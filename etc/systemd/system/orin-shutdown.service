@@ -1,0 +1,16 @@
+[Unit]
+Description=Orin Nano MAVLink Graceful Shutdown
+After=network.target multi-user.target
+
+[Service]
+Type=simple
+User=root
+# Даем MAVProxy время просраться и запустить поток данных
+ExecStartPre=/bin/sleep 5
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/local/bin/orin_shutdown
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

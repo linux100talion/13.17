@@ -1,0 +1,17 @@
+[Unit]
+Description=Auto ROS2 Bag Recorder on Arming
+After=network.target
+
+[Service]
+Type=simple
+User=andriy
+ExecStart=/bin/bash /home/andriy/mavlogs/auto_bag_m.sh
+Restart=on-failure
+RestartSec=5
+
+# Заставляем systemd слать Ctrl+C при остановке и ждать не больше 3 секунд
+KillSignal=SIGINT
+TimeoutStopSec=3
+
+[Install]
+WantedBy=multi-user.target

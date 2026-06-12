@@ -1,0 +1,19 @@
+[Unit]
+Description=VINS-Mono Docker Service
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+# Запускаем от root, чтобы docker exec работал без запроса пароля
+User=root
+ExecStart=/bin/bash /home/andriy/vins_ws/vins_service_m.sh
+Restart=on-failure
+RestartSec=5
+
+# Жесткий контроль остановки, как мы делали для логгера
+KillSignal=SIGINT
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+andriy@jetson:~/orin_shutdown$ sudo journalctl -u orin-shutdown.service -f -n 50
+May 20 13:40:52 jetson systemd[1]: Started Orin Nano MAVLink Graceful Shutdown.
+May 20 13:40:52 jetson orin_shutdown[834]: 2026/05/20 13:40:52 Служба мониторинга MAVLink запущена, ожидание пакетов...
+May 20 13:40:52 jetson orin_shutdown[834]: 2026/05/20 13:40:52 MAVLink канал открыт: udp:127.0.0.1:37730
+May 20 13:44:48 jetson systemd[1]: Stopping Orin Nano MAVLink Graceful Shutdown...
+May 20 13:44:48 jetson systemd[1]: orin-shutdown.service: Deactivated successfully.
+May 20 13:44:48 jetson systemd[1]: Stopped Orin Nano MAVLink Graceful Shutdown.
+May 20 13:44:48 jetson systemd[1]: Started Orin Nano MAVLink Graceful Shutdown.
+May 20 13:44:48 jetson orin_shutdown[3639]: 2026/05/20 13:44:48 Служба мониторинга MAVLink запущена, ожидание пакетов...
+May 20 13:44:48 jetson orin_shutdown[3639]: 2026/05/20 13:44:48 MAVLink канал открыт: udp:127.0.0.1:37730
+May 20 13:47:50 jetson systemd[1]: Stopping Orin Nano MAVLink Graceful Shutdown...
+May 20 13:47:50 jetson systemd[1]: orin-shutdown.service: Deactivated successfully.
+May 20 13:47:50 jetson systemd[1]: Stopped Orin Nano MAVLink Graceful Shutdown.
+May 20 13:48:29 jetson systemd[1]: Started Orin Nano MAVLink Graceful Shutdown.
+May 20 13:48:29 jetson orin_shutdown[3792]: 2026/05/20 13:48:29 Служба мониторинга MAVLink запущенаяяя, ожидание пакетов...
+May 20 13:48:30 jetson orin_shutdown[3792]: 2026/05/20 13:48:30 MAVLink канал открыт: udp:127.0.0.1:37730
+[Unit]
+Description=Orin Nano MAVLink Graceful Shutdown
+After=network.target multi-user.target
+
+[Service]
+Type=simple
+User=root
+# Даем MAVProxy время просраться и запустить поток данных
+ExecStartPre=/bin/sleep 10
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/local/bin/orin_shutdown
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

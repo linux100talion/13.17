@@ -1,0 +1,59 @@
+%YAML:1.0
+
+# Основные пути и топики
+imu_topic: "/mavros/imu/data_raw"
+image_topic: "/image_mono"
+output_path: "/home/andriy/vins_ws/output/"
+vins_folder: "/home/andriy/vins_ws/src/config_pkg/"
+
+# Камера
+model_type: "PINHOLE"
+camera_name: "camera"
+image_width: 1920
+image_height: 1200
+num_of_cam: 1
+
+distortion_parameters:
+   k1: 0.0
+   k2: 0.0
+   p1: 0.0
+   p2: 0.0
+
+projection_parameters:
+   fx: 1000.0
+   fy: 1000.0
+   cx: 960.0
+   cy: 600.0
+
+# Экстринсики (смещение IMU <-> Камера)
+estimate_extrinsic: 1
+ex_calib_result_path: "/home/andriy/vins_ws/extrinsic.yaml"
+
+extrinsicRotation: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+extrinsicTranslation: !!opencv-matrix
+   rows: 3
+   cols: 1
+   dt: d
+   data: [0, 0, 0]
+
+# Настройки трекера фич
+max_cnt: 150
+min_dist: 30
+freq: 46
+F_threshold: 1.0
+show_track: 1
+equalize: 0
+fisheye: 0
+flow_back: 1
+
+# Параметры шума IMU
+acc_n: 0.08
+gyr_n: 0.004
+acc_w: 0.00004
+gyr_w: 2.0e-6
+g_norm: 9.81

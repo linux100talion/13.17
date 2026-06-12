@@ -1,0 +1,15 @@
+[Unit]
+Description=ROS2 MAVROS Node
+After=network.target
+
+[Service]
+Type=simple
+User=andriy
+Group=andriy
+ExecStart=/bin/bash /usr/local/bin/start_mavros.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
