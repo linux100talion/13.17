@@ -1,0 +1,223 @@
+
+project_13_17/
+├── docker-compose.yml
+├── simulator/
+│   └── Dockerfile        # Образ для Gazebo, ArduPilot и ROS 2
+└── ai_brain/
+    ├── Dockerfile        # Образ для PyTorch, CUDA и нод ИИ
+    └── src/              # Сюда ты будешь писать свой Python-код
+
+
+
+
+
+Контейнер 1: Симулятор (Окружение и Физика)
+​Что внутри: Базовый образ osrf/ros:humble-desktop, Gazebo, ArduPilot SITL, плагин ardupilot_gazebo, пакеты моста ros_gz_bridge.
+​Задачи: Рендер лесополос, просчет аэродинамики, публикация картинок с виртуальной камеры в ROS-топики (например, /camera/image_raw).
+​Проброс: Сюда пробрасывается дисплей (X11) для отрисовки графики и GPU (--gpus all) для рендера.
+
+
+Контейнер 2: ИИ и Навигация (Мозг)
+​Что внутри: Базовый образ nvidia/cuda (с PyTorch), легковесный пакет ros-humble-ros-base (без графики и Gazebo, только ядро для связи) и ваши кастомные скрипты (Ray Casting, BEV-трансформация, VPR).
+​Задачи: Подписывается на топик /camera/image_raw из первого контейнера, прогоняет картинку через нейронку, вычисляет 3D-координаты смещения и публикует их обратно в топик для автопилота.
+​Проброс: Только GPU для тензорных вычислений. Графика этому контейнеру не нужна.
+
+
+docker-compose.yml
+
+version: '3.8'
+
+services:
+  # 1. СИМУЛЯТОР (Gazebo + ArduPilot SITL)
+  simulator:
+    build: context: ./simulator
+    container_name: p137_simulator
+    network_mode: "host"
+    privileged: true
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    # ArduPilot SITL будет отдавать телеметрию на TCP 127.0.0.1:5760 (на хосте)
+    command: bash -c "source /opt/ros/humble/setup.bash && tail -f /dev/null"
+
+  # 2. РОУТЕР MAVLINK
+  mavlink_router:
+    image: radarku/mavlink-router:latest # Готовый легковесный образ
+    container_name: p137_mavlink_router
+    network_mode: "host"
+    volumes:
+      - ./config/mavlink-router.conf:/etc/mavlink-router/main.conf:ro
+    # Роутер автоматически подхватит конфиг и начнет раздавать телеметрию
+
+  # 3. МОЗГ (Твой C++ код, VINS, Нейросети, MAVROS)
+  ai_brain:
+    build: context: ./ai_brain
+    container_name: p137_ai_brain
+    network_mode: "host"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./ai_brain/src:/workspace/src:rw
+    command: bash -c "source /opt/ros/humble/setup.bash && tail -f /dev/null"
+
+
+simulator/Dockerfile
+
+
+FROM osrf/ros:humble-desktop
+# Позже мы добавим сюда установку Gazebo Harmonic и ArduPilot
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+
+
+
+
+ai_brain/Dockerfile
+
+
+# Берем образ от NVIDIA с готовой CUDA
+FROM nvidia/cuda:11.8.0-base-ubuntu22.04
+
+# Устанавливаем базовый ROS 2 (без графики) и Python
+RUN apt-get update && apt-get install -y \
+    curl gnupg2 lsb-release python3-pip \
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null \
+    && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    ros-humble-ros-base \
+    && rm -rf /var/lib/apt/lists/*
+
+# Позже здесь будет: RUN pip3 install torch torchvision lightglue
+WORKDIR /workspace
+
+
+
+
+mavlink-router.conf
+
+
+[General]
+TcpServerPort=5760 # Слушаем входящие от SITL (или подключаемся к нему)
+
+# Точка для QGroundControl
+[UdpEndpoint QGC]
+Mode=Normal
+Address=127.0.0.1
+Port=14550
+
+# Точка для MAVROS (внутри контейнера ai_brain)
+[UdpEndpoint MAVROS]
+Mode=Normal
+Address=127.0.0.1
+Port=14540
+
+# Точка для кастомного C++ кода (если нужно напрямую)
+[UdpEndpoint CPP_NODE]
+Mode=Normal
+Address=127.0.0.1
+Port=14541
+
+
+
+
+
+Инженерный итог
+​При такой архитектуре:
+​Gazebo честно рендерит мир и математически "портит" его до сырого BAYER_GBRG8.
+​Твой C++ код (в контейнере ai_brain) получает этот топик, честно загружает процессор дебайеризацией, затем передает кадр в x264enc, который использует 2 потока CPU для сжатия в H.264, отдавая поток на виртуальный порт "OpenHD".
+​mavlink-router гарантирует, что MAVROS, QGroundControl и любые другие твои скрипты получают телеметрию без конфликтов за порты.
+
+
+------------
+Используем ardupilot sitl для эмуляции полётного контроллера.
+
+
+Тебе тут нужно понимать порты ввода вывода и как его связать с gazebo ros 2
+
+-------------
+
+
+
+
+
+gazebo/model.sdf
+
+<sensor name="pilot_camera" type="camera">
+  <update_rate>30.0</update_rate>
+  
+  <pose>0.15 0 0.05 0 0.26 0</pose>
+  
+  <camera>
+    <horizontal_fov>1.5708</horizontal_fov>
+    <image>
+      <width>1920</width>
+      <height>1200</height>
+      <format>R8G8B8</format> </image>
+    <clip>
+      <near>0.1</near>
+      <far>10000.0</far> </clip>
+  </camera>
+  
+  <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"></plugin>
+</sensor>
+
+
+<plugin filename="gz-sim-multicopter-motor-model-system" name="gz::sim::systems::MulticopterMotorModel">
+  <jointName>rotor_0_joint</jointName>
+  <linkName>rotor_0</linkName>
+  <turningDirection>ccw</turningDirection> <timeConstantUp>0.035</timeConstantUp>
+  <timeConstantDown>0.035</timeConstantDown>
+  
+  <maxRotVelocity>1700</maxRotVelocity>
+  
+  <motorConstant>2.5e-05</motorConstant>
+  <momentConstant>0.022</momentConstant>
+  
+  <commandSubTopic>gazebo/command/motor_speed</commandSubTopic>
+  <motorNumber>0</motorNumber> <rotorDragCoefficient>0.0015</rotorDragCoefficient>
+  <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+  
+  <motorSpeedPubTopic>motor_speed/0</motorSpeedPubTopic>
+  <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+</plugin>
+
+
+
+
+
+
+
+Нейросеть №1: Якорная локализация (Абсолютная точность)
+​Суть: Это ваша замена GPS. Жесткая геометрия и тригонометрия.
+​Что она ищет: Конкретные, заранее известные локальные объекты-ориентиры (перекресток, ЛЭП, здание).
+​Тип модели: Детектор объектов (например, легковесная YOLOv8) или матчер локальных признаков (SuperPoint + LightGlue/SuperGlue).
+​Принцип работы (Сброс дрейфа):
+​Нейросеть находит пиксели ориентира в кадре.
+​Скрипт обратного Ray Tracing (используя Intrinsics матрицы камеры и данные с барометра/IMU) проецирует эти 2D-пиксели на 3D-плоскость земли.
+​Вычисляется точная дистанция и пеленг до объекта.
+​Поскольку у объекта есть псевдо-GPS координаты (заданные руками от точки старта), алгоритм понимает абсолютную позицию дрона в пространстве.
+​Эта абсолютная позиция передается в VINS-Mono, обнуляя накопленную ошибку (дрейф).
+​Роль: Отвечает на вопрос «Где я нахожусь с точностью до метра?». Она сохраняет координатную сетку жесткой и не дает дрону "уплыть".
+​2. Нейросеть №2: Топологическая карта (Семантическое понимание)
+​Суть: Ваша база данных контекста. Векторная ассоциативная память.
+​Что она ищет: Не конкретные объекты, а «суть» всей сцены целиком (комбинацию лесополосы, поля, горизонта и текстур).
+​Тип модели: Базовая Foundation-модель (DINOv2) + агрегатор признаков (AnyLoc) + векторная база данных (FAISS).
+​Принцип работы (Тактическая навигация):
+​Модель сжимает весь кадр в один емкий массив чисел (глобальный дескриптор).
+​Сравнивает его через FAISS с базой данных дескрипторов, собранных при разведывательном облете.
+​При совпадении вытягивает из базы кластер VINS-координат (например, 30 точек, размазанных по лесополосе).
+​Вычисляет геометрический центр (центроид) или контур этого кластера.
+​Превращает это в MAVLink-команду (азимут разворота), позволяя дрону выполнить сложную команду (например, «Лети правее леса» или «Поверни к ГРП»).
+​Роль: Отвечает на вопрос «Что меня окружает, как это называется и куда мне лететь?». Она позволяет оператору управлять дроном ассоциациями, а не цифрами.
+​Как они работают вместе: Нейросеть №2 (Дескрипторы) управляет полетом и ведет дрон в нужную зону по смыслу, а Нейросеть №1 (Ориентиры) периодически срабатывает, чтобы координатная система, на которую опирается Нейросеть №2, не искажалась из-за дрейфа гироскопов.
+
+
+
+
