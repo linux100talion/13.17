@@ -1,0 +1,8 @@
+# Raw camera frames
+*.raw
+
+# Compiled binaries
+orin_shutdown
+
+# Editor backup files
+*.save
