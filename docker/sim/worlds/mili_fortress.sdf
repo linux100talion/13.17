@@ -89,6 +89,15 @@
       <uri>model://mt_background</uri>
     </include>
 
+    <!-- ====== Дрон: iris + камера + плагин ArduPilot ======
+         Спавн на открытой площадке. ArduPilotPlugin внутри слушает SITL на
+         127.0.0.1:9002. Камера публикует gz-топик camera/image_raw. -->
+    <include>
+      <name>iris_cam</name>
+      <pose>0 0 0.2 0 0 0</pose>
+      <uri>model://iris_cam</uri>
+    </include>
+
     <!-- ====== Деревья (дубы) — замена <population> ====== -->
     <include>
       <name>oak_tree_1</name>

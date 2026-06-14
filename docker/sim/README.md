@@ -161,19 +161,62 @@ docker exec -it p1317_simulator bash
    gz-sim не тайлит текстуру по грани бокса (для VINS вниз — слабо, но камера
    смотрит вперёд на меши).
 
+## Дрон: iris + камера
+
+Модель `worlds/iris_cam/` — это `iris_with_ardupilot` из ardupilot_gazebo
+(проверенная под SITL: моторы, IMU, плагин `ArduPilotPlugin` на 127.0.0.1:9002)
+**плюс камера пилота**. Камера — параметры из `concept.txt` (поза `0.15 0 0.05`,
+наклон 0.26 рад, fov 1.5708, clip 0.1–10000), но разрешение **1280×720** под
+`camera_node`/`sim.yaml`. Жёстко прикреплена к `iris_with_standoffs::base_link`.
+Меши корпуса/винтов берутся из `model://iris_with_standoffs` (в образе ardupilot_gazebo).
+
+Спавнится в `mili_fortress.sdf` (`<include> model://iris_cam` на `0 0 0.2`).
+Камера публикует gz-топик `camera/image_raw`.
+
+### Мост Gazebo → ROS (контейнер simulator)
+
+```bash
+# Камера + часы симуляции в ROS2
+ros2 run ros_gz_bridge parameter_bridge \
+  /camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image \
+  /clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock
+```
+
+## Полный пайплайн запуска
+
+```
+gz sim (mili_fortress.sdf, дрон с камерой)
+  → SITL (sim_vehicle.py) ←→ ArduPilotPlugin (управление + IMU)
+  → ros_gz_bridge: camera/image_raw + /clock → ROS2
+  → [nav] bayerizer: RGB → /dev/rawbayer
+  → [nav] camera_node: /dev/rawbayer → /image_mono (+ OpenHD)
+  → [nav] feature_tracker + vins_estimator (sim.yaml, use_sim_time:=true)
+  → MAVROS ← mavlink_router ← SITL
+```
+
+1. **simulator**: `gz sim -v4 -r /root/worlds/mili_fortress.sdf`
+2. **simulator**: `sim_vehicle.py -v ArduCopter -f gazebo-iris --console`
+3. **simulator**: `ros_gz_bridge` (команда выше)
+4. **nav**: `bayerizer.py` + `camera_node` (`device:=/dev/rawbayer`)
+5. **nav**: `feature_tracker` + `vins_estimator` (`sim.yaml`), все с `use_sim_time:=true`
+
+### ⚠️ Проверить на ноуте
+
+- **Имя модели/линка**: камера цепляется к `iris_with_standoffs::base_link`.
+  Если ardupilot_gazebo обновил структуру — свериться (`gz sim`-лог о joint).
+- **SITL соединилась**: в логе `gz sim` — "ArduPilot... connected", в `sim_vehicle`
+  телеметрия идёт. Порт 9002.
+- **Камера-топик**: `ros2 topic hz /camera/image_raw` (~30 Гц) после моста.
+
 ## Открытые задачи
 
-1. **Модель дрона (iris + камера + ardupilot_gazebo).** Следующий шаг: SDF-модель
-   квадрокоптера с камерой 1280×720 (fov 90°) и плагином ardupilot_gazebo,
-   спавнить в `mili_fortress.sdf`. Камера должна публиковать Gazebo-топик
-   `/camera/image_raw` → байеризатор.
-2. **Разрешение камеры.** `camera_node` ждёт 1280×720 — под это посчитан
-   `sim.yaml`. Камеру дрона в Gazebo выставить в 1280×720 (не 1920×1200).
-3. **`use_sim_time:=true` всем нодам.** Gazebo публикует `/clock`. Без этого
+1. **`use_sim_time:=true` всем ROS-нодам** (bayerizer, camera_node, feature_tracker,
+   vins_estimator, mavros). Gazebo публикует `/clock` (мост выше). Без этого
    таймстампы кадров и IMU разойдутся с wall-clock → VINS диверджит молча.
-4. **IMU-источник.** VINS ждёт IMU на `/mavros/imu/data_raw` из SITL.
+2. **IMU-источник.** VINS ждёт IMU на `/mavros/imu/data_raw` из SITL.
    Проверить частоту и шум — `sim.yaml` задаёт заниженный шум, при расхождении
    подстроить под модель IMU из ardupilot_gazebo.
+3. **Тюнинг полёта/сцены** после первого успешного прогона VINS.
 
 ## Порты MAVLink
 
