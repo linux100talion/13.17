@@ -1,0 +1,82 @@
+version: '3.8'
+
+# ============================================================================
+# Симуляционный стек: ArduPilot SITL + Gazebo Harmonic + VINS/Nav
+# Запускается на x86 ноутбуке с NVIDIA GPU.
+# Реальное железо (камера, полётник) НЕ требуется — всё эмулируется.
+#
+# Перед запуском на хосте:
+#   xhost +local:root        # разрешить контейнеру доступ к X11
+#   export DISPLAY=:0
+# ============================================================================
+
+services:
+
+  # 1. СИМУЛЯТОР: Gazebo Harmonic (рендер мира + физика) + ArduPilot SITL (полётник)
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    container_name: p1317_simulator
+    restart: unless-stopped
+
+    # host-сеть: SITL отдаёт MAVLink на TCP 127.0.0.1:5760,
+    # Gazebo<->ROS мост работает по DDS без NAT.
+    network_mode: host
+    ipc: host
+
+    # GPU нужен Gazebo для аппаратного рендера (OpenGL).
+    runtime: nvidia
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all      # graphics+compute: нужно для рендера
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw    # проброс дисплея для GUI Gazebo
+      - ./worlds:/root/worlds:rw            # SDF-миры и модели дрона
+      - ./output:/root/output:rw
+
+    # tail держит контейнер живым; запуск SITL+Gazebo — через docker exec / скрипты.
+    command: bash -c "source /opt/ros/humble/setup.bash && tail -f /dev/null"
+
+  # 2. РОУТЕР MAVLINK: разводит телеметрию SITL между MAVROS, QGC и кастомными нодами.
+  mavlink_router:
+    image: radarku/mavlink-router:latest
+    container_name: p1317_mavlink_router
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - simulator
+    volumes:
+      - ./config/mavlink-router.conf:/etc/mavlink-router/main.conf:ro
+
+  # 3. МОЗГ: VINS-Mono + нейросети навигации (CUDA). Камеру берёт из Gazebo-топика.
+  nav:
+    build:
+      context: ../..                        # корень репо: нужен доступ к src/
+      dockerfile: docker/sim/nav/Dockerfile
+    container_name: p1317_nav
+    restart: unless-stopped
+    network_mode: host
+    ipc: host
+
+    # GPU только для тензорных вычислений нейросетей. Графика не нужна.
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+    # Монтируем исходники. build/ и install/ собираются внутри через colcon.
+    # camera_pkg НЕ монтируем — в симуляции картинка идёт из Gazebo, не с V4L2.
+    volumes:
+      - ../../src/vins:/root/sim_ws/src/vins
+      - ../../src/nav:/root/sim_ws/src/nav
+      - ./output:/root/sim_ws/output
+
+    command: bash -c "source /opt/ros/humble/setup.bash && tail -f /dev/null"
