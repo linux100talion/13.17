@@ -1,8 +1,14 @@
 # Raw camera frames
 *.raw
 
-# Compiled binaries
+# Compiled binaries (placeholders with __bin suffix are tracked)
 orin_shutdown
+camera_node
+tuner_cuda
+tuner_cpu
+*.so
+*.o
+*.a
 
 # Editor backup files
 *.save
