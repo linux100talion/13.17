@@ -21,11 +21,11 @@ services:
     
     # Даем права для работы с видеоустройствами
     privileged: true
-    
-    # Монтируем только исходники и папку для логов.
-    # Мы НЕ монтируем build/ и install/ с хоста, чтобы они собрались 
-    # заново внутри чистой Ubuntu контейнера.
+    runtime: nvidia
+
+    # Монтируем исходники. build/ и install/ не монтируем —
+    # собираются внутри контейнера через colcon build.
     volumes:
-      - ../../src/vins:/root/vins_ws/src
+      - ../../src/vins:/root/vins_ws/src/vins
       - ../../src/camera:/root/vins_ws/src/camera
       - ./output:/root/vins_ws/output

@@ -38,9 +38,8 @@ sleep 2
 
 echo "Запуск нод..."
 
-# 1. Camera Node
-# Используем -e для передачи переменных внутрь exec-сессии
-docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && cd /root/vins_ws/src && exec python3 ./cam_node.py" &
+# 1. Camera Node (C++ CUDA)
+docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && exec ros2 run camera_pkg camera_node" &
 PID1=$!
 
 # 2. Feature Tracker
