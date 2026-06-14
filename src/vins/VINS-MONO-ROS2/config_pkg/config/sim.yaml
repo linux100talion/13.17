@@ -1,0 +1,89 @@
+%YAML:1.0
+
+# ============================================================================
+# VINS-Mono — конфиг для СИМУЛЯЦИИ (Gazebo Harmonic + ArduPilot SITL).
+#
+# Отличия от боевого dummy_13_7.yaml:
+#   - Дисторсия НУЛЕВАЯ: Gazebo-камера — идеальный pinhole, линзовых искажений нет.
+#   - Интринсики посчитаны из model.sdf: horizontal_fov=1.5708 (90°), 1280x720.
+#       fx = fy = (width/2)/tan(fov/2) = 640/tan(45°) = 640
+#       cx = width/2 = 640,  cy = height/2 = 360
+#   - Пути: контейнер nav использует /root/sim_ws/ (а не /root/vins_ws/).
+#   - Экстринсики камера<->IMU взяты из позы камеры в model.sdf.
+#   - Шум IMU: в симуляции нет вибраций рамы, значения занижены относительно боевых.
+#
+# ВАЖНО: разрешение здесь (1280x720) должно совпадать с разрешением камеры в
+# Gazebo (model.sdf) И с width_/height_ в camera_node. См. docker/sim/README.md.
+# ============================================================================
+
+# Основные пути и топики
+imu_topic: "/mavros/imu/data_raw"
+image_topic: "/image_mono"
+output_path: "/root/sim_ws/output/"
+vins_folder: "/root/sim_ws/src/vins/VINS-MONO-ROS2/config_pkg/"
+
+# Камера
+model_type: "PINHOLE"
+camera_name: "camera"
+image_width: 1280
+image_height: 720
+num_of_cam: 1
+
+# Gazebo-камера — идеальный pinhole, дисторсии нет.
+distortion_parameters:
+   k1: 0.0
+   k2: 0.0
+   p1: 0.0
+   p2: 0.0
+
+# Из horizontal_fov=1.5708 (90°) при 1280x720.
+projection_parameters:
+   fx: 640.0
+   fy: 640.0
+   cx: 640.0
+   cy: 360.0
+
+
+# Онлайн-оценка задержки времени между камерой и IMU
+estimate_td: 1      # 1 - включить автоматическую подстройку, 0 - выключить
+td: 0.0             # Начальное предположение о задержке (в секундах)
+
+# Экстринсики (смещение IMU <-> Камера)
+estimate_extrinsic: 1
+ex_calib_result_path: "/root/sim_ws/output/extrinsic.yaml"
+
+# Камера в model.sdf повёрнута вниз на pitch 0.26 рад (~15°). При
+# estimate_extrinsic:1 это лишь начальное приближение — VINS уточнит онлайн.
+extrinsicRotation: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+# Из позы камеры в model.sdf: pose="0.15 0 0.05 ..." => [X, Y, Z] в метрах
+# (0.15 м вперёд, 0 вбок, 0.05 м выше центра тела).
+extrinsicTranslation: !!opencv-matrix
+   rows: 3
+   cols: 1
+   dt: d
+   data: [0.15, 0.0, 0.05]
+
+# Настройки трекера фич
+max_cnt: 150
+min_dist: 30
+freq: 15
+F_threshold: 1.0
+show_track: 1
+equalize: 1
+fisheye: 0
+flow_back: 1
+
+# Параметры шума IMU.
+# В симуляции нет вибраций рамы, поэтому значения acc_n/gyr_n возвращены к
+# базовым (в боевом конфиге они были подняты ~в 10 раз под вибрации). При
+# расхождении VINS на старте — подстрой под модель IMU из ardupilot_gazebo.
+acc_n: 0.008       # базовый уровень (боевой: 0.08 под вибрации рамы)
+gyr_n: 0.0004      # базовый уровень (боевой: 0.004)
+acc_w: 0.00004     # случайное блуждание (зависит от чипа)
+gyr_w: 2.0e-6      # случайное блуждание
+g_norm: 9.81

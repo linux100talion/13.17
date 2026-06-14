@@ -109,18 +109,33 @@ ros2 run camera_pkg camera_node --ros-args -p device:=/dev/rawbayer
 
 > Если цвета перепутаны — поменяй `pattern` (GRBG/RGGB/BGGR/GBRG).
 
+### Запуск VINS в контейнере nav
+
+Конфиг симуляции — `sim.yaml` (нулевая дисторсия, интринсики Gazebo-камеры,
+пути `/root/sim_ws/`). Лежит рядом с боевым:
+`src/vins/VINS-MONO-ROS2/config_pkg/config/sim.yaml`.
+
+```bash
+CFG=/root/sim_ws/src/vins/VINS-MONO-ROS2/config_pkg/config/sim.yaml
+ros2 run feature_tracker feature_tracker --ros-args -p config_file:=$CFG
+ros2 run vins_estimator vins_estimator --ros-args -p config_file:=$CFG \
+    --remap /feature_tracker/feature:=/feature \
+    --remap /feature_tracker/restart:=/restart
+```
+
 ## Открытые задачи (грабли симуляции)
 
 1. **Разрешение камеры.** `camera_node` по умолчанию ждёт 1280×720 (захардкожено
-   в конструкторе). Камера Gazebo в `model.sdf` — 1920×1200. Согласовать: проще
-   выставить Gazebo-камеру в 1280×720, либо поправить `width_`/`height_` в ноде.
+   в конструкторе) — под это посчитан `sim.yaml`. Камера Gazebo в `model.sdf` —
+   1920×1200. Согласовать: проще выставить Gazebo-камеру в 1280×720. Если оставить
+   1920×1200 — поправить `width_`/`height_` в ноде И интринсики в `sim.yaml`
+   (fx=fy=960, cx=960, cy=600).
 2. **`use_sim_time:=true` всем нодам.** Gazebo публикует `/clock`. Без этого
    таймстампы кадров и IMU разойдутся с wall-clock → VINS диверджит молча.
-3. **Интринсики камеры.** `dummy_13_7.yaml` — калибровка реального ArduCam.
-   Нужен `config/sim.yaml` с параметрами Gazebo-камеры (fov 1.5708 из `model.sdf`).
-4. **IMU-источник.** VINS ждёт IMU. В симе — `/mavros/imu/data` из SITL.
-   Проверить частоту и ремап под `feature_tracker`/`vins_estimator`.
-5. **Мир и модель дрона.** Положить SDF-мир (лесополосы) и модель iris с
+3. **IMU-источник.** VINS ждёт IMU на `/mavros/imu/data_raw` из SITL.
+   Проверить частоту и шум — `sim.yaml` задаёт заниженный шум (нет вибраций рамы),
+   при расхождении подстроить под модель IMU из ardupilot_gazebo.
+4. **Мир и модель дрона.** Положить SDF-мир (лесополосы) и модель iris с
    камерой из `concept.txt` в `worlds/`.
 
 ## Порты MAVLink
