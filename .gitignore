@@ -13,3 +13,7 @@ tuner_cpu
 
 # Editor backup files
 *.save
+
+# Python
+__pycache__/
+*.pyc

@@ -64,7 +64,7 @@ services:
     network_mode: host
     ipc: host
 
-    # GPU только для тензорных вычислений нейросетей. Графика не нужна.
+    # GPU для нейросетей И для CUDA-дебайеризации камеры-ноды (cv::cuda).
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
@@ -72,11 +72,18 @@ services:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
+    # Виртуальная камера: байеризатор пишет сюда, camera_node читает отсюда.
+    # /dev/rawbayer создаётся на ХОСТЕ модулем v4l2loopback (см. README).
+    devices:
+      - /dev/rawbayer:/dev/rawbayer
+
     # Монтируем исходники. build/ и install/ собираются внутри через colcon.
-    # camera_pkg НЕ монтируем — в симуляции картинка идёт из Gazebo, не с V4L2.
+    # camera_pkg ТЕПЕРЬ монтируем — в симуляции нода работает "как есть",
+    # читая Bayer-кадры из /dev/rawbayer вместо реального /dev/video0.
     volumes:
       - ../../src/vins:/root/sim_ws/src/vins
       - ../../src/nav:/root/sim_ws/src/nav
+      - ../../src/camera:/root/sim_ws/src/camera
       - ./output:/root/sim_ws/output
 
     command: bash -c "source /opt/ros/humble/setup.bash && tail -f /dev/null"

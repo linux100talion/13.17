@@ -61,18 +61,63 @@ docker exec -it p1317_nav bash
 #   (внутри) ros2 launch mavros apm.launch fcu_url:=udp://:14540@
 ```
 
-## Открытые задачи (грабли симуляции — НЕ закрыты этим стеком)
+## Виртуальная камера (camera_node работает "как есть")
 
-Инфраструктура контейнеров готова, но узлы под симуляцию ещё надо адаптировать:
+В симуляции камера-нода (`camera_pkg`) НЕ переписывается. Вместо реального
+ArduCam она читает кадры из виртуального V4L2-устройства `/dev/rawbayer`,
+которое создаёт модуль ядра **v4l2loopback**. Байеризатор берёт RGB из Gazebo,
+"портит" его до сырого Bayer (как реальный сенсор) и пишет в это устройство.
 
-1. **Камера: V4L2 → Gazebo-топик.** `camera_pkg` (CUDA+V4L2) в симуляции не
-   используется. Нужен `ros_gz_bridge` с `/camera/image_raw` (Gazebo) на
-   `/image_mono` (вход VINS). Класть в `src/nav` или отдельный launch.
+```
+Gazebo /camera/image_raw (RGB)
+  → bayerizer.py        RGB→Bayer16
+  → write() → /dev/rawbayer (v4l2loopback)
+  → camera_node  (v4l2-ctl читает BA10 → CUDA debayer → /image_mono + OpenHD)
+```
+
+Нода меняется только параметром: `device:=/dev/rawbayer` (на железе — `/dev/video0`).
+
+### Настройка на ХОСТЕ (v4l2loopback — модуль ядра, не ставится в docker)
+
+```bash
+# 1. Установить и загрузить модуль (один раз)
+sudo apt install v4l2loopback-dkms v4l2loopback-utils
+# Создаём устройство с фиксированным именем /dev/rawbayer.
+# Подбери номер устройства так, чтобы не конфликтовал с вебкамерой.
+sudo modprobe v4l2loopback devices=1 video_nr=9 card_label="rawbayer" exclusive_caps=0
+
+# 2. Симлинк на фиксированное имя (docker пробрасывает именно /dev/rawbayer)
+sudo ln -sf /dev/video9 /dev/rawbayer
+```
+
+> ⚠️ Формат/размер кадра: camera_node берёт `Sizeimage` из `v4l2-ctl
+> --get-fmt-video`, поэтому ему важно, чтобы устройство отдавало
+> `width*height*2` байт (16-бит на пиксель). Если negotiation формата
+> BA10 на loopback не проходит — проверь это первым делом.
+
+### Запуск в контейнере nav
+
+```bash
+docker exec -it p1317_nav bash
+#   (внутри) cd /root/sim_ws && colcon build && source install/setup.bash
+#   (внутри) терминал 1 — байеризатор:
+python3 src/nav/bayerizer.py --ros-args \
+    -p input_topic:=/camera/image_raw -p device:=/dev/rawbayer -p pattern:=GRBG
+#   (внутри) терминал 2 — камера-нода как на железе, но с другим device:
+ros2 run camera_pkg camera_node --ros-args -p device:=/dev/rawbayer
+```
+
+> Если цвета перепутаны — поменяй `pattern` (GRBG/RGGB/BGGR/GBRG).
+
+## Открытые задачи (грабли симуляции)
+
+1. **Разрешение камеры.** `camera_node` по умолчанию ждёт 1280×720 (захардкожено
+   в конструкторе). Камера Gazebo в `model.sdf` — 1920×1200. Согласовать: проще
+   выставить Gazebo-камеру в 1280×720, либо поправить `width_`/`height_` в ноде.
 2. **`use_sim_time:=true` всем нодам.** Gazebo публикует `/clock`. Без этого
    таймстампы кадров и IMU разойдутся с wall-clock → VINS диверджит молча.
 3. **Интринсики камеры.** `dummy_13_7.yaml` — калибровка реального ArduCam.
-   Нужен `config/sim.yaml` с параметрами Gazebo-камеры (1920x1200, fov 1.5708
-   из `model.sdf`).
+   Нужен `config/sim.yaml` с параметрами Gazebo-камеры (fov 1.5708 из `model.sdf`).
 4. **IMU-источник.** VINS ждёт IMU. В симе — `/mavros/imu/data` из SITL.
    Проверить частоту и ремап под `feature_tracker`/`vins_estimator`.
 5. **Мир и модель дрона.** Положить SDF-мир (лесополосы) и модель iris с

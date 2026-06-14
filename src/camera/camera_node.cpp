@@ -28,6 +28,12 @@ public:
         this->declare_parameter("g", 1.0);
         this->declare_parameter("b", 1.0);
 
+        // Путь к V4L2-устройству. На железе — реальная камера (/dev/video0),
+        // в симуляции — виртуальное устройство v4l2loopback (/dev/rawbayer),
+        // куда байеризатор пишет кадры из Gazebo. Меняется только параметром.
+        device_ = this->declare_parameter("device", std::string("/dev/video0"));
+        RCLCPP_INFO(this->get_logger(), "V4L2 устройство: %s", device_.c_str());
+
         // 3. Заполнение CameraInfo (интринсики из dummy_13_7.yaml)
         setup_camera_info();
 
@@ -67,6 +73,7 @@ public:
 
 private:
     int width_, height_;
+    std::string device_;
     size_t frame_size_;
     FILE* pipe_ = nullptr;
     std::atomic<bool> running_;
@@ -104,11 +111,11 @@ private:
 
     bool setup_v4l2() {
         RCLCPP_INFO(this->get_logger(), "Настройка формата и разрешения V4L2...");
-        std::string cmd_fmt = "v4l2-ctl -d /dev/video0 --set-fmt-video=width=" + 
+        std::string cmd_fmt = "v4l2-ctl -d " + device_ + " --set-fmt-video=width=" +
                               std::to_string(width_) + ",height=" + std::to_string(height_) + ",pixelformat=BA10";
         system(cmd_fmt.c_str());
 
-        std::string output = exec("v4l2-ctl -d /dev/video0 --get-fmt-video");
+        std::string output = exec(("v4l2-ctl -d " + device_ + " --get-fmt-video").c_str());
         std::smatch match;
         std::regex rx(R"(Size\s*image\s*:\s*(\d+))", std::regex_constants::icase);
         
@@ -120,7 +127,8 @@ private:
             return false;
         }
 
-        pipe_ = popen("v4l2-ctl -d /dev/video0 --stream-mmap --stream-to=-", "r");
+        std::string cmd_stream = "v4l2-ctl -d " + device_ + " --stream-mmap --stream-to=-";
+        pipe_ = popen(cmd_stream.c_str(), "r");
         if (!pipe_) {
             RCLCPP_ERROR(this->get_logger(), "Не удалось открыть поток v4l2-ctl!");
             return false;
@@ -128,8 +136,11 @@ private:
 
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
+        // Эти контролы специфичны для ArduCam. На v4l2loopback (симуляция) они
+        // не реализованы — v4l2-ctl выдаст ошибку, но это не фатально.
         RCLCPP_INFO(this->get_logger(), "Применение настроек экспозиции, FPS и Gain...");
-        system("v4l2-ctl -d /dev/video0 -c frame_rate=15 -c analogue_gain=1200 -c exposure=5250");
+        std::string cmd_ctrl = "v4l2-ctl -d " + device_ + " -c frame_rate=15 -c analogue_gain=1200 -c exposure=5250";
+        system(cmd_ctrl.c_str());
         
         return true;
     }
