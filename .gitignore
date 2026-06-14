@@ -3,6 +3,7 @@
 
 # Compiled binaries (placeholders with __bin suffix are tracked)
 orin_shutdown
+!*__bin
 camera_node
 tuner_cuda
 tuner_cpu
