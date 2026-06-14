@@ -1,0 +1,31 @@
+<?xml version="1.0" ?>
+<sdf version='1.5'>
+  <model name='jet'>
+    <static>true</static>
+      <link name='jet'>
+        <pose frame=''>0 0 0 0 0 0</pose>
+         <collision name='jet'>
+          <geometry>
+            <mesh>
+              <uri>model://jet/model.dae</uri>
+            </mesh>
+          </geometry>
+          <max_contacts>10</max_contacts>
+        </collision>
+        <visual name='jet'>
+          <geometry>
+            <mesh>
+              <scale>1 1 1</scale>
+              <uri>model://jet/model.dae</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <name>jet</name>
+              <uri>model://jet/model.dae</uri>
+            </script>
+          </material>
+        </visual>
+      </link>
+  </model>
+</sdf>

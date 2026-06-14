@@ -53,7 +53,10 @@ RUN cd ardupilot_gazebo && mkdir build && cd build \
     && make -j$(nproc)
 # Регистрируем плагин и модели в путях Gazebo Harmonic.
 ENV GZ_SIM_SYSTEM_PLUGIN_PATH=/root/ardupilot_gazebo/build:${GZ_SIM_SYSTEM_PLUGIN_PATH}
-ENV GZ_SIM_RESOURCE_PATH=/root/ardupilot_gazebo/models:/root/ardupilot_gazebo/worlds:/root/worlds:${GZ_SIM_RESOURCE_PATH}
+# /root/worlds — смонтированный docker/sim/worlds (миры + дрон-модель)
+# /root/worlds/mili_tech — папка с моделями fortress (нужно, чтобы model://<name>
+#   резолвились: grass_plane, mili_map, tank1, soldier, oak_tree, ...)
+ENV GZ_SIM_RESOURCE_PATH=/root/ardupilot_gazebo/models:/root/ardupilot_gazebo/worlds:/root/worlds:/root/worlds/mili_tech:${GZ_SIM_RESOURCE_PATH}
 
 WORKDIR /root
 

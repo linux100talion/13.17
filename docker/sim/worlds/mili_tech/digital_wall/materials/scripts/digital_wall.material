@@ -1,0 +1,17 @@
+material vrc/digital_wall
+{
+	receive_shadows off
+	technique
+	{
+		pass
+		{
+			texture_unit
+			{
+				texture digital_wall.jpg
+				filtering anistropic
+				max_anisotropy 16
+				scale 0.5 0.5
+			}
+		}
+	}
+}

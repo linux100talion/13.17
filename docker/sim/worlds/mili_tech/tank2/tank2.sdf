@@ -1,0 +1,31 @@
+<?xml version="1.0" ?>
+<sdf version='1.5'>
+  <model name='tank2'>
+    <static>true</static>
+      <link name='tank2'>
+        <pose frame=''>0 0 0 0 0 0</pose>
+         <collision name='tank2'>
+          <geometry>
+            <mesh>
+              <uri>model://tank2/model.dae</uri>
+            </mesh>
+          </geometry>
+          <max_contacts>10</max_contacts>
+        </collision>
+        <visual name='tank2'>
+          <geometry>
+            <mesh>
+              <scale>1 1 1</scale>
+              <uri>model://tank2/model.dae</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <name>tank2</name>
+              <uri>model://tank2/model.dae</uri>
+            </script>
+          </material>
+        </visual>
+      </link>
+  </model>
+</sdf>

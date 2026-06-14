@@ -123,20 +123,57 @@ ros2 run vins_estimator vins_estimator --ros-args -p config_file:=$CFG \
     --remap /feature_tracker/restart:=/restart
 ```
 
-## Открытые задачи (грабли симуляции)
+## Мир: Military fortress
 
-1. **Разрешение камеры.** `camera_node` по умолчанию ждёт 1280×720 (захардкожено
-   в конструкторе) — под это посчитан `sim.yaml`. Камера Gazebo в `model.sdf` —
-   1920×1200. Согласовать: проще выставить Gazebo-камеру в 1280×720. Если оставить
-   1920×1200 — поправить `width_`/`height_` в ноде И интринсики в `sim.yaml`
-   (fx=fy=960, cx=960, cy=600).
-2. **`use_sim_time:=true` всем нодам.** Gazebo публикует `/clock`. Без этого
+Мир `worlds/mili_fortress.sdf` — портированная под Harmonic карта из
+[engcang/gazebo_maps](https://github.com/engcang/gazebo_maps) (`mili_tech`),
+та самая, на которой в демо-видео работает VINS-Fusion + YOLO. Ассеты
+вендорены в `worlds/mili_tech/` (~27 МБ). Атрибуция — `worlds/mili_tech/ATTRIBUTION.md`.
+
+Что было портировано из оригинального Gazebo Classic `mili.world`:
+- добавлены обязательные system-плагины gz-sim (physics/scene/sensors/imu/...)
+- `<population>` деревьев/огня заменены явной расстановкой (gz-sim не
+  поддерживает `<population>`)
+- `<road>` удалён, физика `ode` → дефолт DART
+- материалы `grass_plane`/`digital_wall` → PBR
+- убрана битая ссылка `model://home`
+
+### Запуск мира (контейнер simulator)
+
+```bash
+docker exec -it p1317_simulator bash
+#   (внутри) gz sim -v4 -r /root/worlds/mili_fortress.sdf
+```
+
+### ⚠️ Чек-лист проверки на ноуте (порт не тестировался без Gazebo)
+
+1. **Мир грузится без ошибок** — смотреть лог `gz sim -v4`. Частые места:
+   - `model://...` не резолвится → проверь `GZ_SIM_RESOURCE_PATH` содержит
+     `/root/worlds` и `/root/worlds/mili_tech`.
+   - **Вложенные include в `mili_map`** не подхватились → если карта (стены,
+     танки, дома) не появилась, расплющить `mili_map/model.sdf` в world-level
+     include внутри `mili_fortress.sdf` (позы сложить со смещением `-35 -5 0`).
+   - **`mt_background` (heightmap)** ломает загрузку → закомментировать его
+     include в `mili_fortress.sdf`.
+2. **Текстуры мешей** (танки/дома/деревья) видны — если меш серый, текстура
+   из `.dae` не нашлась (проверь пути в Collada/наличие jpg/png рядом).
+3. **Земля/стены** с PBR-текстурой (не однотонные). Земля может быть размытой —
+   gz-sim не тайлит текстуру по грани бокса (для VINS вниз — слабо, но камера
+   смотрит вперёд на меши).
+
+## Открытые задачи
+
+1. **Модель дрона (iris + камера + ardupilot_gazebo).** Следующий шаг: SDF-модель
+   квадрокоптера с камерой 1280×720 (fov 90°) и плагином ardupilot_gazebo,
+   спавнить в `mili_fortress.sdf`. Камера должна публиковать Gazebo-топик
+   `/camera/image_raw` → байеризатор.
+2. **Разрешение камеры.** `camera_node` ждёт 1280×720 — под это посчитан
+   `sim.yaml`. Камеру дрона в Gazebo выставить в 1280×720 (не 1920×1200).
+3. **`use_sim_time:=true` всем нодам.** Gazebo публикует `/clock`. Без этого
    таймстампы кадров и IMU разойдутся с wall-clock → VINS диверджит молча.
-3. **IMU-источник.** VINS ждёт IMU на `/mavros/imu/data_raw` из SITL.
-   Проверить частоту и шум — `sim.yaml` задаёт заниженный шум (нет вибраций рамы),
-   при расхождении подстроить под модель IMU из ardupilot_gazebo.
-4. **Мир и модель дрона.** Положить SDF-мир (лесополосы) и модель iris с
-   камерой из `concept.txt` в `worlds/`.
+4. **IMU-источник.** VINS ждёт IMU на `/mavros/imu/data_raw` из SITL.
+   Проверить частоту и шум — `sim.yaml` задаёт заниженный шум, при расхождении
+   подстроить под модель IMU из ardupilot_gazebo.
 
 ## Порты MAVLink
 

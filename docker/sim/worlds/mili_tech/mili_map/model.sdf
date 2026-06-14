@@ -1,0 +1,411 @@
+<?xml version='1.0'?>
+<sdf version='1.5'>
+  <model name='mili_map'>
+
+    <!-- Removed: <uri>model://home</uri> — модели 'home' нет в архиве
+         gazebo_maps (битая ссылка в оригинале). -->
+
+    <include>
+      <static>true</static>
+      <name>digital_wall_1</name>
+      <pose>30 60 0 0 0 1.5708</pose>
+      <uri>model://digital_wall</uri>
+    </include>
+    <include>
+      <static>true</static>
+      <name>digital_wall_2</name>
+      <pose>20 20 0 0 0 1.5708</pose>
+      <uri>model://digital_wall</uri>
+    </include>
+    <include>
+      <static>true</static>
+      <name>digital_wall_3</name>
+      <pose>30 -20 0 0 0 1.5708</pose>
+      <uri>model://digital_wall</uri>
+    </include>
+    <include>
+      <name>digital_wall_4</name>
+      <static>true</static>
+      <pose>20 -60 0 0 0 1.5708</pose>
+      <uri>model://digital_wall</uri>
+    </include>
+
+    <include>
+      <name>fire_station_1</name>
+      <static>true</static>
+      <pose>77 58 0 0 0 0</pose>
+      <uri>model://fire_station</uri>
+    </include>
+    <include>
+      <name>fire_station_2</name>
+      <static>true</static>
+      <pose>77 -58 0 0 0 0</pose>
+      <uri>model://fire_station</uri>
+    </include>
+    <include>
+      <static>true</static>
+      <pose>97 0 0 0 0 0</pose>
+      <uri>model://house_1</uri>
+    </include>
+    <include>
+      <name>stop_sign_1</name>
+      <static>true</static>
+      <pose>76 5 0 0 0 -1.5708</pose>
+      <uri>model://stop_sign</uri>
+    </include>
+    <include>
+      <name>stop_sign_2</name>
+      <static>true</static>
+      <pose>76 -5 0 0 0 -1.5708</pose>
+      <uri>model://stop_sign</uri>
+    </include>
+
+    <include>
+      <name>tank1_1</name>
+      <static>true</static>
+      <pose>50 66 0 0 0 3.141592</pose>
+      <uri>model://tank1</uri>
+    </include>
+    <include>
+      <name>tank1_2</name>
+      <static>true</static>
+      <pose>50 58 0 0 0 3.141592</pose>
+      <uri>model://tank1</uri>
+    </include>
+    <include>
+      <name>tank1_3</name>
+      <static>true</static>
+      <pose>50 50 0 0 0 3.141592</pose>
+      <uri>model://tank1</uri>
+    </include>
+    <include>
+      <name>tank2_1</name>
+      <static>true</static>
+      <pose>59 -58 0 0 0 1.5708</pose>
+      <uri>model://tank2</uri>
+    </include>
+    <include>
+      <name>tank2_2</name>
+      <static>true</static>
+      <pose>51 -58 0 0 0 1.5708</pose>
+      <uri>model://tank2</uri>
+    </include>
+    <include>
+      <name>tank2_3</name>
+      <static>true</static>
+      <pose>43 -58 0 0 0 1.5708</pose>
+      <uri>model://tank2</uri>
+    </include>
+
+    <include>
+      <name>jet_1</name>
+      <static>true</static>
+      <pose>93 27.5 0 0 0 3.141592</pose>
+      <uri>model://jet</uri>
+    </include>
+    <include>
+      <name>jet_2</name>
+      <static>true</static>
+      <pose>93 42.5 0 0 0 3.141592</pose>
+      <uri>model://jet</uri>
+    </include>
+    <include>
+      <name>jet_3</name>
+      <static>true</static>
+      <pose>80 35 0 0 0 3.141592</pose>
+      <uri>model://jet</uri>
+    </include>
+    <include>
+      <name>jet_4</name>
+      <static>true</static>
+      <pose>93 -27.5 0 0 0 3.141592</pose>
+      <uri>model://jet</uri>
+    </include>
+    <include>
+      <name>jet_5</name>
+      <static>true</static>
+      <pose>93 -42.5 0 0 0 3.141592</pose>
+      <uri>model://jet</uri>
+    </include>
+    <include>
+      <name>jet_6</name>
+      <static>true</static>
+      <pose>80 -35 0 0 0 3.141592</pose>
+      <uri>model://jet</uri>
+    </include>
+
+
+    <include>
+      <name>soldier_1</name>
+      <static>true</static>
+      <pose>56 39.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_2</name>
+      <static>true</static>
+      <pose>56 37.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_3</name>
+      <static>true</static>
+      <pose>56 35.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_4</name>
+      <static>true</static>
+      <pose>56 33.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_5</name>
+      <static>true</static>
+      <pose>56 31.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_6</name>
+      <static>true</static>
+      <pose>56 29.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_7</name>
+      <static>true</static>
+      <pose>56 27.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_8</name>
+      <static>true</static>
+      <pose>53 39.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_9</name>
+      <static>true</static>
+      <pose>53 37.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_10</name>
+      <static>true</static>
+      <pose>53 35.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_11</name>
+      <static>true</static>
+      <pose>53 33.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_12</name>
+      <static>true</static>
+      <pose>53 31.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_13</name>
+      <static>true</static>
+      <pose>53 29.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_14</name>
+      <static>true</static>
+      <pose>53 27.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_15</name>
+      <static>true</static>
+      <pose>50 39.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_16</name>
+      <static>true</static>
+      <pose>50 37.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_17</name>
+      <static>true</static>
+      <pose>50 35.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_18</name>
+      <static>true</static>
+      <pose>50 33.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_19</name>
+      <static>true</static>
+      <pose>50 31.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_20</name>
+      <static>true</static>
+      <pose>50 29.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_21</name>
+      <static>true</static>
+      <pose>50 27.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>officer_1</name>
+      <static>true</static>
+      <pose>45 33.5 0 0 0 0</pose>
+      <uri>model://officer</uri>
+    </include>
+
+    <include>
+      <name>soldier_22</name>
+      <static>true</static>
+      <pose>56 -39.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_23</name>
+      <static>true</static>
+      <pose>56 -37.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_24</name>
+      <static>true</static>
+      <pose>56 -35.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_25</name>
+      <static>true</static>
+      <pose>56 -33.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_26</name>
+      <static>true</static>
+      <pose>56 -31.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_27</name>
+      <static>true</static>
+      <pose>56 -29.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_28</name>
+      <static>true</static>
+      <pose>56 -27.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_29</name>
+      <static>true</static>
+      <pose>53 -39.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_30</name>
+      <static>true</static>
+      <pose>53 -37.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_31</name>
+      <static>true</static>
+      <pose>53 -35.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_32</name>
+      <static>true</static>
+      <pose>53 -33.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_33</name>
+      <static>true</static>
+      <pose>53 -31.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_34</name>
+      <static>true</static>
+      <pose>53 -29.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_35</name>
+      <static>true</static>
+      <pose>53 -27.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_36</name>
+      <static>true</static>
+      <pose>50 -39.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_37</name>
+      <static>true</static>
+      <pose>50 -37.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_38</name>
+      <static>true</static>
+      <pose>50 -35.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_39</name>
+      <static>true</static>
+      <pose>50 -33.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_40</name>
+      <static>true</static>
+      <pose>50 -31.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_41</name>
+      <static>true</static>
+      <pose>50 -29.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>soldier_42</name>
+      <static>true</static>
+      <pose>50 -27.5 0 0 0 3.141592</pose>
+      <uri>model://soldier</uri>
+    </include>
+    <include>
+      <name>officer_2</name>
+      <static>true</static>
+      <pose>45 -33.5 0 0 0 0</pose>
+      <uri>model://officer</uri>
+    </include>
+    <include>
+      <name>officer_3</name>
+      <static>true</static>
+      <pose>75 0 0 0 0 3.141592</pose>
+      <uri>model://officer</uri>
+    </include>
+
+  </model>
+</sdf>

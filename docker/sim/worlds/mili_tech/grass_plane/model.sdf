@@ -1,0 +1,39 @@
+<?xml version="1.0" ?>
+<sdf version="1.5">
+  <model name="grass_plane">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>150 150 .1</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <cast_shadows>false</cast_shadows>
+        <geometry>
+          <box>
+            <size>150 150 .1</size>
+          </box>
+        </geometry>
+        <!-- Portировано под Harmonic: Ogre-скрипт vrc/grass_plane заменён на PBR.
+             gz-sim не тайлит текстуру по грани бокса, поэтому grass_dry.png
+             растянется на весь план (фич для VINS на земле будет мало —
+             но камера смотрит вперёд-вниз на меши/деревья, не строго вниз). -->
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_dry.png</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

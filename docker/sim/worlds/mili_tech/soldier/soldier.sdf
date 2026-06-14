@@ -1,0 +1,31 @@
+<?xml version="1.0" ?>
+<sdf version='1.5'>
+  <model name='soldier'>
+    <static>true</static>
+      <link name='soldier'>
+        <pose frame=''>0 0 0 0 0 0</pose>
+         <collision name='soldier'>
+          <geometry>
+            <mesh>
+              <uri>model://soldier/model.dae</uri>
+            </mesh>
+          </geometry>
+          <max_contacts>10</max_contacts>
+        </collision>
+        <visual name='soldier'>
+          <geometry>
+            <mesh>
+              <scale>1 1 1</scale>
+              <uri>model://soldier/model.dae</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <name>soldier</name>
+              <uri>model://soldier/model.dae</uri>
+            </script>
+          </material>
+        </visual>
+      </link>
+  </model>
+</sdf>
