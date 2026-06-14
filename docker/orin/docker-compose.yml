@@ -26,5 +26,6 @@ services:
     # Мы НЕ монтируем build/ и install/ с хоста, чтобы они собрались 
     # заново внутри чистой Ubuntu контейнера.
     volumes:
-      - ./src:/root/vins_ws/src
+      - ../../src/vins:/root/vins_ws/src
+      - ../../src/camera:/root/vins_ws/src/camera
       - ./output:/root/vins_ws/output

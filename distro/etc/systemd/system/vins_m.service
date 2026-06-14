@@ -7,7 +7,7 @@ Requires=docker.service
 Type=simple
 # Запускаем от root, чтобы docker exec работал без запроса пароля
 User=root
-ExecStart=/bin/bash /home/andriy/vins_ws/vins_service_m.sh
+ExecStart=/bin/bash /home/andriy/vins_service_m.sh
 Restart=on-failure
 RestartSec=5
 
