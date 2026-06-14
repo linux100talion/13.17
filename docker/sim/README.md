@@ -196,12 +196,27 @@ gz sim (mili_fortress.sdf, дрон с камерой)
 
 1. **simulator**: `gz sim -v4 -r /root/worlds/mili_fortress.sdf`
 2. **simulator**: `sim_vehicle.py -v ArduCopter -f gazebo-iris --console`
-3. **simulator**: `ros_gz_bridge` (команда выше)
-4. **nav**: `bayerizer.py` + `camera_node` (`device:=/dev/rawbayer`)
-5. **nav**: `feature_tracker` + `vins_estimator` (`sim.yaml`), все с `use_sim_time:=true`
+3. **simulator**: `ros_gz_bridge` (команда выше) — публикует `/clock`. **Этой
+   ноде `use_sim_time` НЕ ставится — она источник часов.**
+4. **nav**: один launch на все ноды (bayerizer + camera_node + feature_tracker +
+   vins_estimator), уже с `use_sim_time:=true`:
+   ```bash
+   ros2 launch /root/sim_ws/src/nav/sim_nav.launch.py
+   ```
+5. **nav**: MAVROS — отдельно, тоже с sim-временем:
+   ```bash
+   ros2 run mavros mavros_node --ros-args \
+     -p use_sim_time:=true -p fcu_url:="udp://:14540@127.0.0.1:14555"
+   ```
+
+> **use_sim_time** прописан всем нодам через `src/nav/sim_nav.launch.py`
+> (camera_node штампует кадр через `get_clock()->now()` → уважает sim-время).
+> Единственное исключение — `ros_gz_bridge` (источник `/clock`).
 
 ### ⚠️ Проверить на ноуте
 
+- **`/clock` идёт**: `ros2 topic hz /clock` (после моста). Ноды должны
+  показывать sim-время: `ros2 param get /vins_estimator use_sim_time` → true.
 - **Имя модели/линка**: камера цепляется к `iris_with_standoffs::base_link`.
   Если ardupilot_gazebo обновил структуру — свериться (`gz sim`-лог о joint).
 - **SITL соединилась**: в логе `gz sim` — "ArduPilot... connected", в `sim_vehicle`
@@ -210,13 +225,12 @@ gz sim (mili_fortress.sdf, дрон с камерой)
 
 ## Открытые задачи
 
-1. **`use_sim_time:=true` всем ROS-нодам** (bayerizer, camera_node, feature_tracker,
-   vins_estimator, mavros). Gazebo публикует `/clock` (мост выше). Без этого
-   таймстампы кадров и IMU разойдутся с wall-clock → VINS диверджит молча.
-2. **IMU-источник.** VINS ждёт IMU на `/mavros/imu/data_raw` из SITL.
+1. **IMU-источник.** VINS ждёт IMU на `/mavros/imu/data_raw` из SITL.
    Проверить частоту и шум — `sim.yaml` задаёт заниженный шум, при расхождении
-   подстроить под модель IMU из ardupilot_gazebo.
-3. **Тюнинг полёта/сцены** после первого успешного прогона VINS.
+   подстроить под модель IMU из ardupilot_gazebo. ⚠️ MAVROS под `use_sim_time`
+   — момент тонкий (часть таймстампов приходит от FCU); если IMU/камера не
+   синхронизируются, проверить штампы `/mavros/imu/data_raw` первым делом.
+2. **Тюнинг полёта/сцены** после первого успешного прогона VINS.
 
 ## Порты MAVLink
 
