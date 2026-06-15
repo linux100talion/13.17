@@ -11,7 +11,7 @@
 #   - mavros (свой launch; use_sim_time для него — отдельно, см. README).
 #
 # Запуск (в контейнере nav, после colcon build):
-#   ros2 launch /root/sim_ws/src/nav/sim_nav.launch.py
+#   ros2 launch /root/sim_ws/src/sim/sim_nav.launch.py
 # ============================================================================
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess
@@ -30,7 +30,7 @@ def generate_launch_description():
         #    выставлен для единообразия.
         ExecuteProcess(
             cmd=[
-                "python3", "/root/sim_ws/src/nav/bayerizer.py",
+                "python3", "/root/sim_ws/src/sim/bayerizer.py",
                 "--ros-args",
                 "-p", "input_topic:=/camera/image_raw",
                 "-p", f"device:={DEVICE}",

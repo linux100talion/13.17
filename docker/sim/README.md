@@ -101,7 +101,7 @@ sudo ln -sf /dev/video9 /dev/rawbayer
 docker exec -it p1317_nav bash
 #   (внутри) cd /root/sim_ws && colcon build && source install/setup.bash
 #   (внутри) терминал 1 — байеризатор:
-python3 src/nav/bayerizer.py --ros-args \
+python3 src/sim/bayerizer.py --ros-args \
     -p input_topic:=/camera/image_raw -p device:=/dev/rawbayer -p pattern:=GRBG
 #   (внутри) терминал 2 — камера-нода как на железе, но с другим device:
 ros2 run camera_pkg camera_node --ros-args -p device:=/dev/rawbayer
@@ -201,7 +201,7 @@ gz sim (mili_fortress.sdf, дрон с камерой)
 4. **nav**: один launch на все ноды (bayerizer + camera_node + feature_tracker +
    vins_estimator), уже с `use_sim_time:=true`:
    ```bash
-   ros2 launch /root/sim_ws/src/nav/sim_nav.launch.py
+   ros2 launch /root/sim_ws/src/sim/sim_nav.launch.py
    ```
 5. **nav**: MAVROS — отдельно, тоже с sim-временем:
    ```bash
@@ -209,7 +209,7 @@ gz sim (mili_fortress.sdf, дрон с камерой)
      -p use_sim_time:=true -p fcu_url:="udp://:14540@127.0.0.1:14555"
    ```
 
-> **use_sim_time** прописан всем нодам через `src/nav/sim_nav.launch.py`
+> **use_sim_time** прописан всем нодам через `src/sim/sim_nav.launch.py`
 > (camera_node штампует кадр через `get_clock()->now()` → уважает sim-время).
 > Единственное исключение — `ros_gz_bridge` (источник `/clock`).
 

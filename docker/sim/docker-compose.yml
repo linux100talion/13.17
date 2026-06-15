@@ -82,7 +82,8 @@ services:
     # читая Bayer-кадры из /dev/rawbayer вместо реального /dev/video0.
     volumes:
       - ../../src/vins:/root/sim_ws/src/vins
-      - ../../src/nav:/root/sim_ws/src/nav
+      - ../../src/sim:/root/sim_ws/src/sim       # симуляционная обвязка
+      - ../../src/nav:/root/sim_ws/src/nav       # нейросети навигации (пока пусто)
       - ../../src/camera:/root/sim_ws/src/camera
       - ./output:/root/sim_ws/output
 

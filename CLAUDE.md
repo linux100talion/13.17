@@ -13,7 +13,8 @@ docker/
 src/
   camera/      — C++ CUDA камера-нода (camera_pkg) + tuner
   vins/        — VINS-MONO-ROS2 (конфиги) + python cam-ноды (fallback)
-  nav/         — навигация для симуляции (байеризатор, launch)
+  sim/         — симуляционная обвязка (байеризатор, launch)
+  nav/         — (планируется) нейросети навигации
   orin_shutdown/ — Go-утилита graceful shutdown через MAVLink
   concept.txt  — исходная концепция проекта
 distro/        — деплой на Orin (etc/, home/andriy/, usr/) — systemd, сети, скрипты
@@ -98,7 +99,7 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
      → write() → /dev/rawbayer  (v4l2loopback, модуль ядра ХОСТА)
      → camera_node (device:=/dev/rawbayer)  → CUDA дебайер → /image_mono
    ```
-   Меняется только параметр `device`. Байеризатор: `src/nav/bayerizer.py`
+   Меняется только параметр `device`. Байеризатор: `src/sim/bayerizer.py`
    (паттерн GRBG по умолчанию). v4l2loopback ставится на хосте (`modprobe`,
    симлинк `/dev/rawbayer`), пробрасывается в `nav` через `devices:`.
 5. **isaac_ros удалён** — драйвер камеры не поддерживает Argus.
@@ -106,7 +107,7 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
    `sim.yaml`. Камеру дрона в Gazebo держать 1280×720 (не 1920×1200).
 7. **mavlink_router — клиент к SITL** (tcp:5760). В concept.txt был конфликт
    портов (два сервера на 5760) — исправлено.
-8. **use_sim_time всем нодам** через `src/nav/sim_nav.launch.py`. Исключение —
+8. **use_sim_time всем нодам** через `src/sim/sim_nav.launch.py`. Исключение —
    `ros_gz_bridge` (он источник `/clock`). MAVROS — отдельно (тонкий момент:
    часть штампов IMU от FCU).
 
