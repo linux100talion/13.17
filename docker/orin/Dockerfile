@@ -7,6 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     ros-humble-cv-bridge \
     ros-humble-image-transport \
+    ros-humble-vision-msgs \
     ros-humble-rmw-cyclonedds-cpp \
     python3-colcon-common-extensions \
     build-essential \
