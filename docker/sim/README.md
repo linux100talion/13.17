@@ -36,7 +36,29 @@ ArduPilot SITL эмулирует полётный контроллер, Gazebo 
 | `mavlink_router` | radarku/mavlink-router        | —              | Раздача MAVLink по UDP |
 | `nav`            | nvidia/cuda 12.2 + ros-base   | compute        | VINS-Mono + нейросети + MAVROS |
 
-## Запуск
+## Быстрый старт (Makefile)
+
+Обёртка `docker/sim/Makefile` + `scripts/` автоматизируют всю
+последовательность ниже. Скрипты исполняются ВНУТРИ контейнеров через
+`docker exec -i ... bash -s` (по stdin), ноды уходят в фон, логи — в `output/`.
+
+```bash
+cd docker/sim
+make host-setup     # хост: xhost + v4l2loopback (/dev/rawbayer), нужен sudo
+make build          # собрать образы (долго: SITL+Gazebo+OpenCV из исходников)
+make run            # up + sim (Gazebo+SITL+мост) + nav (colcon+ноды+MAVROS)
+make logs           # хвост логов всех нод (output/*.log)
+make stop           # погасить ноды (контейнеры живут); make restart — перезапуск
+make down           # удалить контейнеры
+make help           # все цели
+```
+
+> ⚠️ Не прогонялось без Gazebo. Спорные места в обёртке: `sim_vehicle.py
+> --no-mavproxy` (телеметрию ждём через mavlink_router), пауза 5 c перед SITL,
+> фон через `nohup`. Если что-то не поднимается — смотреть `output/*.log`
+> и чек-листы ниже.
+
+## Запуск (вручную, по шагам)
 
 ```bash
 # 1. Разрешить контейнеру доступ к дисплею (для GUI Gazebo)
