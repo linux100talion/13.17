@@ -19,7 +19,11 @@ public:
     V4L2CameraNode() : Node("raw_camera_node"), width_(1280), height_(720), frame_size_(0), running_(true) {
         
         // 1. Инициализация публикаторов
+        //    /image_mono  — вход VINS-Mono (каждый кадр).
+        //    /image_color — полноразмерный BGR-кадр для nav-стороны: нейросети
+        //                   (инференс) и openhd_streamer (даунлинк с оверлеем).
         image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/image_mono", 10);
+        image_color_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/image_color", 10);
         info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("/camera_info", 10);
 
         // 2. Объявление динамических ROS2 параметров (вместо веб-слайдеров)
@@ -44,17 +48,26 @@ public:
             return;
         }
 
-        // 5. Инициализация GStreamer для OpenHD (UDP H.264 поток на порт 5600)
-        std::string gst_pipeline = 
-            "appsrc ! videoconvert ! "
-            "x264enc tune=zerolatency speed-preset=ultrafast bitrate=4000 ! "
-            "rtph264pay ! udpsink host=127.0.0.1 port=5600 sync=false";
-        
-        openhd_writer_.open(gst_pipeline, cv::CAP_GSTREAMER, 0, 15, cv::Size(width_ / 2, height_ / 2), true);
-        if (!openhd_writer_.isOpened()) {
-            RCLCPP_WARN(this->get_logger(), "Не удалось открыть GStreamer для OpenHD!");
+        // 5. GStreamer для OpenHD — по умолчанию ВЫКЛ.
+        //    Поток в OpenHD теперь собирает отдельная нода nav_pkg/openhd_streamer:
+        //    она подписана на /image_color, рисует рамки нейросетей (NN1/NN2) и
+        //    кодирует H.264. Камера-нода кодирует сама только при stream_openhd:=true
+        //    (standalone-режим без nav-стороны).
+        stream_openhd_ = this->declare_parameter("stream_openhd", false);
+        if (stream_openhd_) {
+            std::string gst_pipeline =
+                "appsrc ! videoconvert ! "
+                "x264enc tune=zerolatency speed-preset=ultrafast bitrate=4000 ! "
+                "rtph264pay ! udpsink host=127.0.0.1 port=5600 sync=false";
+
+            openhd_writer_.open(gst_pipeline, cv::CAP_GSTREAMER, 0, 15, cv::Size(width_ / 2, height_ / 2), true);
+            if (!openhd_writer_.isOpened()) {
+                RCLCPP_WARN(this->get_logger(), "Не удалось открыть GStreamer для OpenHD!");
+            } else {
+                RCLCPP_INFO(this->get_logger(), "Трансляция H.264 для OpenHD запущена на 127.0.0.1:5600");
+            }
         } else {
-            RCLCPP_INFO(this->get_logger(), "Трансляция H.264 для OpenHD запущена на 127.0.0.1:5600");
+            RCLCPP_INFO(this->get_logger(), "OpenHD внутри камеры выключен (stream_openhd:=false) — поток собирает openhd_streamer.");
         }
 
         // 6. Запуск выделенного потока для захвата и обработки
@@ -78,8 +91,10 @@ private:
     FILE* pipe_ = nullptr;
     std::atomic<bool> running_;
     std::thread capture_thread_;
+    bool stream_openhd_ = false;
 
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_color_pub_;
     rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr info_pub_;
     sensor_msgs::msg::CameraInfo camera_info_msg_;
     
@@ -151,7 +166,7 @@ private:
 
         // Предварительное резервирование памяти GPU
         cv::cuda::GpuMat gpu_raw(height_, width_, CV_8UC1);
-        cv::cuda::GpuMat gpu_color, gpu_mono;
+        cv::cuda::GpuMat gpu_color, gpu_mono, gpu_bgr;
         std::vector<cv::cuda::GpuMat> gpu_channels(3);
 
         // Таблица гаммы
@@ -199,10 +214,14 @@ private:
                     cv::cuda::merge(gpu_channels, gpu_color);
                 }
 
+                // mono для VINS считаем ДО конверсии (поведение не меняем).
                 cv::cuda::cvtColor(gpu_color, gpu_mono, cv::COLOR_BGR2GRAY);
+                // gpu_color после демозаики — RGB; для /image_color (bgr8) и
+                // OpenHD приводим к настоящему BGR.
+                cv::cuda::cvtColor(gpu_color, gpu_bgr, cv::COLOR_RGB2BGR);
 
                 cv::Mat img_color, img_mono;
-                gpu_color.download(img_color);
+                gpu_bgr.download(img_color);
                 gpu_mono.download(img_mono);
                 // -----------------------
 
@@ -216,6 +235,10 @@ private:
                 
                 sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(header, "mono8", img_mono).toImageMsg();
                 image_pub_->publish(*msg);
+
+                // Полноразмерный BGR-кадр для nav-стороны (нейросети + openhd_streamer)
+                sensor_msgs::msg::Image::SharedPtr color_msg = cv_bridge::CvImage(header, "bgr8", img_color).toImageMsg();
+                image_color_pub_->publish(*color_msg);
 
                 camera_info_msg_.header.stamp = current_time;
                 info_pub_->publish(camera_info_msg_);

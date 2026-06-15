@@ -41,6 +41,7 @@ ENV LC_ALL=en_US.UTF-8
 RUN apt-get update && apt-get install -y \
     ros-humble-ros-base \
     ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-vision-msgs \
     ros-humble-mavros \
     ros-humble-mavros-extras \
     python3-colcon-common-extensions \

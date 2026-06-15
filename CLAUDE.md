@@ -14,7 +14,8 @@ src/
   camera/      — C++ CUDA камера-нода (camera_pkg) + tuner
   vins/        — VINS-MONO-ROS2 (конфиги) + python cam-ноды (fallback)
   sim/         — симуляционная обвязка (байеризатор, launch)
-  nav/         — (планируется) нейросети навигации
+  nav/         — пакет nav_pkg: нейросети навигации (NN1/NN2, пока болванки)
+                 + openhd_streamer (даунлинк в OpenHD с оверлеем детекций)
   orin_shutdown/ — Go-утилита graceful shutdown через MAVLink
   concept.txt  — исходная концепция проекта
 distro/        — деплой на Orin (etc/, home/andriy/, usr/) — systemd, сети, скрипты
@@ -34,14 +35,21 @@ intrinsics + барометр/IMU → абсолютная позиция → с
 
 Нейросеть №2 ведёт дрон, Нейросеть №1 периодически сбрасывает дрейф.
 
+Реализация — пакет **`nav_pkg`** (`src/nav/`, ament_python). См. «OpenHD-оверлей».
+
 ## Камера и C++ нода
 
 **`src/camera/camera_node.cpp`** (`camera_pkg`) — боевая ROS2 нода:
 - V4L2 захват (`v4l2-ctl`, формат BA10) → CUDA дебайер (`cv::cuda::demosaicing`,
   `BayerGB2RGB`) → публикует `mono8` в `/image_mono` (вход VINS)
-- H.264 через GStreamer на :5600 (OpenHD)
+- публикует **`/image_color`** (bgr8, полный кадр, каждый кадр) — вход nav-стороны
+  (нейросети + `openhd_streamer`). Цвет приводится к настоящему BGR
+  (`cv::cuda::cvtColor RGB→BGR`); mono-путь VINS считается ДО конверсии (не изменён)
 - ROS-параметры на лету: `gain/r/g/b`; **`device`** (путь к V4L2, default
   `/dev/video0`) — ключ к работе в симуляции (см. ниже)
+- **`stream_openhd`** (default `false`) — встроенный энкодер OpenHD :5600.
+  По умолчанию ВЫКЛ: поток теперь собирает `openhd_streamer` (рисует рамки NN).
+  `true` — standalone-режим камеры без nav-стороны
 - штампует кадр через `get_clock()->now()` → уважает `use_sim_time`
 
 **`src/camera/tuner/cuda/main.cpp`** — автономный веб-тюнер (без ROS): :8080 GUI,
@@ -50,6 +58,40 @@ intrinsics + барометр/IMU → абсолютная позиция → с
 > Разные коды Байера в CUDA (`BayerGB2RGB`) и CPU (`BayerGR2BGR`) — норма:
 > в OpenCV CUDA-модуле сдвиг в именовании паттернов. Оба обрабатывают один
 > физический паттерн (GRBG сенсора).
+
+## OpenHD-оверлей и `nav_pkg` (вариант 2)
+
+Видео для оператора (OpenHD) проходит через нейросети, которые рисуют рамки
+вокруг объектов. Нейросети работают РЕДКО (NN1 ~1 Гц, NN2 ~3 с) и НЕ должны
+гейтить fps видео. Поэтому энкодер вынесен в отдельную ноду, а нейросети шлют
+только геометрию/семантику (килобайты, не пиксели):
+
+```
+camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections (Detection2DArray)
+                            ├─► nn2_scene  (3с)  → /nn2/scene       (String, метка)
+                            └─► openhd_streamer ◄── кэш последних детекций
+                                  рисует оверлей на КАЖДОМ кадре → H.264 → OpenHD :5600
+```
+
+**`src/nav/` = пакет `nav_pkg`** (ament_python):
+- **`openhd_streamer`** — подписан на `/image_color` + `/nn1/detections` +
+  `/nn2/scene`, кэширует последние детекции, рисует на каждом кадре
+  (`cv2.rectangle/putText`), ужимает до 640×360, кодирует H.264 (GStreamer →
+  `udpsink :5600`). Видео на полном fps независимо от инференса; рамки «залипают»
+  между обновлениями (для FPV норм).
+- **`nn1_anchor` / `nn2_scene`** — пока БОЛВАНКИ: таймерное прореживание (1 Гц /
+  3 с), берут последний кадр (QoS depth=1), шлют фиктивные данные. Реальный
+  инференс помечен `TODO`.
+- Запуск: `ros2 launch nav_pkg nav.launch.py use_sim_time:=true` (камеру/VINS
+  не поднимает). В симуляции включается из `sim_nav.launch.py` (`IncludeLaunch`).
+
+Зависимость **`vision_msgs`** (`Detection2DArray`) — добавлена в образ `nav`
+(в `ros-base` её нет). Вариант 2 выбран ради чистоты архитектуры; межнодовый
+republish полного `/image_color` — осознанная плата, потом можно оптимизировать.
+
+> ⚠️ **Боевой борт (`docker/orin/`):** камера больше не гонит OpenHD сама
+> (`stream_openhd:=false`). На Orin нужно либо запускать `openhd_streamer`, либо
+> ставить `stream_openhd:=true`. Пока не настроено.
 
 ## VINS-Mono
 

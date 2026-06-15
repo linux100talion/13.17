@@ -13,8 +13,12 @@
 # Запуск (в контейнере nav, после colcon build):
 #   ros2 launch /root/sim_ws/src/sim/sim_nav.launch.py
 # ============================================================================
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess
+from launch.actions import ExecuteProcess, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 CFG = "/root/sim_ws/src/vins/VINS-MONO-ROS2/config_pkg/config/sim.yaml"
@@ -40,7 +44,9 @@ def generate_launch_description():
             output="screen",
         ),
 
-        # 2. Камера-нода: /dev/rawbayer -> /image_mono (+ OpenHD).
+        # 2. Камера-нода: /dev/rawbayer -> /image_mono (VINS) + /image_color
+        #    (nav-сторона). OpenHD из камеры ВЫКЛ (stream_openhd:=false по
+        #    умолчанию) — поток собирает openhd_streamer из nav.launch.py.
         #    Штампует кадр через get_clock()->now() => уважает use_sim_time.
         Node(
             package="camera_pkg",
@@ -67,5 +73,13 @@ def generate_launch_description():
                 ("/feature_tracker/feature", "/feature"),
                 ("/feature_tracker/restart", "/restart"),
             ],
+        ),
+
+        # 5. nav-сторона: nn1_anchor (~1 Гц) + nn2_scene (~3 с) + openhd_streamer
+        #    (даунлинк в OpenHD с оверлеем детекций). Подписаны на /image_color.
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(
+                get_package_share_directory("nav_pkg"), "launch", "nav.launch.py")),
+            launch_arguments={"use_sim_time": "true"}.items(),
         ),
     ])
