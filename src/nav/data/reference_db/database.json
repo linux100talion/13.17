@@ -1,0 +1,25 @@
+{
+  "origin": {
+    "id": "takeoff",
+    "lat": 47.090000,
+    "lon": 37.100000,
+    "alt": 140.0,
+    "comment": "Точка взлёта = ориентир №0. Держит ОБЕ координаты сразу: VINS (0,0,0) <-> реальные GPS+высота. Датум, сшивающий рамку VINS и гео-рамку. См. tools/nn1_anchor_howto.txt."
+  },
+  "landmarks": {
+    "crossroad_1": {"lat": 47.111000, "lon": 37.222000, "alt": 150.0},
+    "bunker_1":    {"lat": 47.333000, "lon": 37.444000, "alt": 145.5},
+    "bush_1":      {"lat": 47.555000, "lon": 37.666000, "alt": 160.2}
+  },
+  "references": {
+    "crossroad_view_001.npz": "crossroad_1",
+    "crossroad_view_002.npz": "crossroad_1",
+    "crossroad_view_003.npz": "crossroad_1",
+    "bunker_view_001.npz": "bunker_1",
+    "bunker_view_002.npz": "bunker_1",
+    "bunker_view_003.npz": "bunker_1",
+    "bush1_view_001.npz": "bush_1",
+    "bush1_view_002.npz": "bush_1",
+    "bush1_view_003.npz": "bush_1"
+  }
+}

@@ -13,6 +13,10 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
+        # Георефернс-база NN1 (database.json + *.npz эталоны). .npz генерятся
+        # инструментами из tools/ и не коммитятся — ставим то, что есть.
+        (os.path.join("share", package_name, "reference_db"),
+         glob("data/reference_db/*")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
