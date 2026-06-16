@@ -1,3 +1,4 @@
+import os
 import re
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
@@ -7,8 +8,11 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable,
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-MD_PATH = "/data/data/com.termux/files/home/13.17/CLAUDE.md"
-PDF_PATH = "/data/data/com.termux/files/home/13.17/CLAUDE.pdf"
+# Пути относительно корня репозитория (скрипт лежит в tools/mdtopdf/),
+# чтобы генератор работал из любого клона, а не только из termux-хома.
+_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+MD_PATH = os.path.join(_REPO, "CLAUDE.md")
+PDF_PATH = os.path.join(_REPO, "CLAUDE.pdf")
 
 F = "/usr/share/fonts/truetype/liberation"
 pdfmetrics.registerFont(TTFont("Sans",        f"{F}/LiberationSans-Regular.ttf"))
