@@ -105,11 +105,19 @@ RUN wget -q https://raw.githubusercontent.com/mavlink/mavros/master/mavros/scrip
        -O /tmp/geo.sh \
     && bash /tmp/geo.sh && rm /tmp/geo.sh
 
-# --- 6. Место под PyTorch + нейросети (раскомментировать при подключении ИИ) ---
+# --- 6. PyTorch + LightGlue (SuperPoint) для Нейросети №1 (nn1_anchor) ---
 # PyTorch несёт свою CUDA-рантайм-сборку — отдельно ставить CUDA не нужно.
-# RUN pip3 install --no-cache-dir torch torchvision \
-#       --index-url https://download.pytorch.org/whl/cu121 \
-#     && pip3 install --no-cache-dir faiss-gpu lightglue
+# ВАЖНО: lightglue тянет в зависимостях opencv-python (pypi, без CUDA/GStreamer),
+# который ШАДОВИТ наш OpenCV из исходников и ломает cv2 в python-нодах
+# (openhd_streamer: VideoWriter CAP_GSTREAMER). Поэтому ставим lightglue
+# --no-deps, а нужный рантайм-деп (kornia, без opencv) — отдельно.
+RUN pip3 install --no-cache-dir torch torchvision \
+        --index-url https://download.pytorch.org/whl/cu121 \
+    && pip3 install --no-cache-dir kornia \
+    && pip3 install --no-cache-dir --no-deps \
+        git+https://github.com/cvg/LightGlue.git
+# Ретривал-префильтр (Инкремент 1.x / Нейросеть №2): faiss-gpu + DINOv2 — позже.
+# RUN pip3 install --no-cache-dir faiss-gpu
 
 WORKDIR /root/sim_ws
 

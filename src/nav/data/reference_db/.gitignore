@@ -1,0 +1,3 @@
+# Эталоны SuperPoint генерятся инструментами (tools/build_reference_db.py или
+# generate_mock_db.py) и не коммитятся — версионируем только database.json.
+*.npz
