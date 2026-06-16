@@ -3,6 +3,7 @@
 #
 #   camera_pkg публикует /image_color
 #        ├─► nn1_anchor (~1 Гц)  → /nn1/detections (боксы якорей)
+#        │        └─► ray_tracer → /nn1/anchor_pose, /nn1/corrected_odom (сброс дрейфа)
 #        └─► nn2_scene  (~3 с)   → /nn2/scene      (метка сцены)
 #                                       │
 #   openhd_streamer ◄── /image_color ──┘  рисует оверлей → H.264 → OpenHD :5600
@@ -28,6 +29,8 @@ def generate_launch_description():
         Node(package="nav_pkg", executable="openhd_streamer",
              output="screen", parameters=common),
         Node(package="nav_pkg", executable="nn1_anchor",
+             output="screen", parameters=common),
+        Node(package="nav_pkg", executable="ray_tracer",
              output="screen", parameters=common),
         Node(package="nav_pkg", executable="nn2_scene",
              output="screen", parameters=common),

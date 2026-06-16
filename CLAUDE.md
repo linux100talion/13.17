@@ -79,9 +79,15 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   (`cv2.rectangle/putText`), ужимает до 640×360, кодирует H.264 (GStreamer →
   `udpsink :5600`). Видео на полном fps независимо от инференса; рамки «залипают»
   между обновлениями (для FPV норм).
-- **`nn1_anchor` / `nn2_scene`** — пока БОЛВАНКИ: таймерное прореживание (1 Гц /
-  3 с), берут последний кадр (QoS depth=1), шлют фиктивные данные. Реальный
-  инференс помечен `TODO`.
+- **`nn1_anchor`** — Нейросеть №1 (якорная локализация). Инкремент 1: SuperPoint+
+  LightGlue (`anchor_matcher.py`) матчит `/image_color` против георефернс-базы
+  облёта (`data/reference_db/`) → bbox+id ориентира в `/nn1/detections`.
+- **`ray_tracer`** — Инкремент 2: засечка по ориентиру (`geo.py`: луч через
+  intrinsics + углы MAVROS + баро → абсолютная позиция в ENU) → поправка-смещение
+  к VINS (сброс дрейфа) → `/nn1/anchor_pose`, `/nn1/corrected_odom`, `/nn1/drift`.
+  Инъекция `corrected_odom` (MAVROS vision_pose / в VINS) — Инкремент 3.
+  Детали и допущения: `src/nav/tools/nn1_anchor_howto.txt`.
+- **`nn2_scene`** — пока БОЛВАНКА: таймер 3 с, последний кадр, фиктивная метка.
 - Запуск: `ros2 launch nav_pkg nav.launch.py use_sim_time:=true` (камеру/VINS
   не поднимает). В симуляции включается из `sim_nav.launch.py` (`IncludeLaunch`).
 

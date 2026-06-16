@@ -28,6 +28,7 @@ setup(
         "console_scripts": [
             "openhd_streamer = nav_pkg.openhd_streamer:main",
             "nn1_anchor = nav_pkg.nn1_anchor:main",
+            "ray_tracer = nav_pkg.ray_tracer:main",
             "nn2_scene = nav_pkg.nn2_scene:main",
         ],
     },

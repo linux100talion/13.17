@@ -50,14 +50,35 @@ database.json:
 
 
 ИНКРЕМЕНТЫ
-  [1] (этот) детектор: SuperPoint+LightGlue -> Detection2DArray (bbox + id).
-  [2] ray-tracing нода: bbox+id -> координаты по id -> луч (intrinsics + углы +
-      баро) -> абсолютная позиция -> сравнение с VINS -> сброс дрейфа.
+  [1] ГОТОВ. детектор: SuperPoint+LightGlue -> Detection2DArray (bbox + id).
+  [2] ГОТОВ. ray-tracing нода: bbox+id -> координаты по id -> луч (intrinsics +
+      углы MAVROS + баро) -> абсолютная позиция в ENU -> поправка-смещение к
+      VINS (сброс дрейфа), публикует corrected_odom.
+  [3] инъекция corrected_odom: в MAVROS /mavros/vision_pose/pose (коррекция
+      EKF полётника) ИЛИ обратно в VINS; + коррекция рыскания (сейчас только
+      трансляция); + ретривал-префильтр FAISS.
+
+ТОПИКИ ray_tracer
+  вход:  /nn1/detections, /camera_info, /mavros/imu/data,
+         /mavros/global_position/rel_alt, /vins_estimator/odometry
+  выход: /nn1/anchor_pose (PoseWithCovarianceStamped — засечка в ENU),
+         /nn1/corrected_odom (Odometry — VINS + поправка),
+         /nn1/drift (Vector3Stamped — текущий дрейф)
+
+ДОПУЩЕНИЯ ray_tracer (калибровать на живом запуске)
+  - рамка VINS ~ ENU (origin-coupled на взлёте + выровнены по рысканью);
+  - поправка ТРАНСЛЯЦИОННАЯ (yaw-дрейф — Инкремент 3);
+  - статичный разворот optical->body (cam_mount_rpy) и рычаг (cam_mount_xyz) —
+    ROS-параметры из model.sdf; абсолютная верность optical-конвенции Gazebo
+    проверяется только в симе (мат.цепочка самосогласована, см. round-trip);
+  - высота: rel_alt (над взлётом); высоты в ENU считаем от датума взлёта.
 
 
 ФАЙЛЫ
-  nav_pkg/nn1_anchor.py      — ROS-нода (Инкремент 1)
+  nav_pkg/nn1_anchor.py      — ROS-нода детектора (Инкремент 1)
   nav_pkg/anchor_matcher.py  — ядро: SuperPoint+LightGlue + загрузка базы
+  nav_pkg/ray_tracer.py      — ROS-нода засечки/сброса дрейфа (Инкремент 2)
+  nav_pkg/geo.py             — чистая геометрия (ENU, кватернионы, луч)
   tools/build_reference_db.py— БОЕВАЯ сборка базы из кадров облёта (SuperPoint)
   tools/generate_mock_db.py  — МОК базы (случайные дескрипторы) для проверки
                                обвязки; реальных совпадений не даёт
