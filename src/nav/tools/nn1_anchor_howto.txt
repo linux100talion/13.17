@@ -54,16 +54,25 @@ database.json:
   [2] ГОТОВ. ray-tracing нода: bbox+id -> координаты по id -> луч (intrinsics +
       углы MAVROS + баро) -> абсолютная позиция в ENU -> поправка-смещение к
       VINS (сброс дрейфа), публикует corrected_odom.
-  [3] инъекция corrected_odom: в MAVROS /mavros/vision_pose/pose (коррекция
-      EKF полётника) ИЛИ обратно в VINS; + коррекция рыскания (сейчас только
-      трансляция); + ретривал-префильтр FAISS.
+  [3] ЧАСТИЧНО. инъекция: ray_tracer публикует скорректированную позу в
+      /mavros/vision_pose/pose (ArduPilot EK3 External Nav). ray_tracer = ЕДИН-
+      СТВЕННЫЙ мост VINS->полётник (до первой засечки прокидывает сырой VINS).
+      Осталось: коррекция рыскания (сейчас только трансляция) + FAISS-префильтр.
 
 ТОПИКИ ray_tracer
   вход:  /nn1/detections, /camera_info, /mavros/imu/data,
          /mavros/global_position/rel_alt, /vins_estimator/odometry
   выход: /nn1/anchor_pose (PoseWithCovarianceStamped — засечка в ENU),
          /nn1/corrected_odom (Odometry — VINS + поправка),
-         /nn1/drift (Vector3Stamped — текущий дрейф)
+         /nn1/drift (Vector3Stamped — текущий дрейф),
+         /mavros/vision_pose/pose (PoseStamped — скорр. поза в FCU; toggle
+                                   publish_vision_pose, default on)
+
+ПОЛЁТНИК (ArduPilot, чтобы vision_pose реально использовался)
+  EK3_SRC1_POSXY = 6 (ExternalNav), EK3_SRC1_POSZ / VELXY по необходимости;
+  VISO_TYPE при необходимости. MAVROS-плагин vision_pose включён по умолчанию.
+  ВАЖНО: vision_pose должен публиковать ТОЛЬКО ray_tracer (не сам VINS) —
+  иначе конфликт. В репо VINS наружу позу не отдаёт, конфликта нет.
 
 ДОПУЩЕНИЯ ray_tracer (калибровать на живом запуске)
   - рамка VINS ~ ENU (origin-coupled на взлёте + выровнены по рысканью);

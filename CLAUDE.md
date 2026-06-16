@@ -85,7 +85,9 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
 - **`ray_tracer`** — Инкремент 2: засечка по ориентиру (`geo.py`: луч через
   intrinsics + углы MAVROS + баро → абсолютная позиция в ENU) → поправка-смещение
   к VINS (сброс дрейфа) → `/nn1/anchor_pose`, `/nn1/corrected_odom`, `/nn1/drift`.
-  Инъекция `corrected_odom` (MAVROS vision_pose / в VINS) — Инкремент 3.
+  Инкремент 3: публикует скорректированную позу в `/mavros/vision_pose/pose`
+  (ArduPilot EK3 External Nav) — ray_tracer = единственный мост VINS→полётник.
+  Осталось: yaw-коррекция + FAISS-префильтр. На FCU нужен `EK3_SRC1_POSXY=6`.
   Детали и допущения: `src/nav/tools/nn1_anchor_howto.txt`.
 - **`nn2_scene`** — пока БОЛВАНКА: таймер 3 с, последний кадр, фиктивная метка.
 - Запуск: `ros2 launch nav_pkg nav.launch.py use_sim_time:=true` (камеру/VINS

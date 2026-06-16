@@ -27,7 +27,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import PoseWithCovarianceStamped, Vector3Stamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import CameraInfo, Imu
 from std_msgs.msg import Float64
@@ -60,6 +60,11 @@ class RayTracer(Node):
         # сглаживание поправки: 1.0 = жёсткий сброс на каждой засечке
         self.declare_parameter("correction_alpha", 1.0)
         self.declare_parameter("anchor_pos_std", 2.0)   # σ засечки, м
+        # Инкремент 3: инъекция скорректированной позы в полётник (ArduPilot
+        # EK3 External Nav). ray_tracer = единственный мост VINS->FCU.
+        self.declare_parameter("publish_vision_pose", True)
+        self.declare_parameter("vision_pose_topic", "/mavros/vision_pose/pose")
+        self.declare_parameter("vision_pose_frame", "map")
 
         self.db_path = self.get_parameter("db_path").value
         self.alpha = float(self.get_parameter("correction_alpha").value)
@@ -96,7 +101,16 @@ class RayTracer(Node):
         self.pub_corr = self.create_publisher(Odometry, "/nn1/corrected_odom", 10)
         self.pub_drift = self.create_publisher(Vector3Stamped, "/nn1/drift", 10)
 
-        self.get_logger().info("ray_tracer запущен (Инкремент 2: засечка -> сброс дрейфа)")
+        self.publish_vp = bool(self.get_parameter("publish_vision_pose").value)
+        self.vp_frame = self.get_parameter("vision_pose_frame").value
+        self.pub_vision = None
+        if self.publish_vp:
+            self.pub_vision = self.create_publisher(
+                PoseStamped, self.get_parameter("vision_pose_topic").value, 10)
+
+        self.get_logger().info(
+            "ray_tracer запущен (Инкремент 2/3: засечка -> сброс дрейфа -> "
+            + ("vision_pose" if self.publish_vp else "vision_pose ВЫКЛ") + ")")
 
     # --- база (origin + landmarks) -------------------------------------------
     def _load_db(self):
@@ -136,6 +150,17 @@ class RayTracer(Node):
         corr.pose.pose.position.y = p.y + self.offset[1]
         corr.pose.pose.position.z = p.z + self.offset[2]
         self.pub_corr.publish(corr)
+
+        # Инкремент 3: та же скорректированная поза -> полётнику (PoseStamped).
+        # До первой засечки offset=0 => прокидываем сырой VINS (нужно ArduPilot
+        # для GPS-denied); после — с вшитой коррекцией дрейфа.
+        # Ориентация: пока от VINS как есть (yaw-коррекция — отдельный шаг).
+        if self.pub_vision is not None:
+            vp = PoseStamped()
+            vp.header = msg.header
+            vp.header.frame_id = self.vp_frame
+            vp.pose = corr.pose.pose
+            self.pub_vision.publish(vp)
 
     def _intrinsics(self):
         if self.K is not None:
