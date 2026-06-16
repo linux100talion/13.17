@@ -28,4 +28,5 @@ services:
     volumes:
       - ../../src/vins:/root/vins_ws/src/vins
       - ../../src/camera:/root/vins_ws/src/camera
+      - ../../src/nav:/root/vins_ws/src/nav
       - ./output:/root/vins_ws/output

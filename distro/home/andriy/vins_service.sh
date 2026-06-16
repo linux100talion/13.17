@@ -19,6 +19,7 @@ CONTAINER="vins_project_13_7"
 PID1=""
 PID2=""
 PID3=""
+PID4=""
 
 # Функция для запуска нод VINS-Mono
 start_vins_nodes() {
@@ -35,17 +36,25 @@ start_vins_nodes() {
     # 3. VINS Estimator
     docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && exec ros2 run vins_estimator vins_estimator --ros-args -p config_file:=/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/dummy_13_7.yaml --remap /feature_tracker/feature:=/feature --remap /feature_tracker/restart:=/restart" &
     PID3=$!
+
+    # 4. OpenHD streamer: /image_color -> H.264 :5600 (с оверлеем детекций NN).
+    #    Камера сама OpenHD не гонит (stream_openhd:=false). Боевые ноды NN1/NN2
+    #    пока не запускаются — стример отдаёт чистое видео, рамки появятся, когда
+    #    нейросети начнут публиковать /nn1/detections, /nn2/scene.
+    docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && exec ros2 run nav_pkg openhd_streamer" &
+    PID4=$!
 }
 
 # Функция для остановки нод VINS-Mono
 stop_vins_nodes() {
-    if [[ -n "$PID1" ]] || [[ -n "$PID2" ]] || [[ -n "$PID3" ]]; then
+    if [[ -n "$PID1" ]] || [[ -n "$PID2" ]] || [[ -n "$PID3" ]] || [[ -n "$PID4" ]]; then
         echo "Останавливаем процессы VINS-Mono..."
-        kill -INT $PID1 $PID2 $PID3 2>/dev/null
-        wait $PID1 $PID2 $PID3 2>/dev/null
+        kill -INT $PID1 $PID2 $PID3 $PID4 2>/dev/null
+        wait $PID1 $PID2 $PID3 $PID4 2>/dev/null
         PID1=""
         PID2=""
         PID3=""
+        PID4=""
     fi
 }
 
