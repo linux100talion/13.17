@@ -116,8 +116,12 @@ RUN pip3 install --no-cache-dir torch torchvision \
     && pip3 install --no-cache-dir kornia \
     && pip3 install --no-cache-dir --no-deps \
         git+https://github.com/cvg/LightGlue.git
-# Ретривал-префильтр (Инкремент 1.x / Нейросеть №2): faiss-gpu + DINOv2 — позже.
-# RUN pip3 install --no-cache-dir faiss-gpu
+# --- 7. FAISS + DINOv2 для Нейросети №2 (nn2_scene, топологическая карта) ---
+# DINOv2 тянется в рантайме через torch.hub (код+веса -> ~/.cache/torch/hub),
+# использует уже стоящий torch — отдельный pip не нужен. faiss-cpu тянет только
+# numpy (без opencv -> наш CUDA-OpenCV не шадовит). Для больших карт можно
+# заменить на faiss-gpu (тяжелее, привязан к CUDA-сборке).
+RUN pip3 install --no-cache-dir faiss-cpu
 
 WORKDIR /root/sim_ws
 

@@ -89,13 +89,29 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   (ArduPilot EK3 External Nav) — ray_tracer = единственный мост VINS→полётник.
   Осталось: yaw-коррекция + FAISS-префильтр. На FCU нужен `EK3_SRC1_POSXY=6`.
   Детали и допущения: `src/nav/tools/nn1_anchor_howto.txt`.
-- **`nn2_scene`** — пока БОЛВАНКА: таймер 3 с, последний кадр, фиктивная метка.
+- **`nn2_scene`** — Нейросеть №2 (топологическая карта). Инкремент 1: DINOv2
+  сжимает кадр в глобальный дескриптор, FAISS (`scene_descriptor.py`) ищет
+  ближайшее место в карте облёта (`data/scene_map/`: `map.index` + `metadata.json`)
+  → метка в `/nn2/scene` (баннер) + поза места (GPS/ENU + кватернион) в
+  `/nn2/relocalization`. Цель — релокализация VINS после потери трекинга;
+  пока допущение «VINS на треке», позу просто отдаём. Карта собирается из bag:
+  `tools/build_scene_map.py` (мок — `generate_mock_map.py`). Метрический
+  **MLP-«топограф»** поверх DINOv2 (`MetricHead` в `scene_descriptor.py`:
+  изометрия L2 ∝ метры; `--mlp` в build/eval, метрика карты `l2`) — голова
+  РЕАЛИЗОВАНА + тренер `tools/train_topograph.py` (дистанц-регрессия + triplet
+  на дельтах VINS). Осталось: прогнать обучение на реальных bag'ах + детектор
+  потери VINS + применение позы через ray_tracer + FAISS-префильтр для NN1.
+  Детали: `src/nav/tools/nn2_scene_howto.txt`.
+- **`relocalizer`** — ПУСТАЯ нода-заглушка: принимает `/nn2/relocalization`,
+  логирует. Сюда ляжет восстановление VINS (поправка отдаётся в `ray_tracer`).
 - Запуск: `ros2 launch nav_pkg nav.launch.py use_sim_time:=true` (камеру/VINS
   не поднимает). В симуляции включается из `sim_nav.launch.py` (`IncludeLaunch`).
 
 Зависимость **`vision_msgs`** (`Detection2DArray`) — добавлена в образ `nav`
 (в `ros-base` её нет). Вариант 2 выбран ради чистоты архитектуры; межнодовый
 republish полного `/image_color` — осознанная плата, потом можно оптимизировать.
+Для NN2 в образ `nav` добавлен **`faiss-cpu`**; DINOv2 тянется в рантайме через
+`torch.hub` (использует уже стоящий torch). На Orin NN2 пока не запускается.
 
 **Боевой борт (`docker/orin/`):** камера больше не гонит OpenHD сама
 (`stream_openhd:=false`) — `openhd_streamer` запускается рядом с камерой в
