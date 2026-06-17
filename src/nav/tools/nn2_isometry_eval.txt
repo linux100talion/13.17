@@ -72,9 +72,28 @@ NN2 — как ИЗМЕРИТЬ изометрию эмбеддинга на bag
   - recall@10м растёт; медиана ошибки в пределах шага кадров карты.
   - доля алиас-пар мала И локализована (передать в NN1).
 
-РЕАЛИЗАЦИЯ
-  Отдельный офлайн-скрипт tools/eval_isometry.py (rosbag2_py + SceneEncoder):
-  выборка -> пары -> метрики выше -> печать чисел + scatter PNG. Веса MLP
-  подхватывает через SceneEncoder (та же модель, что в карте). Зависит только
-  от того, что уже есть в образе nav (+ matplotlib для PNG, опционально).
+РЕАЛИЗАЦИЯ — tools/eval_isometry.py (ГОТОВО)
+  Офлайн-скрипт (rosbag2_py + SceneEncoder): выборка ~2 Гц -> сырые эмбеддинги
+  DINOv2 (encode normalize=False) + позы VINS + yaw IMU -> метрики выше ->
+  печать чисел + опц. scatter PNG. Когда в SceneEncoder появится MLP-голова —
+  та же команда мерит DINOv2+MLP (одна модель с картой). Зависит только от того,
+  что уже в образе nav (+ matplotlib для PNG, опционально). NN-поиск — брутфорс
+  numpy (без scipy/faiss).
+
+  Что печатает:
+    - изометрия (пары в окне d_phys<=window): Spearman ρ / Pearson r, фит α
+      (ед. вектора/м) + СКО остатка в метрах, разброс α по ячейкам сетки (CV —
+      индикатор глобальности), Kruskal stress-1;
+    - алиасинг: доля пар d_lat<p{alias_pct} при d_phys>alias_dphys (-> NN1);
+    - локализация: NN-поиск, медиана/90-й перц./recall@Xм; режимы — LOO в одном
+      bag (guard по времени против тривиальных соседей) или --query-bag vs карта;
+    - по ракурсу: медиана ошибки по бинам |Δyaw| query<->NN.
+
+  Правка ядра: SceneEncoder.encode(normalize=False) — сырой дескриптор для L2.
+  Нода и build_scene_map.py используют default normalize=True (не изменилось).
+
+  Запуск:
+    python3 tools/eval_isometry.py --bag ~/flight_map \
+        --query-bag ~/flight_test --window 50 --plot /tmp/iso.png
+  Несколько пролётов: позы query и карты обязаны быть в ОДНОМ кадре (co-register).
 ================================================================================
