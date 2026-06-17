@@ -17,6 +17,10 @@ setup(
         # инструментами из tools/ и не коммитятся — ставим то, что есть.
         (os.path.join("share", package_name, "reference_db"),
          glob("data/reference_db/*")),
+        # Топологическая карта NN2 (metadata.json + map.index). map.index
+        # генерится инструментами и не коммитится — ставим то, что есть.
+        (os.path.join("share", package_name, "scene_map"),
+         glob("data/scene_map/*")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -30,6 +34,7 @@ setup(
             "nn1_anchor = nav_pkg.nn1_anchor:main",
             "ray_tracer = nav_pkg.ray_tracer:main",
             "nn2_scene = nav_pkg.nn2_scene:main",
+            "relocalizer = nav_pkg.relocalizer:main",
         ],
     },
 )

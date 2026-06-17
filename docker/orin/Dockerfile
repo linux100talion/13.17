@@ -24,6 +24,10 @@ RUN apt-get update && apt-get install -y \
     libgstreamer-plugins-base1.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Боевые нейросети на Orin пока не запускаются (только openhd_streamer, см.
+# CLAUDE.md). Когда поедут: NN1 — torch+lightglue, NN2 — faiss + DINOv2(torch.hub):
+#   RUN pip3 install --no-cache-dir faiss-cpu  # (torch уже в базе dustynv)
+
 WORKDIR /root/vins_ws
 
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
