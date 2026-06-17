@@ -84,14 +84,20 @@ class SceneEncoder:
         self._info(f"DINOv2 '{model_name}' (dim={self.dim}) на {device}")
 
     @torch.no_grad()
-    def encode(self, frame_bgr):
-        """Кадр (BGR np.ndarray) -> вектор (dim,) float32, L2-нормированный."""
+    def encode(self, frame_bgr, normalize=True):
+        """Кадр (BGR np.ndarray) -> вектор (dim,) float32.
+
+        normalize=True (по умолчанию) — L2-норм под косинус (IP), так считают
+        карту и онлайн-запрос. normalize=False — «сырой» дескриптор: нужен
+        оценке изометрии (tools/eval_isometry.py), где важна L2-величина.
+        """
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         rgb = cv2.resize(rgb, (self.INPUT_SIZE, self.INPUT_SIZE))
         t = torch.from_numpy(rgb).float().permute(2, 0, 1).unsqueeze(0) / 255.0
         t = (t.to(self.device) - self._mean) / self._std
         vec = self.model(t)                                # (1, dim) — CLS-токен
-        vec = torch.nn.functional.normalize(vec, dim=1)    # под косинус (IP)
+        if normalize:
+            vec = torch.nn.functional.normalize(vec, dim=1)   # под косинус (IP)
         return vec.squeeze(0).cpu().numpy().astype(np.float32)
 
     def _info(self, msg):
