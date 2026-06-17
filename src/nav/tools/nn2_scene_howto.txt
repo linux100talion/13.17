@@ -111,6 +111,7 @@ FAISS хранит только векторы + порядковые ID, мет
   tools/generate_mock_map.py  — МОК карты (случайные векторы) для обвязки
   tools/train_topograph.py    — обучение MLP-«топографа» (MetricHead) из bag
   tools/eval_isometry.py      — замер изометрии эмбеддинга (до/после MLP)
+  tools/nn2_topograph_theory.txt — геометрия: fiber/нуисансы, почему работает
   data/scene_map/metadata.json— схема + сэмпл (map.index/.pt генерятся, не коммитятся)
 
 
