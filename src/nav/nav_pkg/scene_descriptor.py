@@ -56,16 +56,56 @@ class SceneMatch:
         self.entry = entry              # dict метаданных места (поза, кватернион)
 
 
+class MetricHead(torch.nn.Module):
+    """MLP-«топограф»: DINOv2 CLS -> метрическое пространство (L2 ≈ метры).
+
+    «Выпрямляет» гладкий, но неравномерный эмбеддинг DINOv2 в (локально) метрический:
+    L2-расстояние между выходами ~ физическому перемещению. Обучается ОФЛАЙН на
+    дельтах одометрии VINS (Triplet/дистанц-регрессия, см. nn2_scene_howto.txt).
+    Веса .pt самоописательны (config + state_dict) — SceneEncoder грузит их, чтобы
+    карта и онлайн считались ОДНОЙ связкой (DINOv2+MLP).
+    """
+    def __init__(self, in_dim, hidden=256, out_dim=64):
+        super().__init__()
+        self.in_dim, self.hidden, self.out_dim = int(in_dim), int(hidden), int(out_dim)
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(self.in_dim, self.hidden),
+            torch.nn.LayerNorm(self.hidden),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.hidden, self.hidden),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.hidden, self.out_dim),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+    def save(self, path):
+        torch.save({"in_dim": self.in_dim, "hidden": self.hidden,
+                    "out_dim": self.out_dim, "state_dict": self.state_dict()},
+                   str(path))
+
+    @classmethod
+    def load(cls, path, map_location=None):
+        ckpt = torch.load(str(path), map_location=map_location)
+        head = cls(ckpt["in_dim"], ckpt["hidden"], ckpt["out_dim"])
+        head.load_state_dict(ckpt["state_dict"])
+        return head
+
+
 class SceneEncoder:
-    """DINOv2 → один L2-нормированный вектор на кадр (глобальный дескриптор).
+    """DINOv2 (+ опц. MLP-«топограф») → один вектор на кадр (глобальный дескриптор).
 
     Общий для ноды (через SceneMatcher) и сборщика карты (build_scene_map.py),
     чтобы карта и онлайн-запрос считались ОДНОЙ моделью (иначе векторы несравнимы).
+    Без MLP: сырой/нормированный CLS DINOv2 (метрика косинус/IP). С MLP: метрический
+    выход (метрика L2 ≈ метры). .dim и .metric отражают активную связку.
     """
     # Сторона входа DINOv2 должна быть кратна патчу (14). 224 = 16*14.
     INPUT_SIZE = 224
 
-    def __init__(self, model_name="dinov2_vits14", device="cuda", logger=None):
+    def __init__(self, model_name="dinov2_vits14", device="cuda",
+                 mlp_path=None, logger=None):
         self.log = logger
         self.model_name = model_name
 
@@ -78,25 +118,44 @@ class SceneEncoder:
         # trust_repo: первый запуск тянет код+веса DINOv2 из torch.hub в кэш.
         self.model = torch.hub.load(
             "facebookresearch/dinov2", model_name, trust_repo=True).eval().to(device)
-        self.dim = _DINOV2_DIM.get(model_name)
+        self.backbone_dim = _DINOV2_DIM.get(model_name)
         self._mean = _MEAN.to(device)
         self._std = _STD.to(device)
-        self._info(f"DINOv2 '{model_name}' (dim={self.dim}) на {device}")
+
+        # MLP-«топограф» опционален. Есть веса -> выход метрический (L2 ≈ метры),
+        # нет -> сырой DINOv2 (косинус/IP). Путь к весам приходит из metadata карты
+        # (SceneMatcher), чтобы карта и онлайн грузили одну связку.
+        self.head = None
+        if mlp_path:
+            p = Path(mlp_path)
+            if p.exists():
+                self.head = MetricHead.load(p, map_location=device).eval().to(device)
+                self._info(f"MLP-топограф '{p.name}': out_dim={self.head.out_dim}, "
+                           f"метрика L2 (метры)")
+            else:
+                self._warn(f"MLP-топограф не найден ({p}) — сырой DINOv2 (косинус).")
+        self.dim = self.head.out_dim if self.head else self.backbone_dim
+        self.metric = "l2" if self.head else "ip"
+        self._info(f"DINOv2 '{model_name}' (backbone {self.backbone_dim}) на "
+                   f"{device}; выход dim={self.dim}, метрика {self.metric}")
 
     @torch.no_grad()
     def encode(self, frame_bgr, normalize=True):
         """Кадр (BGR np.ndarray) -> вектор (dim,) float32.
 
-        normalize=True (по умолчанию) — L2-норм под косинус (IP), так считают
-        карту и онлайн-запрос. normalize=False — «сырой» дескриптор: нужен
-        оценке изометрии (tools/eval_isometry.py), где важна L2-величина.
+        С MLP-«топографом»: выход метрический (L2 ≈ метры), normalize ИГНОРИРУЕТСЯ
+        (нормировка убила бы масштаб). Без MLP: normalize=True — L2-норм под косинус
+        (IP), так считают карту и онлайн-запрос; normalize=False — «сырой» DINOv2
+        (нужен оценке изометрии tools/eval_isometry.py, где важна L2-величина).
         """
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         rgb = cv2.resize(rgb, (self.INPUT_SIZE, self.INPUT_SIZE))
         t = torch.from_numpy(rgb).float().permute(2, 0, 1).unsqueeze(0) / 255.0
         t = (t.to(self.device) - self._mean) / self._std
-        vec = self.model(t)                                # (1, dim) — CLS-токен
-        if normalize:
+        vec = self.model(t)                                # (1, backbone) — CLS-токен
+        if self.head is not None:
+            vec = self.head(vec)                           # (1, out_dim) метрика L2
+        elif normalize:
             vec = torch.nn.functional.normalize(vec, dim=1)   # под косинус (IP)
         return vec.squeeze(0).cpu().numpy().astype(np.float32)
 
@@ -113,20 +172,23 @@ class SceneMatcher:
     """Загрузка карты (FAISS + метаданные) + поиск ближайшего места по кадру."""
 
     def __init__(self, map_path, device="cuda", model_name="dinov2_vits14",
-                 min_score=0.5, logger=None):
+                 min_score=0.5, max_dist=10.0, logger=None):
         self.log = logger
-        self.min_score = float(min_score)
+        self.min_score = float(min_score)    # порог косинуса (IP-карта, больше=лучше)
+        self.max_dist = float(max_dist)      # порог расстояния, м (L2-карта с MLP)
 
         self.index = None
         self.origin = None
         self.entries = []
+        self.mlp_path = None
         meta = self._load_meta(Path(map_path))
 
         # Модель карты главнее параметра ноды: запрос обязан считаться той же
-        # сетью, что и карта, — иначе векторы из разных пространств.
+        # связкой (DINOv2[+MLP]), что и карта, — иначе векторы из разных пространств.
         if meta and meta.get("model"):
             model_name = meta["model"]
-        self.encoder = SceneEncoder(model_name=model_name, device=device, logger=logger)
+        self.encoder = SceneEncoder(model_name=model_name, device=device,
+                                    mlp_path=self.mlp_path, logger=logger)
 
         if self.index is not None and self.encoder.dim and \
                 self.index.d != self.encoder.dim:
@@ -147,6 +209,9 @@ class SceneMatcher:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         self.origin = meta.get("origin")
         self.entries = meta.get("entries", [])
+        # Веса MLP-«топографа» лежат рядом с картой (имя — в metadata.mlp).
+        if meta.get("mlp"):
+            self.mlp_path = str(map_dir / meta["mlp"])
 
         index_path = map_dir / "map.index"
         if not index_path.exists():
@@ -166,16 +231,29 @@ class SceneMatcher:
 
     # --- инференс ------------------------------------------------------------
     def query(self, frame_bgr):
-        """Кадр (BGR np.ndarray) -> SceneMatch или None (ниже порога/пустая карта)."""
+        """Кадр (BGR np.ndarray) -> SceneMatch или None (ниже порога/пустая карта).
+
+        score в SceneMatch: для IP-карты (сырой DINOv2) — косинус [0..1], больше=
+        лучше; для L2-карты (с MLP) — расстояние В МЕТРАХ, меньше=лучше.
+        """
         if self.index is None or self.index.ntotal == 0:
             return None
 
         vec = self.encoder.encode(frame_bgr).reshape(1, -1)
-        scores, ids = self.index.search(vec, 1)     # top-1 по косинусу
-        score = float(scores[0, 0])
+        vals, ids = self.index.search(vec, 1)       # top-1
+        val = float(vals[0, 0])
         idx = int(ids[0, 0])
-        if idx < 0 or score < self.min_score:
+        if idx < 0:
             return None
+
+        if self.index.metric_type == faiss.METRIC_INNER_PRODUCT:
+            if val < self.min_score:                # косинус: больше — лучше
+                return None
+            score = val
+        else:                                       # L2: faiss отдаёт КВАДРАТ дистанции
+            if val > self.max_dist * self.max_dist:
+                return None
+            score = float(np.sqrt(val))             # расстояние в метрах
 
         entry = self.entries[idx]
         label = entry.get("label") or f"place_{entry.get('id', idx)}"

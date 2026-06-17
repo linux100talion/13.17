@@ -20,6 +20,7 @@
 # ============================================================================
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -64,6 +65,9 @@ def main():
     ap.add_argument("--storage-id", default="sqlite3", help="sqlite3 | mcap")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--model", default="dinov2_vits14")
+    ap.add_argument("--mlp", default=None,
+                    help="веса MLP-«топографа» (.pt). Если заданы — карта "
+                         "метрическая (L2≈метры, IndexFlatL2); иначе косинус (IP)")
     ap.add_argument("--origin", default=None,
                     help="JSON с датумом облёта (origin) -> в metadata; опционально")
     args = ap.parse_args()
@@ -74,7 +78,7 @@ def main():
             print(f"⚠ топик {need} нет в bag (есть: {sorted(type_map)})")
 
     bridge = CvBridge()
-    encoder = SceneEncoder(model_name=args.model, device=args.device)
+    encoder = SceneEncoder(model_name=args.model, device=args.device, mlp_path=args.mlp)
 
     sample_dt_ns = int(1e9 / args.rate)
     last_sample_ns = None
@@ -119,25 +123,38 @@ def main():
         return
 
     mat = np.vstack(vectors).astype(np.float32)
-    index = faiss.IndexFlatIP(mat.shape[1])     # косинус (векторы L2-нормированы)
+    # Метрику диктует энкодер: без MLP — косинус (IP, векторы L2-норм.);
+    # с MLP-«топографом» — L2 (≈ метры).
+    if encoder.metric == "ip":
+        index = faiss.IndexFlatIP(mat.shape[1])
+    else:
+        index = faiss.IndexFlatL2(mat.shape[1])
     index.add(mat)
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     faiss.write_index(index, str(out_dir / "map.index"))
 
+    # Веса MLP кладём рядом с картой, имя — в metadata.mlp (его читает SceneMatcher).
+    mlp_name = None
+    if args.mlp and encoder.head is not None:
+        mlp_name = Path(args.mlp).name
+        shutil.copyfile(args.mlp, out_dir / mlp_name)
+
     origin = json.loads(Path(args.origin).read_text(encoding="utf-8")) \
         if args.origin else None
     metadata = {
         "model": args.model,
         "dim": int(mat.shape[1]),
-        "metric": "ip",
+        "metric": encoder.metric,
+        "mlp": mlp_name,
         "origin": origin,
         "entries": entries,
     }
     (out_dir / "metadata.json").write_text(
         json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"✅ Карта собрана в {out_dir}: мест {len(entries)} (модель {args.model})")
+    print(f"✅ Карта собрана в {out_dir}: мест {len(entries)} (модель {args.model}"
+          f"{'+MLP' if mlp_name else ''}, метрика {encoder.metric})")
 
 
 if __name__ == "__main__":

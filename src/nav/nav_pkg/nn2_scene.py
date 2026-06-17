@@ -40,7 +40,8 @@ class NN2Scene(Node):
         self.declare_parameter("map_path", default_map)
         self.declare_parameter("device", "cuda")
         self.declare_parameter("model_name", "dinov2_vits14")
-        self.declare_parameter("min_score", 0.5)
+        self.declare_parameter("min_score", 0.5)   # порог косинуса (карта без MLP)
+        self.declare_parameter("max_dist", 10.0)   # порог дистанции, м (карта с MLP)
 
         period = float(self.get_parameter("period_s").value)
 
@@ -52,6 +53,7 @@ class NN2Scene(Node):
             device=self.get_parameter("device").value,
             model_name=self.get_parameter("model_name").value,
             min_score=self.get_parameter("min_score").value,
+            max_dist=self.get_parameter("max_dist").value,
             logger=self.get_logger(),
         )
 

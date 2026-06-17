@@ -145,18 +145,26 @@ def local_alpha_cv(poses, anchor_idx, dphys, dlat, grid, min_pairs):
     return mean, std, (std / mean if mean else float("nan")), len(a)
 
 
-def localization_error(qf, qp, qs, mf, mp, same_bag, guard_s):
-    """Для каждого query — NN в карте (брутфорс) -> ошибка позы в метрах + idx NN."""
-    # косинус по сырым векторам: NN = max dot/(|q||m|). Эквивалент углового NN.
-    qn = qf / (np.linalg.norm(qf, axis=1, keepdims=True) + 1e-9)
-    mn = mf / (np.linalg.norm(mf, axis=1, keepdims=True) + 1e-9)
-    sim = qn @ mn.T                          # (Nq, Nm)
-    if same_bag:
-        # leave-one-out: глушим временных соседей (тривиальные совпадения,
-        # включая сам кадр при dt=0)
-        dt = np.abs(qs[:, None] - qs[None, :])
-        sim[dt < guard_s] = -2.0
-    nn = np.argmax(sim, axis=1)
+def localization_error(qf, qp, qs, mf, mp, metric, same_bag, guard_s):
+    """Для каждого query — NN в карте (брутфорс) -> ошибка позы в метрах + idx NN.
+
+    metric='ip' (сырой DINOv2) — NN по косинусу; 'l2' (с MLP) — по евклиду.
+    """
+    if metric == "ip":
+        qn = qf / (np.linalg.norm(qf, axis=1, keepdims=True) + 1e-9)
+        mn = mf / (np.linalg.norm(mf, axis=1, keepdims=True) + 1e-9)
+        sim = qn @ mn.T                          # больше — лучше
+        if same_bag:
+            dt = np.abs(qs[:, None] - qs[None, :])
+            sim[dt < guard_s] = -2.0             # глушим временных соседей (и себя)
+        nn = np.argmax(sim, axis=1)
+    else:                                        # l2: квадрат евклида, меньше — лучше
+        d2 = (np.sum(qf ** 2, 1)[:, None] + np.sum(mf ** 2, 1)[None, :]
+              - 2.0 * qf @ mf.T)
+        if same_bag:
+            dt = np.abs(qs[:, None] - qs[None, :])
+            d2[dt < guard_s] = np.inf
+        nn = np.argmin(d2, axis=1)
     err = np.linalg.norm(qp - mp[nn], axis=1)
     return err, nn
 
@@ -174,6 +182,8 @@ def main():
     ap.add_argument("--storage-id", default="sqlite3")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--model", default="dinov2_vits14")
+    ap.add_argument("--mlp", default=None,
+                    help="веса MLP-«топографа» (.pt) — мерить DINOv2+MLP (метрика L2)")
     ap.add_argument("--window", type=float, default=50.0, help="окно d_phys, м")
     ap.add_argument("--max-pairs", type=int, default=200000)
     ap.add_argument("--grid", type=float, default=25.0, help="ячейка α-карты, м")
@@ -189,7 +199,7 @@ def main():
     args = ap.parse_args()
 
     rng = np.random.default_rng(args.seed)
-    encoder = SceneEncoder(model_name=args.model, device=args.device)
+    encoder = SceneEncoder(model_name=args.model, device=args.device, mlp_path=args.mlp)
 
     print(f"== карта-bag: {args.bag}")
     mf, mp, my, ms = read_bag(args.bag, args.storage_id, args.image_topic,
@@ -233,7 +243,8 @@ def main():
                                   args.odom_topic, args.imu_topic, args.rate, encoder)
         print(f"   кадров: {len(qf)}")
         print(f"\n== локализация (query-bag vs карта; позы должны быть в одном кадре)")
-    err, nn = localization_error(qf, qp, qs, mf, mp, same_bag, args.guard_s)
+    err, nn = localization_error(qf, qp, qs, mf, mp, encoder.metric, same_bag,
+                                 args.guard_s)
     thr = [float(x) for x in args.recall.split(",") if x.strip()]
     print(f"   медиана: {np.median(err):.2f} м | 90-й перц.: "
           f"{np.percentile(err, 90):.2f} м")

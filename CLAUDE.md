@@ -95,10 +95,12 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   → метка в `/nn2/scene` (баннер) + поза места (GPS/ENU + кватернион) в
   `/nn2/relocalization`. Цель — релокализация VINS после потери трекинга;
   пока допущение «VINS на треке», позу просто отдаём. Карта собирается из bag:
-  `tools/build_scene_map.py` (мок — `generate_mock_map.py`). Осталось:
-  метрический **MLP-«топограф»** поверх DINOv2 (Triplet Loss на дельтах VINS →
-  изометрия: L2-расстояние ∝ метры; вставляется в `SceneEncoder`) + детектор
-  потери VINS + применение позы через ray_tracer + FAISS-префильтр для NN1.
+  `tools/build_scene_map.py` (мок — `generate_mock_map.py`). Метрический
+  **MLP-«топограф»** поверх DINOv2 (`MetricHead` в `scene_descriptor.py`:
+  изометрия L2 ∝ метры; `--mlp` в build/eval, метрика карты `l2`) — голова
+  РЕАЛИЗОВАНА, ждёт офлайн-обучения (тренер `train_topograph.py` на дельтах
+  VINS). Осталось: обучение головы + детектор потери VINS + применение позы
+  через ray_tracer + FAISS-префильтр для NN1.
   Детали: `src/nav/tools/nn2_scene_howto.txt`.
 - **`relocalizer`** — ПУСТАЯ нода-заглушка: принимает `/nn2/relocalization`,
   логирует. Сюда ляжет восстановление VINS (поправка отдаётся в `ray_tracer`).
