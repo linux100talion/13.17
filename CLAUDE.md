@@ -98,9 +98,9 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   `tools/build_scene_map.py` (мок — `generate_mock_map.py`). Метрический
   **MLP-«топограф»** поверх DINOv2 (`MetricHead` в `scene_descriptor.py`:
   изометрия L2 ∝ метры; `--mlp` в build/eval, метрика карты `l2`) — голова
-  РЕАЛИЗОВАНА, ждёт офлайн-обучения (тренер `train_topograph.py` на дельтах
-  VINS). Осталось: обучение головы + детектор потери VINS + применение позы
-  через ray_tracer + FAISS-префильтр для NN1.
+  РЕАЛИЗОВАНА + тренер `tools/train_topograph.py` (дистанц-регрессия + triplet
+  на дельтах VINS). Осталось: прогнать обучение на реальных bag'ах + детектор
+  потери VINS + применение позы через ray_tracer + FAISS-префильтр для NN1.
   Детали: `src/nav/tools/nn2_scene_howto.txt`.
 - **`relocalizer`** — ПУСТАЯ нода-заглушка: принимает `/nn2/relocalization`,
   логирует. Сюда ляжет восстановление VINS (поправка отдаётся в `ray_tracer`).
