@@ -18,8 +18,9 @@
 # шлём КИЛОБАЙТЫ, не пиксели. Два потока (latest-of-each):
 #   /nn2/relocalization (от nn2_scene) — МЕТР-БЛОК φ-карты: {mx,my,mstd,mconf,...};
 #     кэшируем + сразу шлём метрик-only позу (живёт ДО появления route-голов);
-#   /nn2/route_coords   (route-головы s,e) — {s,e,conf}; на нём СЛИВАЕМ route-позу
-#     с кэшированной метрикой -> фьюз-поза + рулёжка.
+#   /nn2/route_coords   (route-головы s,e) — {s,e,conf}; сырое s прогоняем через
+#     ПОСЛЕДОВАТЕЛЬНЫЙ ФИЛЬТР (s_filter, гасит аляйснутые «телепорты» по маршруту),
+#     затем СЛИВАЕМ route-позу с кэшированной метрикой -> фьюз-поза + рулёжка.
 #
 # ⚠ НАБРОСОК на ветке-концепте: не вшит в setup.py/launch; топики/ковариации —
 # заготовка под калибровку. Один мост VINS->FCU — ray_tracer (NN1): засечку шлём
@@ -41,6 +42,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped, TwistStamped  # noqa: E
 from route_field import RouteField                         # noqa: E402
 from route_geometry import Centerline                      # noqa: E402
 from route_fusion import gaussian_fuse, route_pose         # noqa: E402
+from s_filter import SFilter                               # noqa: E402
 
 
 def _yaw(q):
@@ -68,6 +70,11 @@ class RelocalizerField(Node):
         self.declare_parameter("e_gate", 8.0)       # |e|>gate -> вне маршрута (метрика рулит)
         self.declare_parameter("min_metric_conf", 0.3)  # гейт метрики для фьюза
         self.declare_parameter("world_frame", "map")
+        # последовательный фильтр s (HMM/гистограмма) против алиасинга по маршруту
+        self.declare_parameter("s_nbins", 200)
+        self.declare_parameter("s_diffusion", 0.01)   # σ диффузии s за шаг (доли маршрута)
+        self.declare_parameter("s_sigma_base", 0.02)  # базовый шум засечки s (доли)
+        self.declare_parameter("min_filt_conf", 0.3)  # гейт по пиковости веры s
 
         ckpt = self.get_parameter("ckpt").value
         if not ckpt:
@@ -86,6 +93,11 @@ class RelocalizerField(Node):
 
         self.yaw = None
         self.metric = None          # кэш метр-блока φ-карты: (p_m, C_m, mconf)
+        self.metric_alias = False   # страж kNN сработал (msrc=top1-fallback) -> раздуть σ_s
+        self._last_t = None         # время прошлой засечки (для ds = v·dt/L)
+        self.sfilter = SFilter(
+            nbins=int(self.get_parameter("s_nbins").value),
+            diffusion=float(self.get_parameter("s_diffusion").value))
         self.create_subscription(Imu, "/mavros/imu/data", self._on_imu, 10)
         # МЕТР-БЛОК φ-карты от nn2_scene (мостик XVIII): {mx,my,mstd,mconf}.
         self.create_subscription(String, "/nn2/relocalization", self._on_metric, 10)
@@ -117,6 +129,7 @@ class RelocalizerField(Node):
         except (ValueError, KeyError, TypeError):
             return                                           # нет метр-блока — молча
         self.metric = (p_m, C_m, mconf)
+        self.metric_alias = (d.get("msrc") == "top1-fallback")   # вход стража для фильтра s
         if mconf < float(self.get_parameter("min_metric_conf").value):
             return                                           # не уверена — не публикуем
         pc = PoseWithCovarianceStamped()
@@ -140,6 +153,10 @@ class RelocalizerField(Node):
         if conf < float(self.get_parameter("min_conf").value):
             return                                           # гейт: не уверены — молчим
 
+        # --- ФИЛЬТР s: гасим аляйснутые «телепорты» по маршруту временем ---
+        s = self._filter_s(s, conf)
+        if s is None:
+            return                                           # вера s размазана -> молчим
         now = self.get_clock().now().to_msg()
 
         # --- ГРАНЬ 2: засечка с ФЬЮЗОМ (XVIII): route-поза ⊗ кэш метрики ---
@@ -162,6 +179,27 @@ class RelocalizerField(Node):
             tw.twist.linear.y = float(vb[1])     # вбок (body)
             self.pub_cmd.publish(tw)
         # без курса -> visual servoing (route_field.VisualServo), здесь не собран.
+
+    def _filter_s(self, s_raw, conf):
+        """Последовательный фильтр прогресса s (s_filter.SFilter): predict вперёд
+        (ds = v·dt/L) + update сырого s. σ засечки раздувается при низком conf и при
+        срабатывании стража kNN (metric_alias). -> сглаженное s, либо None если вера
+        размазана/мультимодальна (ждём — форвард-движение разведёт алиасинг)."""
+        now_t = self.get_clock().now().nanoseconds * 1e-9
+        dt = (now_t - self._last_t) if self._last_t is not None else 0.0
+        self._last_t = now_t
+        ds = 0.0
+        L = self.field.cl.L
+        if dt > 0.0 and L > 1e-6:
+            ds = float(self.get_parameter("speed").value) * dt / L
+            ds = min(max(ds, 0.0), 0.5)              # cap на случай дикого dt
+        out = self.sfilter.step(
+            s_raw, conf, ds=ds,
+            sigma_base=float(self.get_parameter("s_sigma_base").value),
+            alias=self.metric_alias)
+        if out["conf"] < float(self.get_parameter("min_filt_conf").value):
+            return None
+        return out["s"]
 
     def _fuse_pose(self, s, e, metric):
         """Иерархия XVIII: route-поза (узко поперёк) ⊗ метрика. Возвращает
