@@ -12,11 +12,20 @@
 #   построили центрлинию (опорный пролёт или центр пучка) -> project_many -> s*,e*.
 # Бэкбон DINOv2 заморожен, головы — MetricHead(out_dim=1) (для s сверху сигмоида).
 #
+# ── ДВЕ СТАДИИ (расцепление тяжёлого извлечения и быстрого обучения) ─────────
+#   1) ИЗВЛЕЧЕНИЕ фич (ROS + DINOv2, медленно, раз; на ноуте/Orin с bag'ами):
+#        train_route_coords.py --bag ~/f1 ~/f2 --save-feats feats.npz --extract-only
+#      -> feats.npz {feats(N,backbone), poses(N,3), bounds(P,2), model, топики, rate}
+#   2) ОБУЧЕНИЕ голов (только torch, БЕЗ ROS/DINOv2/bag'ов; быстро, повторяемо —
+#      перебор центрлинии/lr/весов не требует пере-извлечения):
+#        train_route_coords.py --npz feats.npz --multipass --out route_coords.pt
+#   (Можно и одной командой: --bag ... [--save-feats feats.npz] — извлечёт и обучит.)
+#
 # ⚠ Для e нужен ПОПЕРЕЧНЫЙ разброс данных (один проход -> e*≈0): сдвинутые проходы
 #   или мультипролёт (--multipass). См. раздел XVI.
 #
-# Пример:
-#   python3 train_route_coords.py --bag ~/f1 ~/f2 --multipass --out route_coords.pt
+# Импорты torch/scene_descriptor — ЛЕНИВЫЕ (внутри функций), чтобы npz-I/O и
+# геометрию можно было импортировать/тестировать без torch (как demo_synth).
 # ============================================================================
 import argparse
 import sys
@@ -26,12 +35,9 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))                 # route_geometry (сосед по tools/nn2_route/)
-sys.path.insert(0, str(HERE.parents[1]))      # src/nav -> nav_pkg
-import torch                                               # noqa: E402
-from nav_pkg.nn2.scene_descriptor import MetricHead, SceneEncoder   # noqa: E402
+sys.path.insert(0, str(HERE.parents[1]))      # src/nav -> nav_pkg (для ленивых импортов)
 
-# ROS нужен только для read_bag/main; fit_route_heads работает и без него
-# (его зовёт, напр., demo_synth.py на синтетике).
+# ROS нужен только для read_bag (стадия извлечения). Обучение из --npz его не зовёт.
 try:
     from cv_bridge import CvBridge
     from rclpy.serialization import deserialize_message
@@ -43,6 +49,31 @@ except ImportError:
 from route_geometry import build_centerline, centerline_from_passes  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parents[2] / "data" / "scene_map" / "route_coords.pt"
+
+
+# ============================================================================
+# npz-расцепление: фичи+позы+пролёты (стенд между извлечением и обучением)
+# ============================================================================
+def save_feats_npz(path, feats, poses, bounds, model, image_topic, odom_topic, rate):
+    """Сохранить извлечённые фичи/позы/границы пролётов + контекст. Чистый numpy."""
+    np.savez(str(path),
+             feats=np.asarray(feats, np.float32),
+             poses=np.asarray(poses, np.float64),
+             bounds=np.asarray(bounds, np.int64),
+             model=np.array(str(model)),
+             image_topic=np.array(str(image_topic)),
+             odom_topic=np.array(str(odom_topic)),
+             rate=np.array(float(rate)))
+
+
+def load_feats_npz(path):
+    """-> (feats (N,D) f32, poses (N,3) f64, bounds (P,2) i64, model str|None)."""
+    d = np.load(str(path), allow_pickle=False)
+    feats = d["feats"].astype(np.float32)
+    poses = d["poses"].astype(np.float64)
+    bounds = d["bounds"].astype(np.int64)
+    model = str(d["model"]) if "model" in d.files else None
+    return feats, poses, bounds, model
 
 
 def read_bag(path, storage_id, image_topic, odom_topic, rate, encoder):
@@ -82,9 +113,55 @@ def read_bag(path, storage_id, image_topic, odom_topic, rate, encoder):
     return np.asarray(feats, np.float32), np.asarray(poses, np.float64)
 
 
+def extract_bags(bags, storage_id, image_topic, odom_topic, rate, model, device):
+    """Стадия 1: bag'и -> (feats, poses, bounds) через DINOv2 (ленивый torch+энкодер)."""
+    import torch                                              # noqa: E402
+    from nav_pkg.nn2.scene_descriptor import SceneEncoder     # noqa: E402
+    dev = device if (device != "cuda" or torch.cuda.is_available()) else "cpu"
+    if dev != device:
+        print("⚠ CUDA недоступна — считаю фичи на CPU (медленно).")
+    encoder = SceneEncoder(model_name=model, device=dev)      # без головы -> сырой CLS
+
+    feats, poses, bounds, off = [], [], [], 0
+    for bag in bags:
+        print(f"== bag: {bag}")
+        f, p = read_bag(bag, storage_id, image_topic, odom_topic, rate, encoder)
+        if len(f) == 0:
+            print("   ⚠ пусто, пропускаю"); continue
+        feats.append(f); poses.append(p)
+        bounds.append((off, off + len(f))); off += len(f)
+        print(f"   кадров: {len(f)}")
+    if not feats:
+        raise SystemExit("⚠ ни одного кадра — нечего извлекать.")
+    return (np.vstack(feats).astype(np.float32), np.vstack(poses),
+            np.asarray(bounds, np.int64))
+
+
+def build_route_targets(poses, bounds, multipass, reference, smooth_window, resample_ds):
+    """Центрлиния + цели s*,e* одной проекцией (чистый numpy, route_geometry)."""
+    passes_xy = [poses[s:e, :2] for s, e in bounds]
+    ref = min(reference, len(passes_xy) - 1)
+    if multipass and len(passes_xy) > 1:
+        cl = centerline_from_passes(passes_xy, reference=ref,
+                                    smooth_window=smooth_window, resample_ds=resample_ds)
+    else:
+        cl = build_centerline(passes_xy[ref],
+                              smooth_window=smooth_window, resample_ds=resample_ds)
+    s_star, e_star, _ = cl.project_many(poses[:, :2])
+    return cl, s_star, e_star
+
+
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--bag", nargs="+", required=True)
+    ap = argparse.ArgumentParser(
+        description="Обучение route-координат s,e (двухстадийно: извлечение -> обучение).")
+    ap.add_argument("--bag", nargs="+", default=None,
+                    help="ROS bag'и облёта (стадия ИЗВЛЕЧЕНИЯ; нужны ROS+DINOv2)")
+    ap.add_argument("--npz", default=None,
+                    help="готовые фичи .npz (стадия ОБУЧЕНИЯ; ROS/DINOv2 НЕ нужны)")
+    ap.add_argument("--save-feats", default=None,
+                    help="куда сохранить извлечённые фичи .npz (для повторного обучения)")
+    ap.add_argument("--extract-only", action="store_true",
+                    help="только извлечь фичи в --save-feats и выйти (без обучения)")
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--image-topic", default="/image_color")
     ap.add_argument("--odom-topic", default="/vins_estimator/odometry")
@@ -110,42 +187,37 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
-    torch.manual_seed(args.seed)
-    rng = np.random.default_rng(args.seed)
-    dev = args.device if (args.device != "cuda" or torch.cuda.is_available()) else "cpu"
-    if dev != args.device:
-        print("⚠ CUDA недоступна — учу на CPU.")
+    if not args.bag and not args.npz:
+        raise SystemExit("нужен либо --bag (извлечь из bag'ов), либо --npz (обучить из фич).")
+    if args.extract_only and not args.save_feats:
+        raise SystemExit("--extract-only требует --save-feats (куда писать фичи).")
 
-    encoder = SceneEncoder(model_name=args.model, device=dev)   # без головы -> сырой CLS
+    model = args.model
 
-    feats, poses, bounds = [], [], []
-    off = 0
-    for bag in args.bag:
-        print(f"== bag: {bag}")
-        f, p = read_bag(bag, args.storage_id, args.image_topic,
-                        args.odom_topic, args.rate, encoder)
-        if len(f) == 0:
-            print("   ⚠ пусто, пропускаю"); continue
-        feats.append(f); poses.append(p)
-        bounds.append((off, off + len(f))); off += len(f)
-        print(f"   кадров: {len(f)}")
-    if not feats:
-        raise SystemExit("⚠ ни одного кадра — нечего обучать.")
-    feats = np.vstack(feats).astype(np.float32)
-    poses = np.vstack(poses)
-    bounds = np.asarray(bounds, np.int64)
-
-    # --- центрлиния + цели s*,e* одной проекцией ---
-    passes_xy = [poses[s:e, :2] for s, e in bounds]
-    if args.multipass and len(passes_xy) > 1:
-        cl = centerline_from_passes(passes_xy, reference=args.reference,
-                                    smooth_window=args.smooth_window,
-                                    resample_ds=args.resample_ds)
+    # === СТАДИЯ 1: фичи — из npz (готовые) или извлечением из bag'ов ===
+    if args.npz:
+        feats, poses, bounds, npz_model = load_feats_npz(args.npz)
+        if npz_model:
+            model = npz_model       # чекпойнт обязан помнить, какой сетью считаны фичи
+        print(f"== фичи из npz {args.npz}: кадров {len(feats)}, dim {feats.shape[1]}, "
+              f"пролётов {len(bounds)}, модель {model}")
     else:
-        cl = build_centerline(passes_xy[args.reference],
-                              smooth_window=args.smooth_window,
-                              resample_ds=args.resample_ds)
-    s_star, e_star, _ = cl.project_many(poses[:, :2])
+        feats, poses, bounds = extract_bags(
+            args.bag, args.storage_id, args.image_topic, args.odom_topic,
+            args.rate, model, args.device)
+        if args.save_feats:
+            save_feats_npz(args.save_feats, feats, poses, bounds, model,
+                           args.image_topic, args.odom_topic, args.rate)
+            print(f"== фичи сохранены -> {args.save_feats} "
+                  f"(переобучай головы из них через --npz, без bag'ов/DINOv2)")
+        if args.extract_only:
+            print("✅ извлечение завершено (--extract-only).")
+            return
+
+    # === центрлиния + цели s*,e* (чистый numpy) ===
+    cl, s_star, e_star = build_route_targets(
+        poses, bounds, args.multipass, args.reference,
+        args.smooth_window, args.resample_ds)
     print(f"== центрлиния: L={cl.L:.1f} м; s*∈[{s_star.min():.2f},{s_star.max():.2f}], "
           f"e*∈[{e_star.min():.1f},{e_star.max():.1f}] м "
           f"(узкий e -> поперечного разброса мало, см. XVI)")
@@ -153,6 +225,12 @@ def main():
         np.savez(args.dump, s=s_star, e=e_star, poses=poses)
         print(f"   s*,e* -> {args.dump}")
 
+    # === СТАДИЯ 2: обучение голов (ленивый torch) ===
+    import torch                                              # noqa: E402
+    torch.manual_seed(args.seed)
+    dev = args.device if (args.device != "cuda" or torch.cuda.is_available()) else "cpu"
+    if dev != args.device:
+        print("⚠ CUDA недоступна — учу головы на CPU (быстро: MLP на готовых фичах).")
     s_head, e_head = fit_route_heads(
         feats, s_star, e_star, bounds, device=dev, hidden=args.hidden,
         steps=args.steps, batch=args.batch, lr=args.lr, w_s=args.w_s,
@@ -161,7 +239,7 @@ def main():
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
-        "model": args.model,
+        "model": model,
         "backbone_dim": int(feats.shape[1]),
         "hidden": args.hidden,
         "s_head": s_head.state_dict(),
@@ -178,7 +256,10 @@ def fit_route_heads(feats, s_star, e_star, bounds, device="cpu", hidden=256,
                     seed=0, log=print):
     """Учит головы s(f),e(f) на готовых фичах+целях. Вынесено из main, чтобы код
     обучения вызывали и не-ROS потребители (напр. demo_synth.py). Возвращает
-    (s_head, e_head) — torch-модули MetricHead(out_dim=1)."""
+    (s_head, e_head) — torch-модули MetricHead(out_dim=1). torch/MetricHead —
+    ленивым импортом (модуль импортируется и без torch)."""
+    import torch                                              # noqa: E402
+    from nav_pkg.nn2.scene_descriptor import MetricHead       # noqa: E402
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     F = torch.from_numpy(np.asarray(feats, np.float32)).to(device)
