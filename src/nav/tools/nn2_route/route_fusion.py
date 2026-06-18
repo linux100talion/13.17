@@ -10,11 +10,12 @@
 #        route-поза p̂_r=R(σ)+e·n (узкая поперёк, широкая вдоль) ⊗ метрика p̂_m.
 #   Вне маршрута (e велик / метрика не уверена) -> только метрика (восстановление).
 #
-# Чистый numpy в ядре (тестируем без torch/ROS). Метрический декодер здесь —
-# kNN-регрессия в пространстве φ (СТЕНД вместо настоящего MetricHead+FAISS): так
-# демо считается на Termux. Боевая нода подменяет MetricMap.decode на
-# scene_descriptor.SceneEncoder(mlp=...) + FAISS-карту (data/scene_map), а s,e —
-# на головы из train_route_coords.pt. Слияние/гейт остаются как есть.
+# Ядро kNN-декода — чистый numpy (тестируем без torch/ROS). Источник E,P:
+#   - MetricMap.from_scene_map(data/scene_map) — РЕАЛЬНАЯ карта: реконструкция φ из
+#     map.index (выходы топографа) + позиции из metadata.json + голова train_topograph.pt
+#     (metadata.mlp) для encode(frame); faiss/torch — ленивым импортом;
+#   - MetricMap(E, P) напрямую — синтетика для самопроверки (демо считается на Termux).
+# route-головы s,e — из train_route_coords.pt. Слияние/гейт остаются как есть.
 #
 # Куда встаёт: это шаг «позы» для relocalizer_field — вместо одиночного
 # field.position(s,e) даёт фьюз-позу p̂+cov (-> Калман/ray_tracer) и команду поля.
@@ -30,22 +31,84 @@ from route_field import RouteField                         # noqa: E402
 
 
 # ============================================================================
-# 1. МЕТРИЧЕСКИЙ СТВОЛ φ -> позиция (СТЕНД: kNN-регрессия; бой: MetricHead+FAISS)
+# 1. МЕТРИЧЕСКИЙ СТВОЛ φ -> позиция (kNN-декод по реальной карте топографа)
 # ============================================================================
 class MetricMap:
-    """Метрическая карта φ: хранит (embeddings E (N,d), positions P (N,2)).
-    decode(q) -> (p̂ (2,), cov (2,2), conf): k ближайших мест в пространстве φ
-    (L2≈метры), позиция = взвешенное среднее, ковариация = разброс соседей + пол,
-    conf∈(0,1] по близости ближайшего соседа (метры).
+    """Метрическая карта φ: (embeddings E (N,d), positions P (N,2)) + kNN-декод.
+    decode(q) -> (p̂ (2,), cov (2,2), conf): k ближайших мест в φ (L2≈метры),
+    позиция = взвешенное среднее, cov = разброс соседей + пол, conf по близости.
+    Карта покрывает ПЛОЩАДЬ (10 облётов) -> p̂ определяется и ВНЕ маршрута, откуда
+    e падает геометрией (XVIII).
 
-    Карта покрывает ПЛОЩАДЬ (10 облётов = область, не только нить) — поэтому p̂
-    определяется и ВНЕ маршрута, откуда e падает геометрией (XVIII)."""
-    def __init__(self, embeddings, positions, k=6, sigma_floor=1.0, conf_scale=5.0):
+    Два источника E,P:
+      - from_scene_map(...) — РЕАЛЬНЫЙ: map.index (φ топографа) + metadata.json
+        (позиции) + голова train_topograph.pt (для кодирования кадров запроса);
+      - прямой конструктор MetricMap(E, P) — синтетика для самопроверки.
+    """
+    def __init__(self, embeddings, positions, k=6, sigma_floor=1.0, conf_scale=5.0,
+                 encoder=None, metric="l2"):
         self.E = np.asarray(embeddings, np.float64)
         self.P = np.asarray(positions, np.float64)
         self.k = int(k)
         self.sigma_floor = float(sigma_floor)
         self.conf_scale = float(conf_scale)
+        self.encoder = encoder     # SceneEncoder(+топограф) для encode(frame); None в стенде
+        self.metric = metric       # "l2" (топограф, метры) | "ip" (косинус, НЕ метры)
+
+    @classmethod
+    def from_scene_map(cls, map_dir, device="cpu", k=6, sigma_floor=1.0,
+                       conf_scale=5.0, logger=None):
+        """РЕАЛЬНАЯ карта из data/scene_map: map.index (FAISS) + metadata.json.
+        E = реконструированные векторы индекса (это УЖЕ выходы топографа — карту
+        собрали build_scene_map.py --mlp), P = позиции мест (ENU-метры, та же
+        VINS-рамка, что route-центрлиния). Голова топографа (metadata.mlp) поднимается
+        в SceneEncoder для encode(frame). faiss/torch — ленивым импортом."""
+        import json
+        import faiss
+        map_dir = Path(map_dir)
+        meta = json.loads((map_dir / "metadata.json").read_text(encoding="utf-8"))
+        entries = meta.get("entries", [])
+        metric = meta.get("metric", "ip")
+        P = np.array([[e.get("x"), e.get("y")] for e in entries], dtype=np.float64)
+
+        index = faiss.read_index(str(map_dir / "map.index"))
+        if index.ntotal != len(entries):
+            raise SystemExit(f"рассинхрон карты: векторов {index.ntotal} != "
+                             f"мест {len(entries)}")
+        try:
+            E = index.reconstruct_n(0, index.ntotal)        # (N,d) — φ топографа
+        except RuntimeError as ex:
+            raise SystemExit(f"индекс не поддерживает reconstruct ({ex}); нужен "
+                             "IndexFlat (build_scene_map по умолчанию его и пишет).")
+        if metric != "l2" and logger:
+            logger.warn("карта НЕ метрическая (metric=ip): L2 в φ ≠ метры — собери "
+                        "карту с --mlp (топограф) для честной метрики.")
+
+        # голова топографа -> кодируем кадры запроса ТОЙ ЖЕ связкой, что и карту
+        encoder = None
+        mlp = meta.get("mlp")
+        if mlp:
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # src/nav
+            from nav_pkg.nn2.scene_descriptor import SceneEncoder
+            encoder = SceneEncoder(model_name=meta.get("model", "dinov2_vits14"),
+                                   device=device, mlp_path=str(map_dir / mlp),
+                                   logger=logger)
+        elif logger:
+            logger.warn("metadata.mlp пуст — encode(frame) недоступен (нет головы "
+                        "топографа); decode по готовому φ всё равно работает.")
+        return cls(E, P, k=k, sigma_floor=sigma_floor, conf_scale=conf_scale,
+                   encoder=encoder, metric=metric)
+
+    def encode(self, frame_bgr):
+        """Кадр (BGR) -> φ той же связкой (DINOv2+топограф), что и карта."""
+        if self.encoder is None:
+            raise RuntimeError("encode(frame) недоступен: карта без головы топографа "
+                               "(metadata.mlp пуст). Подавай готовый φ в decode().")
+        return self.encoder.encode(frame_bgr)               # топограф -> метрика L2
+
+    def decode_frame(self, frame_bgr):
+        """Кадр -> (p̂, cov, conf): encode + decode одним вызовом (бой)."""
+        return self.decode(self.encode(frame_bgr))
 
     def decode(self, q):
         q = np.asarray(q, np.float64)
