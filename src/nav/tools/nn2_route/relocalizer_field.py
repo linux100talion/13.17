@@ -15,9 +15,11 @@
 #   - метрики нет в сообщении -> route-only (старое поведение, обратная совместимость).
 #
 # ГДЕ φ: тяжёлый DINOv2+голова+FAISS крутит nn2_scene (там descriptor). По проводу
-# шлём КИЛОБАЙТЫ, не пиксели/дескрипторы — поэтому nn2_scene уже декодирует
-# метрическую позицию p̂_m из карты и кладёт её в то же /nn2/route_coords.
-#   JSON: {s, e, conf,  mx?, my?, mstd?, mconf?}   (m* — опциональный метр-блок)
+# шлём КИЛОБАЙТЫ, не пиксели. Два потока (latest-of-each):
+#   /nn2/relocalization (от nn2_scene) — МЕТР-БЛОК φ-карты: {mx,my,mstd,mconf,...};
+#     кэшируем + сразу шлём метрик-only позу (живёт ДО появления route-голов);
+#   /nn2/route_coords   (route-головы s,e) — {s,e,conf}; на нём СЛИВАЕМ route-позу
+#     с кэшированной метрикой -> фьюз-поза + рулёжка.
 #
 # ⚠ НАБРОСОК на ветке-концепте: не вшит в setup.py/launch; топики/ковариации —
 # заготовка под калибровку. Один мост VINS->FCU — ray_tracer (NN1): засечку шлём
@@ -83,9 +85,12 @@ class RelocalizerField(Node):
             self.get_logger().info(f"центрлиния: L={cl.L:.1f} м")
 
         self.yaw = None
+        self.metric = None          # кэш метр-блока φ-карты: (p_m, C_m, mconf)
         self.create_subscription(Imu, "/mavros/imu/data", self._on_imu, 10)
-        # (s,e,conf [,mx,my,mstd,mconf]) от nn2_scene (он крутит DINOv2+голову+FAISS).
-        # TODO: nn2_scene должен публиковать /nn2/route_coords с метр-блоком.
+        # МЕТР-БЛОК φ-карты от nn2_scene (мостик XVIII): {mx,my,mstd,mconf}.
+        self.create_subscription(String, "/nn2/relocalization", self._on_metric, 10)
+        # route-координаты (s,e,conf) от route-голов. TODO: nn2_scene начнёт их
+        # публиковать, когда обучим s(f),e(f) (train_route_coords).
         self.create_subscription(String, "/nn2/route_coords", self._on_coords, 10)
 
         self.pub_pose = self.create_publisher(
@@ -96,6 +101,28 @@ class RelocalizerField(Node):
 
     def _on_imu(self, msg):
         self.yaw = _yaw(msg.orientation)
+
+    def _on_metric(self, msg):
+        """МЕТР-БЛОК φ-карты от nn2_scene: кэшируем для фьюза + сразу шлём
+        метрик-only позу (полезно ДО появления route-голов: nn2_scene -> Калман)."""
+        try:
+            d = json.loads(msg.data)
+            p_m = np.array([float(d["mx"]), float(d["my"])])
+            mstd = float(d.get("mstd", 4.0))                 # изотроп. σ метрики, м
+            mconf = float(d.get("mconf", 1.0))
+        except (ValueError, KeyError, TypeError):
+            return                                           # нет метр-блока — молча
+        C_m = mstd ** 2 * np.eye(2)
+        self.metric = (p_m, C_m, mconf)
+        if mconf < float(self.get_parameter("min_metric_conf").value):
+            return                                           # не уверена — не публикуем
+        pc = PoseWithCovarianceStamped()
+        pc.header.stamp = self.get_clock().now().to_msg()
+        pc.header.frame_id = self.get_parameter("world_frame").value
+        pc.pose.pose.position.x = float(p_m[0])
+        pc.pose.pose.position.y = float(p_m[1])
+        pc.pose.covariance = self._pack_cov(C_m)
+        self.pub_pose.publish(pc)                            # source: metric-only
 
     def _on_coords(self, msg):
         if self.field is None:
@@ -110,21 +137,10 @@ class RelocalizerField(Node):
         if conf < float(self.get_parameter("min_conf").value):
             return                                           # гейт: не уверены — молчим
 
-        # опциональный метр-блок от nn2_scene (φ-карта); нет -> route-only
-        metric = None
-        if "mx" in d and "my" in d:
-            try:
-                p_m = np.array([float(d["mx"]), float(d["my"])])
-                mstd = float(d.get("mstd", 4.0))             # изотроп. σ метрики, м
-                mconf = float(d.get("mconf", 1.0))
-                metric = (p_m, mstd ** 2 * np.eye(2), mconf)
-            except (ValueError, TypeError):
-                self.get_logger().warn("route_coords: битый метр-блок, route-only")
-
         now = self.get_clock().now().to_msg()
 
-        # --- ГРАНЬ 2: засечка с ФЬЮЗОМ (XVIII) ---
-        p, C, source = self._fuse_pose(s, e, metric)
+        # --- ГРАНЬ 2: засечка с ФЬЮЗОМ (XVIII): route-поза ⊗ кэш метрики ---
+        p, C, source = self._fuse_pose(s, e, self.metric)
         pc = PoseWithCovarianceStamped()
         pc.header.stamp = now
         pc.header.frame_id = self.get_parameter("world_frame").value
