@@ -26,13 +26,13 @@ import numpy as np
 
 # nav_pkg импортируемым (общий энкодер с нодой/картой). faiss/torch тянутся
 # транзитивно из scene_descriptor; NN-поиск здесь — брутфорс numpy.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from cv_bridge import CvBridge                            # noqa: E402
 from rclpy.serialization import deserialize_message        # noqa: E402
 import rosbag2_py                                          # noqa: E402
 from rosidl_runtime_py.utilities import get_message        # noqa: E402
 
-from nav_pkg.scene_descriptor import SceneEncoder          # noqa: E402
+from nav_pkg.nn2.scene_descriptor import SceneEncoder     # noqa: E402
 
 
 # --- чтение bag ------------------------------------------------------------

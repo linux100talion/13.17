@@ -1,4 +1,4 @@
-# FAISS-индекс генерится инструментами (tools/build_scene_map.py или
+# FAISS-индекс генерится инструментами (tools/nn2_scene/build_scene_map.py или
 # generate_mock_map.py) и не коммитится — версионируем только metadata.json
 # (схема + сэмпл). Бинарный индекс не мержится и тяжёлый.
 *.index

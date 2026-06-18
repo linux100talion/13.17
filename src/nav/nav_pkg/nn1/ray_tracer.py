@@ -33,7 +33,7 @@ from sensor_msgs.msg import CameraInfo, Imu
 from std_msgs.msg import Float64
 from vision_msgs.msg import Detection2DArray
 
-from nav_pkg import geo
+from nav_pkg.nn1 import geo
 
 
 class RayTracer(Node):

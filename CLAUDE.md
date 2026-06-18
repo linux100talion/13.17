@@ -73,7 +73,14 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
                                   рисует оверлей на КАЖДОМ кадре → H.264 → OpenHD :5600
 ```
 
-**`src/nav/` = пакет `nav_pkg`** (ament_python):
+**`src/nav/` = пакет `nav_pkg`** (ament_python). Раскладка по слоям (модули
+разнесены по подпапкам, имена нод/executables НЕ менялись):
+- `nav_pkg/openhd_streamer.py` — общий стример (не NN1/NN2);
+- `nav_pkg/nn1/` — якорь: `nn1_anchor`, `ray_tracer`, либы `anchor_matcher`, `geo`;
+- `nav_pkg/nn2/` — топокарта: `nn2_scene`, `relocalizer`, либа `scene_descriptor`;
+- `tools/nn1/` и `tools/nn2_scene/` (подход 1: топограф/изометрия) — офлайн-скрипты.
+  (Подход 2 — route-координаты −∇V — живёт отдельно в ветке-концепте `nn2-concept-notes`,
+  `tools/nn2_route/`, в `main` не вливается.)
 - **`openhd_streamer`** — подписан на `/image_color` + `/nn1/detections` +
   `/nn2/scene`, кэширует последние детекции, рисует на каждом кадре
   (`cv2.rectangle/putText`), ужимает до 640×360, кодирует H.264 (GStreamer →
@@ -88,20 +95,20 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   Инкремент 3: публикует скорректированную позу в `/mavros/vision_pose/pose`
   (ArduPilot EK3 External Nav) — ray_tracer = единственный мост VINS→полётник.
   Осталось: yaw-коррекция + FAISS-префильтр. На FCU нужен `EK3_SRC1_POSXY=6`.
-  Детали и допущения: `src/nav/tools/nn1_anchor_howto.txt`.
+  Детали и допущения: `src/nav/tools/nn1/nn1_anchor_howto.txt`.
 - **`nn2_scene`** — Нейросеть №2 (топологическая карта). Инкремент 1: DINOv2
   сжимает кадр в глобальный дескриптор, FAISS (`scene_descriptor.py`) ищет
   ближайшее место в карте облёта (`data/scene_map/`: `map.index` + `metadata.json`)
   → метка в `/nn2/scene` (баннер) + поза места (GPS/ENU + кватернион) в
   `/nn2/relocalization`. Цель — релокализация VINS после потери трекинга;
   пока допущение «VINS на треке», позу просто отдаём. Карта собирается из bag:
-  `tools/build_scene_map.py` (мок — `generate_mock_map.py`). Метрический
+  `tools/nn2_scene/build_scene_map.py` (мок — `generate_mock_map.py`). Метрический
   **MLP-«топограф»** поверх DINOv2 (`MetricHead` в `scene_descriptor.py`:
   изометрия L2 ∝ метры; `--mlp` в build/eval, метрика карты `l2`) — голова
-  РЕАЛИЗОВАНА + тренер `tools/train_topograph.py` (дистанц-регрессия + triplet
-  на дельтах VINS). Осталось: прогнать обучение на реальных bag'ах + детектор
-  потери VINS + применение позы через ray_tracer + FAISS-префильтр для NN1.
-  Детали: `src/nav/tools/nn2_scene_howto.txt`.
+  РЕАЛИЗОВАНА + тренер `tools/nn2_scene/train_topograph.py` (дистанц-регрессия +
+  triplet на дельтах VINS). Осталось: прогнать обучение на реальных bag'ах +
+  детектор потери VINS + применение позы через ray_tracer + FAISS-префильтр для NN1.
+  Детали: `src/nav/tools/nn2_scene/nn2_scene_howto.txt`.
 - **`relocalizer`** — ПУСТАЯ нода-заглушка: принимает `/nn2/relocalization`,
   логирует. Сюда ляжет восстановление VINS (поправка отдаётся в `ray_tracer`).
 - Запуск: `ros2 launch nav_pkg nav.launch.py use_sim_time:=true` (камеру/VINS

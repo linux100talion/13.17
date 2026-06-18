@@ -10,7 +10,7 @@
 # (см. nn1_anchor_howto.txt, «КРИТИЧНЫЕ МЕСТА»): сначала NN2 сужает кандидатов,
 # потом LightGlue матчит только их. Поэтому encoder/index вынесены сюда отдельно.
 #
-# Формат карты (data/scene_map/, см. tools/nn2_scene_howto.txt) — ДВА
+# Формат карты (data/scene_map/, см. tools/nn2_scene/nn2_scene_howto.txt) — ДВА
 # синхронизированных файла (FAISS хранит только векторы+ID, метаданные — рядом):
 #   map.index      — FAISS-индекс (IndexFlatIP по L2-нормированным векторам =
 #                    косинусная близость); строка i ↔ entries[i]
@@ -146,7 +146,7 @@ class SceneEncoder:
         С MLP-«топографом»: выход метрический (L2 ≈ метры), normalize ИГНОРИРУЕТСЯ
         (нормировка убила бы масштаб). Без MLP: normalize=True — L2-норм под косинус
         (IP), так считают карту и онлайн-запрос; normalize=False — «сырой» DINOv2
-        (нужен оценке изометрии tools/eval_isometry.py, где важна L2-величина).
+        (нужен оценке изометрии tools/nn2_scene/eval_isometry.py, где важна L2-величина).
         """
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         rgb = cv2.resize(rgb, (self.INPUT_SIZE, self.INPUT_SIZE))
@@ -203,7 +203,7 @@ class SceneMatcher:
         if not meta_path.exists():
             self._warn(f"metadata.json не найден ({meta_path}) — работаю вхолостую "
                        f"(локализации не будет, пока карта не собрана: "
-                       f"tools/build_scene_map.py).")
+                       f"tools/nn2_scene/build_scene_map.py).")
             return None
 
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
