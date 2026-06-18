@@ -5,7 +5,7 @@
 # георефернс-базы облёта. На выход — найденный ориентир (id + координаты из БД)
 # и bbox совпавших точек. Ray tracing и сброс дрейфа VINS — Инкремент 2.
 #
-# Формат базы (data/reference_db/, см. tools/nn1_anchor_howto.txt):
+# Формат базы (data/reference_db/, см. tools/nn1/nn1_anchor_howto.txt):
 #   database.json:
 #     origin      — точка взлёта = ориентир №0 (GPS+высота, датум VINS<->гео)
 #     landmarks   — id -> {lat, lon, alt}  (реальные гео-координаты)
@@ -74,7 +74,7 @@ class AnchorMatcher:
             npz = db_dir / ref_name
             if not npz.exists():
                 self._warn(f"эталон {ref_name} отсутствует — пропускаю "
-                           f"(сгенерируй базу: tools/build_reference_db.py).")
+                           f"(сгенерируй базу: tools/nn1/build_reference_db.py).")
                 continue
             data = np.load(npz)
             feats = {

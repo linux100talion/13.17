@@ -1,5 +1,5 @@
 {
-  "_comment": "Топологическая карта NN2 (схема + сэмпл). Векторы мест лежат в map.index (FAISS, не коммитится). Строка i индекса <-> entries[i]. Боевую карту собирает tools/build_scene_map.py из bag облёта; мок — tools/generate_mock_map.py. См. tools/nn2_scene_howto.txt.",
+  "_comment": "Топологическая карта NN2 (схема + сэмпл). Векторы мест лежат в map.index (FAISS, не коммитится). Строка i индекса <-> entries[i]. Боевую карту собирает tools/nn2_scene/build_scene_map.py из bag облёта; мок — tools/nn2_scene/generate_mock_map.py. См. tools/nn2_scene/nn2_scene_howto.txt.",
   "model": "dinov2_vits14",
   "dim": 384,
   "metric": "ip",

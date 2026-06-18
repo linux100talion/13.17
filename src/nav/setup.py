@@ -1,14 +1,15 @@
 import os
 from glob import glob
 
-from setuptools import setup
+from setuptools import find_packages, setup
 
 package_name = "nav_pkg"
 
 setup(
     name=package_name,
     version="0.0.1",
-    packages=[package_name],
+    # nav_pkg + подпакеты nav_pkg.nn1 (якорь) и nav_pkg.nn2 (топокарта)
+    packages=find_packages(exclude=["test"]),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
@@ -31,10 +32,10 @@ setup(
     entry_points={
         "console_scripts": [
             "openhd_streamer = nav_pkg.openhd_streamer:main",
-            "nn1_anchor = nav_pkg.nn1_anchor:main",
-            "ray_tracer = nav_pkg.ray_tracer:main",
-            "nn2_scene = nav_pkg.nn2_scene:main",
-            "relocalizer = nav_pkg.relocalizer:main",
+            "nn1_anchor = nav_pkg.nn1.nn1_anchor:main",
+            "ray_tracer = nav_pkg.nn1.ray_tracer:main",
+            "nn2_scene = nav_pkg.nn2.nn2_scene:main",
+            "relocalizer = nav_pkg.nn2.relocalizer:main",
         ],
     },
 )

@@ -8,7 +8,7 @@
 #
 # ⚠️ Дескрипторы случайные — LightGlue реальных совпадений НЕ найдёт. Годится
 # только для проверки ROS-обвязки, путей и форм тензоров, НЕ алгоритма.
-# Для настоящей базы по кадрам облёта — tools/build_reference_db.py.
+# Для настоящей базы по кадрам облёта — tools/nn1/build_reference_db.py.
 #
 # Пишет рядом с боевой базой: src/nav/data/reference_db/.
 # ============================================================================
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-DB_DIR = Path(__file__).resolve().parents[1] / "data" / "reference_db"
+DB_DIR = Path(__file__).resolve().parents[2] / "data" / "reference_db"
 DB_DIR.mkdir(parents=True, exist_ok=True)
 
 IMAGE_SIZE = (1280.0, 720.0)   # как у /image_color
