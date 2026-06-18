@@ -84,6 +84,17 @@ class Centerline:
         s, e, sigma = self.project_many(np.asarray(p, float)[None, :])
         return float(s[0]), float(e[0]), float(sigma[0])
 
+    # --- прямое отображение (нужно полю −∇V и засечке p̂ = R(σ)+e·n) -----------
+    def frame_at(self, sigma):
+        """Арк-длина σ -> (R(σ), T̂, n̂): точка нити, касательная, левая нормаль."""
+        sig = float(np.clip(sigma, 0.0, self.L))
+        k = int(np.searchsorted(self.cumlen, sig, side="right") - 1)
+        k = min(max(k, 0), len(self.seg) - 1)
+        T = self.dir[k].copy()                       # единичная касательная
+        n = np.array([-T[1], T[0]])                  # единичная левая нормаль
+        R = self.V[k] + (sig - self.cumlen[k]) * T   # точка на нити
+        return R, T, n
+
 
 def build_centerline(points, smooth_window=9, resample_ds=2.0):
     """Центрлиния из ОДНОЙ траектории (напр. опорный пролёт VINS): сглаживание
@@ -141,6 +152,11 @@ def _selftest():
     S, E, _ = cl.project_many(P)
     assert np.allclose(S, [0.5, 0.25, 0.0, 1.0], atol=1e-3), S
     assert np.allclose(E, [7.0, -3.0, 0.0, 0.0], atol=1e-3), E
+
+    # frame_at: на нити вдоль +x середина ~ (50,0), T≈(1,0), n≈(0,1)
+    R, T, nrm = cl.frame_at(50.0)
+    assert np.allclose(R, [50, 0], atol=1e-3) and np.allclose(T, [1, 0], atol=1e-3) \
+        and np.allclose(nrm, [0, 1], atol=1e-3), (R, T, nrm)
 
     # пучок: два сдвинутых на ±10 прохода вдоль +x -> центрлиния по середине (y≈0)
     p_up = np.stack([np.linspace(0, 100, 60), np.full(60, 10.0)], axis=1)
