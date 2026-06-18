@@ -7,7 +7,7 @@
 #
 # ⚠️ Векторы случайные — реальной локализации НЕ будет, top-1 случаен. Годится
 # только для проверки ROS-обвязки (nn2_scene -> relocalizer), путей и форм.
-# Для настоящей карты по облёту — tools/build_scene_map.py.
+# Для настоящей карты по облёту — tools/nn2_scene/build_scene_map.py.
 #
 # Пишет рядом с боевой картой: src/nav/data/scene_map/. dim=384 = dinov2_vits14
 # (модель, которой будет считать нода) — иначе SceneMatcher отбракует по размеру.
@@ -18,7 +18,7 @@ from pathlib import Path
 import faiss
 import numpy as np
 
-OUT_DIR = Path(__file__).resolve().parents[1] / "data" / "scene_map"
+OUT_DIR = Path(__file__).resolve().parents[2] / "data" / "scene_map"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL = "dinov2_vits14"

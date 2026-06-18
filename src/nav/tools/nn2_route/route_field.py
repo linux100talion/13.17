@@ -72,7 +72,7 @@ class RouteCoords:
     нужен image-якобиан, см. VisualServo)."""
     def __init__(self, ckpt_path, device="cpu"):
         import torch
-        from nav_pkg.scene_descriptor import MetricHead
+        from nav_pkg.nn2.scene_descriptor import MetricHead
         ckpt = torch.load(str(ckpt_path), map_location=device)
         D, H = ckpt["backbone_dim"], ckpt["hidden"]
         self.torch = torch

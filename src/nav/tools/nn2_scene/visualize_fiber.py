@@ -23,13 +23,13 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from cv_bridge import CvBridge                             # noqa: E402
 from rclpy.serialization import deserialize_message        # noqa: E402
 import rosbag2_py                                          # noqa: E402
 from rosidl_runtime_py.utilities import get_message        # noqa: E402
 
-from nav_pkg.scene_descriptor import SceneEncoder          # noqa: E402
+from nav_pkg.nn2.scene_descriptor import SceneEncoder     # noqa: E402
 
 
 def read_bag(path, storage_id, image_topic, odom_topic, rate, encoder, stride):

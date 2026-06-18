@@ -28,7 +28,7 @@ from lightglue import SuperPoint
 from lightglue.utils import rbd
 
 EXTS = {".png", ".jpg", ".jpeg", ".bmp"}
-DEFAULT_OUT = Path(__file__).resolve().parents[1] / "data" / "reference_db"
+DEFAULT_OUT = Path(__file__).resolve().parents[2] / "data" / "reference_db"
 
 
 def main():

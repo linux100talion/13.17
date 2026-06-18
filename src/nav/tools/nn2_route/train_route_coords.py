@@ -25,10 +25,10 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))                 # route_geometry (сосед по tools/)
-sys.path.insert(0, str(HERE.parent))          # nav_pkg
+sys.path.insert(0, str(HERE))                 # route_geometry (сосед по tools/nn2_route/)
+sys.path.insert(0, str(HERE.parents[1]))      # src/nav -> nav_pkg
 import torch                                               # noqa: E402
-from nav_pkg.scene_descriptor import MetricHead, SceneEncoder   # noqa: E402
+from nav_pkg.nn2.scene_descriptor import MetricHead, SceneEncoder   # noqa: E402
 
 # ROS нужен только для read_bag/main; fit_route_heads работает и без него
 # (его зовёт, напр., demo_synth.py на синтетике).
@@ -42,7 +42,7 @@ except ImportError:
     _HAVE_ROS = False
 from route_geometry import build_centerline, centerline_from_passes  # noqa: E402
 
-DEFAULT_OUT = Path(__file__).resolve().parents[1] / "data" / "scene_map" / "route_coords.pt"
+DEFAULT_OUT = Path(__file__).resolve().parents[2] / "data" / "scene_map" / "route_coords.pt"
 
 
 def read_bag(path, storage_id, image_topic, odom_topic, rate, encoder):

@@ -21,7 +21,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
-from nav_pkg.anchor_matcher import AnchorMatcher
+from nav_pkg.nn1.anchor_matcher import AnchorMatcher
 
 
 class NN1Anchor(Node):

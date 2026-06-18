@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # src/nav -> nav_pkg
 from route_geometry import build_centerline                # noqa: E402
 from route_field import RouteField                          # noqa: E402
 

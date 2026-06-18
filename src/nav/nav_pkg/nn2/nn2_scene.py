@@ -27,7 +27,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
-from nav_pkg.scene_descriptor import SceneMatcher
+from nav_pkg.nn2.scene_descriptor import SceneMatcher
 
 
 class NN2Scene(Node):
