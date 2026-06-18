@@ -26,8 +26,10 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # src/nav -> nav_pkg
 from route_geometry import Centerline                      # noqa: E402
 from route_field import RouteField                         # noqa: E402
+from nav_pkg.nn2.metric_decode import knn_decode_guard     # noqa: E402  (numpy, общий с боевым)
 
 
 # ============================================================================
@@ -46,18 +48,19 @@ class MetricMap:
       - прямой конструктор MetricMap(E, P) — синтетика для самопроверки.
     """
     def __init__(self, embeddings, positions, k=6, sigma_floor=1.0, conf_scale=5.0,
-                 encoder=None, metric="l2"):
+                 guard_radius=8.0, encoder=None, metric="l2"):
         self.E = np.asarray(embeddings, np.float64)
         self.P = np.asarray(positions, np.float64)
         self.k = int(k)
         self.sigma_floor = float(sigma_floor)
         self.conf_scale = float(conf_scale)
+        self.guard_radius = float(guard_radius)   # порог компактности соседей (страж), м
         self.encoder = encoder     # SceneEncoder(+топограф) для encode(frame); None в стенде
         self.metric = metric       # "l2" (топограф, метры) | "ip" (косинус, НЕ метры)
 
     @classmethod
     def from_scene_map(cls, map_dir, device="cpu", k=6, sigma_floor=1.0,
-                       conf_scale=5.0, logger=None):
+                       conf_scale=5.0, guard_radius=8.0, logger=None):
         """РЕАЛЬНАЯ карта из data/scene_map: map.index (FAISS) + metadata.json.
         E = реконструированные векторы индекса (это УЖЕ выходы топографа — карту
         собрали build_scene_map.py --mlp), P = позиции мест (ENU-метры, та же
@@ -97,7 +100,7 @@ class MetricMap:
             logger.warn("metadata.mlp пуст — encode(frame) недоступен (нет головы "
                         "топографа); decode по готовому φ всё равно работает.")
         return cls(E, P, k=k, sigma_floor=sigma_floor, conf_scale=conf_scale,
-                   encoder=encoder, metric=metric)
+                   guard_radius=guard_radius, encoder=encoder, metric=metric)
 
     def encode(self, frame_bgr):
         """Кадр (BGR) -> φ той же связкой (DINOv2+топограф), что и карта."""
@@ -111,18 +114,15 @@ class MetricMap:
         return self.decode(self.encode(frame_bgr))
 
     def decode(self, q):
+        """φ-вектор q -> (p̂ (2,), cov (2,2), conf). k ближайших в φ (L2≈метры) ->
+        ОБЩИЙ kNN-декод со стражем (knn_decode_guard), что и боевой SceneMatcher."""
         q = np.asarray(q, np.float64)
         d = np.linalg.norm(self.E - q, axis=1)             # L2 в φ ≈ метры
         idx = np.argsort(d)[:self.k]
-        dk, Pk = d[idx], self.P[idx]
-        w = np.exp(-(dk / (dk.mean() + 1e-9)) ** 2)        # мягкие веса по близости
-        w = w / (w.sum() + 1e-12)
-        p = (w[:, None] * Pk).sum(0)
-        diff = Pk - p
-        cov = (w[:, None, None] * np.einsum("ni,nj->nij", diff, diff)).sum(0)
-        cov = cov + self.sigma_floor ** 2 * np.eye(2)      # пол неопределённости, м²
-        conf = float(np.exp(-dk.min() / self.conf_scale))  # ближе сосед -> увереннее
-        return p, cov, conf
+        dec = knn_decode_guard(self.P[idx], d[idx], "l2", k=self.k,
+                               guard_radius=self.guard_radius,
+                               sigma_floor=self.sigma_floor, conf_scale=self.conf_scale)
+        return np.array([dec["x"], dec["y"]]), dec["cov"], dec["conf"]
 
 
 # ============================================================================

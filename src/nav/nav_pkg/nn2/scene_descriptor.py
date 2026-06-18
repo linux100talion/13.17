@@ -34,6 +34,8 @@ import faiss
 import numpy as np
 import torch
 
+from nav_pkg.nn2.metric_decode import knn_decode_guard   # kNN-декод + страж (numpy)
+
 # DINOv2 ImageNet-нормировка (модель обучена с ней).
 _MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 _STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
@@ -54,6 +56,19 @@ class SceneMatch:
         self.label = label              # str, метка места (баннер оператору)
         self.score = score              # float, косинусная близость [0..1]
         self.entry = entry              # dict метаданных места (поза, кватернион)
+
+
+class MetricFix:
+    """kNN-засечка со стражем (XVIII): top-1 для баннера/позы + метрическая
+    позиция/ковариация из knn_decode_guard."""
+    def __init__(self, top1, dec):
+        self.top1 = top1                # SceneMatch (баннер, базовая поза/кватернион)
+        self.x, self.y = dec["x"], dec["y"]     # метрическая позиция (ENU-метры)
+        self.cov = dec["cov"]           # 2×2 ковариация (м²), анизотропная
+        self.std = dec["std"]           # скалярный σ-эквивалент (совместимость)
+        self.conf = dec["conf"]         # уверенность 0..1 (сбита при стражe)
+        self.source = dec["source"]     # "knn" | "top1-fallback"
+        self.spread = dec["spread"]     # RMS-разброс соседей, м (сигнал алиасинга)
 
 
 class MetricHead(torch.nn.Module):
@@ -258,6 +273,54 @@ class SceneMatcher:
         entry = self.entries[idx]
         label = entry.get("label") or f"place_{entry.get('id', idx)}"
         return SceneMatch(entry.get("id", idx), label, score, entry)
+
+    def search(self, frame_bgr, k):
+        """Кодирует кадр ОДИН раз -> k ближайших мест: (ids (m,), dists (m,))
+        или (None, None). dists: МЕТРЫ (L2-карта) или КОСИНУС (IP-карта), сырые
+        (без гейта), nearest-first."""
+        if self.index is None or self.index.ntotal == 0:
+            return None, None
+        vec = self.encoder.encode(frame_bgr).reshape(1, -1)
+        kk = int(min(k, self.index.ntotal))
+        vals, ids = self.index.search(vec, kk)
+        ids, vals = ids[0], vals[0]
+        keep = ids >= 0
+        ids, vals = ids[keep], vals[keep]
+        if self.index.metric_type == faiss.METRIC_INNER_PRODUCT:
+            dists = vals                            # косинус (больше — лучше)
+        else:
+            dists = np.sqrt(np.maximum(vals, 0.0))  # L2: КВАДРАТ -> метры
+        return ids, dists
+
+    def metric_fix(self, frame_bgr, k=6, guard_radius=8.0, sigma_floor=1.0,
+                   conf_scale=5.0, guard_penalty=0.3):
+        """kNN-локализация СО СТРАЖЕМ алиасинга (XVIII) вместо top-1. Кодирует кадр
+        раз, берёт k соседей, гейтит ЛУЧШЕГО (min_score/max_dist), декодирует
+        позицию+ковариацию (knn_decode_guard; фолбэк top-1 при разбегании соседей).
+        -> MetricFix или None (пусто/ниже порога)."""
+        ids, dists = self.search(frame_bgr, k)
+        if ids is None or len(ids) == 0:
+            return None
+        metric = "ip" if self.index.metric_type == faiss.METRIC_INNER_PRODUCT else "l2"
+        best = float(dists[0])                       # nearest-first -> [0] лучший
+        if metric == "ip":
+            if best < self.min_score:
+                return None
+            score = best
+        else:
+            if best > self.max_dist:                 # dists уже в метрах
+                return None
+            score = best
+        P = np.array([[self.entries[i].get("x"), self.entries[i].get("y")]
+                      for i in ids], dtype=np.float64)
+        dec = knn_decode_guard(P, dists, metric, k=k, guard_radius=guard_radius,
+                               sigma_floor=sigma_floor, conf_scale=conf_scale,
+                               min_score=self.min_score, guard_penalty=guard_penalty)
+        i0 = int(ids[0])
+        entry = self.entries[i0]
+        label = entry.get("label") or f"place_{entry.get('id', i0)}"
+        top1 = SceneMatch(entry.get("id", i0), label, score, entry)
+        return MetricFix(top1, dec)
 
     # --- логирование (logger опционален, чтобы класс был тестируем вне ROS) ---
     def _info(self, msg):

@@ -14,16 +14,16 @@
 # Топики:
 #   /nn2/scene          std_msgs/String — метка места (баннер openhd_streamer)
 #   /nn2/relocalization std_msgs/String — JSON-поза места для relocalizer; несёт и
-#     МЕТР-БЛОК (XVIII): mx,my (позиция места, ENU-метры) + mstd (σ, м) + mconf
-#     (уверенность 0..1). Это метрическая опора φ-карты, которую relocalizer_field
-#     сливает с route-позой (route_fusion.gaussian_fuse). σ/conf — из режима карты:
-#     L2-карта (MLP-топограф) -> score=метры -> σ,conf по дистанции; IP-карта
-#     (косинус) -> метров нет -> σ фикс, conf из косинуса над порогом.
+#     МЕТР-БЛОК (XVIII): mx,my (метрическая позиция, ENU-метры) + анизотропная
+#     ковариация mcxx,mcxy,mcyy (м²) + mstd (скаляр-σ, совместимость) + mconf +
+#     msrc. Это метрическая опора φ-карты, которую relocalizer_field сливает с
+#     route-позой (route_fusion.gaussian_fuse). Считается kNN-засечкой СО СТРАЖЕМ
+#     алиасинга (SceneMatcher.metric_fix), а не top-1: позиция и ковариация — из
+#     разброса k соседей; разбежались (алиасинг) -> фолбэк top-1, mconf сбит.
 #     Тип String с JSON — осознанная заглушка («пока .json», см. идею); потом
 #     заменим на типизированный msg (нужен отдельный CMake-интерфейс-пакет).
 # ============================================================================
 import json
-import math
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -48,10 +48,12 @@ class NN2Scene(Node):
         self.declare_parameter("model_name", "dinov2_vits14")
         self.declare_parameter("min_score", 0.5)   # порог косинуса (карта без MLP)
         self.declare_parameter("max_dist", 10.0)   # порог дистанции, м (карта с MLP)
-        # Метр-блок (XVIII): как считать σ/conf метрической опоры из режима карты.
-        self.declare_parameter("sigma_metric_floor", 2.0)  # база σ метрики (L2), м
-        self.declare_parameter("sigma_metric_ip", 8.0)     # σ метрики (IP, косинус), м
+        # Метр-блок (XVIII): kNN-засечка СО СТРАЖЕМ алиасинга вместо top-1.
+        self.declare_parameter("knn_k", 6)                 # число соседей kNN
+        self.declare_parameter("guard_radius", 8.0)        # порог компактности соседей, м
+        self.declare_parameter("sigma_metric_floor", 1.0)  # пол σ ковариации, м
         self.declare_parameter("metric_conf_scale", 5.0)   # затухание conf по дист. (L2), м
+        self.declare_parameter("guard_penalty", 0.3)       # множитель conf при срабатывании стража
 
         period = float(self.get_parameter("period_s").value)
 
@@ -81,54 +83,48 @@ class NN2Scene(Node):
             return
 
         frame = self.bridge.imgmsg_to_cv2(self.last_image, desired_encoding="bgr8")
-        match = self.matcher.query(frame)
+        fix = self.matcher.metric_fix(
+            frame,
+            k=int(self.get_parameter("knn_k").value),
+            guard_radius=float(self.get_parameter("guard_radius").value),
+            sigma_floor=float(self.get_parameter("sigma_metric_floor").value),
+            conf_scale=float(self.get_parameter("metric_conf_scale").value),
+            guard_penalty=float(self.get_parameter("guard_penalty").value),
+        )
 
-        if match is None:
+        if fix is None:
             # Локализация не уверена — чистим баннер, релокализацию не шлём.
             self.pub_scene.publish(String(data="unknown"))
             return
 
-        # Баннер оператору (контракт openhd_streamer).
-        self.pub_scene.publish(String(data=match.label))
+        # Баннер оператору (контракт openhd_streamer) — по top-1.
+        self.pub_scene.publish(String(data=fix.top1.label))
 
-        # Найденная поза места -> relocalizer. Штамп берём от кадра.
-        e = match.entry
+        # Найденная поза места -> relocalizer. Штамп берём от кадра. Позиция места и
+        # ковариация — kNN-засечка со стражем (mx,my,mstd,mcxx/mcxy/mcyy,mconf).
+        t = fix.top1
+        e = t.entry
+        cov = fix.cov
         stamp = self.last_image.header.stamp
         payload = {
             "stamp": {"sec": stamp.sec, "nanosec": stamp.nanosec},
-            "scene_id": match.scene_id,
-            "label": match.label,
-            "score": match.score,
-            "x": e.get("x"), "y": e.get("y"), "z": e.get("z"),     # ENU-метры (VINS-мир)
+            "scene_id": t.scene_id,
+            "label": t.label,
+            "score": t.score,
+            "x": e.get("x"), "y": e.get("y"), "z": e.get("z"),     # top-1 (ENU-метры)
             "qx": e.get("qx"), "qy": e.get("qy"),
             "qz": e.get("qz"), "qw": e.get("qw"),                  # кватернион IMU
+            # МЕТР-БЛОК XVIII: kNN-позиция + анизотропная ковариация (м²)
+            "mx": float(fix.x), "my": float(fix.y),
+            "mstd": float(fix.std), "mconf": float(fix.conf),
+            "mcxx": float(cov[0, 0]), "mcxy": float(cov[0, 1]), "mcyy": float(cov[1, 1]),
+            "msrc": fix.source,                                    # knn | top1-fallback
         }
-        payload.update(self._metric_block(match))                 # XVIII: mx,my,mstd,mconf
         self.pub_reloc.publish(String(data=json.dumps(payload)))
         self.get_logger().info(
-            f"NN2: место '{match.label}' (id={match.scene_id}, "
-            f"score={match.score:.3f}, mconf={payload['mconf']:.2f}) -> relocalizer")
-
-    def _metric_block(self, match):
-        """МЕТР-БЛОК (XVIII): позиция места (ENU-метры) + σ + conf метрической опоры.
-        L2-карта (MLP-топограф): match.score = дистанция в МЕТРАХ -> σ=floor+d,
-        conf=exp(-d/scale). IP-карта (косинус): метров нет -> σ фикс, conf —
-        насколько косинус выше порога min_score. Кадр в той же VINS-рамке, что и
-        route-центрлиния, поэтому позы СЛИВАЕМЫ (route_fusion)."""
-        ex, ey = match.entry.get("x"), match.entry.get("y")
-        if self.matcher.encoder.metric == "l2":
-            d = float(match.score)                                # метры
-            floor = float(self.get_parameter("sigma_metric_floor").value)
-            scale = float(self.get_parameter("metric_conf_scale").value)
-            mstd = floor + d
-            mconf = math.exp(-d / scale) if scale > 0 else 0.0
-        else:                                                     # ip (косинус)
-            cos = float(match.score)
-            lo = float(self.get_parameter("min_score").value)
-            mstd = float(self.get_parameter("sigma_metric_ip").value)
-            mconf = max(0.0, min(1.0, (cos - lo) / (1.0 - lo + 1e-9)))
-        return {"mx": float(ex), "my": float(ey),
-                "mstd": float(mstd), "mconf": float(mconf)}
+            f"NN2: место '{t.label}' (id={t.scene_id}, score={t.score:.3f}) "
+            f"-> метрика [{fix.source}] mconf={fix.conf:.2f}, разброс соседей "
+            f"{fix.spread:.1f} м -> relocalizer")
 
 
 def main(args=None):

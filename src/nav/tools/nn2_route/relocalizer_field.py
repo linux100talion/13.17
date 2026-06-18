@@ -108,11 +108,14 @@ class RelocalizerField(Node):
         try:
             d = json.loads(msg.data)
             p_m = np.array([float(d["mx"]), float(d["my"])])
-            mstd = float(d.get("mstd", 4.0))                 # изотроп. σ метрики, м
             mconf = float(d.get("mconf", 1.0))
+            if "mcxx" in d:                                  # анизотропная cov (kNN-страж)
+                cxy = float(d.get("mcxy", 0.0))
+                C_m = np.array([[float(d["mcxx"]), cxy], [cxy, float(d["mcyy"])]])
+            else:                                            # старый изотроп. mstd
+                C_m = float(d.get("mstd", 4.0)) ** 2 * np.eye(2)
         except (ValueError, KeyError, TypeError):
             return                                           # нет метр-блока — молча
-        C_m = mstd ** 2 * np.eye(2)
         self.metric = (p_m, C_m, mconf)
         if mconf < float(self.get_parameter("min_metric_conf").value):
             return                                           # не уверена — не публикуем
