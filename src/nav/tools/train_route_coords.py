@@ -28,12 +28,18 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))                 # route_geometry (сосед по tools/)
 sys.path.insert(0, str(HERE.parent))          # nav_pkg
 import torch                                               # noqa: E402
-from cv_bridge import CvBridge                             # noqa: E402
-from rclpy.serialization import deserialize_message        # noqa: E402
-import rosbag2_py                                          # noqa: E402
-from rosidl_runtime_py.utilities import get_message        # noqa: E402
-
 from nav_pkg.scene_descriptor import MetricHead, SceneEncoder   # noqa: E402
+
+# ROS нужен только для read_bag/main; fit_route_heads работает и без него
+# (его зовёт, напр., demo_synth.py на синтетике).
+try:
+    from cv_bridge import CvBridge
+    from rclpy.serialization import deserialize_message
+    import rosbag2_py
+    from rosidl_runtime_py.utilities import get_message
+    _HAVE_ROS = True
+except ImportError:
+    _HAVE_ROS = False
 from route_geometry import build_centerline, centerline_from_passes  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parents[1] / "data" / "scene_map" / "route_coords.pt"
@@ -41,6 +47,8 @@ DEFAULT_OUT = Path(__file__).resolve().parents[1] / "data" / "scene_map" / "rout
 
 def read_bag(path, storage_id, image_topic, odom_topic, rate, encoder):
     """bag -> (feats (n,backbone) сырой CLS, poses (n,3)) с выборкой ~rate Гц."""
+    if not _HAVE_ROS:
+        raise SystemExit("read_bag требует ROS (cv_bridge/rosbag2_py).")
     reader = rosbag2_py.SequentialReader()
     reader.open(
         rosbag2_py.StorageOptions(uri=str(path), storage_id=storage_id),
@@ -145,44 +153,10 @@ def main():
         np.savez(args.dump, s=s_star, e=e_star, poses=poses)
         print(f"   s*,e* -> {args.dump}")
 
-    F = torch.from_numpy(feats).to(dev)
-    s_t = torch.from_numpy(s_star.astype(np.float32)).to(dev)
-    e_t = torch.from_numpy(e_star.astype(np.float32)).to(dev)
-
-    # головы-близнецы MetricHead(out_dim=1); для s сверху сигмоида -> [0,1]
-    s_head = MetricHead(in_dim=feats.shape[1], hidden=args.hidden, out_dim=1).to(dev).train()
-    e_head = MetricHead(in_dim=feats.shape[1], hidden=args.hidden, out_dim=1).to(dev).train()
-    opt = torch.optim.Adam(list(s_head.parameters()) + list(e_head.parameters()), lr=args.lr)
-    huber = torch.nn.functional.smooth_l1_loss
-    n = len(feats)
-
-    for step in range(1, args.steps + 1):
-        bi = torch.from_numpy(rng.integers(0, n, size=args.batch)).to(dev)
-        s_pred = torch.sigmoid(s_head(F[bi]).squeeze(1))
-        e_pred = e_head(F[bi]).squeeze(1)
-        loss_s = huber(s_pred, s_t[bi])
-        loss_e = huber(e_pred, e_t[bi])
-
-        # ranking: пары внутри одного пролёта, порядок по s* -> монотонность s_pred
-        a = rng.integers(0, n, size=args.batch)
-        b = rng.integers(0, n, size=args.batch)
-        same = np.array([_same_pass(x, y, bounds) for x, y in zip(a, b)])
-        a, b = a[same], b[same]
-        if len(a) > 0:
-            lo = np.where(s_star[a] <= s_star[b], a, b)   # «раньше» по маршруту
-            hi = np.where(s_star[a] <= s_star[b], b, a)
-            slo = torch.sigmoid(s_head(F[torch.from_numpy(lo).to(dev)]).squeeze(1))
-            shi = torch.sigmoid(s_head(F[torch.from_numpy(hi).to(dev)]).squeeze(1))
-            loss_rank = torch.relu(slo - shi).mean()       # хотим slo < shi
-        else:
-            loss_rank = torch.zeros((), device=dev)
-
-        loss = args.w_s * loss_s + args.w_e * loss_e + args.w_rank * loss_rank
-        opt.zero_grad(); loss.backward(); opt.step()
-        if step % max(1, args.steps // 20) == 0 or step == 1:
-            print(f"  step {step:5d}/{args.steps}  loss={loss.item():.3f} "
-                  f"(s={loss_s.item():.3f}, e={loss_e.item():.3f} м, "
-                  f"rank={float(loss_rank):.3f})")
+    s_head, e_head = fit_route_heads(
+        feats, s_star, e_star, bounds, device=dev, hidden=args.hidden,
+        steps=args.steps, batch=args.batch, lr=args.lr, w_s=args.w_s,
+        w_e=args.w_e, w_rank=args.w_rank, seed=args.seed)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -197,6 +171,52 @@ def main():
     }, out)
     print(f"✅ Route-координаты обучены -> {out} (s,e головы + центрлиния). "
           f"Дальше: поле −∇V и засечка p̂=R(σ)+e·n из (s,e).")
+
+
+def fit_route_heads(feats, s_star, e_star, bounds, device="cpu", hidden=256,
+                    steps=4000, batch=512, lr=1e-3, w_s=1.0, w_e=1.0, w_rank=0.2,
+                    seed=0, log=print):
+    """Учит головы s(f),e(f) на готовых фичах+целях. Вынесено из main, чтобы код
+    обучения вызывали и не-ROS потребители (напр. demo_synth.py). Возвращает
+    (s_head, e_head) — torch-модули MetricHead(out_dim=1)."""
+    torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
+    F = torch.from_numpy(np.asarray(feats, np.float32)).to(device)
+    s_t = torch.from_numpy(np.asarray(s_star, np.float32)).to(device)
+    e_t = torch.from_numpy(np.asarray(e_star, np.float32)).to(device)
+
+    s_head = MetricHead(in_dim=F.shape[1], hidden=hidden, out_dim=1).to(device).train()
+    e_head = MetricHead(in_dim=F.shape[1], hidden=hidden, out_dim=1).to(device).train()
+    opt = torch.optim.Adam(list(s_head.parameters()) + list(e_head.parameters()), lr=lr)
+    huber = torch.nn.functional.smooth_l1_loss
+    n = len(feats)
+
+    for step in range(1, steps + 1):
+        bi = torch.from_numpy(rng.integers(0, n, size=batch)).to(device)
+        loss_s = huber(torch.sigmoid(s_head(F[bi]).squeeze(1)), s_t[bi])
+        loss_e = huber(e_head(F[bi]).squeeze(1), e_t[bi])
+
+        a = rng.integers(0, n, size=batch)
+        b = rng.integers(0, n, size=batch)
+        same = np.array([_same_pass(x, y, bounds) for x, y in zip(a, b)])
+        a, b = a[same], b[same]
+        if len(a) > 0:
+            lo = np.where(s_star[a] <= s_star[b], a, b)   # «раньше» по маршруту
+            hi = np.where(s_star[a] <= s_star[b], b, a)
+            slo = torch.sigmoid(s_head(F[torch.from_numpy(lo).to(device)]).squeeze(1))
+            shi = torch.sigmoid(s_head(F[torch.from_numpy(hi).to(device)]).squeeze(1))
+            loss_rank = torch.relu(slo - shi).mean()       # хотим slo < shi
+        else:
+            loss_rank = torch.zeros((), device=device)
+
+        loss = w_s * loss_s + w_e * loss_e + w_rank * loss_rank
+        opt.zero_grad(); loss.backward(); opt.step()
+        if step % max(1, steps // 20) == 0 or step == 1:
+            log(f"  step {step:5d}/{steps}  loss={loss.item():.3f} "
+                f"(s={loss_s.item():.3f}, e={loss_e.item():.3f} м, "
+                f"rank={float(loss_rank):.3f})")
+    s_head.eval(); e_head.eval()
+    return s_head, e_head
 
 
 def _same_pass(i, j, bounds):
