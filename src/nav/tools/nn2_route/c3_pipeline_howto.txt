@@ -160,9 +160,11 @@ numpy + selftest (torch/faiss/rosbag не ставятся -> проверяем
   ШАГ 4 c3_qc_report.py            — единый QC-светофор (стадия 8).
   ШАГ 5 route_heads.py + route_heads_node.py — рантайм голов C (forward-pass без
         FAISS) + OOD-страж XXIII; relocalizer_field переведён на метрику-как-страховку.
+  ШАГ 6 c3_pose_graph.py — pose-graph (стадия 5): SE2 Gauss-Newton, дрейф давится
+        loop-closure+якорями (selftest ATE 1.93->0.08 м). На GCP — GTSAM/g2o drop-in.
   плюс база: register_flights, build_route_targets, fit_route_heads, route_field/
   fusion, s_filter, metric_decode.
-ОСТАЛОСЬ: ШАГ 6 — pose-graph (стадия 5, опц., внешний солвер).
-ЖДЁТ ЖЕЛЕЗА: реальный прогон стадий 1–2 и 7 на bag'ах (torch/faiss/rosbag) —
-  извлечение φ, обучение голов C (fit_route_heads), загрузка RouteHeads.load.
+ЖДЁТ ЖЕЛЕЗА (GCE-GPU): реальный прогон на bag'ах (torch/faiss/rosbag) — извлечение
+  φ, обучение голов C (fit_route_heads), RouteHeads.load. Чек-лист переезда +
+  порядок прогона: c3_gce_setup.txt. Незакрытые хвосты до FCU: c3_TODO.txt раздел A.
 ================================================================================

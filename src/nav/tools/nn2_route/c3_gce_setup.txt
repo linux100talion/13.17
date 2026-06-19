@@ -1,0 +1,75 @@
+================================================================================
+(c)-основной — ПЕРЕЕЗД НА GCE-GPU. Что поставить и в каком порядке прогнать.
+================================================================================
+Текущая среда (Termux ARM) — только numpy/py_compile: вся логика (c)-основного
+(ШАГ 1–6) проверена numpy-зеркалами. На GCE+NVIDIA выполняем РЕАЛЬНЫЕ прогоны
+(torch/CUDA/faiss/ROS) — хвосты B из c3_TODO.txt. Этот файл — чек-лист переезда.
+
+
+── 0. ИНСТАНС GCE ───────────────────────────────────────────────────────────────
+  - Образ: Ubuntu 22.04 (под ROS2 Humble) ИЛИ Deep Learning VM (CUDA предустановлен).
+  - GPU: T4 (дёшево, хватит для DINOv2-инференса/обучения голов) или L4/A10.
+  - Диск: ≥100 ГБ (100 bag'ов облётов — десятки ГБ сырого видео+одометрии).
+  - Драйвер NVIDIA + CUDA 12.x; проверка: `nvidia-smi`.
+
+
+── 1. ЗАВИСИМОСТИ (ставить ОДИН раз) ────────────────────────────────────────────
+  PYTORCH (CUDA):   pip torch (под CUDA инстанса; проверка torch.cuda.is_available()).
+  DINOv2:           тянется в рантайме через torch.hub (нужен интернет 1-й раз) —
+                    как в scene_descriptor.SceneEncoder; зависимостей почти нет.
+  FAISS:            faiss-gpu (или faiss-cpu — карта мест маленькая, CPU хватит).
+  ROS2 Humble:      нужен ТОЛЬКО для извлечения из bag'ов (rosbag2_py) и для запуска
+                    нод (route_heads_node, relocalizer_field). Если bag'и уже
+                    извлечены в .npz — обучение голов ROS НЕ требует.
+  cv_bridge:        как в проекте (сборка против нашего OpenCV, см. docker/sim).
+  numpy:            уже используется везде.
+  СМОУК-ЧЕК после установки:
+    python3 -c "import torch; print(torch.cuda.is_available())"   # True
+    python3 -c "import faiss; print(faiss.__version__)"
+    python3 c3_pose_graph.py && python3 build_global_dataset.py   # numpy-зеркала живы
+
+
+── 2. ПОРЯДОК ПРОГОНА (B1–B6 из c3_TODO.txt) ────────────────────────────────────
+ОФЛАЙН (один раз на 100 облётах, на GPU):
+  B1. ИЗВЛЕЧЬ φ из bag'ов (ДВУХСТАДИЙНО, чтобы потом учить без ROS/DINOv2):
+        python3 train_route_coords.py --bag <bag1> <bag2> ... \
+            --extract-only --save-feats flightN.npz --device cuda
+      (на облёт -> свой .npz: feats φ + ЛОКАЛЬНЫЕ позы VINS). Параллельно собрать
+      попадания якорей NN1 (стадия 3a) и, при нехватке, кросс-связи (ШАГ 2).
+  B2. РЕГИСТРАЦИЯ в одну рамку (стадии 4->6, ШАГ 1/2 — numpy, БЕЗ GPU):
+        build_correspondences (cross_flight_correspond) -> build_global_dataset
+        -> GlobalDataset.save(global_set.npz). Проверить QC: c3_qc_report (светофор
+        GREEN/YELLOW/RED; RED -> переснять/доснять, см. отчёт).
+  B2'. (опц.) ТОНКО: c3_pose_graph (ШАГ 6) поверх грубой, если QC даёт большие
+        кросс-невязки. На GCP можно подменить numpy-солвер на GTSAM/g2o (тот же граф).
+  B3. РАЗМЕТКА + ОБУЧЕНИЕ голов C (стадия 7c, GPU):
+        c3_route_pipeline: рисуем полилинию -> route_targets_on_polyline (s*,e*)
+        -> save_route_dataset(route_set.npz). Затем ОБУЧЕНИЕ:
+        python3 train_route_coords.py --npz route_set.npz --device cuda \
+            --out train_route_coords.pt        # fit_route_heads (MLP s,e + центрлиния)
+      (топограф/MetricHead — train_topograph.py, если идём от метрики; для (c)-основ-
+       ного головы можно учить и прямо на сыром φ, см. XX-компромисс.)
+  B4–B6. РАНТАЙМ на борту/симуляции:
+        - RouteHeads.load(train_route_coords.pt) + route_heads_node -> /nn2/route_coords;
+        - relocalizer_field (s_filter + OOD-страж) -> /nn2/reloc_pose + /nn2/guidance;
+        - СЛИТЬ φ в nn2_scene (один DINOv2 -> метрика+головы), убрать двойной прогон;
+        - ВШИТЬ route_heads_node + relocalizer_field в setup.py/launch.
+
+
+── 3. ЧТО ПЕРЕНЕСТИ НА ИНСТАНС ──────────────────────────────────────────────────
+  - весь src/nav (nav_pkg + tools/nn2_route + tools/nn2_scene);
+  - 100 bag'ов облётов (или уже извлечённые .npz, если извлекали локально);
+  - георефернс якорей NN1 (data/reference_db) + карта мест (data/scene_map);
+  - параметры рамки-руками (XXIV п.1): GPS датума взлёта + сурвейные GPS якорей +
+    курс (yaw) локальной рамки.
+
+
+── 4. ГРАНИЦА «ГОТОВО vs ЖДЁТ ЖЕЛЕЗА» ───────────────────────────────────────────
+ГОТОВО и не требует GPU (numpy): ШАГ 1,2,4,6 (регистрация/связи/QC/pose-graph),
+  разметка s*,e* (ШАГ 3), OOD-страж (route_heads), s_filter.
+ТРЕБУЕТ GPU/torch: извлечение φ (B1), обучение голов/топографа (B3),
+  RouteHeads.load + инференс на живом /image_color (B4).
+ТРЕБУЕТ ROS: извлечение из bag'ов (B1), запуск нод (B4–B6).
+НЕ из ШАГ 1–6 (отдельный слой, XXIV-мост): провод 1 -> ray_tracer/EK3, провод 2 ->
+  offboard, рамка-руками — см. c3_TODO.txt раздел A.
+================================================================================
