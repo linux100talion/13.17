@@ -7,12 +7,13 @@
 #                       (подтяжка дрейфа VINS);
 #   ПОЛЕ (рулёжка):     v = α·T̂ − β·e·n̂ -> (по курсу) body-команда -> guidance.
 #
-# ФЬЮЗ (route_fusion, XVIII): засечка теперь не просто p̂=R(σ)+e·n, а СЛИЯНИЕ двух
-# оценок позы по анизотропной ковариации:
-#   route-поза (узкая ПОПЕРЁК нити, из s,e) ⊗ метрическая поза (route-agnostic, из φ).
-#   - на маршруте + метрика уверена -> gaussian_fuse (ковариация сжимается);
-#   - вне маршрута (|e|>gate) -> только метрика (восстановление, домен NN1);
-#   - метрики нет в сообщении -> route-only (старое поведение, обратная совместимость).
+# ФЬЮЗ + OOD-СТРАЖ (route_fusion + route_heads, XVIII/XXIII): в (c)-основном route-
+# поза от голов C ПЕРВИЧНА; метрика φ-карты — не слепой фьюз, а страховка:
+#   - на маршруте + метрика СОГЛАСНА (Махаланобис<=k_sigma) -> gaussian_fuse (сжатие);
+#   - на маршруте + метрика РАСХОДИТСЯ (топограф вне 100 облётов / алиасинг) -> метрику
+#     в позицию НЕ берём (доверяем C), флажок -> s_filter раздувает σ_s (XXIII);
+#   - вне маршрута (|e|>gate) -> метрика рулит (восстановление, домен NN1);
+#   - метрики нет / низкий conf -> route-only (чистый C, обратная совместимость).
 #
 # ГДЕ φ: тяжёлый DINOv2+голова+FAISS крутит nn2_scene (там descriptor). По проводу
 # шлём КИЛОБАЙТЫ, не пиксели. Два потока (latest-of-each):
@@ -43,6 +44,7 @@ from route_field import RouteField                         # noqa: E402
 from route_geometry import Centerline                      # noqa: E402
 from route_fusion import gaussian_fuse, route_pose         # noqa: E402
 from s_filter import SFilter                               # noqa: E402
+from route_heads import metric_ood_gate                    # noqa: E402
 
 
 def _yaw(q):
@@ -69,6 +71,7 @@ class RelocalizerField(Node):
         self.declare_parameter("e_std", 2.0)        # неопр. e (м)            -> cov вдоль n
         self.declare_parameter("e_gate", 8.0)       # |e|>gate -> вне маршрута (метрика рулит)
         self.declare_parameter("min_metric_conf", 0.3)  # гейт метрики для фьюза
+        self.declare_parameter("k_sigma_ood", 3.0)  # порог Махаланобиса route↔метрика (XXIII)
         self.declare_parameter("world_frame", "map")
         # последовательный фильтр s (HMM/гистограмма) против алиасинга по маршруту
         self.declare_parameter("s_nbins", 200)
@@ -94,6 +97,7 @@ class RelocalizerField(Node):
         self.yaw = None
         self.metric = None          # кэш метр-блока φ-карты: (p_m, C_m, mconf)
         self.metric_alias = False   # страж kNN сработал (msrc=top1-fallback) -> раздуть σ_s
+        self._ood_flag = False      # route↔метрика разошлись (XXIII) -> раздуть σ_s в s_filter
         self._last_t = None         # время прошлой засечки (для ds = v·dt/L)
         self.sfilter = SFilter(
             nbins=int(self.get_parameter("s_nbins").value),
@@ -196,26 +200,42 @@ class RelocalizerField(Node):
         out = self.sfilter.step(
             s_raw, conf, ds=ds,
             sigma_base=float(self.get_parameter("s_sigma_base").value),
-            alias=self.metric_alias)
+            alias=self.metric_alias or self._ood_flag)   # страж kNN ИЛИ OOD-расхождение (XXIII)
         if out["conf"] < float(self.get_parameter("min_filt_conf").value):
             return None
         return out["s"]
 
     def _fuse_pose(self, s, e, metric):
-        """Иерархия XVIII: route-поза (узко поперёк) ⊗ метрика. Возвращает
-        (p (2,), cov (2,2), source). Без метрики -> route-only (совместимость)."""
+        """(c)-основной (XXIII): route-поза от голов C — ПЕРВИЧНА; метрика φ-карты —
+        не слепой фьюз, а OOD-СТРАЖ. Возвращает (p (2,), cov (2,2), source).
+          - метрики нет / низкий conf -> route-only (рулёжка на C);
+          - на маршруте + метрика СОГЛАСНА (Махаланобис<=k_sigma) -> gaussian_fuse
+            (метрика поджимает ковариацию, законный фьюз двух наблюдений);
+          - на маршруте + метрика РАСХОДИТСЯ -> топограф поплыл вне 100 облётов ИЛИ
+            алиасинг: метрику в позицию НЕ берём (доверяем C), флажок _ood_flag ->
+            следующий s_filter раздует σ_s; cov route-позы расширяем (меньше веры);
+          - вне маршрута (|e|>gate) -> домен восстановления: метрика рулит (NN1-грань)."""
         s_std = float(self.get_parameter("s_std").value)
         e_std = float(self.get_parameter("e_std").value)
-        p_r, C_r = route_pose(self.field, s, e, s_std, e_std)   # из route_fusion
+        p_r, C_r = route_pose(self.field, s, e, s_std, e_std)   # из route_fusion (первично)
+        self._ood_flag = False
         if metric is None:
             return p_r, C_r, "route-only"
 
         p_m, C_m, mconf = metric
         on_route = abs(e) <= float(self.get_parameter("e_gate").value)
-        if on_route and mconf >= float(self.get_parameter("min_metric_conf").value):
-            p, C = gaussian_fuse(p_r, C_r, p_m, C_m)            # ковариация сжимается
-            return p, C, "fused"
-        return p_m, C_m, "metric-only(off-route/low-conf)"      # восстановление
+        confident = mconf >= float(self.get_parameter("min_metric_conf").value)
+        if on_route and confident:
+            ok, maha = metric_ood_gate(p_r, metric,
+                                       k_sigma=float(self.get_parameter("k_sigma_ood").value))
+            if ok:
+                p, C = gaussian_fuse(p_r, C_r, p_m, C_m)        # согласны -> ковариация сжимается
+                return p, C, "fused"
+            self._ood_flag = True                               # расхождение -> страж XXIII
+            return p_r, 4.0 * C_r, f"route-primary(ood:maha={maha:.1f})"  # доверяем C, веры меньше
+        if not on_route and confident:
+            return p_m, C_m, "metric-only(off-route/recovery)"  # восстановление, домен NN1
+        return p_r, C_r, "route-only(metric-low-conf)"          # метрика не годна -> чистый C
 
     @staticmethod
     def _pack_cov(C):

@@ -153,9 +153,16 @@ numpy + selftest (torch/faiss/rosbag не ставятся -> проверяем
 ================================================================================
 СТАТУС
 ================================================================================
-ГОТОВО (numpy-зеркала): стадия 4 (register_flights), стадия 3-геометрия
-  (build_route_targets), куски стадии 7 (fit_route_heads), рантайм-обвязка
-  (route_field/fusion, s_filter, metric_decode).
-ДЕЛАЕМ: ШАГ 1 — build_global_dataset.py (оркестратор 4->6 на синтетике).
-ЖДЁТ ЖЕЛЕЗА: реальный прогон стадий 1–2 и 7 на bag'ах (torch/faiss/rosbag).
+ГОТОВО (numpy-зеркала):
+  ШАГ 1 build_global_dataset.py    — оркестратор регистрации 4->6.
+  ШАГ 2 cross_flight_correspond.py — кросс-облётные связи 3b (φ-ретривал+RANSAC).
+  ШАГ 3 c3_route_pipeline.py       — XXVI end-to-end: разметка s*,e* + учебность.
+  ШАГ 4 c3_qc_report.py            — единый QC-светофор (стадия 8).
+  ШАГ 5 route_heads.py + route_heads_node.py — рантайм голов C (forward-pass без
+        FAISS) + OOD-страж XXIII; relocalizer_field переведён на метрику-как-страховку.
+  плюс база: register_flights, build_route_targets, fit_route_heads, route_field/
+  fusion, s_filter, metric_decode.
+ОСТАЛОСЬ: ШАГ 6 — pose-graph (стадия 5, опц., внешний солвер).
+ЖДЁТ ЖЕЛЕЗА: реальный прогон стадий 1–2 и 7 на bag'ах (torch/faiss/rosbag) —
+  извлечение φ, обучение голов C (fit_route_heads), загрузка RouteHeads.load.
 ================================================================================
