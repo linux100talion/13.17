@@ -1,3 +1,3 @@
 # Memory index
 
-- [GCE GPU plan](gce-gpu-plan.md) — GCE dev-workspace-1317: CPU build-box удалён под апгрейд, boot-диск сохранён; GPU заблокирован глобальной квотой GPUS_ALL_REGIONS=0 (региональная T4 есть) — нужен аппрув quota-increase, тогда 08_add_gpu.sh поднимет из диска
+- [GCE GPU plan](gce-gpu-plan.md) — build-box dev-workspace-1317: Docker установлен, оба sim-образа собраны (sim-simulator 7.6 GB + sim-nav 27.2 GB); квота GPUS_ALL_REGIONS поднята; GPU-апгрейд через 08_add_gpu.sh запускать с локальной машины
