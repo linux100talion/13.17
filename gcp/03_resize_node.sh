@@ -2,7 +2,7 @@
 # Изменение мощности инстанса "на лету"
 
 ZONE="us-central1-a"
-INSTANCE_NAME="dev-workspace-137"
+INSTANCE_NAME="dev-workspace-1317"
 
 if [ -z "$1" ]; then
     echo "Использование: $0 {light|heavy}"

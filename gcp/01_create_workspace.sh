@@ -3,7 +3,7 @@
 
 PROJECT="drone-13-17-workspace-2026"
 ZONE="us-central1-a"
-INSTANCE_NAME="dev-workspace-137"
+INSTANCE_NAME="dev-workspace-1317"
 DISK_SIZE="${1:-120}"   # размер загрузочного диска в GB (по умолчанию 120)
 
 echo "🚀 Создаем инстанс $INSTANCE_NAME в зоне $ZONE (диск ${DISK_SIZE}GB)..."

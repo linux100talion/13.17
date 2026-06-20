@@ -4,7 +4,7 @@
 # докер-образов, build-кэша и общий расклад по диску. Запускать на RUNNING-инстансе.
 
 ZONE="us-central1-a"
-INSTANCE_NAME="dev-workspace-137"
+INSTANCE_NAME="dev-workspace-1317"
 
 echo "🔍 Проверяем, что инстанс $INSTANCE_NAME запущен..."
 STATUS=$(gcloud compute instances describe $INSTANCE_NAME --zone=$ZONE --format="value(status)" 2>/dev/null)

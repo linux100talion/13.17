@@ -3,7 +3,7 @@
 
 PROJECT="drone-13-17-workspace-2026"
 ZONE="us-central1-a"
-INSTANCE_NAME="dev-workspace-137"
+INSTANCE_NAME="dev-workspace-1317"
 
 echo "⚠️ Ты собираешься УДАЛИТЬ инстанс $INSTANCE_NAME в зоне $ZONE."
 echo "   Загрузочный диск будет СОХРАНЕН (--keep-disks=boot)."

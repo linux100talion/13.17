@@ -2,7 +2,7 @@
 # Повседневный менеджер питания для экономии бюджета
 
 ZONE="us-central1-a"
-INSTANCE_NAME="dev-workspace-137"
+INSTANCE_NAME="dev-workspace-1317"
 
 case "$1" in
     start)

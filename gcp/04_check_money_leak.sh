@@ -2,7 +2,7 @@
 # Проверка статуса: не забыл ли я выключить сервер?
 
 ZONE="us-central1-a"
-INSTANCE_NAME="dev-workspace-137"
+INSTANCE_NAME="dev-workspace-1317"
 
 echo "🔍 Проверяем статус инстанса $INSTANCE_NAME..."
 STATUS=$(gcloud compute instances describe $INSTANCE_NAME --zone=$ZONE --format="value(status)" 2>/dev/null)

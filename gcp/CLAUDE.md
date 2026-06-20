@@ -10,7 +10,7 @@
 |------------|------------------------------|
 | Project    | `drone-13-17-workspace-2026` |
 | Zone       | `us-central1-a`              |
-| Instance   | `dev-workspace-137`          |
+| Instance   | `dev-workspace-1317`          |
 | GPU        | 1× NVIDIA Tesla T4           |
 | OS         | Ubuntu 24.04 LTS (amd64)     |
 | Boot disk  | 120 GB, pd-balanced          |
