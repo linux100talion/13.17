@@ -1,7 +1,7 @@
 #!/bin/bash
 # Повседневный менеджер питания для экономии бюджета
 
-ZONE="us-central1-a"
+ZONE="${ZONE:-europe-west4-a}"
 INSTANCE_NAME="dev-workspace-1317"
 
 case "$1" in

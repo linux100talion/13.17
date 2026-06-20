@@ -2,7 +2,7 @@
 # Скрипт для первичного создания воркспейса
 
 PROJECT="drone-13-17-workspace-2026"
-ZONE="us-central1-a"
+ZONE="${ZONE:-europe-west4-a}"
 INSTANCE_NAME="dev-workspace-1317"
 DISK_SIZE="${1:-120}"   # размер загрузочного диска в GB (по умолчанию 120)
 

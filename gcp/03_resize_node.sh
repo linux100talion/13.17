@@ -1,7 +1,7 @@
 #!/bin/bash
 # Изменение мощности инстанса "на лету"
 
-ZONE="us-central1-a"
+ZONE="${ZONE:-europe-west4-a}"
 INSTANCE_NAME="dev-workspace-1317"
 
 if [ -z "$1" ]; then

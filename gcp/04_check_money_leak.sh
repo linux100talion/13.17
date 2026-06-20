@@ -1,7 +1,7 @@
 #!/bin/bash
 # Проверка статуса: не забыл ли я выключить сервер?
 
-ZONE="us-central1-a"
+ZONE="${ZONE:-europe-west4-a}"
 INSTANCE_NAME="dev-workspace-1317"
 
 echo "🔍 Проверяем статус инстанса $INSTANCE_NAME..."

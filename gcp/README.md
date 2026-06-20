@@ -9,11 +9,17 @@
 | Параметр    | Значение                      |
 |-------------|-------------------------------|
 | Project     | `drone-13-17-workspace-2026`  |
-| Zone        | `us-central1-a`               |
+| Zone        | `europe-west4-a` *(можно переопределить `ZONE=…`)* |
 | Instance    | `dev-workspace-1317`           |
 | GPU         | 1× NVIDIA Tesla T4            |
 | OS          | Ubuntu 24.04 LTS (amd64)      |
 | Boot disk   | 120 GB, pd-balanced           |
+
+> Зона задаётся переменной окружения с дефолтом: если в зоне нет свободных T4
+> (`RESOURCE_POOL_EXHAUSTED`), перебери зоны без правки файлов —
+> `ZONE=europe-west4-b ./01_create_workspace.sh`. Зону существующего инстанса
+> сменить нельзя (она и диск зональны), так что override полезен в основном на
+> создании.
 
 ## Требования
 

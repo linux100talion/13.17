@@ -3,7 +3,7 @@
 # Тонкая обёртка над `gcloud ... ssh --command "docker ..."`: показывает размеры
 # докер-образов, build-кэша и общий расклад по диску. Запускать на RUNNING-инстансе.
 
-ZONE="us-central1-a"
+ZONE="${ZONE:-europe-west4-a}"
 INSTANCE_NAME="dev-workspace-1317"
 
 echo "🔍 Проверяем, что инстанс $INSTANCE_NAME запущен..."
