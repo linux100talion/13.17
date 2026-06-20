@@ -31,11 +31,26 @@ B1–B6/что перенести); не предлагать запускать
 build_global_dataset, cross_flight_correspond, c3_route_pipeline, c3_qc_report,
 route_heads(+node), c3_pose_graph. Ждёт GPU только B-раздел c3_TODO.txt.
 
+**ГЛАВНЫЙ БЛОКЕР GPU (выяснено 2026-06-20): глобальная квота
+`GPUS_ALL_REGIONS = 0`** в проекте `drone-13-17-workspace-2026`. Региональные
+T4-квоты в `europe-west4` есть (`NVIDIA_T4_GPUS=1`, `PREEMPTIBLE_NVIDIA_T4_GPUS=1`),
+но глобальный потолок 0 режет ЛЮБОЙ GPU-инстанс (on-demand/spot/любая зона).
+Пока on-demand отдаёт `ZONE_RESOURCE_POOL_EXHAUSTED` (проверка ёмкости раньше
+квоты), а spot пробивает до настоящей причины — `Quota 'GPUS_ALL_REGIONS'
+exceeded. Limit: 0.0`. **Фикс: поднять `GPUS_ALL_REGIONS` 0→≥1** через консоль
+IAM&Admin→Quotas (фильтр "GPUs (all regions)") — аппрув Google, требует владельца;
+за пользователя через gcloud надёжно не сделать (есть Cloud Quotas API
+`gcloud alpha quotas preferences create`, но тоже идёт ревью). До аппрува GPU
+не поднять никак.
+
 **Статус на 2026-06-20:** заведён GCE-инстанс `dev-workspace-1317`
-(`europe-west4-a`, проект `drone-13-17-workspace-2026`) — но пока **CPU-only**
-(`n1-standard-8`, без `--accelerator`). Причина: (1) T4 в дефиците
-(`ZONE_RESOURCE_POOL_EXHAUSTED` ловили в us-central1-a и во всём europe-west4),
-(2) для проверки кода GPU не нужен — `nvcc` собирает CUDA без видеокарты.
+(`europe-west4-a`, проект `drone-13-17-workspace-2026`). Был **CPU-only**
+build-box (`n1-standard-8`, без `--accelerator`). При попытке апгрейда до GPU
+через `08_add_gpu.sh` инстанс УДАЛЁН (boot-диск `dev-workspace-1317` СОХРАНЁН,
+READY, 120GB, в europe-west4-a) — create с T4 упал на квоте (см. выше). Сейчас
+**инстанса нет, есть только сохранённый диск**; как только квота ≥1 —
+`./08_add_gpu.sh` (или `SPOT=1 …`) поднимет машину из этого диска. Для проверки
+кода GPU не нужен — `nvcc` собирает CUDA без видеокарты.
 Это **build-box для проверки кода** (compile/colcon/линт/сборка docker-образов),
 а НЕ замена GPU-машины для B-раздела: тяжёлые прогоны torch/DINOv2/обучение
 по-прежнему ждут реального GPU. Создаётся тогглом `GPU=0 ./01_create_workspace.sh`;
