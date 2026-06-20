@@ -27,6 +27,9 @@
 - `04_check_money_leak.sh` — статус инстанса (`RUNNING` / `TERMINATED`).
 - `05_delete_instance.sh` — удаление с подтверждением `yes`; загрузочный диск
   сохраняется (`--keep-disks=boot`).
+- `06_build_sizes.sh` — сколько места реально съела сборка: по SSH гоняет
+  `docker system df`/`docker images` на инстансе (образы проекта, build-кэш,
+  диск). Только чтение, требует RUNNING-инстанс.
 
 ## Конвенции
 
