@@ -12,13 +12,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DOMAIN_ID=0
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
-# --- 1. Базовые утилиты + apt-репозиторий Gazebo (osrfoundation) ---
+# --- 1. Базовые утилиты + EGL для headless GPU-рендера + apt-репозиторий Gazebo ---
+# EGL (libegl1 + libgles2 + libgbm1) нужен OGRE2, чтобы рендерить камеру
+# без дисплея: gz sim --headless-rendering использует EGL-бэкенд вместо X11.
+# NVIDIA-специфичный ICD (/usr/share/glvnd/egl_vendor.d/10_nvidia.json)
+# приходит через nvidia-container-runtime — в образ его класть не нужно.
 RUN apt-get update && apt-get install -y \
     lsb-release wget gnupg curl git \
     build-essential cmake \
     rapidjson-dev \
     libopencv-dev \
     python3-pip \
+    libegl1 libegl-mesa0 libgles2 libgbm1 libglvnd0 \
     && wget https://packages.osrfoundation.org/gazebo.gpg \
        -O /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
@@ -61,5 +66,16 @@ ENV GZ_SIM_RESOURCE_PATH=/root/ardupilot_gazebo/models:/root/ardupilot_gazebo/wo
 WORKDIR /root
 
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+
+# Headless EGL: отключаем синхронизацию с vblank (нет монитора) и
+# разрешаем NVIDIA EGL через libglvnd. DISPLAY намеренно не задаём —
+# gz sim --headless-rendering работает без него через EGL.
+ENV __GL_SYNC_TO_VBLANK=0
+ENV NVIDIA_DRIVER_CAPABILITIES=all
+
+# Запуск в headless-режиме (bag-коллекция, без GUI):
+#   gz sim --headless-rendering -r /root/worlds/mili_fortress.sdf
+# Запуск с GUI (локальный ноут, нужен xhost +local:root и DISPLAY):
+#   gz sim -r /root/worlds/mili_fortress.sdf
 
 CMD ["tail", "-f", "/dev/null"]

@@ -25,18 +25,21 @@ services:
     network_mode: host
     ipc: host
 
-    # GPU нужен Gazebo для аппаратного рендера (OpenGL).
+    # GPU нужен Gazebo для аппаратного рендера через EGL (headless) или X11 (GUI).
+    # Headless (bag-коллекция): DISPLAY не нужен, gz sim --headless-rendering.
+    # GUI (локальный ноут): раскомментировать DISPLAY + volume /tmp/.X11-unix
+    #   и выполнить на хосте: xhost +local:root
     runtime: nvidia
     environment:
-      - DISPLAY=${DISPLAY}
-      - QT_X11_NO_MITSHM=1
+      # - DISPLAY=${DISPLAY}               # раскомментировать для GUI-режима
+      # - QT_X11_NO_MITSHM=1              # раскомментировать для GUI-режима
       - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all      # graphics+compute: нужно для рендера
+      - NVIDIA_DRIVER_CAPABILITIES=all      # graphics+compute: нужно для EGL/рендера
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
     volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw    # проброс дисплея для GUI Gazebo
+      # - /tmp/.X11-unix:/tmp/.X11-unix:rw  # раскомментировать для GUI-режима
       - ./worlds:/root/worlds:rw            # SDF-миры и модели дрона
       - ./output:/root/output:rw
 
