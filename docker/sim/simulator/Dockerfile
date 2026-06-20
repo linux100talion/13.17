@@ -44,10 +44,17 @@ RUN git clone --recurse-submodules --depth 1 -b Copter-4.5 \
         https://github.com/ArduPilot/ardupilot.git
 WORKDIR /root/ardupilot
 RUN USER=root Tools/environment_install/install-prereqs-ubuntu.sh -y || true
+# pexpect и future нужны waf; prereqs их не ставит стабильно внутри Docker.
+RUN pip3 install pexpect future
 # waf-сборка SITL (--board sitl). Среда из prereqs уже в ~/.bashrc.
 RUN . ~/.profile 2>/dev/null; . ~/.bashrc 2>/dev/null; \
     ./waf configure --board sitl && ./waf copter
 ENV PATH="/root/ardupilot/build/sitl/bin:/root/ardupilot/Tools/autotest:${PATH}"
+
+# --- 3b. GStreamer dev (нужен ardupilot_gazebo cmake: gstreamer-app-1.0) ---
+RUN apt-get update && apt-get install -y \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # --- 4. Плагин ardupilot_gazebo (мост ArduPilot <-> Gazebo Harmonic) ---
 ENV GZ_VERSION=harmonic
