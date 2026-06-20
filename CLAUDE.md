@@ -227,6 +227,22 @@ MAVROS ← mavlink_router ← SITL`. Команды — в `docker/sim/README.md
 
 ---
 
+# Облачный прогон — `gcp/`
+
+GPU/CPU-прогоны torch/CUDA/ROS2, вынесенные с ноута/Jetson на GCE. Обёртки над
+`gcloud` для инстанса `dev-workspace-1317` + bootstrap нового бокса. Подробности
+и дисциплина (build-box, арх-привязка) — в `gcp/CLAUDE.md`.
+
+**Поднятие нового GCE-бокса — через `gcp/bootstrap_gce.sh`** (не вручную):
+запускается НА инстансе, ставит Node+Claude Code, клонирует репу и **подхватывает
+память из `gcp/memory/`** (едет в самой репе; tarball/scp — опц. override).
+```
+./gcp/bootstrap_gce.sh [REPO_DIR] [MEMORY_TARBALL]
+```
+Память (`gcp/memory/`) — снимок `~/.claude/projects/-root-13-17/memory`; держать
+синхронной, чтобы новый бокс стартовал с тем же контекстом. Дальше — чек-лист
+`gcp/c3_gce_setup.txt` (зависимости + прогон пайплайна), план — `gcp/c3_TODO.txt`.
+
 ## Репозиторий
 
 - GitHub: `https://github.com/linux100talion/13.17`, ветка `main`
