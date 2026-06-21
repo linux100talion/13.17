@@ -50,7 +50,7 @@ class OpenHDStreamer(Node):
 
         pipeline = (
             "appsrc ! videoconvert ! "
-            f"x264enc tune=zerolatency speed-preset=ultrafast bitrate={bitrate} ! "
+            f"openh264enc bitrate={bitrate * 1000} ! "
             f"rtph264pay ! udpsink host={host} port={port} sync=false"
         )
         self.writer = cv2.VideoWriter(

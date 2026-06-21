@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-vision-msgs \
     ros-humble-mavros \
     ros-humble-mavros-extras \
+    ros-humble-image-transport \
     python3-colcon-common-extensions \
     python3-pip python3-dev python3-numpy \
     build-essential cmake git pkg-config wget unzip \
@@ -114,8 +115,8 @@ RUN wget -q https://raw.githubusercontent.com/mavlink/mavros/master/mavros/scrip
 RUN pip3 install --no-cache-dir torch torchvision \
         --index-url https://download.pytorch.org/whl/cu121 \
     && pip3 install --no-cache-dir kornia \
-    && pip3 install --no-cache-dir --no-deps \
-        git+https://github.com/cvg/LightGlue.git
+    && git clone --depth 1 https://github.com/cvg/LightGlue.git /opt/lightglue \
+    && echo '/opt/lightglue' > /usr/local/lib/python3.10/dist-packages/lightglue.pth
 # --- 7. FAISS + DINOv2 для Нейросети №2 (nn2_scene, топологическая карта) ---
 # DINOv2 тянется в рантайме через torch.hub (код+веса -> ~/.cache/torch/hub),
 # использует уже стоящий torch — отдельный pip не нужен. faiss-cpu тянет только
