@@ -14,7 +14,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help host-setup build up sim nav run stop down restart ps logs nav-rebuild clean
+.PHONY: help host-setup build up sim nav run stop down restart ps logs nav-rebuild capture-frames clean
 
 help:            ## показать список целей
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -55,6 +55,9 @@ logs:            ## хвост логов запущенных нод (output/*.
 nav-rebuild:     ## принудительная пересборка workspace в nav (colcon)
 	docker exec $(NAV) bash -c 'cd /root/sim_ws && rm -rf build install log'
 	$(MAKE) nav
+
+capture-frames:  ## снять N кадров из Gazebo мира → worlds/preview/*.png  (N=5 default, N=10 пример)
+	bash scripts/capture_frames.sh $(N)
 
 clean: down      ## down + удалить образы и тома стека
 	$(DC) down --rmi local --volumes

@@ -17,3 +17,7 @@ tuner_cpu
 # Python
 __pycache__/
 *.pyc
+
+# Симуляция — временные выходные данные
+docker/sim/output/
+docker/sim/worlds/preview/*.bag
