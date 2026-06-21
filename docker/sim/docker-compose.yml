@@ -48,7 +48,9 @@ services:
 
   # 2. РОУТЕР MAVLINK: разводит телеметрию SITL между MAVROS, QGC и кастомными нодами.
   mavlink_router:
-    image: radarku/mavlink-router:latest
+    build:
+      context: ./mavlink_router
+      dockerfile: Dockerfile
     container_name: p1317_mavlink_router
     restart: unless-stopped
     network_mode: host
