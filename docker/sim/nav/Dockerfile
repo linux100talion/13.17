@@ -122,6 +122,8 @@ RUN pip3 install --no-cache-dir torch torchvision \
 # numpy (без opencv -> наш CUDA-OpenCV не шадовит). Для больших карт можно
 # заменить на faiss-gpu (тяжелее, привязан к CUDA-сборке).
 RUN pip3 install --no-cache-dir faiss-cpu
+# OpenCV собран против NumPy 1.x; torch/faiss тянут 2.x — пинуем обратно.
+RUN pip3 install --no-cache-dir "numpy<2"
 
 WORKDIR /root/sim_ws
 
