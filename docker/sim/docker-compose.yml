@@ -43,6 +43,7 @@ services:
       - ./worlds:/root/worlds:rw            # SDF-миры и модели дрона
       - ./output:/root/output:rw
       - ./scripts:/scripts:ro               # sim_up.sh запускается автоматически
+      - ./config/sitl-extra.parm:/root/sitl-extra.parm:ro  # доп. параметры SITL
 
     # sim_up.sh стартует Gazebo+SITL+bridge в фоне, потом tail держит контейнер.
     # Итерация без пересоздания: docker compose stop && docker compose start
