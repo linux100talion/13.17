@@ -14,7 +14,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help host-setup build up sim nav run stop down restart ps logs nav-rebuild capture-frames clean
+.PHONY: help host-setup build up sim nav run stop down restart restart-all ps logs nav-rebuild capture-frames clean
 
 help:            ## показать список целей
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -42,6 +42,13 @@ stop:            ## остановить процессы в контейнер�
 	-docker exec $(NAV) pkill -f 'sim_nav.launch|mavros_node|camera_node|feature_tracker|vins_estimator|bayerizer'
 
 restart: stop sim nav  ## перезапустить ноды без пересборки образов
+
+restart-all:         ## полный перезапуск: down → up → sim → nav (чистый лист)
+	$(DC) down
+	$(DC) up -d
+	@sleep 3
+	docker exec -i $(SIM) bash -s < scripts/sim_up.sh
+	docker exec -i $(NAV) bash -s < scripts/nav_up.sh
 
 down:            ## погасить и удалить контейнеры
 	$(DC) down

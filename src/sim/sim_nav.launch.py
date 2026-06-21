@@ -17,7 +17,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, IncludeLaunchDescription, TimerAction
+from launch.actions import IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
@@ -29,25 +29,10 @@ def generate_launch_description():
     use_sim_time = {"use_sim_time": True}
 
     return LaunchDescription([
-        # 1. Байеризатор: Gazebo RGB -> /dev/rawbayer (standalone-скрипт).
-        #    use_sim_time здесь не влияет (он не публикует stamped-сообщения),
-        #    выставлен для единообразия.
-        ExecuteProcess(
-            cmd=[
-                "python3", "/root/sim_ws/src/sim/bayerizer.py",
-                "--ros-args",
-                "-p", "input_topic:=/camera/image_raw",
-                "-p", f"device:={DEVICE}",
-                "-p", "pattern:=GRBG",
-                "-p", "use_sim_time:=true",
-            ],
-            output="screen",
-        ),
-
-        # 2-4. camera_node и VINS стартуют с задержкой 4 с.
-        #      Байеризатор открывает /dev/rawbayer и пишет инициализирующий кадр
-        #      в __init__() — только ПОСЛЕ этого v4l2loopback отвечает на
-        #      G_FMT(CAPTURE). 4 с достаточно для ROS-инициализации байеризатора.
+        # 1-3. camera_node и VINS стартуют с задержкой 4 с.
+        #      Байеризатор запускается ВНЕ этого launch (в nav_up.sh) чтобы его
+        #      крах/остановка не убивала весь launch. nav_up.sh ждёт активации
+        #      /dev/rawbayer перед вызовом этого launch-файла.
         TimerAction(period=4.0, actions=[
 
             # Камера-нода: /dev/rawbayer -> /image_mono (VINS) + /image_color
