@@ -3,7 +3,9 @@
 #
 # Типичная итерация разработки (НЕ удаляет контейнеры — быстро):
 #   make restart-all      # stop → start; скрипты запускаются автоматически
-#   make logs             # смотреть что поднялось
+#   make wait             # ждать пока nav_up.sh завершится («nav: готово»)
+#   make status           # что запустилось (✓/✗), последние ошибки из логов
+#   make logs             # непрерывный хвост output/*.log
 #
 # Первый запуск / пересборка образов:
 #   make host-setup       # хост: v4l2loopback + xhost
@@ -27,7 +29,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs nav-rebuild capture-frames clean
+.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild capture-frames clean
 
 help:            ## показать список целей
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -61,8 +63,38 @@ fresh-start:     ## полный сброс: down → up (пересоздать
 down:            ## погасить и удалить контейнеры
 	$(DC) down
 
-ps:              ## статус контейнеров
+ps:              ## статус контейнеров (docker compose ps)
 	$(DC) ps
+
+status:          ## что запустилось, что упало (процессы + последние ошибки)
+	@echo "── simulator ──────────────────────────────────"
+	@docker exec $(SIM) bash -c '\
+	  ok(){ pgrep -f "$$1" >/dev/null && echo "  ✓ $$2" || echo "  ✗ $$2 — НЕ ЗАПУЩЕН"; }; \
+	  ok "gz sim"          "gz sim (Gazebo)"; \
+	  ok "arducopter"      "SITL (arducopter)"; \
+	  ok "ros_gz_bridge"   "ros_gz_bridge"; \
+	  echo; \
+	  echo "  -- последние ошибки sitl.log --"; \
+	  grep -i "error\|crash\|abort\|fail" /root/output/sitl.log 2>/dev/null | tail -3 || true'
+	@echo "── nav ─────────────────────────────────────────"
+	@docker exec $(NAV) bash -c '\
+	  ok(){ pgrep -f "$$1" >/dev/null && echo "  ✓ $$2" || echo "  ✗ $$2 — НЕ ЗАПУЩЕН"; }; \
+	  ok "bayerizer\.py"                   "bayerizer"; \
+	  ok "camera_pkg/lib/camera_pkg"       "camera_node"; \
+	  ok "feature_tracker/feature_tracker" "feature_tracker"; \
+	  ok "vins_estimator/vins_estimator"   "vins_estimator"; \
+	  ok "mavros_node"                     "MAVROS"; \
+	  echo; \
+	  echo "  -- последние ошибки sim_nav.log --"; \
+	  grep -i "\[ERROR\]\|died\|abort\|NumPy\|disorder" /root/sim_ws/output/sim_nav.log 2>/dev/null | tail -5 || true; \
+	  echo "  -- mavros --"; \
+	  grep -i "error\|FCU:\|connected\|timeout" /root/sim_ws/output/mavros.log 2>/dev/null | tail -3 || true'
+
+wait:            ## ждать пока nav_up.sh напишет «nav: готово» (до 5 мин)
+	@echo "Жду завершения nav_up.sh..."
+	@timeout 300 bash -c '\
+	  until docker logs p1317_nav 2>&1 | grep -q "nav: готово"; do sleep 3; done' \
+	  && echo "nav: готово" || echo "TIMEOUT (5 мин)"
 
 logs:            ## хвост логов всех нод (output/*.log)
 	tail -n 40 -f output/*.log
