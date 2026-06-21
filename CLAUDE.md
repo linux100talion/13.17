@@ -216,6 +216,49 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 8. **use_sim_time всем нодам** через `src/sim/sim_nav.launch.py`. Исключение —
    `ros_gz_bridge` (он источник `/clock`). MAVROS — отдельно (тонкий момент:
    часть штампов IMU от FCU).
+9. **Байеризатор вынесен из `sim_nav.launch.py`** (запускается в `nav_up.sh` как
+   отдельный `nohup`-процесс). Причина: если байеризатор падает внутри launch,
+   launch-менеджер убивает весь дерево (camera_node + VINS). Вне launch — изолирован.
+   `sim_nav.launch.py` содержит только `TimerAction(4с)` с camera_node/VINS и
+   `IncludeLaunchDescription` для nav_pkg.
+10. **Entrypoint-скрипты** (auto-start при старте контейнера). Скрипты
+    `scripts/sim_up.sh` и `scripts/nav_up.sh` монтируются в контейнеры как
+    `/scripts/:ro` и запускаются автоматически через `command:` в compose:
+    ```
+    command: bash -c "bash /scripts/sim_up.sh; exec tail -f /dev/null"
+    ```
+    Итерация разработки (без пересоздания контейнеров, ephemeral state жив):
+    ```
+    make restart-all   # docker compose stop → start
+    make logs          # tail -f output/*.log
+    ```
+    Полный сброс (пересоздать контейнеры):
+    ```
+    make fresh-start   # docker compose down → up
+    ```
+    `nav` зависит от `simulator` (`depends_on:`), таймаут ожидания `/dev/rawbayer`
+    увеличен до 60 с.
+11. **IMU timesync fix** — SITL JSON-протокол возвращает `no_time_sync`, FCU
+    использует wall-time; MAVROS с `use_sim_time:=true` считает смещение
+    `ROS_now(Gazebo) − FCU_wall` → offset дрейфует → IMU timestamps регрессируют
+    → VINS получает `imu message in disorder`. Решение двухслойное:
+    - MAVROS: `conn/timesync_mode:=NONE` — штампует все сообщения `rclcpp::now()`
+      (Gazebo sim-время), не синхронизирует часы с FCU.
+    - `vins_estimator/estimator_node.cpp`, `imu_callback`: монотонный патч —
+      если `t <= last_imu_t`, принудительно `t = last_imu_t + 1e-6` (вместо drop).
+      Нужен потому что `/clock` ~155 Гц < 250 Гц IMU → несколько сообщений
+      получают одинаковый timestamp.
+    Оба патча применяются в `nav_up.sh` (auto-clone + sed при клонировании vins_oss).
+12. **SITL параметры (ephemeral)** — применяются внутри контейнера `simulator`
+    в `/root/ardupilot/Tools/autotest/default_params/gazebo-iris.parm` при первом
+    запуске; теряются на `fresh-start` (пересоздание контейнера). Критичные:
+    ```
+    SCHED_LOOP_RATE 100   # иначе "Main loop slow (249Hz < 400Hz)" → краш FCU
+    FS_GCS_ENABLE 0       # отключить failsafe GCS
+    ARMING_CHECK 0        # упростить армирование в симуляции
+    DISARM_DELAY 0
+    ```
+    TODO: зафиксировать в образе (Dockerfile COPY или volume-монтирование .parm).
 
 ## Мир — Military fortress
 
@@ -244,17 +287,34 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 
 ## Полный пайплайн
 
-`gz sim (мир+дрон) → SITL ←→ ArduPilotPlugin → ros_gz_bridge (camera + /clock)
-→ bayerizer → /dev/rawbayer → camera_node → /image_mono → VINS;
-MAVROS ← mavlink_router ← SITL`. Команды — в `docker/sim/README.md`.
+```
+gz sim (мир+дрон)
+  → ArduPilotPlugin@9002 ←→ SITL → tcp:5760 → mavlink_router → MAVROS
+  → ros_gz_bridge: /camera/image_raw + /clock
+  → bayerizer.py (RGB→Bayer16, nohup, изолирован от VINS)
+  → /dev/rawbayer (v4l2loopback, хост)
+  → camera_node (device:=/dev/rawbayer) → /image_mono → VINS feature_tracker
+                                        → /image_color → nav_pkg (nn1/nn2)
+  → vins_estimator → /vins_estimator/odometry → ray_tracer → /mavros/vision_pose/pose
+```
 
-## ⚠️ Не протестировано без Gazebo (проверить на ноуте)
+**Запуск (после `make host-setup` и `make build`):**
+```bash
+make up           # создать контейнеры; sim_up.sh + nav_up.sh запустятся автоматически
+make logs         # смотреть output/*.log
+make restart-all  # быстрый перезапуск без пересоздания (stop → start)
+make fresh-start  # полный сброс (down → up, ephemeral state теряется)
+```
+
+## ⚠️ Не протестировано без Gazebo / известные проблемы
 
 - Вложенные `<include>` в `mili_map` (если карта не появится — расплющить)
 - `mt_background` (heightmap) — может ломать загрузку
 - Scope `iris_with_standoffs::base_link` (крепление камеры)
-- Соединение SITL (порт 9002), синхронизация IMU/камеры под `use_sim_time`
 - ✅ Формат v4l2loopback — решено: BGR4-транспорт + eager init байеризатора
+- ✅ IMU disorder — решено: `timesync_mode:=NONE` + монотонный патч в estimator_node.cpp
+- ✅ Main loop slow — решено: `SCHED_LOOP_RATE 100` в .parm (ephemeral, см. п.12)
+- ⚠️ SITL .parm теряется на `fresh-start` — TODO: зафиксировать в образе
 
 ---
 
