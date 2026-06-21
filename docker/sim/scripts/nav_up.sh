@@ -26,6 +26,42 @@ if [ ! -d src/vins_oss ]; then
     # IMU QoS: MAVROS публикует BEST_EFFORT → подписка тоже должна быть BEST_EFFORT
     sed -i '357s/rclcpp::QoS(rclcpp::KeepLast(2000))/rclcpp::QoS(rclcpp::KeepLast(2000)).best_effort()/' \
         src/vins_oss/vins_estimator/src/estimator_node.cpp
+
+    # IMU монотонный патч: /clock ~155 Гц < 250 Гц IMU → несколько сообщений
+    # получают одинаковый timestamp → VINS бросает "imu message in disorder".
+    # Вместо drop: принудительная монотонность t = last_imu_t + 1e-6;
+    # плюс перезапись stamp в сообщении чтобы нижнее обработка видела то же t.
+    python3 - <<'PYEOF'
+import re, sys
+fname = "src/vins_oss/vins_estimator/src/estimator_node.cpp"
+with open(fname) as f:
+    content = f.read()
+if "last_imu_t + 1e-6" in content:
+    print("  IMU monotonic patch: already applied")
+    sys.exit(0)
+# Оригинал: if (t <= last_imu_t) { WARN; return; } last_imu_t = t;
+pattern = r'(    if \(t <= last_imu_t\)\s*\{[^}]*\}\s*last_imu_t = t;)'
+replacement = (
+    "    // Sim-time updates slower than IMU (250Hz > 155Hz /clock):\n"
+    "    // multiple msgs share the same timestamp. Enforce monotonicity\n"
+    "    // instead of dropping — no IMU measurement is lost.\n"
+    "    if (t <= last_imu_t)\n"
+    "        t = last_imu_t + 1e-6;\n"
+    "    last_imu_t = t;\n"
+    "    // Rewrite stamp so downstream processing also sees corrected t.\n"
+    "    const_cast<sensor_msgs::msg::Imu*>(imu_msg.get())->header.stamp.sec = (int32_t)t;\n"
+    "    const_cast<sensor_msgs::msg::Imu*>(imu_msg.get())->header.stamp.nanosec =\n"
+    "        (uint32_t)((t - (int32_t)t) * 1e9);\n"
+    "    last_imu_t = imu_msg->header.stamp.sec+imu_msg->header.stamp.nanosec * (1e-9);"
+)
+new_content, n = re.subn(pattern, replacement, content, flags=re.DOTALL)
+if n == 0:
+    print("  IMU monotonic patch: WARNING pattern not found, skipped", file=sys.stderr)
+    sys.exit(0)
+with open(fname, "w") as f:
+    f.write(new_content)
+print(f"  IMU monotonic patch: applied ({n} location)")
+PYEOF
 fi
 
 # 1b. Сборка workspace — только если ещё не собран.
