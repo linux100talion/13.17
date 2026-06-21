@@ -24,7 +24,7 @@ if [ ! -d src/vins_oss ]; then
         src/vins_oss/vins_estimator/src/utility/visualization.cpp
 
     # IMU QoS: MAVROS публикует BEST_EFFORT → подписка тоже должна быть BEST_EFFORT
-    sed -i 's/rclcpp::QoS(rclcpp::KeepLast(2000)))/rclcpp::QoS(rclcpp::KeepLast(2000)).best_effort()/g' \
+    sed -i '357s/rclcpp::QoS(rclcpp::KeepLast(2000))/rclcpp::QoS(rclcpp::KeepLast(2000)).best_effort()/' \
         src/vins_oss/vins_estimator/src/estimator_node.cpp
 fi
 
@@ -52,7 +52,7 @@ if ! pgrep -f "bayerizer.py" >/dev/null; then
     echo "  bayerizer -> $LOG/bayerizer.log"
     # Ждём пока байеризатор активирует capture-сторону v4l2loopback (eager-init).
     echo -n "  ожидаем /dev/rawbayer..."
-    for i in $(seq 1 30); do
+    for i in $(seq 1 60); do
         if v4l2-ctl -d /dev/rawbayer --get-fmt-video >/dev/null 2>&1; then
             echo " готово (${i}с)"
             break
