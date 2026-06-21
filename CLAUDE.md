@@ -177,6 +177,22 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
    Меняется только параметр `device`. Байеризатор: `src/sim/bayerizer.py`
    (паттерн GRBG по умолчанию). v4l2loopback ставится на хосте (`modprobe`,
    симлинк `/dev/rawbayer`), пробрасывается в `nav` через `devices:`.
+
+   **Особенности v4l2loopback (задокументированы при отладке на GCE):**
+   - Поддерживает **только BGR4** (32-bit BGRA). BA10/Y16 — EINVAL.
+   - `VIDIOC_S_FMT` требует буфер **208 байт** (не 204): `v4l2_format` на
+     x86_64 имеет 4 байта padding между `type` и union из-за выравнивания
+     8-байтного указателя `v4l2_window.clips`. Используем `ctypes` с
+     `_align = c_uint64` для автоматического учёта padding.
+   - `ready_for_capture` (доступность G_FMT для capture-стороны) **ставится
+     только после первого `write()`**, не после S_FMT. Поэтому байеризатор
+     открывает `/dev/rawbayer` и пишет один нулевой кадр в `__init__()`.
+   - camera_node стартует с задержкой **4 с** (`TimerAction` в
+     `sim_nav.launch.py`), чтобы байеризатор успел активировать capture-сторону.
+   - camera_node читает `sizeimage=3686400` (BGR4 1280×720×4), но проверяет
+     `frame_size_ >= w*h*2` и берёт только первые `w*h*2 = 1843200` байт
+     как `CV_16UC1`. Байеризатор пишет bayer16-данные + нули-паддинг до sizeimage.
+   - `modprobe v4l2loopback ... width=1280 height=720` — подсказка по умолчанию.
 5. **isaac_ros удалён** — драйвер камеры не поддерживает Argus.
 6. **Разрешение 1280×720** — под него захардкожена `camera_node` и посчитан
    `sim.yaml`. Камеру дрона в Gazebo держать 1280×720 (не 1920×1200).
@@ -223,7 +239,7 @@ MAVROS ← mavlink_router ← SITL`. Команды — в `docker/sim/README.md
 - `mt_background` (heightmap) — может ломать загрузку
 - Scope `iris_with_standoffs::base_link` (крепление камеры)
 - Соединение SITL (порт 9002), синхронизация IMU/камеры под `use_sim_time`
-- Формат BA10 на v4l2loopback (нода берёт `Sizeimage` = w*h*2)
+- ✅ Формат v4l2loopback — решено: BGR4-транспорт + eager init байеризатора
 
 ---
 
