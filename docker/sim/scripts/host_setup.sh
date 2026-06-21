@@ -12,9 +12,11 @@ xhost +local:root || true
 #    Модуль ядра, в docker НЕ ставится; создаётся на хосте, пробрасывается в nav.
 if ! lsmod | grep -q '^v4l2loopback'; then
     sudo modprobe v4l2loopback devices=1 video_nr=9 \
-        card_label="rawbayer" exclusive_caps=0
+        card_label="rawbayer" exclusive_caps=0 \
+        width=1280 height=720
 fi
 # Фиксированное имя: docker-compose пробрасывает именно /dev/rawbayer.
 sudo ln -sf /dev/video9 /dev/rawbayer
+sudo chmod 666 /dev/video9 /dev/rawbayer 2>/dev/null || true
 
 echo "host: DISPLAY=${DISPLAY:-<не задан>}, /dev/rawbayer -> /dev/video9 готовы"

@@ -17,7 +17,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, IncludeLaunchDescription
+from launch.actions import ExecuteProcess, IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
@@ -44,36 +44,41 @@ def generate_launch_description():
             output="screen",
         ),
 
-        # 2. Камера-нода: /dev/rawbayer -> /image_mono (VINS) + /image_color
-        #    (nav-сторона). OpenHD из камеры ВЫКЛ (stream_openhd:=false по
-        #    умолчанию) — поток собирает openhd_streamer из nav.launch.py.
-        #    Штампует кадр через get_clock()->now() => уважает use_sim_time.
-        Node(
-            package="camera_pkg",
-            executable="camera_node",
-            output="screen",
-            parameters=[use_sim_time, {"device": DEVICE}],
-        ),
+        # 2-4. camera_node и VINS стартуют с задержкой 4 с.
+        #      Байеризатор открывает /dev/rawbayer и пишет инициализирующий кадр
+        #      в __init__() — только ПОСЛЕ этого v4l2loopback отвечает на
+        #      G_FMT(CAPTURE). 4 с достаточно для ROS-инициализации байеризатора.
+        TimerAction(period=4.0, actions=[
 
-        # 3. VINS feature tracker.
-        Node(
-            package="feature_tracker",
-            executable="feature_tracker",
-            output="screen",
-            parameters=[use_sim_time, {"config_file": CFG}],
-        ),
+            # Камера-нода: /dev/rawbayer -> /image_mono (VINS) + /image_color
+            Node(
+                package="camera_pkg",
+                executable="camera_node",
+                output="screen",
+                parameters=[use_sim_time, {"device": DEVICE}],
+            ),
 
-        # 4. VINS estimator.
-        Node(
-            package="vins_estimator",
-            executable="vins_estimator",
-            output="screen",
-            parameters=[use_sim_time, {"config_file": CFG}],
-            remappings=[
-                ("/feature_tracker/feature", "/feature"),
-                ("/feature_tracker/restart", "/restart"),
-            ],
-        ),
+            # VINS feature tracker.
+            Node(
+                package="feature_tracker",
+                executable="feature_tracker",
+                output="screen",
+                parameters=[use_sim_time, {"config_file": CFG}],
+            ),
+
+            # VINS estimator.
+            Node(
+                package="vins_estimator",
+                executable="vins_estimator",
+                output="screen",
+                parameters=[use_sim_time, {"config_file": CFG}],
+                remappings=[
+                    ("/feature_tracker/feature", "/feature"),
+                    ("/feature_tracker/restart", "/restart"),
+                ],
+            ),
+
+        ]),
 
         # 5. nav-сторона: nn1_anchor (~1 Гц) + nn2_scene (~3 с) + openhd_streamer
         #    (даунлинк в OpenHD с оверлеем детекций). Подписаны на /image_color.
