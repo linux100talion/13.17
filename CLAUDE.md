@@ -172,6 +172,32 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 | `mavlink_router` | radarku/mavlink-router | — | раздача MAVLink по UDP |
 | `nav` | nvidia/cuda 12.2 + ros-base | compute | VINS + камера-нода + нейросети + MAVROS |
 
+## Bind mounts (тип volumes в compose)
+
+Все `volumes:` в `docker-compose.yml` — **bind mounts** (не Docker-volumes).
+Bind mount монтирует конкретный путь с хоста прямо в контейнер; Docker-volumes
+управляются самим Docker — мы их не используем.
+
+| Bind mount | Контейнер | Зачем |
+|---|---|---|
+| `./scripts:/scripts:ro` | simulator, nav | entrypoint-скрипты: редактируются на хосте, применяются сразу без пересборки образа |
+| `./config/sitl-extra.parm:/root/sitl-extra.parm:ro` | simulator | параметры SITL (SCHED_LOOP_RATE 100 и др.) — выживают при `fresh-start` |
+| `./worlds:/root/worlds:rw` | simulator | SDF-миры и модели дрона |
+| `./output:/root/output:rw` | simulator | логи → `make logs` читает с хоста |
+| `../../src/nav:/root/sim_ws/src/nav` | nav | исходники nav_pkg: пишешь на хосте, colcon build в контейнере |
+| `../../src/camera`, `src/sim`, `src/vins` | nav | аналогично — код на хосте |
+| `./output:/root/sim_ws/output` | nav | логи nav-стороны → тот же каталог `docker/sim/output/` |
+
+**Что выживает при `restart-all` (stop/start) и что теряется при `fresh-start` (down/up):**
+
+- **Выживает** всё, что лежит в bind mounts — данные на хосте, контейнер просто
+  переподключается к тем же путям.
+- **Теряется** всё внутри контейнера вне bind mounts: `vins_oss` (клон внутри
+  `/root/sim_ws/src/`), установленные через `apt`/`pip` пакеты, собранный
+  `build/install` colcon-workspace. Поэтому `nav_up.sh` содержит auto-clone
+  vins_oss с патчами, а критичные apt-пакеты (`ros-humble-image-transport`,
+  `numpy<2`) должны быть в Dockerfile.
+
 ## Ключевые решения по симуляции
 
 1. **Gazebo Harmonic** (не Fortress) — по concept.txt (плагины `gz-sim-*`).
