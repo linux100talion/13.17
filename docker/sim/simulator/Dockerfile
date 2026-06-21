@@ -40,7 +40,7 @@ RUN apt-get update && apt-get install -y \
 # --- 3. ArduPilot SITL (полётный контроллер в софте) ---
 # Клонируем исходники, ставим зависимости, собираем arducopter под SITL.
 WORKDIR /root
-RUN git clone --recurse-submodules --depth 1 -b Copter-4.5 \
+RUN git clone --recurse-submodules --depth 1 -b master \
         https://github.com/ArduPilot/ardupilot.git
 WORKDIR /root/ardupilot
 RUN USER=root Tools/environment_install/install-prereqs-ubuntu.sh -y || true

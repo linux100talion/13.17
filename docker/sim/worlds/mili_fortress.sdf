@@ -82,12 +82,15 @@
       <uri>model://mili_map</uri>
     </include>
 
-    <!-- Фон-горы (heightmap). РИСК: heightmap в gz-sim. Если ломает загрузку —
-         закомментировать этот блок. -->
+    <!-- Фон-горы (heightmap) ОТКЛЮЧЁН: mt_background/model.sdf ссылается на
+         текстуры Ogre Classic (file://media/materials/textures/*.png) которых
+         нет в Gazebo Harmonic → "Failed to load a world". -->
+    <!--
     <include>
       <static>true</static>
       <uri>model://mt_background</uri>
     </include>
+    -->
 
     <!-- ====== Дрон: iris + камера + плагин ArduPilot ======
          Спавн на открытой площадке. ArduPilotPlugin внутри слушает SITL на
