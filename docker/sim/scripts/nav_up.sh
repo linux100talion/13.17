@@ -19,9 +19,11 @@ if [ ! -d src/vins_oss ]; then
     echo "  клонируем VINS-MONO-ROS2..."
     git clone --depth 1 https://github.com/dongbo19/VINS-MONO-ROS2 src/vins_oss
 
-    # rclcpp::Duration(0) — убран single-int конструктор в Humble
-    sed -i 's/rclcpp::Duration(0)/rclcpp::Duration(0, 0)/g' \
-        src/vins_oss/vins_estimator/src/utility/visualization.cpp
+    # rclcpp::Duration(0) — убран single-int конструктор в Humble.
+    # Затронуты несколько файлов в vins_oss.
+    find src/vins_oss -name '*.cpp' -o -name '*.h' | \
+        xargs grep -l 'rclcpp::Duration(0)' | \
+        xargs sed -i 's/rclcpp::Duration(0)/rclcpp::Duration(0, 0)/g'
 
     # IMU QoS: MAVROS публикует BEST_EFFORT → подписка тоже должна быть BEST_EFFORT
     sed -i '357s/rclcpp::QoS(rclcpp::KeepLast(2000))/rclcpp::QoS(rclcpp::KeepLast(2000)).best_effort()/' \
@@ -39,9 +41,15 @@ with open(fname) as f:
 if "last_imu_t + 1e-6" in content:
     print("  IMU monotonic patch: already applied")
     sys.exit(0)
-# Оригинал: if (t <= last_imu_t) { WARN; return; } last_imu_t = t;
-pattern = r'(    if \(t <= last_imu_t\)\s*\{[^}]*\}\s*last_imu_t = t;)'
+# Оригинал (VINS-MONO-ROS2): if проверяет stamp напрямую, без переменной t.
+# При disorder: RCUTILS_LOG_WARN + return (drop).
+pattern = (
+    r'    if \(\(imu_msg->header\.stamp\.sec\+imu_msg->header\.stamp\.nanosec \* \(1e-9\)\) <= last_imu_t\)\s*'
+    r'\{\s*RCUTILS_LOG_WARN\("imu message in disorder!"\);\s*return;\s*\}\s*'
+    r'last_imu_t = imu_msg->header\.stamp\.sec\+imu_msg->header\.stamp\.nanosec \* \(1e-9\);'
+)
 replacement = (
+    "    double t = imu_msg->header.stamp.sec + imu_msg->header.stamp.nanosec * 1e-9;\n"
     "    // Sim-time updates slower than IMU (250Hz > 155Hz /clock):\n"
     "    // multiple msgs share the same timestamp. Enforce monotonicity\n"
     "    // instead of dropping — no IMU measurement is lost.\n"
