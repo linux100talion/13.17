@@ -97,9 +97,15 @@ services:
       - ../../src/sim:/root/sim_ws/src/sim       # симуляционная обвязка
       - ../../src/nav:/root/sim_ws/src/nav       # нейросети навигации (пока пусто)
       - ../../src/camera:/root/sim_ws/src/camera
+      - nav_colcon_build:/root/sim_ws/build      # colcon build — выживает при fresh-start
+      - nav_colcon_install:/root/sim_ws/install  # colcon install — выживает при fresh-start
       - ./output:/root/sim_ws/output
       - ./scripts:/scripts:ro                    # nav_up.sh запускается автоматически
 
     # nav_up.sh: colcon build (если нет) + bayerizer + VINS launch + MAVROS.
     # Итерация без пересоздания: docker compose stop && docker compose start
     command: bash -c "bash /scripts/nav_up.sh; exec tail -f /dev/null"
+
+volumes:
+  nav_colcon_build:   # colcon build artifacts (build/): выживают при fresh-start, сносятся make clean
+  nav_colcon_install: # colcon install artifacts (install/): аналогично

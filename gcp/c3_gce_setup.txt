@@ -33,6 +33,19 @@
     инструменты работают по ФС инстанса (torch/CUDA/ROS рядом).
 
 
+── 0c. СИМУЛЯЦИОННЫЙ СТЕК (docker/sim/) — ПРЕДВАРИТЕЛЬНЫЕ ТРЕБОВАНИЯ ────────────
+  Перед первым `make up` нужно клонировать форк VINS на хост в фиксированный путь:
+        git clone --branch 1317_debug \
+            https://github.com/linux100talion/VINS-MONO-ROS2 \
+            /root/VINS-MONO-ROS2
+  Форк монтируется в nav-контейнер как bind mount (docker-compose.yml):
+        /root/VINS-MONO-ROS2 → /root/sim_ws/src/vins_oss
+  Все патчи проекта (QoS, IMU skip, debug) живут в ветке 1317_debug форка —
+  nav_up.sh их не применяет. Артефакты colcon build/install хранятся в named
+  volumes (nav_colcon_build, nav_colcon_install) — выживают при `make fresh-start`;
+  для принудительной пересборки: `make nav-rebuild`.
+
+
 ── 1. ЗАВИСИМОСТИ (ставить ОДИН раз) ────────────────────────────────────────────
   PYTORCH (CUDA):   pip torch (под CUDA инстанса; проверка torch.cuda.is_available()).
   DINOv2:           тянется в рантайме через torch.hub (нужен интернет 1-й раз) —
