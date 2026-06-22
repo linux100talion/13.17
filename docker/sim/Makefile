@@ -113,7 +113,7 @@ land:            ## посадка (режим LAND)
 	docker exec $(NAV) bash /lab/land.sh
 
 vins-watch:      ## мониторинг VINS: Initialization/NON_LINEAR/ошибки + odometry Hz
-	docker exec -it $(NAV) bash /lab/vins_watch.sh
+	docker exec -i $(NAV) bash /lab/vins_watch.sh
 
 capture-frames:  ## снять N кадров из Gazebo мира → worlds/preview/*.png  (N=5 default)
 	bash scripts/capture_frames.sh $(N)
