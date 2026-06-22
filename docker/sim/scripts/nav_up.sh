@@ -23,7 +23,14 @@ if [ ! -d src/vins_oss/vins_estimator ]; then
 fi
 echo "  vins_oss: $(git -C src/vins_oss log --oneline -1 2>/dev/null || echo 'не git-репо')"
 
-# 1b. numpy<2 — cv_bridge в overlay собран против NumPy 1.x; NumPy 2.x → ABI-краш.
+# 1b. image_transport — нужен feature_tracker/pose_graph из форка linux100talion.
+#     Должен быть в Dockerfile; fallback на apt если образ старый (до rebuild).
+if ! ros2 pkg list 2>/dev/null | grep -q "^image_transport$"; then
+    echo "  image_transport не найден, ставим через apt..."
+    apt-get update -q && apt-get install -y -q ros-humble-image-transport
+fi
+
+# 1d. numpy<2 — cv_bridge в overlay собран против NumPy 1.x; NumPy 2.x → ABI-краш.
 #     Проверяем один раз: если уже <2 — ничего не делаем.
 if python3 -c "import numpy; exit(0 if tuple(int(x) for x in numpy.__version__.split('.')[:2]) < (2,0) else 1)" 2>/dev/null; then
     echo "  numpy: $(python3 -c 'import numpy; print(numpy.__version__)') — OK"
@@ -32,11 +39,11 @@ else
     pip3 install 'numpy<2' -q
 fi
 
-# 1c. Сборка workspace — только если ещё не собран.
+# 1e. Сборка workspace — только если ещё не собран.
 #     Для пересборки: make nav-rebuild (или rm -rf install внутри).
 if [ ! -f install/setup.bash ]; then
     echo "  colcon build ..."
-    colcon build
+    colcon build --packages-ignore ar_demo
 fi
 source install/setup.bash
 

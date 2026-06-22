@@ -100,7 +100,7 @@ logs:            ## хвост логов всех нод (output/*.log)
 	tail -n 40 -f output/*.log
 
 nav-rebuild:     ## принудительная пересборка colcon workspace в nav
-	docker exec $(NAV) bash -c 'cd /root/sim_ws && rm -rf build install log'
+	docker exec $(NAV) bash -c 'cd /root/sim_ws && rm -rf build/* install/* log'
 	$(MAKE) nav
 
 capture-frames:  ## снять N кадров из Gazebo мира → worlds/preview/*.png  (N=5 default)
