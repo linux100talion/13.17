@@ -29,7 +29,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild capture-frames clean
+.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm fly land vins-watch capture-frames clean
 
 help:            ## показать список целей
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -102,6 +102,18 @@ logs:            ## хвост логов всех нод (output/*.log)
 nav-rebuild:     ## принудительная пересборка colcon workspace в nav
 	docker exec $(NAV) bash -c 'cd /root/sim_ws && rm -rf build/* install/* log'
 	$(MAKE) nav
+
+arm:             ## армировать дрон и взлететь (ALT=3 по умолчанию)
+	docker exec $(NAV) bash /lab/arm_takeoff.sh $(ALT)
+
+fly:             ## запустить облёт квадрата для инициализации VINS (Ctrl+C для стопа)
+	docker exec -it $(NAV) python3 /lab/fly_square.py $(FLYARGS)
+
+land:            ## посадка (режим LAND)
+	docker exec $(NAV) bash /lab/land.sh
+
+vins-watch:      ## мониторинг VINS: Initialization/NON_LINEAR/ошибки + odometry Hz
+	docker exec -it $(NAV) bash /lab/vins_watch.sh
 
 capture-frames:  ## снять N кадров из Gazebo мира → worlds/preview/*.png  (N=5 default)
 	bash scripts/capture_frames.sh $(N)
