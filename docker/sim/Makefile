@@ -118,5 +118,8 @@ vins-watch:      ## мониторинг VINS: Initialization/NON_LINEAR/оши�
 capture-frames:  ## снять N кадров из Gazebo мира → worlds/preview/*.png  (N=5 default)
 	bash scripts/capture_frames.sh $(N)
 
+capture-scene:   ## полный прогон: рестарт→взлёт→облёт→запись→30 кадров→Google Drive (rclone)
+	bash ../../src/lab/capture_scene.sh
+
 clean: down      ## down + удалить образы и тома стека
 	$(DC) down --rmi local --volumes

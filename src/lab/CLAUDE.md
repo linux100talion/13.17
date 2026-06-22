@@ -26,6 +26,44 @@ make arm ALT=5      # взлёт на 5м
 docker exec p1317_nav bash /lab/arm_takeoff.sh 5
 ```
 
+### `capture_scene.sh` (+ `extract_frames.py`)
+Единый прогон диагностики камеры «от рестарта до заливки на Google Drive»:
+рестарт стека → арм/взлёт → запись rosbag `/image_color` параллельно с облётом
+квадрата → стоп/посадка → извлечение 30 кадров с шагом 1с в JPEG → заливка папки
+на Google Drive через `rclone`. `extract_frames.py` запускается внутри
+nav-контейнера (читает bag через `rosbag2_py`, декодит `cv_bridge`).
+
+```bash
+cd docker/sim && make capture-scene        # полный прогон с дефолтами
+# или напрямую с хоста (параметры через env):
+ALT=4 FLY_SECONDS=55 N_FRAMES=30 bash src/lab/capture_scene.sh
+GDRIVE_UP=0 bash src/lab/capture_scene.sh  # только снять кадры, без заливки
+```
+
+Параметры (env): `ALT`, `SIZE`, `SIDE_TIME`, `FLY_SECONDS`, `N_FRAMES`,
+`STEP_NS`, `TOPIC`, `NAV`, `GDRIVE_UP` (1/0), `GDRIVE_REMOTE` (default `gdrive`),
+`GDRIVE_DIR` (default `13.17/scene_img`).
+В начале прогона старые rosbag'ы (`output/scene_bag*`) удаляются; свежий bag
+этого прогона (2+ ГБ) **остаётся** в `docker/sim/output/scene_bag` для анализа.
+
+#### Настройка Google Drive (rclone, разово)
+Заливка идёт через `rclone` (remote по умолчанию `gdrive:`). Бокс headless,
+поэтому OAuth проходим в Google Cloud Shell и копируем готовый `rclone.conf`:
+
+```bash
+# В Google Cloud Shell:
+curl https://rclone.org/install.sh | sudo bash
+rclone config            # n → имя gdrive → drive → scope drive → auto config Yes
+# Скопировать конфиг на бокс (попадёт в домашку SSH-юзера):
+gcloud compute scp ~/.config/rclone/rclone.conf \
+    dev-workspace-1317:~/rclone.conf \
+    --zone europe-west4-a --project drone-13-17-workspace-2026
+# На боксе (под root) положить в дефолтный путь:
+mkdir -p /root/.config/rclone && mv /home/*/rclone.conf /root/.config/rclone/
+```
+
+Проверка: `rclone listremotes` должен показать `gdrive:`.
+
 ### `fly_square.py`
 Непрерывный облёт квадрата через `setpoint_position/local` на 10 Гц.
 Нужен для инициализации VINS: создаёт параллакс и IMU excitation.
