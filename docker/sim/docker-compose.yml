@@ -93,6 +93,7 @@ services:
 
     volumes:
       - ../../src/vins:/root/sim_ws/src/vins
+      - /root/VINS-MONO-ROS2:/root/sim_ws/src/vins_oss  # форк linux100talion/VINS-MONO-ROS2, ветка 1317_debug
       - ../../src/sim:/root/sim_ws/src/sim       # симуляционная обвязка
       - ../../src/nav:/root/sim_ws/src/nav       # нейросети навигации (пока пусто)
       - ../../src/camera:/root/sim_ws/src/camera

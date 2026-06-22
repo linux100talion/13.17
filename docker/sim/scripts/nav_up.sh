@@ -13,64 +13,15 @@ source /opt/overlay/install/setup.bash
 LOG=/root/sim_ws/output; mkdir -p "$LOG"
 cd /root/sim_ws
 
-# 1a. vins_oss — клонируется вне монтированного src/, поэтому исчезает при
-#     docker compose down. Клонируем и патчим если нет.
-if [ ! -d src/vins_oss ]; then
-    echo "  клонируем VINS-MONO-ROS2..."
-    git clone --depth 1 https://github.com/dongbo19/VINS-MONO-ROS2 src/vins_oss
-
-    # rclcpp::Duration(0) — убран single-int конструктор в Humble.
-    # Затронуты несколько файлов в vins_oss.
-    find src/vins_oss -name '*.cpp' -o -name '*.h' | \
-        xargs grep -l 'rclcpp::Duration(0)' | \
-        xargs sed -i 's/rclcpp::Duration(0)/rclcpp::Duration(0, 0)/g'
-
-    # IMU QoS: MAVROS публикует BEST_EFFORT → подписка тоже должна быть BEST_EFFORT
-    sed -i '357s/rclcpp::QoS(rclcpp::KeepLast(2000))/rclcpp::QoS(rclcpp::KeepLast(2000)).best_effort()/' \
-        src/vins_oss/vins_estimator/src/estimator_node.cpp
-
-    # IMU монотонный патч: /clock ~155 Гц < 250 Гц IMU → несколько сообщений
-    # получают одинаковый timestamp → VINS бросает "imu message in disorder".
-    # Вместо drop: принудительная монотонность t = last_imu_t + 1e-6;
-    # плюс перезапись stamp в сообщении чтобы нижнее обработка видела то же t.
-    python3 - <<'PYEOF'
-import re, sys
-fname = "src/vins_oss/vins_estimator/src/estimator_node.cpp"
-with open(fname) as f:
-    content = f.read()
-if "last_imu_t + 1e-6" in content:
-    print("  IMU monotonic patch: already applied")
-    sys.exit(0)
-# Оригинал (VINS-MONO-ROS2): if проверяет stamp напрямую, без переменной t.
-# При disorder: RCUTILS_LOG_WARN + return (drop).
-pattern = (
-    r'    if \(\(imu_msg->header\.stamp\.sec\+imu_msg->header\.stamp\.nanosec \* \(1e-9\)\) <= last_imu_t\)\s*'
-    r'\{\s*RCUTILS_LOG_WARN\("imu message in disorder!"\);\s*return;\s*\}\s*'
-    r'last_imu_t = imu_msg->header\.stamp\.sec\+imu_msg->header\.stamp\.nanosec \* \(1e-9\);'
-)
-replacement = (
-    "    double t = imu_msg->header.stamp.sec + imu_msg->header.stamp.nanosec * 1e-9;\n"
-    "    // Sim-time updates slower than IMU (250Hz > 155Hz /clock):\n"
-    "    // multiple msgs share the same timestamp. Enforce monotonicity\n"
-    "    // instead of dropping — no IMU measurement is lost.\n"
-    "    if (t <= last_imu_t)\n"
-    "        t = last_imu_t + 1e-6;\n"
-    "    last_imu_t = t;\n"
-    "    // Rewrite stamp so downstream processing also sees corrected t.\n"
-    "    const_cast<sensor_msgs::msg::Imu*>(imu_msg.get())->header.stamp.sec = (int32_t)t;\n"
-    "    const_cast<sensor_msgs::msg::Imu*>(imu_msg.get())->header.stamp.nanosec =\n"
-    "        (uint32_t)((t - (int32_t)t) * 1e9);\n"
-    "    last_imu_t = imu_msg->header.stamp.sec+imu_msg->header.stamp.nanosec * (1e-9);"
-)
-new_content, n = re.subn(pattern, replacement, content, flags=re.DOTALL)
-if n == 0:
-    print("  IMU monotonic patch: WARNING pattern not found, skipped", file=sys.stderr)
-    sys.exit(0)
-with open(fname, "w") as f:
-    f.write(new_content)
-print(f"  IMU monotonic patch: applied ({n} location)")
-PYEOF
+# 1a. vins_oss — монтируется из хоста через bind mount (../../src/vins_oss).
+#     При fresh-start bind mount переподключается автоматически — клонировать не нужно.
+#     Все патчи (Humble, QoS, IMU skip, debug) живут в ветке 1317_debug форка:
+#     https://github.com/linux100talion/VINS-MONO-ROS2/tree/1317_debug
+if [ ! -d src/vins_oss/vins_estimator ]; then
+    echo "  ОШИБКА: src/vins_oss не смонтирован (проверь bind mount в docker-compose.yml)"
+    exit 1
 fi
+echo "  vins_oss: $(git -C src/vins_oss log --oneline -1 2>/dev/null || echo 'не git-репо')"
 
 # 1b. numpy<2 — cv_bridge в overlay собран против NumPy 1.x; NumPy 2.x → ABI-краш.
 #     Проверяем один раз: если уже <2 — ничего не делаем.
