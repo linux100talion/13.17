@@ -7,7 +7,7 @@ metadata:
   originSessionId: e91c61b2-3d22-4338-af7d-8631b0040ec7
 ---
 
-**Статус на 2026-06-21 (вечер):** весь критичный стек запущен, но VINS не удерживает трекинг.
+**Статус на 2026-06-22:** диагностирована и исправлена первопричина #1 — dt=1e-6 патч. Сборка идёт.
 
 ## Что работает
 
@@ -33,17 +33,28 @@ position: 0.01..., orientation: -0.10...
 `failureDetection()` триггерится сразу после init и сбрасывает solver_flag → INITIAL.
 `/odometry` топик есть в `ros2 topic list`, но сообщений нет.
 
-**Возможные причины:**
-1. IMU монотонный патч создаёт dt=1e-6 между дублированными timestamp → IMU preintegration даёт residuals несовместимые с визуальным решением → failureDetection() срабатывает
-2. Недостаточная визуальная текстура в mili_fortress на высоте ~10м → плохое SfM-решение
-3. Параметры шума IMU в sim.yaml (заниженные) создают слишком жёсткие ограничения
+## Диагностика 2026-06-22
 
-**Что пробовали:** полёт по квадрату 3 круга (5 сек каждая сторона), полёт кругами 120с с угловой скоростью 0.25 рад/с.
+**Наблюдения в полёте:**
+- `numerical unstable in preintegration` — нарастающие предупреждения
+- orientation вышел за [-π, π]: `5.83 -7.85 -3.72`
+- `throw img` продолжает появляться во время полёта
+- VINS падает обратно в инициализацию через ~10-15с
 
-**Why:** Без стабильного /odometry нет входа для ray_tracer → нет поправки дрейфа VINS → нет навигации.
+**Подтверждённая причина:** IMU патч `t = last_imu_t + 1e-6` создаёт цепочку N×1μs шагов (sim /clock ~155Hz < IMU 250Hz → несколько msg с одинаковым stamp). В preintegration: dt=1e-6, dt²=1e-12 ≈ near machine-epsilon → ковариационная матрица деградирует → VINS отвергает IMU измерения → failureDetection().
 
-**How to apply:** Следующий шаг — диагностировать failureDetection(). Варианты:
-- Отключить failure detection в estimator.cpp (закомментировать clearState())
-- Проверить IMU noise params в sim.yaml (acc_n, gyr_n, acc_w, gyr_w)
-- Увеличить параметр MIN_PARALLAX в sim.yaml
-- Посмотреть что за residuals возникают после init (добавить отладочный вывод)
+**Применённый фикс (2026-06-22):**
+- `estimator_node.cpp` imu_callback: заменено `t = last_imu_t + 1e-6` на `return` (skip duplicate)
+- `nav_up.sh` обновлён: новый паттерн skip + fallback-паттерн на старый 1e-6 для nav-rebuild
+- Сборка запущена, результат будет виден после перезапуска
+
+**Ожидаемый результат:** `numerical unstable in preintegration` должны исчезнуть; VINS должен удержать NON_LINEAR.
+
+**Если после фикса всё равно не держит:**
+- Проверить noise params в sim.yaml (acc_n, gyr_n, acc_w, gyr_w) — возможно слишком жёсткие
+- Проверить MIN_PARALLAX (текстура mili_fortress на высоте ~10м)
+- Отключить failure detection в estimator.cpp для изоляции проблемы
+
+**Why:** Без стабильного /odometry нет входа для ray_tracer → нет навигации.
+
+**How to apply:** После `make nav-rebuild` армировать и взлетать, смотреть sim_nav.log — должны появиться строки position: без `numerical unstable`.

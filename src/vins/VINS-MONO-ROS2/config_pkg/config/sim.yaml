@@ -44,24 +44,39 @@ projection_parameters:
    cy: 360.0
 
 
-# Онлайн-оценка задержки времени между камерой и IMU
-estimate_td: 1      # 1 - включить автоматическую подстройку, 0 - выключить
-td: 0.0             # Начальное предположение о задержке (в секундах)
+# Временная задержка камера<->IMU.
+# В симуляции оба источника штампуются sim-clock'ом → td=0, оценку отключаем.
+estimate_td: 0
+td: 0.0
 
-# Экстринсики (смещение IMU <-> Камера)
-estimate_extrinsic: 1
+# Экстринсики (смещение IMU <-> Камера).
+# estimate_extrinsic: 0 — фиксированный (не оцениваем онлайн).
+# В этом форке VINS: 0=fix, 1=optimize around initial guess, 2=no prior/calibrate.
+#
+# Конвенция: RIC — матрица поворота из тела (FLU: X вперёд, Y влево, Z вверх)
+# в camera-optical frame (Z вперёд в сцену, X вправо в кадре, Y вниз).
+# Камера в Gazebo смотрит вдоль +X camera_link (Classic-конвенция).
+# Вправо в кадре = -Y_link (Y_link = Y_body = влево), вниз = -Z_link.
+# Поза SDF: pitch=0.26 рад → X_link=[cos,0,-sin], Z_link=[sin,0,cos] в теле.
+#
+#   X_cam (вправо) = -Y_link = [0, -1, 0]
+#   Y_cam (вниз)   = -Z_link = [-sin(0.26), 0, -cos(0.26)] = [-0.257, 0, -0.966]
+#   Z_cam (вперёд) = +X_link = [cos(0.26), 0, -sin(0.26)] = [0.966, 0, -0.257]
+#
+# Проверка: RIC * g_body = RIC * [0,0,-9.81] = [0, 9.48, 2.52] — гравитация
+# указывает в +Y_cam (вниз в кадре), и чуть +Z_cam (вперёд, т.к. наклон 15°). ✓
+estimate_extrinsic: 0
 ex_calib_result_path: "/root/sim_ws/output/extrinsic.yaml"
 
-# Камера в model.sdf повёрнута вниз на pitch 0.26 рад (~15°). При
-# estimate_extrinsic:1 это лишь начальное приближение — VINS уточнит онлайн.
 extrinsicRotation: !!opencv-matrix
    rows: 3
    cols: 3
    dt: d
-   data: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+   data: [0, -1, 0,
+          -0.25708, 0, -0.96639,
+          0.96639, 0, -0.25708]
 
-# Из позы камеры в model.sdf: pose="0.15 0 0.05 ..." => [X, Y, Z] в метрах
-# (0.15 м вперёд, 0 вбок, 0.05 м выше центра тела).
+# Из позы камеры в model.sdf: pose="0.15 0 0.05 ..." => [X, Y, Z] в теле FLU.
 extrinsicTranslation: !!opencv-matrix
    rows: 3
    cols: 1
@@ -82,8 +97,8 @@ flow_back: 1
 # В симуляции нет вибраций рамы, поэтому значения acc_n/gyr_n возвращены к
 # базовым (в боевом конфиге они были подняты ~в 10 раз под вибрации). При
 # расхождении VINS на старте — подстрой под модель IMU из ardupilot_gazebo.
-acc_n: 0.08        # combat-уровень: маленький noise → huge sqrt_info → Jacobian>1e8 → numerical unstable
-gyr_n: 0.004       # combat-уровень: даёт ковариации разумного масштаба
-acc_w: 0.0004      # combat-уровень
-gyr_w: 2.0e-5      # combat-уровень
+acc_n: 0.08        # физически верно: нет вибраций рамы в sim (check2 был из-за ill-conditioned cov, не из-за acc_n)
+gyr_n: 0.004
+acc_w: 0.0004
+gyr_w: 2.0e-5
 g_norm: 9.81
