@@ -1,0 +1,18 @@
+# Пример rclone.conf для заливки кадров на Google Drive (remote "gdrive:").
+#
+# ⚠️ Это ШАБЛОН без секретов. Реальный конфиг с client_secret/refresh_token
+#    в git НЕ коммитим (репозиторий публичный) — он живёт только на боксе в
+#    /root/.config/rclone/rclone.conf. Как получить значения — см.
+#    gdrive_rclone_setup.md (OAuth client + OAuth Playground).
+#
+# Подставь свои значения вместо <...> и положи как /root/.config/rclone/rclone.conf
+# (либо собери командой `rclone config create gdrive drive ...` из gdrive_rclone_setup.md).
+
+[gdrive]
+type = drive
+client_id = <CLIENT_ID>.apps.googleusercontent.com
+client_secret = <CLIENT_SECRET>
+scope = drive
+# token: refresh_token обязателен; expiry можно оставить в прошлом —
+# rclone сам обновит access_token при первом обращении.
+token = {"access_token":"","token_type":"Bearer","refresh_token":"<REFRESH_TOKEN>","expiry":"2000-01-01T00:00:00Z"}

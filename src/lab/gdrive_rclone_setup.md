@@ -22,6 +22,8 @@ browser»). Обходной путь — получить refresh-токен ч
    **Важно:** опубликовать приложение — **Publishing status → Production**
    (иначе в режиме Testing refresh-токен умирает через 7 дней). На предупреждение
    «unverified» — просто соглашаешься.
+   В новом интерфейсе (Google Auth Platform) статус и Test users здесь:
+   [Audience](https://console.cloud.google.com/auth/audience?project=drone-13-17-workspace-2026).
 3. **Создать OAuth client** — [Credentials](https://console.cloud.google.com/apis/credentials?project=drone-13-17-workspace-2026)
    → **Create credentials → OAuth client ID** → тип **Web application** →
    в **Authorized redirect URIs** добавить:
@@ -68,3 +70,7 @@ rclone listremotes        # должен показать gdrive:
 ```
 
 После этого `make capture-scene` зальёт кадры в `gdrive:13.17/scene_img`.
+
+Шаблон конфига без секретов — `rclone.conf.example` (рядом). Реальный
+`rclone.conf` с `client_secret`/`refresh_token` в git **не коммитим**
+(репозиторий публичный) — он живёт только на боксе в `/root/.config/rclone/`.
