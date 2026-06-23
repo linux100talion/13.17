@@ -6,13 +6,13 @@
 # поэтому, чтобы поймать спот в другой зоне, диск туда переносится снапшотом:
 #   снапшот свежего диска → зональный диск в целевой зоне → spot-инстанс на нём.
 #
-# Три зоны — три скрипта (10–12_spot_gpu_a/b/c.sh), отличаются только TARGET_ZONE.
+# Три зоны — три скрипта ({a,b,c}_start.sh), отличаются только TARGET_ZONE.
 # Стратегия «ловли»: гоняем по очереди a → b → c, пока зона не отдаст T4.
 #
 # Тогглы (env):
-#   MACHINE_TYPE=n1-standard-4 ./12_spot_gpu_c.sh  # меньше host'ов → реже EXHAUSTED
-#   SPOT=0 ./12_spot_gpu_c.sh                       # on-demand вместо spot (дороже, стабильнее)
-#   REFRESH=1 ./12_spot_gpu_c.sh                    # перезалить устаревший диск целевой зоны из свежего снапшота
+#   MACHINE_TYPE=n1-standard-4 ./c_start.sh  # меньше host'ов → реже EXHAUSTED
+#   SPOT=0 ./c_start.sh                       # on-demand вместо spot (дороже, стабильнее)
+#   REFRESH=1 ./c_start.sh                    # перезалить устаревший диск целевой зоны из свежего снапшота
 #
 # ВНИМАНИЕ: скрипт НЕ удаляет старые зональные диски сам (кроме REFRESH=1).
 # Канон — диск инстанса, работавшего последним; диски в других зонах могут быть
@@ -27,7 +27,7 @@ MACHINE_TYPE="${MACHINE_TYPE:-n1-standard-8}"
 SPOT="${SPOT:-1}"
 REFRESH="${REFRESH:-0}"
 
-TARGET_ZONE="europe-west4-c"     # ← единственное, чем отличаются 10–12_spot_gpu_{a,b,c}.sh
+TARGET_ZONE="europe-west4-c"     # ← единственное, чем отличаются {a,b,c}_start.sh
 FALLBACK_ZONE="europe-west4-a"   # где исторически лежит исходный диск (для холодного старта)
 SNAPSHOT="${INSTANCE_NAME}-snap" # рабочий снапшот переноса (пересоздаётся при каждом переезде)
 
@@ -60,10 +60,10 @@ if [ "$INST_ZONE" = "$TARGET_ZONE" ]; then
     echo "$OUT"
     if [ $RC -eq 0 ]; then
         echo "✅ Поймали: $INSTANCE_NAME запущен в $TARGET_ZONE."
-        echo "   SSH:  ZONE=$TARGET_ZONE ./02_power_manager.sh ssh"
+        echo "   SSH:  ZONE=$TARGET_ZONE ../02_power_manager.sh ssh"
         exit 0
     elif echo "$OUT" | grep -qiE "EXHAUSTED|ZONE_RESOURCE"; then
-        echo "🛑 В $TARGET_ZONE сейчас нет свободных T4. Пробуй соседнюю зону (10–12_spot_gpu_*.sh)."
+        echo "🛑 В $TARGET_ZONE сейчас нет свободных T4. Пробуй соседнюю зону ({a,b,c}_start.sh)."
         exit 1
     else
         echo "❌ start не удался (код $RC), см. вывод выше."
@@ -87,7 +87,7 @@ else
     SRC_DISK="$INSTANCE_NAME"
     if [ -z "$SRC_ZONE" ]; then
         echo "❌ Нет ни инстанса, ни boot-диска '$INSTANCE_NAME' ни в одной зоне — грузиться не с чего."
-        echo "   Сначала создай рабочую машину: ./01_create_workspace.sh"
+        echo "   Сначала создай рабочую машину: ../01_create_workspace.sh"
         exit 1
     fi
     echo "ℹ️  Инстанса нет; источник состояния: диск '$SRC_DISK' в $SRC_ZONE."
@@ -144,13 +144,13 @@ echo "$OUT"
 if [ $RC -eq 0 ]; then
     echo ""
     echo "✅ Поймали T4 в $TARGET_ZONE! Инстанс $INSTANCE_NAME запущен."
-    echo "   SSH:           ZONE=$TARGET_ZONE ./02_power_manager.sh ssh"
-    echo "   Статус/деньги: ZONE=$TARGET_ZONE ./04_check_money_leak.sh"
+    echo "   SSH:           ZONE=$TARGET_ZONE ../02_power_manager.sh ssh"
+    echo "   Статус/деньги: ZONE=$TARGET_ZONE ../04_check_money_leak.sh"
 elif echo "$OUT" | grep -qiE "EXHAUSTED|ZONE_RESOURCE"; then
     echo ""
     echo "🛑 В $TARGET_ZONE нет свободных T4 (RESOURCE_POOL_EXHAUSTED)."
     echo "   Диск '$INSTANCE_NAME' в $TARGET_ZONE готов — повтори позже эту зону"
-    echo "   или попробуй соседнюю: 10–12_spot_gpu_*.sh."
+    echo "   или попробуй соседнюю: {a,b,c}_start.sh."
     exit 1
 else
     echo "❌ Создание не удалось (код $RC), см. вывод выше."
