@@ -11,21 +11,26 @@ browser»). Обходной путь — получить refresh-токен ч
 
 ## A. Создать свой OAuth-клиент (GCP Console, ~2 мин)
 
-1. console.cloud.google.com → проект **`drone-13-17-workspace-2026`**.
-2. **APIs & Services → Library** → найти **Google Drive API** → **Enable**.
-3. **APIs & Services → OAuth consent screen**: если не настроен — User Type
-   **External**, заполнить имя/почту. Добавить себя в **Test users**.
+Ссылки ведут прямо на нужную страницу с уже выбранным проектом
+**`drone-13-17-workspace-2026`** (если не залогинен — сначала вход в Google).
+
+1. **Включить Drive API** — [Library → Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com?project=drone-13-17-workspace-2026)
+   → кнопка **Enable**.
+2. **OAuth consent screen** — [открыть](https://console.cloud.google.com/apis/credentials/consent?project=drone-13-17-workspace-2026):
+   если не настроен — User Type **External**, заполнить имя/почту, добавить себя
+   в **Test users**.
    **Важно:** опубликовать приложение — **Publishing status → Production**
    (иначе в режиме Testing refresh-токен умирает через 7 дней). На предупреждение
    «unverified» — просто соглашаешься.
-4. **APIs & Services → Credentials → Create credentials → OAuth client ID** →
-   тип **Web application** → в **Authorized redirect URIs** добавить:
+3. **Создать OAuth client** — [Credentials](https://console.cloud.google.com/apis/credentials?project=drone-13-17-workspace-2026)
+   → **Create credentials → OAuth client ID** → тип **Web application** →
+   в **Authorized redirect URIs** добавить:
    `https://developers.google.com/oauthplayground`
    → Create. Скопировать **Client ID** и **Client secret**.
 
 ## B. Получить refresh-токен (OAuth Playground)
 
-1. Открыть **developers.google.com/oauthplayground**.
+1. Открыть **[OAuth Playground](https://developers.google.com/oauthplayground)**.
 2. Шестерёнка ⚙ справа → галка **«Use your own OAuth credentials»** →
    вставить Client ID + Secret.
 3. Слева поле **«Input your own scopes»** → вписать:
