@@ -9,9 +9,10 @@
 # a_start/a_stop/a_ssh.
 #
 # set-scheduling требует ОСТАНОВЛЕННОГО инстанса — если работает, скрипт его
-# сначала гасит. provisioning-model=STANDARD + --no-preemptible снимают и
-# Spot-специфичный instance-termination-action. Maintenance policy (TERMINATE,
-# обязательна для GPU) не трогается.
+# сначала гасит. provisioning-model=STANDARD + --no-preemptible; Spot-специфичный
+# instance-termination-action ОБЯЗАТЕЛЬНО сбросить (--clear-instance-termination-
+# action), иначе API ругается «termination action нельзя у STANDARD». Maintenance
+# policy (TERMINATE, обязательна для GPU) не трогается.
 #
 # Три зоны — три скрипта (a/b/c_convert.sh), отличаются только TARGET_ZONE.
 
@@ -59,7 +60,8 @@ fi
 
 echo "🔄 Конвертируем $INSTANCE_NAME ($TARGET_ZONE) в on-demand..."
 g compute instances set-scheduling "$INSTANCE_NAME" --zone="$TARGET_ZONE" \
-    --provisioning-model=STANDARD --no-preemptible
+    --provisioning-model=STANDARD --no-preemptible \
+    --clear-instance-termination-action
 
 NEW_MODEL=$(g compute instances describe "$INSTANCE_NAME" --zone="$TARGET_ZONE" \
     --format="value(scheduling.provisioningModel)")

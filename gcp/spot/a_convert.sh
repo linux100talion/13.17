@@ -8,10 +8,12 @@
 # в SPOT», дальше обычные a_start/a_stop/a_ssh.
 #
 # set-scheduling требует ОСТАНОВЛЕННОГО инстанса — если работает, скрипт его
-# сначала гасит. provisioning-model=SPOT + instance-termination-action=STOP:
-# при вытеснении инстанс ОСТАНАВЛИВАЕТСЯ (boot-диск цел), а не удаляется
-# (как и при создании в *_start.sh). Maintenance policy (TERMINATE, обязательна
-# для GPU) не трогается.
+# сначала гасит. provisioning-model=SPOT + ОБЯЗАТЕЛЬНО --preemptible (иначе API
+# ругается «preemptible=false противоречит provisioning_model=SPOT» — у standard-
+# инстанса legacy-флаг preemptible=false, его надо явно поднять).
+# instance-termination-action=STOP: при вытеснении инстанс ОСТАНАВЛИВАЕТСЯ
+# (boot-диск цел), а не удаляется (как и при создании в *_start.sh). Maintenance
+# policy (TERMINATE, обязательна для GPU) не трогается.
 #
 # ⚠️ SPOT дешевле, но ВЫТЕСНЯЕМ — Google может остановить инстанс в любой момент.
 #
@@ -61,7 +63,8 @@ fi
 
 echo "🔄 Конвертируем $INSTANCE_NAME ($TARGET_ZONE) в SPOT..."
 g compute instances set-scheduling "$INSTANCE_NAME" --zone="$TARGET_ZONE" \
-    --provisioning-model=SPOT --instance-termination-action=STOP
+    --provisioning-model=SPOT --preemptible \
+    --instance-termination-action=STOP
 
 NEW_MODEL=$(g compute instances describe "$INSTANCE_NAME" --zone="$TARGET_ZONE" \
     --format="value(scheduling.provisioningModel)")
