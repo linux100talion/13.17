@@ -41,4 +41,12 @@ if [ "$STATUS" != "RUNNING" ]; then
 fi
 
 echo "💻 Подключаемся по SSH к $INSTANCE_NAME ($TARGET_ZONE)..."
-exec g compute ssh "$INSTANCE_NAME" --zone="$TARGET_ZONE" "$@"
+if [ "$#" -eq 0 ]; then
+    # Без доп. аргументов — открываем интерактивную сессию сразу в ~/13.17.
+    # -t форсит выделение TTY; cd до exec сохраняет каталог в логин-шелле.
+    exec gcloud compute ssh "$INSTANCE_NAME" --zone="$TARGET_ZONE" --project="$PROJECT" \
+        -- -t 'cd ~/13.17 2>/dev/null; exec bash -l'
+else
+    # Есть аргументы (напр. --command=...) — пробрасываем как есть, без cd.
+    exec gcloud compute ssh "$INSTANCE_NAME" --zone="$TARGET_ZONE" --project="$PROJECT" "$@"
+fi
