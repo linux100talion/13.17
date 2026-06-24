@@ -53,11 +53,15 @@ source install/setup.bash
 #    Eager-init в __init__: открывает /dev/rawbayer, пишет нулевой кадр —
 #    только после этого v4l2loopback разрешает G_FMT на стороне capture.
 if ! pgrep -f "bayerizer.py" >/dev/null; then
+    # Разрешение — из env CAMERA_W/CAMERA_H (default 1280×720). Должно совпадать
+    # с SDF-камерой Gazebo и camera_node (CPU-оверрайд compose ставит 320×180).
     nohup python3 /root/sim_ws/src/sim/bayerizer.py \
         --ros-args \
         -p input_topic:=/camera/image_raw \
         -p device:=/dev/rawbayer \
         -p pattern:=GRBG \
+        -p width:=${CAMERA_W:-1280} \
+        -p height:=${CAMERA_H:-720} \
         -p use_sim_time:=true \
         >"$LOG/bayerizer.log" 2>&1 &
     echo "  bayerizer -> $LOG/bayerizer.log"

@@ -27,8 +27,16 @@ services:
     environment:
       - LIBGL_ALWAYS_SOFTWARE=1         # софтовый OpenGL (llvmpipe) вместо EGL/NVIDIA
       - GALLIUM_DRIVER=llvmpipe         # явный софтовый драйвер Mesa
+      # Разрешение камеры под llvmpipe: 1280×720 софтрендер тянет лишь ~2 Hz,
+      # 320×180 (×16 меньше пикселей) → ~30 Hz. sim_up.sh патчит SDF iris_cam.
+      - CAMERA_W=320
+      - CAMERA_H=180
 
   nav:
     runtime: runc                       # отменяем nvidia-runtime из базового compose
     environment:
       - CAMERA_NODE=camera_node_cpu     # sim_nav.launch.py → drop-in CPU-камера
+      # То же разрешение, что в simulator — bayerizer задаёт формат loopback,
+      # camera_node делает S_FMT, интринсики VINS пересчитываются из sim.yaml.
+      - CAMERA_W=320
+      - CAMERA_H=180

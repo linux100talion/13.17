@@ -56,6 +56,14 @@ public:
         device_ = this->declare_parameter("device", std::string("/dev/video0"));
         RCLCPP_INFO(this->get_logger(), "V4L2 устройство: %s", device_.c_str());
 
+        // Разрешение — параметры (default 1280×720, как на боевом ArduCam/Orin).
+        // В GPU-less симуляции (llvmpipe) ставится 320×180 через env CAMERA_W/H
+        // (sim_nav.launch.py), чтобы софтрендер тянул камеру на fps для VINS.
+        // Должно совпадать с SDF-камерой Gazebo, bayerizer и sim.yaml.
+        width_  = this->declare_parameter("width", 1280);
+        height_ = this->declare_parameter("height", 720);
+        RCLCPP_INFO(this->get_logger(), "Разрешение: %dx%d", width_, height_);
+
         // 3. CameraInfo (интринсики из конфига).
         setup_camera_info();
 
@@ -135,14 +143,24 @@ private:
     cv::VideoWriter openhd_writer_;
 
     void setup_camera_info() {
+        // Интринсики вычисляем из разрешения по модели sim-камеры: hfov 90°,
+        // квадратные пиксели → fx=fy=width/2, cx=width/2, cy=height/2.
+        // 1280×720 → fx=fy=640, cx=640, cy=360 (как было захардкожено); 320×180
+        // → 160/160/160/90. Для VINS источник интринсик — sim.yaml, не этот
+        // /camera_info, но держим его консистентным с разрешением.
+        const double fx = width_ / 2.0;
+        const double fy = width_ / 2.0;
+        const double cx = width_ / 2.0;
+        const double cy = height_ / 2.0;
+
         camera_info_msg_.header.frame_id = "camera_frame";
         camera_info_msg_.width = width_;
         camera_info_msg_.height = height_;
         camera_info_msg_.distortion_model = "plumb_bob";
         camera_info_msg_.d = {0.0, 0.0, 0.0, 0.0, 0.0};
-        camera_info_msg_.k = {640.0, 0.0, 640.0, 0.0, 640.0, 360.0, 0.0, 0.0, 1.0};
+        camera_info_msg_.k = {fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0};
         camera_info_msg_.r = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-        camera_info_msg_.p = {640.0, 0.0, 640.0, 0.0, 0.0, 640.0, 360.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+        camera_info_msg_.p = {fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0};
     }
 
     // Выполнение системной команды с захватом stdout.

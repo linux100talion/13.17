@@ -14,6 +14,23 @@ source /opt/ros/humble/setup.bash
 LOG=/root/output; mkdir -p "$LOG"
 WORLD="${WORLD:-/root/worlds/mili_fortress.sdf}"
 
+# Разрешение камеры: env CAMERA_W/CAMERA_H (default 1280×720). В GPU-less прогоне
+# (llvmpipe) CPU-оверрайд compose ставит 320×180 — в ~16 раз меньше пикселей под
+# софтрендер. SDF статичен (gz не подставляет env), поэтому при не-дефолтном
+# разрешении кладём ПАТЧЕНУЮ копию модели iris_cam в /tmp и выводим её первой в
+# GZ_SIM_RESOURCE_PATH — репозиторную модель не трогаем (git чист).
+CAM_W="${CAMERA_W:-1280}"; CAM_H="${CAMERA_H:-720}"
+if [ "$CAM_W" != "1280" ] || [ "$CAM_H" != "720" ]; then
+    PATCH=/tmp/sim_models
+    rm -rf "$PATCH"; mkdir -p "$PATCH"
+    cp -a /root/worlds/iris_cam "$PATCH/iris_cam"
+    sed -i "s|<width>1280</width>|<width>${CAM_W}</width>|; \
+            s|<height>720</height>|<height>${CAM_H}</height>|" \
+        "$PATCH/iris_cam/model.sdf"
+    export GZ_SIM_RESOURCE_PATH="$PATCH:${GZ_SIM_RESOURCE_PATH}"
+    echo "  камера: SDF пропатчен до ${CAM_W}x${CAM_H} (модель из $PATCH)"
+fi
+
 # 1. Gazebo Harmonic — мир + дрон с камерой (ArduPilotPlugin слушает 9002).
 if ! pgrep -f "gz sim" >/dev/null; then
     nohup gz sim -s --headless-rendering -v4 -r "$WORLD" >"$LOG/gz_sim.log" 2>&1 &
