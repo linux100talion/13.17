@@ -24,6 +24,13 @@ from launch_ros.actions import Node
 CFG = "/root/sim_ws/src/vins/VINS-MONO-ROS2/config_pkg/config/sim.yaml"
 DEVICE = "/dev/rawbayer"
 
+# Какой executable камеры запускать:
+#   camera_node     — боевой CUDA-дебайер (default, штатный GPU-sim),
+#   camera_node_cpu — drop-in CPU-дебайер для машин без GPU (env CAMERA_NODE).
+# Переключается через окружение, не правя launch — CPU-оверрайд compose
+# выставляет CAMERA_NODE=camera_node_cpu.
+CAMERA_EXECUTABLE = os.environ.get("CAMERA_NODE", "camera_node")
+
 
 def generate_launch_description():
     use_sim_time = {"use_sim_time": True}
@@ -35,10 +42,12 @@ def generate_launch_description():
         #      /dev/rawbayer перед вызовом этого launch-файла.
         TimerAction(period=4.0, actions=[
 
-            # Камера-нода: /dev/rawbayer -> /image_mono (VINS) + /image_color
+            # Камера-нода: /dev/rawbayer -> /image_mono (VINS) + /image_color.
+            # executable выбирается по env CAMERA_NODE (CUDA по умолчанию, CPU в
+            # GPU-less прогоне).
             Node(
                 package="camera_pkg",
-                executable="camera_node",
+                executable=CAMERA_EXECUTABLE,
                 output="screen",
                 parameters=[use_sim_time, {"device": DEVICE}],
             ),

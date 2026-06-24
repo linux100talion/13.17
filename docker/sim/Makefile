@@ -19,10 +19,24 @@
 #   make sim              # перезапустить Gazebo+SITL+bridge внутри simulator
 #   make nav              # перезапустить VINS+MAVROS внутри nav
 #
+# GPU-less прогон (машина без NVIDIA, ветка nn2_c3_cpu) — добавить CPU=1 к
+# ЛЮБОМУ таргету: подключает docker-compose.cpu.yml (runc вместо nvidia-runtime,
+# софтовый GL для Gazebo, drop-in CPU-камера camera_node_cpu). Флаг держать во
+# всех командах сессии, иначе compose адресует другой набор файлов:
+#   make CPU=1 build && make CPU=1 up && make CPU=1 logs
+#   make CPU=1 restart-all && make CPU=1 wait
+#
 # Запускать из каталога docker/sim/.
 # ============================================================================
 
-DC      := docker compose
+# CPU=1 — наложить CPU-оверрайд (GPU-less режим) на все docker compose команды.
+CPU ?=
+ifeq ($(CPU),1)
+DC := docker compose -f docker-compose.yml -f docker-compose.cpu.yml
+else
+DC := docker compose
+endif
+
 SIM     := p1317_simulator
 NAV     := p1317_nav
 DISPLAY ?= :0

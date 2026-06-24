@@ -42,18 +42,29 @@
          публиковать кадр, или признать, что нужен хотя бы слабый GPU.
          TODO: подтвердить на форке, что VINS без GPU (нет cuda/GpuMat).
 
-  [ ] 1. camera_node.cpp — CPU-fallback.
-         Параметр use_cuda (default true). При false — ветка на cv::demosaicing
-         / cv::cvtColor / per-channel gain на cv::Mat.
-         ⚠️ Код Байера на CPU ДРУГОЙ: cv::COLOR_BayerGR2BGR (не BayerGB2RGB,
-            как в CUDA) — см. CLAUDE.md, раздел про камеру. Проверить цвет/mono.
+  [x] 1. camera — CPU-вариант. РЕШЕНИЕ: не флаг use_cuda внутри ноды, а
+         РЕФАКТОРИНГ + DROP-IN executable (camera_node.cpp оставлен боевым):
+         - camera_core.hpp — базовый класс V4L2CameraBase (общий V4L2/гамма/
+           публикация/OpenHD), дебайер+gain → чистый виртуальный process_frame().
+         - camera_node.cpp     — тонкий CUDA-наследник (поведение байт-в-байт).
+         - camera_node_cpu.cpp  — drop-in CPU-наследник (cv::COLOR_BayerGR2BGR,
+           per-channel gain по BGR, BGR2GRAY). Линкуется БЕЗ CUDA-модулей OpenCV.
+         - CMakeLists.txt — второй executable camera_node_cpu.
+         ⚠️ Код Байера на CPU ДРУГОЙ (BayerGR2BGR, не BayerGB2RGB) — учтено.
+         ⚠️ Поток захвата стартует через start() ПОСЛЕ ctor наследника (иначе
+            pure-virtual call во время конструирования базы).
+         TODO рантайм: сверить цвет/mono на живом кадре (на хосте без GPU не
+         собрать — colcon build в контейнере nav).
 
-  [ ] 2. compose — CPU-оверрайд (docker-compose.cpu.yml ИЛИ профиль/env):
-         - nav:       убрать runtime: nvidia + NVIDIA_* ; запускать camera_node
-                      с use_cuda:=false.
-         - simulator: убрать runtime: nvidia ; LIBGL_ALWAYS_SOFTWARE=1
-                      (+ возможно GALLIUM_DRIVER=llvmpipe, MESA доступна).
-         Базовый docker-compose.yml НЕ трогать деструктивно — оверрайд поверх.
+  [x] 2. compose — CPU-оверрайд: docker/sim/docker-compose.cpu.yml (поверх
+         базового, ничего в нём не меняя). Подключается тогглом make CPU=1.
+         - nav + simulator: runtime: nvidia → runc (NVIDIA_*-env безвредны, не
+           трогаем).
+         - simulator: LIBGL_ALWAYS_SOFTWARE=1 + GALLIUM_DRIVER=llvmpipe.
+         - nav: CAMERA_NODE=camera_node_cpu → sim_nav.launch.py поднимает
+           drop-in CPU-камеру (выбор executable по env, launch не правится).
+         Makefile: CPU ?= ; CPU=1 → docker compose -f …yml -f …cpu.yml для ВСЕХ
+         таргетов (build/up/restart-all/wait/logs/…). Флаг держать всю сессию.
 
   [ ] 3. Прогон по дисциплине (CLAUDE.md «Дисциплина прогона»):
          атомарно restart-all → wait → арминг/взлёт → fly_square → bag.

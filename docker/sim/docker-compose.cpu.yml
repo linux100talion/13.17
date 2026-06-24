@@ -1,0 +1,34 @@
+# ============================================================================
+# CPU-оверрайд симуляционного стека — GPU-less прогон gazebo → SITL → VINS
+# (ветка nn2_c3_cpu, пока T4 на GCE в дефиците).
+#
+# Кладётся ПОВЕРХ базового docker-compose.yml, ничего в нём не меняя:
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml ...
+#   (или через Makefile:  make CPU=1 <target>)
+#
+# Что переопределяет:
+#   • runtime: nvidia → runc        — на машине без NVIDIA-драйвера nvidia-
+#       runtime не стартует; возвращаем дефолтный рантайм. NVIDIA_*-env при
+#       этом безвредны (без рантайма ни на что не влияют), их не трогаем.
+#   • simulator: софтовый GL        — llvmpipe вместо EGL/NVIDIA для рендера
+#       камеры Gazebo (ГЕЙТ-РИСК: тянет ли llvmpipe 1280×720 на нужном fps —
+#       проверяется в рантайме).
+#   • nav: CAMERA_NODE=camera_node_cpu — sim_nav.launch.py поднимает drop-in
+#       CPU-камеру (cv::* вместо cv::cuda::*), а не боевую CUDA-ноду.
+#
+# ⚠️ Это режим разработки на безгпушной машине. Боевой Orin и штатный GPU-sim
+#    остаются на базовом compose (camera_node + runtime: nvidia).
+# ============================================================================
+
+services:
+
+  simulator:
+    runtime: runc                       # отменяем nvidia-runtime из базового compose
+    environment:
+      - LIBGL_ALWAYS_SOFTWARE=1         # софтовый OpenGL (llvmpipe) вместо EGL/NVIDIA
+      - GALLIUM_DRIVER=llvmpipe         # явный софтовый драйвер Mesa
+
+  nav:
+    runtime: runc                       # отменяем nvidia-runtime из базового compose
+    environment:
+      - CAMERA_NODE=camera_node_cpu     # sim_nav.launch.py → drop-in CPU-камера
