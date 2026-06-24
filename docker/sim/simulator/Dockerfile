@@ -17,13 +17,17 @@ ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 # без дисплея: gz sim --headless-rendering использует EGL-бэкенд вместо X11.
 # NVIDIA-специфичный ICD (/usr/share/glvnd/egl_vendor.d/10_nvidia.json)
 # приходит через nvidia-container-runtime — в образ его класть не нужно.
+# libgl1-mesa-dri — софтовый gallium-драйвер (llvmpipe/swrast): нужен для
+# GPU-less прогона (docker-compose.cpu.yml: LIBGL_ALWAYS_SOFTWARE=1 +
+# GALLIUM_DRIVER=llvmpipe). Для GPU-режима безвреден — лежит как fallback,
+# EGL там идёт через nvidia-ICD.
 RUN apt-get update && apt-get install -y \
     lsb-release wget gnupg curl git \
     build-essential cmake \
     rapidjson-dev \
     libopencv-dev \
     python3-pip \
-    libegl1 libegl-mesa0 libgles2 libgbm1 libglvnd0 \
+    libegl1 libegl-mesa0 libgles2 libgbm1 libglvnd0 libgl1-mesa-dri \
     && wget https://packages.osrfoundation.org/gazebo.gpg \
        -O /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
