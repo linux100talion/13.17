@@ -9,12 +9,11 @@
 Или через make: make fly
 """
 import argparse
-import math
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Header
-import time
 
 WAYPOINTS_REL = [
     ( 1,  0),
@@ -27,21 +26,29 @@ WAYPOINTS_REL = [
 class SquareFlight(Node):
     def __init__(self, size: float, alt: float, side_time: float):
         super().__init__('fly_square')
+        # use_sim_time: иначе нода считает по РЕАЛЬНЫМ часам — при низком RTF
+        # (симуляция ~13× медленнее, ветка nn2_c3_cpu) сторона квадрата прошла бы
+        # за доли sim-секунды, дрон не успевал бы лететь, а штамп setpoint
+        # разъезжался бы с sim-временем FCU. Сажаем ноду на /clock (sim-время):
+        # таймер, отсчёт сторон и штамп — всё в sim-времени, как у VINS/MAVROS.
+        self.set_parameters([Parameter('use_sim_time', Parameter.Type.BOOL, True)])
+
         self.pub = self.create_publisher(PoseStamped, '/mavros/setpoint_position/local', 10)
         self.size = size
         self.alt = alt
-        self.side_time = side_time
+        self.side_time = side_time   # секунды SIM-времени на сторону
         self.waypoints = [(x * size, y * size) for x, y in WAYPOINTS_REL]
         self.wp_idx = 0
-        self.wp_start = time.time()
+        self.wp_start = self.get_clock().now()
+        # 0.1 с sim-времени → 10 sim-Гц паблиша (для GUIDED-таргета достаточно).
         self.timer = self.create_timer(0.1, self.step)
         self.get_logger().info(
-            f"fly_square: size={size}m alt={alt}m side_time={side_time}s"
+            f"fly_square: size={size}m alt={alt}m side_time={side_time}s (sim-время)"
         )
 
     def step(self):
-        now = time.time()
-        if now - self.wp_start >= self.side_time:
+        now = self.get_clock().now()
+        if (now - self.wp_start).nanoseconds * 1e-9 >= self.side_time:
             self.wp_idx = (self.wp_idx + 1) % len(self.waypoints)
             self.wp_start = now
             x, y = self.waypoints[self.wp_idx]
