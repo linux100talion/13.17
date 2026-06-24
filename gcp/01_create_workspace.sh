@@ -3,7 +3,8 @@
 
 PROJECT="drone-13-17-workspace-2026"
 ZONE="${ZONE:-europe-west4-a}"
-INSTANCE_NAME="dev-workspace-1317"
+INSTANCE_NAME="${INSTANCE_NAME:-dev-workspace-1317}"  # env-override: отдельный бокс рядом
+MACHINE_TYPE="${MACHINE_TYPE:-n1-standard-8}"         # env-override: c2-standard-16 и т.п.
 DISK_SIZE="${1:-120}"   # размер загрузочного диска в GB (по умолчанию 120)
 GPU="${GPU:-1}"         # 1 = с T4 (рантайм CUDA/Gazebo), 0 = CPU-only build-box
 
@@ -12,17 +13,17 @@ GPU="${GPU:-1}"         # 1 = с T4 (рантайм CUDA/Gazebo), 0 = CPU-only b
 # вариант доступен сразу (нет дефицита T4) и не привязывает к арх GPU.
 if [ "$GPU" = "1" ]; then
     GPU_ARGS=(--accelerator=type=nvidia-tesla-t4,count=1 --maintenance-policy=TERMINATE)
-    echo "🚀 Создаём $INSTANCE_NAME в $ZONE (диск ${DISK_SIZE}GB) — режим GPU (T4)..."
+    echo "🚀 Создаём $INSTANCE_NAME в $ZONE ($MACHINE_TYPE, диск ${DISK_SIZE}GB) — режим GPU (T4)..."
 else
     GPU_ARGS=()   # без --accelerator: обычная CPU-машина, без TERMINATE-политики
-    echo "🚀 Создаём $INSTANCE_NAME в $ZONE (диск ${DISK_SIZE}GB) — режим CPU-only..."
+    echo "🚀 Создаём $INSTANCE_NAME в $ZONE ($MACHINE_TYPE, диск ${DISK_SIZE}GB) — режим CPU-only..."
 fi
 
 # Ловим вывод и КОД ВОЗВРАТА gcloud — иначе печатали бы "✅" даже при провале.
 OUT=$(gcloud compute instances create $INSTANCE_NAME \
     --project=$PROJECT \
     --zone=$ZONE \
-    --machine-type=n1-standard-8 \
+    --machine-type=$MACHINE_TYPE \
     "${GPU_ARGS[@]}" \
     --image-family=ubuntu-2404-lts-amd64 \
     --image-project=ubuntu-os-cloud \
