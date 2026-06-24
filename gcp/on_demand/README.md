@@ -12,9 +12,10 @@
 
 | Скрипт | Что делает |
 |---|---|
-| `{a,b,c}_start.sh` | `gcloud instances start` инстанса в своей зоне (только старт существующего) |
-| `{a,b,c}_stop.sh`  | погасить инстанс в своей зоне (диск остаётся, платишь за storage) |
-| `{a,b,c}_ssh.sh`   | SSH в инстанс своей зоны (доп. аргументы → `gcloud compute ssh`) |
+| `{a,b,c}_start.sh`   | `gcloud instances start` инстанса в своей зоне (только старт существующего) |
+| `{a,b,c}_stop.sh`    | погасить инстанс в своей зоне (диск остаётся, платишь за storage) |
+| `{a,b,c}_ssh.sh`     | SSH в инстанс своей зоны (доп. аргументы → `gcloud compute ssh`) |
+| `{a,b,c}_convert.sh` | конвертировать SPOT-инстанс в on-demand (STANDARD) in-place |
 
 Соседние верхнеуровневые скрипты зовутся через `../` (`../01_create_workspace.sh`,
 `../02_power_manager.sh`, `../04_check_money_leak.sh`).
@@ -35,9 +36,32 @@
 в зоне исчерпана (`RESOURCE_POOL_EXHAUSTED`) — повторить позже или ехать в другую
 зону через `../spot/` (там вся работа с зональным диском/снапшотами).
 
+## Перевод SPOT → on-demand: `{a,b,c}_convert.sh`
+
+Provisioning model (SPOT / on-demand) задаётся при создании и **не меняется через
+`start`** — `a_start.sh` поднимет SPOT-инстанс обратно как SPOT. Чтобы реально
+перевести существующий SPOT-инстанс в on-demand, есть два пути:
+
+| | `{a,b,c}_convert.sh` (здесь) | `../08_add_gpu.sh` |
+|---|---|---|
+| Механика | in-place `set-scheduling` | пересоздание `delete + create` |
+| Диск/инстанс | остаются на месте | диск сохраняется, инстанс пересоздаётся |
+| Скорость | мгновенно | дольше (стоп → delete → create) |
+| Когда | инстанс уже существует, нужно лишь сменить модель | инстанса нет / нужно заодно (пере)прицепить GPU |
+
+`convert` требует остановленного инстанса (если работает — сам погасит), затем
+`--provisioning-model=STANDARD --no-preemptible`. Maintenance policy (TERMINATE,
+обязательна для GPU) не трогается. После конвертации — обычный `./a_start.sh`
+(теперь поднимется как on-demand). ⚠️ on-demand T4 дороже (~3×) и при `start`
+тоже может упереться в `RESOURCE_POOL_EXHAUSTED` (отдельный от SPOT пул).
+
 ## Типовые сценарии
 
 ```bash
+# разовый перевод текущего SPOT-инстанса в on-demand (зона a)
+./a_convert.sh                    # SPOT → STANDARD in-place (сам остановит если надо)
+
+# повседневное питание
 ./a_start.sh                      # поднять инстанс в europe-west4-a
 ./a_ssh.sh                        # подключиться
 ./a_ssh.sh --command='nvidia-smi' # одноразовая команда

@@ -14,9 +14,10 @@
 
 | Скрипт | Что делает |
 |---|---|
-| `{a,b,c}_start.sh` | поймать/поднять SPOT T4 в своей зоне (с переносом диска, если нужно) |
-| `{a,b,c}_stop.sh`  | погасить инстанс в своей зоне (диск остаётся, платишь только за storage) |
-| `{a,b,c}_ssh.sh`   | SSH в инстанс своей зоны (доп. аргументы → `gcloud compute ssh`) |
+| `{a,b,c}_start.sh`   | поймать/поднять SPOT T4 в своей зоне (с переносом диска, если нужно) |
+| `{a,b,c}_stop.sh`    | погасить инстанс в своей зоне (диск остаётся, платишь только за storage) |
+| `{a,b,c}_ssh.sh`     | SSH в инстанс своей зоны (доп. аргументы → `gcloud compute ssh`) |
+| `{a,b,c}_convert.sh` | конвертировать on-demand-инстанс в SPOT (STANDARD → SPOT) in-place |
 
 Соседние скрипты верхнего уровня (`../01_create_workspace.sh`,
 `../02_power_manager.sh`, `../04_check_money_leak.sh`) зовутся через `../`.
@@ -134,3 +135,15 @@ gcloud compute disks delete dev-workspace-1317 --zone=<zone> \
 зоны — он сам снимет снапшот свежего диска, создаст диск в целевой зоне и
 освободит имя инстанса. После переезда **не забудь удалить** оставшийся диск
 старой зоны (плата за storage).
+
+## Перевод on-demand → SPOT: `{a,b,c}_convert.sh`
+
+Provisioning model (on-demand / SPOT) задаётся при создании и **не меняется через
+`start`**. `{a,b,c}_convert.sh` переводит существующий on-demand-инстанс в SPOT
+**in-place** через `set-scheduling` (стоп при необходимости →
+`--provisioning-model=SPOT --instance-termination-action=STOP`). Инстанс и диск
+остаются на месте, без пересоздания. Зеркально к `../on_demand/{a,b,c}_convert.sh`
+(обратное направление). После конвертации — обычный `./a_start.sh`.
+
+⚠️ SPOT дешевле, но **вытесняем**: termination=STOP → при вытеснении инстанс
+останавливается (диск цел), вернуть его — снова `./a_start.sh`.

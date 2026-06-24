@@ -83,14 +83,23 @@
     аргументы пробрасываются в `gcloud compute ssh` (напр. `./a_ssh.sh
     --command='nvidia-smi'`). Тонкая обёртка над `../02_power_manager.sh ssh`
     с зоной, прибитой к a/b/c.
+  - `{a,b,c}_convert.sh` — перевести существующий on-demand-инстанс в SPOT
+    **in-place** через `set-scheduling` (стоп при необходимости →
+    `--provisioning-model=SPOT --instance-termination-action=STOP`, без
+    пересоздания). Зеркально к `on_demand/{a,b,c}_convert.sh` (обратное
+    направление).
 - **`on_demand/`** — питание **on-demand** (не вытесняемого) T4-инстанса по тем
   же трём зонам: `{a,b,c}_{start,stop,ssh}.sh` (отличаются только `TARGET_ZONE`).
   Зеркало `spot/` по раскладке, но скрипты **тонкие** — никакой снапшот-логики и
   переезда между зонами (это забота `spot/`). `start` = только `gcloud instances
   start` существующего инстанса в своей зоне (создание — `01_…`/`08_…`, перенос
-  диска — `spot/`); `stop`/`ssh` — как у `spot/`. Когда что: on-demand живёт
-  постоянно и не вытесняется (дороже) → `on_demand/`; ловля дешёвой вытесняемой
-  ёмкости с переездом диска по зонам → `spot/`. Подробности — `on_demand/README.md`.
+  диска — `spot/`); `stop`/`ssh` — как у `spot/`. `{a,b,c}_convert.sh` — перевести
+  существующий SPOT-инстанс в on-demand (STANDARD) **in-place** через
+  `set-scheduling` (стоп при необходимости → `--provisioning-model=STANDARD
+  --no-preemptible`, диск/инстанс на месте; альтернатива пересозданию через
+  `08_add_gpu.sh`). Когда что: on-demand живёт постоянно и не вытесняется
+  (дороже) → `on_demand/`; ловля дешёвой вытесняемой ёмкости с переездом диска по
+  зонам → `spot/`. Подробности — `on_demand/README.md`.
 - **`snapshot/`** — работа с бэкап-снапшотами boot-диска по зонам.
   `{a,b,c}_take.sh` — снять датированный **бэкап**-снапшот в своей зоне
   (`<instance>-snap-YYYYMMDD`, без буквы зоны — диск живёт в одной зоне за раз,
