@@ -67,3 +67,69 @@ make restart-all 2>&1 | tail -3 && make wait 2>&1
 - Если переустанавливал образы или менял Dockerfile — сначала `make build`, иначе `restart-all`/`start` поднимет старый образ.
 
 Коротко: первый раз — `host-setup → build → up`; дальше для каждого прогона — `restart-all + wait`.
+
+
+Как вставлять в прогон симуляции скрипты `arm_takeoff.sh` и `fly_square.py` из `src/lab`? Как между ними переключаться?
+
+## Их «не вставляют» в запуск стека — они уже примонтированы
+
+`arm_takeoff.sh` и `fly_square.py` **не являются частью** `restart-all`/`sim_nav.launch.py`. Они постоянно лежат внутри `nav`-контейнера через bind mount (read-only):
+
+```yaml
+# docker-compose.yml:99
+- ../../src/lab:/lab:ro     # arm/fly/land/vins_watch
+```
+
+То есть весь каталог `src/lab/` виден в контейнере как `/lab/`. Редактируешь файл на хосте → правка сразу доступна в контейнере, пересборка/перезапуск не нужны.
+
+## Как они «вставляются в прогон» — это ручные шаги поверх поднятого стека
+
+Стек (`restart-all`) поднимает Gazebo+SITL+VINS+MAVROS, но **дрон стоит на земле**. Дальше ты сам подаёшь команды через Makefile-цели, которые просто дёргают `docker exec` по этим скриптам:
+
+```makefile
+arm:  docker exec p1317_nav bash   /lab/arm_takeoff.sh $(ALT)
+fly:  docker exec -it p1317_nav python3 /lab/fly_square.py $(FLYARGS)
+land: docker exec p1317_nav bash   /lab/land.sh
+```
+
+Типичная последовательность одного прогона:
+
+```bash
+cd docker/sim
+make restart-all && make wait    # поднять стек, дождаться «nav: готово»
+make arm                         # arm_takeoff.sh: GUIDED → арм → взлёт 3м
+make fly                         # fly_square.py: облёт квадрата (инициализация VINS)
+make land                        # land.sh: посадка
+```
+
+## Это не «или-или» и не переключение — это последовательность ролей
+
+У них **разные задачи**, они работают в связке, а не вместо друг друга:
+
+- **`arm_takeoff.sh`** — один раз: поднять дрон в воздух (GUIDED + арм + набор высоты). Завершается сам, по факту достижения высоты.
+- **`fly_square.py`** — потом: гоняет дрон по квадрату, чтобы создать параллакс и IMU excitation для инициализации VINS. Крутится, **пока не нажмёшь Ctrl+C**.
+
+Сначала `arm`, затем `fly`. Без взлёта `fly_square.py` нечего двигать.
+
+## «Переключение» параметрами, а не скриптами
+
+Менять поведение — через переменные Makefile, сами скрипты не трогаешь:
+
+```bash
+make arm ALT=5                              # взлёт на 5 м
+make fly FLYARGS="--size 8 --alt 4"         # квадрат 8×8, высота 4 м
+make fly FLYARGS="--size 5 --side-time 5"   # быстрее, 5 с на сторону
+```
+
+Или напрямую, в обход Makefile:
+
+```bash
+docker exec p1317_nav bash /lab/arm_takeoff.sh 5
+docker exec -it p1317_nav python3 /lab/fly_square.py --size 5 --alt 3 --side-time 8
+```
+
+## Если хочешь всё автоматом
+
+`capture_scene.sh` (= `make capture-scene`) — готовая обёртка, которая сама делает `restart-all → wait → arm → fly → запись bag → land`. Это эталонный «атомарный прогон» из дисциплины CLAUDE.md; новые сценарии рекомендуется оформлять так же — обёрткой над `make`/скриптами, а не ручными командами в контейнере.
+
+Коротко: скрипты уже «вставлены» (bind mount `/lab`), а в прогон ты их вводишь целями `make arm` → `make fly` (по порядку, не вместо друг друга); поведение настраивается `ALT=`/`FLYARGS=`.
