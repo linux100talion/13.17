@@ -25,21 +25,19 @@ nav_pkg»). Кратко:
   (camera_node_cpu), Gazebo — софтовый llvmpipe. Барьер тут — fps софтрендера
   (perf-гейт), а не отсутствие GPU.
 
-СТЕНА №1 — тривиальная, ловится сразу при старте nn-нод
-  Дефолты нод захардкожены на CUDA:
-    nav_pkg/nn1/nn1_anchor.py:35  declare_parameter("device", "cuda")
-                                  → anchor_matcher: LightGlue(...).to("cuda")
-    nav_pkg/nn2/nn2_scene.py:47   declare_parameter("device", "cuda")
-                                  → SceneEncoder: DINOv2 .to("cuda")
-  На машине без GPU это НЕМЕДЛЕННЫЙ краш на загрузке модели (torch: no CUDA
-  device). Но это НЕ настоящая стена — везде это ROS-параметр / --device,
-  лечится device:=cpu. Образец правильного поведения уже есть:
-    tools/nn2_route/train_route_coords.py:120
-      dev = device if (device != "cuda" or torch.cuda.is_available()) else "cpu"
-  TODO (если гонять nn на CPU-боксе): завести такой же авто-фолбэк cuda→cpu в
-  nn1_anchor / nn2_scene, чтобы ноды не падали и не требовали ручных device:=cpu.
-  Офлайн-тулзы (build_scene_map, eval_isometry, visualize_fiber) — argparse
-  --device default="cuda", достаточно передать --device cpu.
+СТЕНА №1 — тривиальная: РЕШЕНА авто-фолбэком cuda→cpu
+  Дефолты нод по-прежнему "cuda" (боевой Orin / GPU-sim не трогаем):
+    nav_pkg/nn1/nn1_anchor.py  declare_parameter("device", "cuda")
+                               → anchor_matcher: LightGlue(...).to(device)
+    nav_pkg/nn2/nn2_scene.py   declare_parameter("device", "cuda")
+                               → SceneEncoder: DINOv2 .to(device)
+  Раньше на машине без GPU это валило ноду на загрузке модели (torch: no CUDA
+  device). Теперь device проходит через nav_pkg/device_util.py::resolve_device():
+  если просили cuda, но torch.cuda недоступна — молча уходим на cpu (с warn в
+  лог), как в tools/nn2_route/train_route_coords.py:120. Так что на CPU-боксе
+  ноды поднимаются БЕЗ ручного device:=cpu; на GPU поведение не меняется.
+  Офлайн-тулзы (build_scene_map, eval_isometry, visualize_fiber) фолбэка пока
+  НЕ имеют — argparse --device default="cuda", передавать --device cpu вручную.
 
 СТЕНА №2 — настоящая: пропускная способность, а не «не запустится»
   Torch и FAISS на CPU РАБОТАЮТ, вопрос в скорости (×10–50):

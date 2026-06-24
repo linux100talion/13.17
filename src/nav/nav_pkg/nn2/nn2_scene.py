@@ -34,6 +34,7 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
 from nav_pkg.nn2.scene_descriptor import SceneMatcher
+from nav_pkg.device_util import resolve_device
 
 
 class NN2Scene(Node):
@@ -60,9 +61,11 @@ class NN2Scene(Node):
         self.bridge = CvBridge()
         self.last_image = None
 
+        device = resolve_device(self.get_parameter("device").value, self.get_logger())
+
         self.matcher = SceneMatcher(
             map_path=self.get_parameter("map_path").value,
-            device=self.get_parameter("device").value,
+            device=device,
             model_name=self.get_parameter("model_name").value,
             min_score=self.get_parameter("min_score").value,
             max_dist=self.get_parameter("max_dist").value,

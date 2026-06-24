@@ -22,6 +22,7 @@ from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
 from nav_pkg.nn1.anchor_matcher import AnchorMatcher
+from nav_pkg.device_util import resolve_device
 
 
 class NN1Anchor(Node):
@@ -41,9 +42,11 @@ class NN1Anchor(Node):
         self.bridge = CvBridge()
         self.last_image = None
 
+        device = resolve_device(self.get_parameter("device").value, self.get_logger())
+
         self.matcher = AnchorMatcher(
             db_path=self.get_parameter("db_path").value,
-            device=self.get_parameter("device").value,
+            device=device,
             max_keypoints=self.get_parameter("max_keypoints").value,
             min_matches=self.get_parameter("min_matches").value,
             logger=self.get_logger(),
