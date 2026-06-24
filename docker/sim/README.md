@@ -53,6 +53,9 @@ make down           # удалить контейнеры
 make help           # все цели
 ```
 
+> 💬 Частые вопросы по обёртке Makefile (`restart-all` vs `fresh-start`, что
+> нужно сделать до первого `restart-all`) — см. [`FAQ.txt`](FAQ.txt).
+
 > ⚠️ Не прогонялось без Gazebo. Спорные места в обёртке: `sim_vehicle.py
 > --no-mavproxy` (телеметрию ждём через mavlink_router), пауза 5 c перед SITL,
 > фон через `nohup`. Если что-то не поднимается — смотреть `output/*.log`
