@@ -17,12 +17,13 @@ source /opt/ros/humble/setup.bash
 SIM_BUDGET=${ARM_SIM_BUDGET:-40}     # sim-секунд на готовность EKF + GUIDED/arm
 WALL_CAP=${ARM_WALL_CAP:-1200}       # абсолютный потолок wall, сек
 
-get_field() {  # $1=топик  $2=поле — ретраим: --once на низком RTF часто пуст
-    local v
+get_field() {  # $1=топик  $2=поле — ретраим: --once на низком RTF часто пуст.
+    local v=""    # ВСЕГДА echo (даже пустое) → return 0: иначе set -e роняет arm.sh
     for _ in 1 2 3; do
         v=$(timeout 10 ros2 topic echo --once --field "$2" "$1" 2>/dev/null | head -1)
-        [ -n "$v" ] && { echo "$v"; return; }
+        [ -n "$v" ] && break
     done
+    echo "$v"
 }
 # Только число: при незапущенном /clock ros2 печатает предупреждение в stdout —
 # grep -oxE отбирает строку из одних цифр (значение clock.sec), мусор отбрасывает.
@@ -54,7 +55,7 @@ while :; do
     ros2 service call /mavros/cmd/arming mavros_msgs/srv/CommandBool \
         '{value: true}' >/dev/null 2>&1 || true
     armed=$(get_field /mavros/state armed)
-    [ "$armed" = "true" ] && break
+    [ "${armed,,}" = "true" ] && break   # ros2 печатает "True" — сравниваем без регистра
     budget_left "$s0" "$w0" || { echo "    ⚠️ арм не прошёл в бюджете (armed=$armed)"; break; }
     sleep 2
 done

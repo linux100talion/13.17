@@ -18,7 +18,7 @@ for _ in $(seq 1 30); do
     ros2 service call /mavros/cmd/arming mavros_msgs/srv/CommandBool \
         '{value: false}' >/dev/null 2>&1 || true
     armed=$(get_field /mavros/state armed)
-    [ "$armed" = "false" ] && break
+    [ "${armed,,}" = "false" ] && break   # ros2 печатает "False" — сравниваем без регистра
     sleep 1
 done
 echo ">>> Готово (armed=$armed)."
