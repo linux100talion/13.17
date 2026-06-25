@@ -494,3 +494,34 @@ ros2 launch /root/sim_ws/src/sim/sim_nav.launch.py
 ```
 
 Под «дисциплину прогона» отдельно его дёргать не стоит — стек поднимают целиком через `make restart-all` (см. выше).
+
+
+--------------------------------
+Что делает `nav_up.sh` и как он запускается?
+--------------------------------
+
+`nav_up.sh` (`docker/sim/scripts/nav_up.sh`) — это **entrypoint nav-стороны**: один скрипт, который внутри контейнера `nav` приводит окружение в порядок, собирает workspace и поднимает все ноды (байеризатор → camera_node + VINS → MAVROS). Это он пишет в лог финальное «nav: готово», которого ждёт `make wait`.
+
+## Как запускается
+
+- **Автоматически** — прописан как `command:` контейнера `nav` в `docker-compose.yml`, поэтому стартует сам при `up`/`start`/`restart-all`.
+- **Вручную** — `make nav` (= `docker exec -i p1317_nav bash -s < scripts/nav_up.sh`). Он смонтирован как `/scripts/nav_up.sh:ro`, так что правки на хосте применяются без пересборки образа.
+
+## Что он делает по шагам
+
+1. **Source окружения по порядку** (важно!): ROS Humble → overlay `/opt/overlay` (там `cv_bridge`, собранный против CUDA-OpenCV) → workspace. Неверный порядок = ABI-краш cv_bridge.
+2. **Проверки/починка зависимостей** (идемпотентно, переживает `fresh-start`, где apt/pip-пакеты теряются):
+   - `vins_oss` смонтирован (bind mount из `/root/VINS-MONO-ROS2`, ветка `1317_debug`) — иначе ошибка;
+   - `image_transport` есть (нужен feature_tracker/pose_graph) — fallback на apt, если образ старый;
+   - `numpy<2` — cv_bridge собран против NumPy 1.x, NumPy 2.x ломает ABI; даунгрейд при необходимости.
+3. **colcon build** — только если workspace ещё не собран (`install/setup.bash` нет). Для принудительной пересборки — `make nav-rebuild`.
+4. **Байеризатор** (`nohup`, ВНЕ launch) — Gazebo RGB → `/dev/rawbayer`; затем **ждёт до 60 с**, пока `v4l2-ctl` увидит формат (eager-init активировал capture-сторону loopback). Разрешение из `CAMERA_W`/`CAMERA_H`.
+5. **`sim_nav.launch.py`** (`nohup`) — camera_node + feature_tracker + vins_estimator + nav_pkg, все с `use_sim_time`.
+6. **MAVROS** (`nohup`, отдельно) — вход от mavlink_router `udp:14540`, `conn/timesync_mode:=NONE` (штампует IMU sim-временем, иначе «imu message in disorder»). Через 20 с поднимает stream_rate IMU до 200 Гц (по умолчанию ArduPilot шлёт ~7 Гц, VINS нужно ≥100).
+
+## Важные моменты
+
+- **Идемпотентен**: каждый шаг проверяет `pgrep`/наличие файла перед запуском, поэтому повторный прогон (`make nav`) не плодит дубли нод и не пересобирает зря.
+- **Почему байеризатор и ноды по отдельности** (`nohup`, не один launch): если байеризатор падает внутри launch, launch-менеджер убивает всё дерево. Здесь он изолирован, а `nav_up.sh` гарантирует порядок: сначала байеризатор + ожидание `/dev/rawbayer`, потом launch.
+- Логи всех нод — в `docker/sim/output/` (`bayerizer.log`, `sim_nav.log`, `mavros.log`); читаются с хоста (`make logs`).
+- Парный скрипт на стороне Gazebo — `sim_up.sh` (поднимает Gazebo+SITL+bridge в контейнере `simulator`).
