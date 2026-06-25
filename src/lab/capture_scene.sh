@@ -62,14 +62,15 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
     cmd="${SEQ[$i]}"
     case "$cmd" in
         arm|land|disarm) ;;
-        takeoff|hover)
+        takeoff|hover|square)
             # опциональный числовой аргумент: если следующий токен — число, он наш
+            # (takeoff=ALT, hover=SIM_SEC, square=число кругов)
             nxt="${SEQ[$((i+1))]:-}"
             [[ "$nxt" =~ ^[0-9]+(\.[0-9]+)?$ ]] && i=$((i+1))
             ;;
         *)
             echo "ОШИБКА: неизвестная команда '$cmd'." >&2
-            echo "Допустимо: arm, takeoff [ALT], hover [SIM_SEC], land, disarm." >&2
+            echo "Допустимо: arm, takeoff [ALT], hover [SIM_SEC], square [LOOPS], land, disarm." >&2
             exit 2
             ;;
     esac
@@ -136,7 +137,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
     cmd="${SEQ[$i]}"
     arg=""
     case "$cmd" in
-        takeoff|hover)
+        takeoff|hover|square)
             nxt="${SEQ[$((i+1))]:-}"
             if [[ "$nxt" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then arg="$nxt"; i=$((i+1)); fi
             ;;

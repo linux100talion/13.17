@@ -24,7 +24,7 @@ WAYPOINTS_REL = [
 
 
 class SquareFlight(Node):
-    def __init__(self, size: float, alt: float, side_time: float):
+    def __init__(self, size: float, alt: float, side_time: float, loops: int = 0):
         super().__init__('fly_square')
         # use_sim_time: иначе нода считает по РЕАЛЬНЫМ часам — при низком RTF
         # (симуляция ~13× медленнее, ветка nn2_c3_cpu) сторона квадрата прошла бы
@@ -39,6 +39,9 @@ class SquareFlight(Node):
         self.side_time = side_time   # секунды SIM-времени на сторону
         self.waypoints = [(x * size, y * size) for x, y in WAYPOINTS_REL]
         self.wp_idx = 0
+        self.max_loops = loops    # 0 = бесконечно (до Ctrl+C); >0 = выйти после N кругов
+        self.loops_done = 0
+        self.done = False
         self.wp_start = self.get_clock().now()
         # 0.1 с sim-времени → 10 sim-Гц паблиша (для GUIDED-таргета достаточно).
         self.timer = self.create_timer(0.1, self.step)
@@ -51,6 +54,12 @@ class SquareFlight(Node):
         if (now - self.wp_start).nanoseconds * 1e-9 >= self.side_time:
             self.wp_idx = (self.wp_idx + 1) % len(self.waypoints)
             self.wp_start = now
+            if self.wp_idx == 0:   # вернулись к (0,0) = круг завершён (дрон у старта)
+                self.loops_done += 1
+                if self.max_loops > 0 and self.loops_done >= self.max_loops:
+                    self.get_logger().info(f"Облёт завершён ({self.loops_done} кругов).")
+                    self.done = True
+                    return
             x, y = self.waypoints[self.wp_idx]
             self.get_logger().info(f"  -> waypoint {self.wp_idx}: x={x:.1f} y={y:.1f} z={self.alt:.1f}")
 
@@ -71,17 +80,21 @@ def main():
     parser.add_argument('--size', type=float, default=5.0, help='сторона квадрата, м (default 5)')
     parser.add_argument('--alt', type=float, default=3.0, help='высота полёта, м (default 3)')
     parser.add_argument('--side-time', type=float, default=8.0, help='время на каждую сторону, с (default 8)')
+    parser.add_argument('--loops', type=int, default=0, help='число полных кругов; 0 = бесконечно до Ctrl+C (default 0)')
     args = parser.parse_args()
 
     rclpy.init()
-    node = SquareFlight(args.size, args.alt, args.side_time)
+    node = SquareFlight(args.size, args.alt, args.side_time, args.loops)
     try:
-        rclpy.spin(node)
+        # При --loops>0 крутимся, пока нода не выставит done (N кругов пройдено).
+        while rclpy.ok() and not node.done:
+            rclpy.spin_once(node, timeout_sec=0.1)
     except KeyboardInterrupt:
         node.get_logger().info("Остановлено.")
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

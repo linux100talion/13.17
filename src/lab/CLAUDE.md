@@ -31,6 +31,7 @@ make disarm                     # дизарм
 | `arm` | `arm.sh` | GUIDED + арм (БЕЗ взлёта) |
 | `takeoff [ALT]` | `takeoff.sh` | взлёт на `ALT` м (default 3); нужен предварительный `arm` |
 | `hover [SIM_SEC]` | `hover.sh` | висение `SIM_SEC` секунд **sim-времени** (default 10) |
+| `square [LOOPS]` | `square.sh` | облёт квадрата `SQ_SIZE`×`SQ_SIZE` м @ `SQ_ALT` м, `LOOPS` кругов (default 1); нужен предварительный `takeoff` |
 | `land` | `land.sh` | посадка (режим LAND) |
 | `disarm` | `disarm.sh` | дизарм (`cmd/arming false`) |
 
@@ -183,7 +184,8 @@ mkdir -p /root/.config/rclone && mv /home/*/rclone.conf /root/.config/rclone/
 ### `fly_square.py`
 Непрерывный облёт квадрата через `setpoint_position/local`.
 Нужен для инициализации VINS: создаёт параллакс и IMU excitation.
-Работает пока не прервать Ctrl+C.
+По умолчанию работает пока не прервать Ctrl+C; **`--loops N`** — выйти после N
+полных кругов (круг считается по возврату к `(0,0)` → дрон финиширует у старта).
 
 > ⏱ Работает на **sim-времени** (`use_sim_time` ставится в ноде): таймер, отсчёт
 > сторон и штамп setpoint — в sim-часах. Поэтому `--side-time` — это секунды
@@ -205,6 +207,23 @@ docker exec -it p1317_nav python3 /lab/fly_square.py --size 5 --alt 3 --side-tim
 | `--size` | 5.0 | сторона квадрата, м |
 | `--alt` | 3.0 | высота полёта, м |
 | `--side-time` | 8.0 | время на каждую сторону, с |
+| `--loops` | 0 | число полных кругов; 0 = бесконечно (до Ctrl+C) |
+
+### `square.sh`
+ОГРАНИЧЕННАЯ обёртка над `fly_square.py` для секвенсора `capture_scene` (в
+отличие от `make fly`, который крутит бесконечно). Команда `square [LOOPS]` летит
+квадрат `LOOPS` кругов и выходит сама → встраивается в атомарный прогон между
+`takeoff` и `land`. Размер/высота/скорость — через env `SQ_SIZE` (2), `SQ_ALT`
+(5), `SQ_SIDE` (6 с/сторона). Нужен предварительный `takeoff` (EKF origin для
+local-координат `map`).
+
+```bash
+# в секвенсоре capture_scene (запись bag + кадры по пути вдоль квадрата + Drive):
+CPU=1 bash src/lab/capture_scene.sh 640x480 arm takeoff 5 square 1 land
+# отдельно (1 круг 2×2 @ 5м):
+docker exec p1317_nav bash /lab/square.sh 1
+SQ_SIZE=4 SQ_ALT=6 docker exec p1317_nav bash /lab/square.sh 2   # 4×4 @ 6м, 2 круга
+```
 
 ### `land.sh`
 Переводит в режим LAND. Дрон садится на месте.
