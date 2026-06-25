@@ -8,102 +8,119 @@
 ```bash
 cd docker/sim
 make restart-all && make wait   # поднять стек, дождаться сборки
-make arm                        # GUIDED + арм + взлёт 3м
+make arm                        # GUIDED + арм (без взлёта)
+make takeoff ALT=3              # взлёт на 3м
 make fly                        # квадрат 5×5м (держит VINS на треке)
 make vins-watch                 # смотреть инициализацию в реальном времени
 make land                       # посадка
+make disarm                     # дизарм
 ```
 
 ## Скрипты
 
-### `arm_takeoff.sh`
-Переводит дрон в режим GUIDED, армирует, взлетает на заданную высоту.
+### Лётные команды: `arm` / `takeoff` / `hover` / `land` / `disarm`
+Пять чистых атомарных команд, каждая = свой скрипт в `/lab/`. Используются
+самостоятельно (`make`/`docker exec`) или как звенья секвенсора `capture_scene.sh`.
 
-> ⏱ Ждёт по ФАКТУ (поллинг `mode`/`armed`/высоты `z` из `/mavros/...`), а не
-> фиксированными `sleep` — RTF-независимо. При низком RTF фикс. `sleep` означал
-> бы доли sim-секунды, и «взлёт» завершался бы у земли. Поллинг высоты заодно
-> гарантирует, что EKF получил origin (см. ограничение ниже — теперь снято).
+> ⏱ Все команды ждут по ФАКТУ (поллинг `mode`/`armed`/`z` из `/mavros/...`;
+> `hover` — по `/clock`), а не фиксированными `sleep` — RTF-независимо. При низком
+> RTF фикс. `sleep` означал бы доли sim-секунды, и «взлёт» завершался бы у земли.
+
+| Команда | Скрипт | Что делает |
+|---|---|---|
+| `arm` | `arm.sh` | GUIDED + арм (БЕЗ взлёта) |
+| `takeoff [ALT]` | `takeoff.sh` | взлёт на `ALT` м (default 3); нужен предварительный `arm` |
+| `hover [SIM_SEC]` | `hover.sh` | висение `SIM_SEC` секунд **sim-времени** (default 10) |
+| `land` | `land.sh` | посадка (режим LAND) |
+| `disarm` | `disarm.sh` | дизарм (`cmd/arming false`) |
+
+`hover` = sim-секунды (не wall): в GUIDED коптер сам удерживает точку после
+takeoff, поэтому `hover.sh` просто ждёт прироста sim-времени по `/clock`. При
+низком RTF фикс. wall-секунды были бы мизером sim-времени.
 
 ```bash
-make arm            # взлёт на 3м (default)
-make arm ALT=5      # взлёт на 5м
+make arm                              # GUIDED + арм
+make takeoff ALT=5                    # взлёт на 5м
+make hover SEC=10                     # висеть 10 sim-секунд
+make land && make disarm              # посадка + дизарм
 # или напрямую:
-docker exec p1317_nav bash /lab/arm_takeoff.sh 5
+docker exec p1317_nav bash /lab/takeoff.sh 5
+docker exec p1317_nav bash /lab/hover.sh 10
 ```
 
-### `capture_scene.sh` (+ `extract_frames.py`)
+### `capture_scene.sh` (+ `extract_frames.py`) — СЕКВЕНСОР команд
 Единый АТОМАРНЫЙ прогон диагностики камеры «от рестарта до заливки на Google
-Drive», разбитый на 6 ФАЗ (каждую можно выключить флагом, дефолты = полный прогон):
+Drive». Проигрывает заданную ПОСЛЕДОВАТЕЛЬНОСТЬ лётных команд, а запись
+rosbag + извлечение кадров по пути + заливка идут автоматически вокруг неё.
 
 ```
-1. рестарт стека      (RESTART)   make restart-all + make wait
-2. арм + взлёт        + ОТЧЁТ      make arm ALT=… → печатает факт. z vs цель
-3. лётная фаза + bag  (RECORD)    облёт квадрата (FLY=1) ИЛИ висение (FLY=0)
-4. посадка            (LAND)      make land
-5. извлечение кадров  ПО ПУТИ     extract_frames.py: кадр каждые DIST_M метров
-6. заливка на Drive   (GDRIVE_UP) rclone
+capture_scene.sh [WxH] <команда> [арг] <команда> [арг] ...
 ```
 
-Зачем фазы: при низком RTF (≈0.05) каждая sim-секунда дорога. Чтобы дёшево
-проверить «взлетает ли дрон вообще», лётную фазу режут (`FLY=0` + малый
-`FLY_SECONDS`), не трогая запись/заливку. После арма скрипт печатает фактическую
-`z` против цели — явный ответ «взлетел/нет».
+- `WxH` — ОПЦ. 1-й позиц. аргумент: разрешение камеры (напр. `640x480`). Если
+  задано → стек ПЕРЕСОЗДАЁТСЯ (`fresh-start`), т.к. env применяется при создании
+  контейнера; иначе быстрый `restart-all`.
+- команды — `arm`, `takeoff [ALT]`, `hover [SIM_SEC]`, `land`, `disarm`
+  (см. таблицу выше). `takeoff`/`hover` съедают следующий числовой токен;
+  неизвестная команда → ошибка ещё ДО рестарта стека (стек впустую не поднимаем).
+
+Поток: рестарт → старт записи bag (`RECORD=1`) → исполнение последовательности
+команд по порядку → стоп записи → извлечение кадров по пути → заливка на Drive.
 
 #### Запуск
 
 ```bash
-cd docker/sim && make capture-scene        # полный прогон с дефолтами
-# или напрямую с хоста (параметры через env):
-ALT=10 FLY=0 FLY_SECONDS=10 bash src/lab/capture_scene.sh  # взлёт 10м, висение, запись+заливка
-DIST_M=1.0 bash src/lab/capture_scene.sh   # выборка кадров реже — каждый метр пути
-GDRIVE_UP=0 bash src/lab/capture_scene.sh  # снять кадры локально, без заливки
-RECORD=0 FLY=0 FLY_SECONDS=5 bash src/lab/capture_scene.sh # дешёвая проверка взлёта (без bag)
+cd docker/sim && make capture-scene                          # дефолтная последовательность (CSARGS)
+make capture-scene CSARGS="640x480 arm takeoff 5 hover 2 land"
+# или напрямую с хоста:
+bash src/lab/capture_scene.sh 640x480 arm takeoff 5 hover 2 land   # 640×480 (fresh-start)
+bash src/lab/capture_scene.sh arm takeoff 3 hover 20 land disarm   # без смены разрешения (restart-all)
+DIST_M=1.0 bash src/lab/capture_scene.sh arm takeoff 4 hover 20 land  # выборка кадров реже
+GDRIVE_UP=0 bash src/lab/capture_scene.sh arm takeoff 4 hover 20 land # снять кадры локально, без заливки
+RECORD=0 bash src/lab/capture_scene.sh arm takeoff 3 land             # дешёвая проверка взлёта (без bag)
 ```
 
 #### Параметры (env)
 
+Полётные параметры теперь ПОЗИЦИОННЫЕ (команды + `WxH`); env управляет только
+рестартом / записью / извлечением / заливкой:
+
 | Env | Default | Что |
 |---|---|---|
-| `RESTART` | 1 | 1 = перезапуск стека (restart-all+wait); 0 = на живом стеке (⚠️ рассинхрон) |
-| `ALT` | 4 | высота взлёта, м |
-| `FLY` | 1 | 1 = облёт квадрата; 0 = висение на месте |
-| `SIZE` / `SIDE_TIME` | 5 / 8 | геометрия квадрата (при `FLY=1`): сторона, м / время на сторону, с |
-| `FLY_SECONDS` | 55 | длительность лётной фазы и записи bag, с (wall) |
-| `RECORD` | 1 | 1 = писать rosbag (`/image_color` + поза) |
+| `RESTART` | 1 | 1 = перезапуск стека (restart-all/fresh-start + wait); 0 = на живом стеке (⚠️ рассинхрон) |
+| `RECORD` | 1 | 1 = писать rosbag (`/image_color` + поза) вокруг всей последовательности |
 | `DIST_M` | 0.5 | **шаг выборки кадров по пройденному пути, м** |
 | `N_FRAMES` | 30 | макс. число кадров (0 = без лимита) |
-| `LAND` | 1 | 1 = посадка в конце |
 | `TOPIC` | `/image_color` | топик камеры |
 | `POSE_TOPIC` | `/mavros/local_position/pose` | поза для расчёта пути |
 | `CPU` | — | `CPU=1` → GPU-less режим (накладывает `docker-compose.cpu.yml`) |
-| `CAMERA_W` / `CAMERA_H` | — (1280×720 / CPU 320×180) | разрешение камеры; если задано → фаза 1 делает `fresh-start` (см. ниже) |
 | `GDRIVE_UP` | 1 | 1 = заливать на Drive; 0 = только снять кадры |
 | `GDRIVE_REMOTE` / `GDRIVE_DIR` | `gdrive` / `13.17/scene_img` | rclone-remote и папка на Drive |
 
-Дефолты совпадают с прежним поведением — `make capture-scene` не изменился (кроме
-выборки кадров: теперь по пути, см. ниже). При `RECORD=1` старые rosbag'ы
-(`output/scene_bag*`) удаляются в начале; свежий bag этого прогона (2+ ГБ)
-**остаётся** в `docker/sim/output/scene_bag` для анализа.
+Разрешение задаётся ПОЗИЦИОННО (`WxH`), не через env (см. ниже). При `RECORD=1`
+старые rosbag'ы (`output/scene_bag*`) удаляются в начале; свежий bag этого
+прогона (2+ ГБ) **остаётся** в `docker/sim/output/scene_bag` для анализа.
 
-#### Разрешение камеры (`CAMERA_W` / `CAMERA_H`)
-Разрешение задаётся ОДНОЙ парой env, которая растекается по всем 5 точкам (SDF-
+#### Разрешение камеры (`WxH`, 1-й позиционный аргумент)
+Разрешение задаётся первым позиционным аргументом `WxH`; `capture_scene.sh`
+парсит его в `CAMERA_W`/`CAMERA_H`, которые растекаются по всем 5 точкам (SDF-
 камера Gazebo, `bayerizer`, `camera_node`, интринсики VINS, `CameraInfo`).
 `docker-compose.yml` интерполирует их из env хоста (`${CAMERA_W:-1280}` / `:-720`;
 CPU-оверрайд → `:-320` / `:-180`). **Подвох:** env применяется при СОЗДАНИИ
 контейнера — `restart-all` (stop/start) его не перечитывает. Поэтому при заданном
-`CAMERA_W`/`CAMERA_H` `capture_scene.sh` в фазе 1 делает `fresh-start`
-(пересоздание), а не `restart-all`. Это безопасно: критичные SITL-параметры лежат
-в host-смонтированном `config/sitl-extra.parm` и применяются при каждом старте.
+`WxH` `capture_scene.sh` в фазе рестарта делает `fresh-start` (пересоздание), а не
+`restart-all`. Это безопасно: критичные SITL-параметры лежат в host-смонтированном
+`config/sitl-extra.parm` и применяются при каждом старте.
 
 ```bash
-CAMERA_W=640 CAMERA_H=360 bash src/lab/capture_scene.sh        # 640×360 на GPU
-CPU=1 CAMERA_W=320 CAMERA_H=180 bash src/lab/capture_scene.sh  # CPU-бокс
+bash src/lab/capture_scene.sh 640x360 arm takeoff 4 hover 20 land        # 640×360 на GPU
+CPU=1 bash src/lab/capture_scene.sh 320x180 arm takeoff 4 hover 20 land  # CPU-бокс
 ```
 ⚠️ При `RESTART=0` разрешение не применится (нет пересоздания) — скрипт предупредит.
 
 #### Выборка кадров — ПО ПУТИ, а не по времени (`extract_frames.py`)
 Кадры для заливки выбираются по **пройденному пути дрона**, не по таймеру:
-- фаза 3 пишет в bag два топика — `/image_color` И `/mavros/local_position/pose`;
+- запись пишет в bag два топика — `/image_color` И `/mavros/local_position/pose`;
 - `extract_frames.py` (внутри nav, `rosbag2_py` + `cv_bridge`) копит 3D-длину пути
   между позами и сохраняет: первый кадр (старт) + каждый раз, как с прошлого
   сохранения набежало ≥ `DIST_M` метров;
@@ -132,19 +149,18 @@ Env `extract_frames.py`: `SCENE_BAG` (default `…/output/scene_bag`), `SCENE_OU
 
 | Стадия | Откуда | Время |
 |---|---|---|
-| `restart-all` (stop→start контейнеров) | docker compose | ~10–20с |
+| `restart-all` (stop→start контейнеров; `fresh-start` при смене разрешения чуть дольше) | docker compose | ~10–20с |
 | `make wait` → «nav: готово» (старт MAVROS/VINS/камеры, colcon инкрементально) | до старта нод | ~60–120с |
 | прогрев EKF: origin set ~+35с, «is using GPS» ~+85с после старта MAVROS | таймстампы FCU | ~85с |
-| `arm_takeoff.sh`: GUIDED→arm→takeoff (циклы с ретраями до `TIMEOUT=180`) | мои циклы | 10–40с при успехе; до 180с при отказе |
-| облёт + запись bag | `FLY_SECONDS=55` | 55с |
+| `arm.sh`+`takeoff.sh`: GUIDED→arm→takeoff (циклы с ретраями до 180 итераций) | поллинг | 10–40с при успехе; до 180с при отказе |
+| `hover.sh` (sim-секунды) + запись bag | по `SIM_SEC` и RTF | зависит |
 | извлечение кадров по пути из bag (`extract_frames.py`) | внутри nav | ~15с |
 | заливка на Drive (rclone) | из лога | ~18с |
 
-Разброс даёт `arm_takeoff.sh`: при успешном взлёте весь прогон ≈ **4–5 мин**;
-при зависшем `takeoff` (ретрай до таймаута 180с) → **+3 мин** → ~6–7 мин.
-Когда взлёт стабилен, время режется: убрать лишний `sleep 8` в `capture_scene.sh`
-(арминг сам ждёт готовность), уменьшить `TIMEOUT`, `FLY_SECONDS` для диагностики
-хватит 30с.
+Разброс даёт взлёт (`arm.sh`+`takeoff.sh`): при успешном весь прогон ≈ **4–5 мин**;
+при зависшем `takeoff` (ретрай до таймаута) → **+3 мин** → ~6–7 мин. Когда взлёт
+стабилен, время режется: убрать лишний `sleep 8` в `capture_scene.sh` (команды
+сами ждут готовность), уменьшить `SIM_SEC` у `hover`.
 
 #### Настройка Google Drive (rclone, разово)
 Заливка идёт через `rclone` (remote по умолчанию `gdrive:`). Бокс headless,
@@ -219,8 +235,8 @@ VINS требует для инициализации движение с пар
 Дрон стоя не инициализируется. Типичный сценарий:
 
 ```
-[terminal 1]  make vins-watch        # смотреть лог
-[terminal 2]  make arm && make fly   # взлететь и начать квадрат
+[terminal 1]  make vins-watch                       # смотреть лог
+[terminal 2]  make arm && make takeoff && make fly  # арм, взлёт, квадрат
 ```
 
 Ждать строку `Initialization finish!` → потом `solver_flag: NON_LINEAR`.
@@ -232,7 +248,7 @@ VINS требует для инициализации движение с пар
 (IMU skip, шум sim.yaml) работают:
 
 ```bash
-make arm && make fly &
+make arm && make takeoff && make fly &
 make vins-watch
 # ожидаем: нет "numerical unstable", нет "imu message in disorder"
 # ожидаем: "Initialization finish!" → "NON_LINEAR" через ~30с движения
@@ -250,8 +266,8 @@ make vins-watch
 
 - `fly_square.py` использует локальные координаты (`map` frame) — нужен EKF
   origin. Раньше требовалось вручную ждать 3–5 с после `make arm`; теперь
-  `arm_takeoff.sh` поллит высоту до набора, а к этому моменту origin уже есть,
+  `takeoff.sh` поллит высоту до набора, а к этому моменту origin уже есть,
   так что ручная пауза не нужна.
-- `arm_takeoff.sh` требует `ARMING_CHECK 0` в SITL (задано в `sitl-extra.parm`).
+- `arm.sh` требует `ARMING_CHECK 0` в SITL (задано в `sitl-extra.parm`).
 - При потере VINS трекинга (`system reboot!`) — остановить `fly`, сделать
-  `make land`, потом `make arm && make fly` заново.
+  `make land`, потом `make arm && make takeoff && make fly` заново.

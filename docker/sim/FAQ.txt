@@ -74,16 +74,16 @@ make restart-all 2>&1 | tail -3 && make wait 2>&1
 
 
 --------------------------------
-Как вставлять в прогон симуляции скрипты `arm_takeoff.sh` и `fly_square.py` из `src/lab`? Как между ними переключаться?
+Как вставлять в прогон симуляции лётные команды и `fly_square.py` из `src/lab`? Как между ними переключаться?
 --------------------------------
 
 ## Их «не вставляют» в запуск стека — они уже примонтированы
 
-`arm_takeoff.sh` и `fly_square.py` **не являются частью** `restart-all`/`sim_nav.launch.py`. Они постоянно лежат внутри `nav`-контейнера через bind mount (read-only):
+Лётные команды (`arm.sh`/`takeoff.sh`/`hover.sh`/`land.sh`/`disarm.sh`) и `fly_square.py` **не являются частью** `restart-all`/`sim_nav.launch.py`. Они постоянно лежат внутри `nav`-контейнера через bind mount (read-only):
 
 ```yaml
 # docker-compose.yml:99
-- ../../src/lab:/lab:ro     # arm/fly/land/vins_watch
+- ../../src/lab:/lab:ro     # arm/takeoff/hover/land/disarm/fly/vins_watch
 ```
 
 То есть весь каталог `src/lab/` виден в контейнере как `/lab/`. Редактируешь файл на хосте → правка сразу доступна в контейнере, пересборка/перезапуск не нужны.
@@ -93,9 +93,12 @@ make restart-all 2>&1 | tail -3 && make wait 2>&1
 Стек (`restart-all`) поднимает Gazebo+SITL+VINS+MAVROS, но **дрон стоит на земле**. Дальше ты сам подаёшь команды через Makefile-цели, которые просто дёргают `docker exec` по этим скриптам:
 
 ```makefile
-arm:  docker exec p1317_nav bash   /lab/arm_takeoff.sh $(ALT)
-fly:  docker exec -it p1317_nav python3 /lab/fly_square.py $(FLYARGS)
-land: docker exec p1317_nav bash   /lab/land.sh
+arm:     docker exec p1317_nav bash /lab/arm.sh
+takeoff: docker exec p1317_nav bash /lab/takeoff.sh $(ALT)
+hover:   docker exec p1317_nav bash /lab/hover.sh $(SEC)
+land:    docker exec p1317_nav bash /lab/land.sh
+disarm:  docker exec p1317_nav bash /lab/disarm.sh
+fly:     docker exec -it p1317_nav python3 /lab/fly_square.py $(FLYARGS)
 ```
 
 Типичная последовательность одного прогона:
@@ -103,26 +106,29 @@ land: docker exec p1317_nav bash   /lab/land.sh
 ```bash
 cd docker/sim
 make restart-all && make wait    # поднять стек, дождаться «nav: готово»
-make arm                         # arm_takeoff.sh: GUIDED → арм → взлёт 3м
+make arm                         # arm.sh: GUIDED + арм
+make takeoff ALT=3               # takeoff.sh: взлёт на 3м
 make fly                         # fly_square.py: облёт квадрата (инициализация VINS)
 make land                        # land.sh: посадка
 ```
 
 ## Это не «или-или» и не переключение — это последовательность ролей
 
-У них **разные задачи**, они работают в связке, а не вместо друг друга:
+У команд **разные задачи**, они работают в связке:
 
-- **`arm_takeoff.sh`** — один раз: поднять дрон в воздух (GUIDED + арм + набор высоты). Завершается сам, по факту достижения высоты.
-- **`fly_square.py`** — потом: гоняет дрон по квадрату, чтобы создать параллакс и IMU excitation для инициализации VINS. Крутится, **пока не нажмёшь Ctrl+C**.
+- **`arm` → `takeoff`** — поднять дрон в воздух (GUIDED + арм, затем набор высоты). Каждая завершается сама, по факту.
+- **`hover`** — удерживать точку N секунд sim-времени (в GUIDED коптер держится сам после takeoff).
+- **`fly_square.py`** — гоняет дрон по квадрату, чтобы создать параллакс и IMU excitation для инициализации VINS. Крутится, **пока не нажмёшь Ctrl+C** (в отличие от `hover`, у которого конечная длительность).
 
-Сначала `arm`, затем `fly`. Без взлёта `fly_square.py` нечего двигать.
+Сначала `arm`+`takeoff`, затем `hover`/`fly`. Без взлёта двигать нечего.
 
 ## «Переключение» параметрами, а не скриптами
 
 Менять поведение — через переменные Makefile, сами скрипты не трогаешь:
 
 ```bash
-make arm ALT=5                              # взлёт на 5 м
+make takeoff ALT=5                          # взлёт на 5 м
+make hover SEC=10                           # висеть 10 sim-секунд
 make fly FLYARGS="--size 8 --alt 4"         # квадрат 8×8, высота 4 м
 make fly FLYARGS="--size 5 --side-time 5"   # быстрее, 5 с на сторону
 ```
@@ -130,15 +136,15 @@ make fly FLYARGS="--size 5 --side-time 5"   # быстрее, 5 с на стор
 Или напрямую, в обход Makefile:
 
 ```bash
-docker exec p1317_nav bash /lab/arm_takeoff.sh 5
+docker exec p1317_nav bash /lab/takeoff.sh 5
 docker exec -it p1317_nav python3 /lab/fly_square.py --size 5 --alt 3 --side-time 8
 ```
 
 ## Если хочешь всё автоматом
 
-`capture_scene.sh` (= `make capture-scene`) — готовая обёртка, которая сама делает `restart-all → wait → arm → fly → запись bag → land`. Это эталонный «атомарный прогон» из дисциплины CLAUDE.md; новые сценарии рекомендуется оформлять так же — обёрткой над `make`/скриптами, а не ручными командами в контейнере.
+`capture_scene.sh` (= `make capture-scene`) — готовый СЕКВЕНСОР: `restart-all/fresh-start → wait → последовательность лётных команд → запись bag → извлечение кадров → заливка`. Последовательность задаётся позиционно: `capture_scene.sh [WxH] arm takeoff 5 hover 2 land`. Это эталонный «атомарный прогон» из дисциплины CLAUDE.md; новые сценарии рекомендуется оформлять так же — обёрткой над `make`/скриптами, а не ручными командами в контейнере.
 
-Коротко: скрипты уже «вставлены» (bind mount `/lab`), а в прогон ты их вводишь целями `make arm` → `make fly` (по порядку, не вместо друг друга); поведение настраивается `ALT=`/`FLYARGS=`.
+Коротко: скрипты уже «вставлены» (bind mount `/lab`), а в прогон ты их вводишь целями `make arm` → `make takeoff` → `make fly` (по порядку); поведение настраивается `ALT=`/`SEC=`/`FLYARGS=`.
 
 
 --------------------------------
@@ -172,14 +178,14 @@ docker exec -it p1317_nav bash /lab/vins_watch.sh
 Это диагностический наблюдатель — его держат в отдельном окне, пока в другом идёт полёт. Типовой сценарий инициализации VINS:
 
 ```
-[окно 1]  make vins-watch        # смотреть лог + частоту одометрии
-[окно 2]  make arm && make fly    # взлететь и пойти по квадрату
+[окно 1]  make vins-watch                       # смотреть лог + частоту одометрии
+[окно 2]  make arm && make takeoff && make fly  # арм, взлёт, квадрат
 ```
 
 На что смотреть:
 - ждём `Initialization finish!` → затем `solver_flag: NON_LINEAR` — VINS инициализировался;
 - после инициализации `[odom]` начинает показывать ненулевую частоту `/vins_estimator/odometry`;
-- НЕ должно быть `numerical unstable`, `imu message in disorder`, `system reboot!` — это признаки проблем (см. п.11 CLAUDE.md про IMU timesync; при `reboot` — `make land`, затем `make arm && make fly` заново).
+- НЕ должно быть `numerical unstable`, `imu message in disorder`, `system reboot!` — это признаки проблем (см. п.11 CLAUDE.md про IMU timesync; при `reboot` — `make land`, затем `make arm && make takeoff && make fly` заново).
 
 Важно: `vins_watch.sh` только читает лог и топик — запускать/перезапускать его можно сколько угодно, на состояние стека он не влияет (под «дисциплину прогона» это разрешённое «только смотреть»).
 
@@ -210,17 +216,18 @@ docker exec p1317_nav bash /lab/land.sh
 
 ## Место в прогоне
 
-`land.sh` — это завершение лётной части прогона, противоположность `arm_takeoff.sh`. Типовая последовательность:
+`land.sh` — это завершение лётной части прогона, противоположность `takeoff.sh`. Типовая последовательность:
 
 ```bash
-make arm     # взлёт
+make arm     # арм
+make takeoff # взлёт
 make fly     # облёт квадрата (Ctrl+C, чтобы остановить)
 make land    # посадка
 ```
 
 Когда применять:
 - штатно — после `make fly` в конце прогона;
-- при потере VINS трекинга (`system reboot!` в `vins_watch.sh`) — остановить `fly`, сделать `make land`, затем `make arm && make fly` заново (см. «Известные ограничения» в `src/lab/CLAUDE.md`).
+- при потере VINS трекинга (`system reboot!` в `vins_watch.sh`) — остановить `fly`, сделать `make land`, затем `make arm && make takeoff && make fly` заново (см. «Известные ограничения» в `src/lab/CLAUDE.md`).
 
 Замечания:
 - `land.sh` шлёт только команду режима — он НЕ дизармит явно. После касания земли ArduPilot дизармит сам (в SITL с `DISARM_DELAY 0` — сразу).
@@ -228,52 +235,60 @@ make land    # посадка
 
 
 --------------------------------
-Что делает `arm_takeoff.sh` и как им пользоваться?
+Что делают 5 лётных команд (`arm`/`takeoff`/`hover`/`land`/`disarm`) и как ими пользоваться?
 --------------------------------
 
-`arm_takeoff.sh` — это взлёт дрона: переводит FCU в режим **GUIDED**, армирует моторы и поднимает на заданную высоту. Это первый лётный шаг прогона (противоположность `land.sh`). Лежит в `src/lab/`, примонтирован в `nav`-контейнер как `/lab/arm_takeoff.sh`.
+Лётная часть разбита на **5 чистых атомарных команд** — каждая = свой скрипт в `src/lab/`, примонтирован в `nav`-контейнер как `/lab/<cmd>.sh`. Используются самостоятельно (`make`/`docker exec`) или как звенья секвенсора `capture_scene.sh`.
 
-## Что он делает (3 фазы, каждая — по факту, не по `sleep`)
-
-1. **GUIDED** — вызывает `/mavros/set_mode`, затем поллит `/mavros/state` поле `mode`, пока не станет `GUIDED` (до 30 попыток).
-2. **Арм** — в цикле дёргает `/mavros/cmd/arming {value: true}` и проверяет `/mavros/state` поле `armed`, пока не станет `true` (до 30 попыток с ретраями).
-3. **Взлёт** — вызывает `/mavros/cmd/takeoff` на `ALT`, потом поллит фактическую высоту `/mavros/local_position/pose` (`pose.position.z`), пока не достигнет **95 % от `ALT`** (до 180 попыток).
+| Команда | Скрипт | Что делает |
+|---|---|---|
+| `arm` | `arm.sh` | GUIDED + арм (без взлёта): `/mavros/set_mode` GUIDED + поллинг `mode`; цикл `/mavros/cmd/arming {value:true}` + поллинг `armed` |
+| `takeoff [ALT]` | `takeoff.sh` | `/mavros/cmd/takeoff` на `ALT` (default 3), поллинг `z` до 95% ALT, печать факт. `z`. Нужен предварительный `arm` |
+| `hover [SIM_SEC]` | `hover.sh` | держит точку `SIM_SEC` сек **sim-времени** (default 10): ждёт прироста `/clock` |
+| `land` | `land.sh` | `/mavros/set_mode` LAND (автопилот снижается сам) |
+| `disarm` | `disarm.sh` | цикл `/mavros/cmd/arming {value:false}` + поллинг `armed=false` |
 
 ## ⏱ Почему поллинг, а не фиксированные `sleep`
 
-Ключевой момент: скрипт ждёт **по факту** (опрос `mode`/`armed`/`z`), а не фиксированными паузами. Симуляция идёт с низким RTF (на CPU-боксе ~13× медленнее реального), поэтому `sleep 5` соответствовал бы долям sim-секунды — дрон не успел бы ни сменить режим, ни набрать высоту, и «взлёт» завершался бы у земли. Здесь `sleep` — это лишь **интервал опроса** (wall), а не предположение о длительности. Поэтому скрипт RTF-независим. Поллинг высоты заодно гарантирует, что EKF получил origin к моменту запуска `fly_square.py`.
+Каждая команда ждёт **по факту** (опрос `mode`/`armed`/`z`; `hover` — по `/clock`), а не фиксированными паузами. Симуляция идёт с низким RTF (на CPU-боксе ~13× медленнее реального), поэтому `sleep 5` соответствовал бы долям sim-секунды — дрон не успел бы ни сменить режим, ни набрать высоту. Здесь `sleep` — это лишь **интервал опроса** (wall), а не предположение о длительности. Поэтому команды RTF-независимы. Поллинг высоты в `takeoff` заодно гарантирует, что EKF получил origin к моменту запуска `fly_square.py`.
+
+`hover` = sim-секунды, а не wall: в GUIDED коптер сам удерживает точку после takeoff (continuous setpoints не нужны, в отличие от PX4 OFFBOARD), поэтому `hover.sh` просто ждёт прироста sim-времени по `/clock`.
 
 ## Как запускать
 
 ```bash
-make arm            # взлёт на 3 м (ALT по умолчанию)
-make arm ALT=5      # взлёт на 5 м
+make arm                        # GUIDED + арм
+make takeoff ALT=5              # взлёт на 5 м
+make hover SEC=10               # висеть 10 sim-секунд
+make land && make disarm        # посадка + дизарм
 # или напрямую:
-docker exec p1317_nav bash /lab/arm_takeoff.sh 5
+docker exec p1317_nav bash /lab/takeoff.sh 5
+docker exec p1317_nav bash /lab/hover.sh 10
 ```
-
-Высота передаётся первым позиционным аргументом (через `make` — переменной `ALT`).
 
 ## Место в прогоне
 
 ```bash
 make restart-all && make wait    # стек поднят, дрон на земле
-make arm                         # ← GUIDED + арм + взлёт
+make arm && make takeoff         # ← GUIDED + арм + взлёт
 make fly                         # дальше — облёт квадрата
 ```
 
+Или одной строкой через секвенсор: `bash src/lab/capture_scene.sh 640x480 arm takeoff 5 hover 2 land`.
+
 ## Замечания
 
-- Требует **`ARMING_CHECK 0`** в SITL (задано в `config/sitl-extra.parm`) — иначе арм отклонит проверками.
-- Завершается сам по достижении высоты; если взлёт «завис», ретраит до таймаута (фаза высоты — до 180 циклов опроса), из-за чего весь прогон может растянуться (см. бюджет времени в `src/lab/CLAUDE.md`).
-- Раньше требовалась ручная пауза 3–5 с после арма (ждать EKF origin) — теперь не нужна: поллинг высоты доходит до набора уже после установки origin.
+- `arm` требует **`ARMING_CHECK 0`** в SITL (задано в `config/sitl-extra.parm`) — иначе арм отклонит проверками.
+- `takeoff` завершается сам по достижении высоты; если взлёт «завис», ретраит до таймаута (фаза высоты — до 180 циклов опроса), из-за чего весь прогон может растянуться (см. бюджет времени в `src/lab/CLAUDE.md`).
+- После `land` ArduCopter дизармит сам (`DISARM_DELAY 0`); `disarm` — явный/принудительный дизарм.
+- Раньше требовалась ручная пауза 3–5 с после арма (ждать EKF origin) — теперь не нужна: поллинг высоты в `takeoff` доходит до набора уже после установки origin.
 
 
 --------------------------------
 Что делает `fly_square.py` и как им пользоваться?
 --------------------------------
 
-`fly_square.py` — это непрерывный облёт квадрата для **прогрева/инициализации VINS**. VINS не инициализируется, пока дрон стоит: ему нужны параллакс (смена ракурса) и IMU excitation (ускорения). Этот скрипт гоняет дрон по квадрату, создавая и то, и другое. Это второй лётный шаг (после `arm_takeoff.sh`). Лежит в `src/lab/`, примонтирован как `/lab/fly_square.py`.
+`fly_square.py` — это непрерывный облёт квадрата для **прогрева/инициализации VINS**. VINS не инициализируется, пока дрон стоит: ему нужны параллакс (смена ракурса) и IMU excitation (ускорения). Этот скрипт гоняет дрон по квадрату, создавая и то, и другое. Это лётный шаг после `arm`+`takeoff`. Лежит в `src/lab/`, примонтирован как `/lab/fly_square.py`.
 
 ## Что он делает
 
@@ -304,7 +319,7 @@ docker exec -it p1317_nav python3 /lab/fly_square.py --size 5 --alt 3 --side-tim
 ## Место в прогоне
 
 ```bash
-make arm                  # сначала взлёт (нужен EKF origin для local-координат)
+make arm && make takeoff  # сначала взлёт (нужен EKF origin для local-координат)
 make fly                  # ← облёт квадрата, держим до инициализации VINS
 # в соседнем окне: make vins-watch — ждём "Initialization finish!" → "NON_LINEAR"
 make land                 # Ctrl+C по fly, затем посадка
@@ -312,8 +327,8 @@ make land                 # Ctrl+C по fly, затем посадка
 
 ## Замечания
 
-- Использует **локальные координаты** (`map` frame) → требует EKF origin. Поэтому строго **после** `arm_takeoff.sh` (тот доводит до набора высоты, к этому моменту origin есть).
-- При потере трекинга (`system reboot!` в `vins_watch.sh`) — остановить `fly`, `make land`, затем `make arm && make fly` заново.
+- Использует **локальные координаты** (`map` frame) → требует EKF origin. Поэтому строго **после** `takeoff.sh` (тот доводит до набора высоты, к этому моменту origin есть).
+- При потере трекинга (`system reboot!` в `vins_watch.sh`) — остановить `fly`, `make land`, затем `make arm && make takeoff && make fly` заново.
 - Перед `make land` облёт надо остановить (Ctrl+C): иначе нода продолжает слать setpoint'ы и перебивает снижение. В `capture_scene.sh` это делается автоматически (`pkill -f fly_square.py`).
 
 

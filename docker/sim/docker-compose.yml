@@ -104,7 +104,7 @@ services:
       - /root/VINS-MONO-ROS2:/root/sim_ws/src/vins_oss  # форк linux100talion/VINS-MONO-ROS2, ветка 1317_debug
       - ../../src/sim:/root/sim_ws/src/sim       # симуляционная обвязка
       - ../../src/nav:/root/sim_ws/src/nav       # нейросети навигации (пока пусто)
-      - ../../src/lab:/lab:ro                    # управляющие скрипты (arm/fly/land/vins_watch)
+      - ../../src/lab:/lab:ro                    # управляющие скрипты (arm/takeoff/hover/land/disarm/fly/vins_watch)
       - ../../src/camera:/root/sim_ws/src/camera
       - nav_colcon_build:/root/sim_ws/build      # colcon build — выживает при fresh-start
       - nav_colcon_install:/root/sim_ws/install  # colcon install — выживает при fresh-start
