@@ -32,24 +32,99 @@ docker exec p1317_nav bash /lab/arm_takeoff.sh 5
 ```
 
 ### `capture_scene.sh` (+ `extract_frames.py`)
-Единый прогон диагностики камеры «от рестарта до заливки на Google Drive»:
-рестарт стека → арм/взлёт → запись rosbag `/image_color` параллельно с облётом
-квадрата → стоп/посадка → извлечение 30 кадров с шагом 1с в JPEG → заливка папки
-на Google Drive через `rclone`. `extract_frames.py` запускается внутри
-nav-контейнера (читает bag через `rosbag2_py`, декодит `cv_bridge`).
+Единый АТОМАРНЫЙ прогон диагностики камеры «от рестарта до заливки на Google
+Drive», разбитый на 6 ФАЗ (каждую можно выключить флагом, дефолты = полный прогон):
+
+```
+1. рестарт стека      (RESTART)   make restart-all + make wait
+2. арм + взлёт        + ОТЧЁТ      make arm ALT=… → печатает факт. z vs цель
+3. лётная фаза + bag  (RECORD)    облёт квадрата (FLY=1) ИЛИ висение (FLY=0)
+4. посадка            (LAND)      make land
+5. извлечение кадров  ПО ПУТИ     extract_frames.py: кадр каждые DIST_M метров
+6. заливка на Drive   (GDRIVE_UP) rclone
+```
+
+Зачем фазы: при низком RTF (≈0.05) каждая sim-секунда дорога. Чтобы дёшево
+проверить «взлетает ли дрон вообще», лётную фазу режут (`FLY=0` + малый
+`FLY_SECONDS`), не трогая запись/заливку. После арма скрипт печатает фактическую
+`z` против цели — явный ответ «взлетел/нет».
+
+#### Запуск
 
 ```bash
 cd docker/sim && make capture-scene        # полный прогон с дефолтами
 # или напрямую с хоста (параметры через env):
-ALT=4 FLY_SECONDS=55 N_FRAMES=30 bash src/lab/capture_scene.sh
-GDRIVE_UP=0 bash src/lab/capture_scene.sh  # только снять кадры, без заливки
+ALT=10 FLY=0 FLY_SECONDS=10 bash src/lab/capture_scene.sh  # взлёт 10м, висение, запись+заливка
+DIST_M=1.0 bash src/lab/capture_scene.sh   # выборка кадров реже — каждый метр пути
+GDRIVE_UP=0 bash src/lab/capture_scene.sh  # снять кадры локально, без заливки
+RECORD=0 FLY=0 FLY_SECONDS=5 bash src/lab/capture_scene.sh # дешёвая проверка взлёта (без bag)
 ```
 
-Параметры (env): `ALT`, `SIZE`, `SIDE_TIME`, `FLY_SECONDS`, `N_FRAMES`,
-`STEP_NS`, `TOPIC`, `NAV`, `GDRIVE_UP` (1/0), `GDRIVE_REMOTE` (default `gdrive`),
-`GDRIVE_DIR` (default `13.17/scene_img`).
-В начале прогона старые rosbag'ы (`output/scene_bag*`) удаляются; свежий bag
-этого прогона (2+ ГБ) **остаётся** в `docker/sim/output/scene_bag` для анализа.
+#### Параметры (env)
+
+| Env | Default | Что |
+|---|---|---|
+| `RESTART` | 1 | 1 = перезапуск стека (restart-all+wait); 0 = на живом стеке (⚠️ рассинхрон) |
+| `ALT` | 4 | высота взлёта, м |
+| `FLY` | 1 | 1 = облёт квадрата; 0 = висение на месте |
+| `SIZE` / `SIDE_TIME` | 5 / 8 | геометрия квадрата (при `FLY=1`): сторона, м / время на сторону, с |
+| `FLY_SECONDS` | 55 | длительность лётной фазы и записи bag, с (wall) |
+| `RECORD` | 1 | 1 = писать rosbag (`/image_color` + поза) |
+| `DIST_M` | 0.5 | **шаг выборки кадров по пройденному пути, м** |
+| `N_FRAMES` | 30 | макс. число кадров (0 = без лимита) |
+| `LAND` | 1 | 1 = посадка в конце |
+| `TOPIC` | `/image_color` | топик камеры |
+| `POSE_TOPIC` | `/mavros/local_position/pose` | поза для расчёта пути |
+| `CPU` | — | `CPU=1` → GPU-less режим (накладывает `docker-compose.cpu.yml`) |
+| `CAMERA_W` / `CAMERA_H` | — (1280×720 / CPU 320×180) | разрешение камеры; если задано → фаза 1 делает `fresh-start` (см. ниже) |
+| `GDRIVE_UP` | 1 | 1 = заливать на Drive; 0 = только снять кадры |
+| `GDRIVE_REMOTE` / `GDRIVE_DIR` | `gdrive` / `13.17/scene_img` | rclone-remote и папка на Drive |
+
+Дефолты совпадают с прежним поведением — `make capture-scene` не изменился (кроме
+выборки кадров: теперь по пути, см. ниже). При `RECORD=1` старые rosbag'ы
+(`output/scene_bag*`) удаляются в начале; свежий bag этого прогона (2+ ГБ)
+**остаётся** в `docker/sim/output/scene_bag` для анализа.
+
+#### Разрешение камеры (`CAMERA_W` / `CAMERA_H`)
+Разрешение задаётся ОДНОЙ парой env, которая растекается по всем 5 точкам (SDF-
+камера Gazebo, `bayerizer`, `camera_node`, интринсики VINS, `CameraInfo`).
+`docker-compose.yml` интерполирует их из env хоста (`${CAMERA_W:-1280}` / `:-720`;
+CPU-оверрайд → `:-320` / `:-180`). **Подвох:** env применяется при СОЗДАНИИ
+контейнера — `restart-all` (stop/start) его не перечитывает. Поэтому при заданном
+`CAMERA_W`/`CAMERA_H` `capture_scene.sh` в фазе 1 делает `fresh-start`
+(пересоздание), а не `restart-all`. Это безопасно: критичные SITL-параметры лежат
+в host-смонтированном `config/sitl-extra.parm` и применяются при каждом старте.
+
+```bash
+CAMERA_W=640 CAMERA_H=360 bash src/lab/capture_scene.sh        # 640×360 на GPU
+CPU=1 CAMERA_W=320 CAMERA_H=180 bash src/lab/capture_scene.sh  # CPU-бокс
+```
+⚠️ При `RESTART=0` разрешение не применится (нет пересоздания) — скрипт предупредит.
+
+#### Выборка кадров — ПО ПУТИ, а не по времени (`extract_frames.py`)
+Кадры для заливки выбираются по **пройденному пути дрона**, не по таймеру:
+- фаза 3 пишет в bag два топика — `/image_color` И `/mavros/local_position/pose`;
+- `extract_frames.py` (внутри nav, `rosbag2_py` + `cv_bridge`) копит 3D-длину пути
+  между позами и сохраняет: первый кадр (старт) + каждый раз, как с прошлого
+  сохранения набежало ≥ `DIST_M` метров;
+- имя файла несёт пройденный путь: `frame_03_001.50m.jpg`;
+- **дрон не двигался** (не взлетел) или позы в bag нет → останется ТОЛЬКО первый
+  кадр + предупреждение. На время НЕ откатываемся.
+
+Это удобнее для анализа сцены: кадры равномерны в пространстве (а не во времени),
+число кадров ∝ длине маршрута. Извлечение можно перезапустить отдельно по уже
+снятому bag (с другим шагом), не делая новый прогон — внутри nav-контейнера:
+
+```bash
+docker exec -e SCENE_DIST_M=0.5 -e SCENE_N=0 p1317_nav bash -lc \
+  'source /opt/ros/humble/setup.bash; source /opt/overlay/install/setup.bash; \
+   source /root/sim_ws/install/setup.bash; python3 /lab/extract_frames.py'
+```
+
+Env `extract_frames.py`: `SCENE_BAG` (default `…/output/scene_bag`), `SCENE_OUT`
+(`…/output/scene_img`), `SCENE_TOPIC` (`/image_color`), `SCENE_POSE`
+(`/mavros/local_position/pose`), `SCENE_DIST_M` (0.5), `SCENE_N` (30; 0 = без
+лимита). Требует overlay `/opt/overlay` (cv_bridge против CUDA-OpenCV).
 
 #### Бюджет времени прогона (~4–7 мин)
 Складывается из стадий скрипта + физического прогрева FCU (значения — из скрипта
@@ -62,7 +137,7 @@ GDRIVE_UP=0 bash src/lab/capture_scene.sh  # только снять кадры,
 | прогрев EKF: origin set ~+35с, «is using GPS» ~+85с после старта MAVROS | таймстампы FCU | ~85с |
 | `arm_takeoff.sh`: GUIDED→arm→takeoff (циклы с ретраями до `TIMEOUT=180`) | мои циклы | 10–40с при успехе; до 180с при отказе |
 | облёт + запись bag | `FLY_SECONDS=55` | 55с |
-| извлечение 30 кадров из bag (`extract_frames.py`) | внутри nav | ~15с |
+| извлечение кадров по пути из bag (`extract_frames.py`) | внутри nav | ~15с |
 | заливка на Drive (rclone) | из лога | ~18с |
 
 Разброс даёт `arm_takeoff.sh`: при успешном взлёте весь прогон ≈ **4–5 мин**;

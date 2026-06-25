@@ -37,6 +37,10 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all      # graphics+compute: нужно для EGL/рендера
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      # Разрешение камеры — из env хоста (default 1280×720, боевой ArduCam).
+      # Применяется при СОЗДАНИИ контейнера → менять только через up/fresh-start.
+      - CAMERA_W=${CAMERA_W:-1280}
+      - CAMERA_H=${CAMERA_H:-720}
 
     volumes:
       # - /tmp/.X11-unix:/tmp/.X11-unix:rw  # раскомментировать для GUI-режима
@@ -79,6 +83,10 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      # Разрешение камеры — из env хоста (default 1280×720). ДОЛЖНО совпадать с
+      # simulator. Применяется при СОЗДАНИИ контейнера → менять через up/fresh-start.
+      - CAMERA_W=${CAMERA_W:-1280}
+      - CAMERA_H=${CAMERA_H:-720}
 
     # Виртуальная камера: байеризатор пишет сюда, camera_node читает отсюда.
     # /dev/rawbayer создаётся на ХОСТЕ модулем v4l2loopback (см. README).
