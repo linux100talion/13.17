@@ -555,3 +555,47 @@ ros2 launch /root/sim_ws/src/sim/sim_nav.launch.py
 - **SITL-параметры эфемерны**: критичные (`SCHED_LOOP_RATE 100`, `ARMING_CHECK 0` и др.) применяются в `.parm` внутри контейнера и теряются на `fresh-start` (пересоздание контейнера); `sitl-extra.parm` смонтирован с хоста и переживает. См. CLAUDE.md п.12.
 - Логи — в `docker/sim/output/` (`gz_sim.log`, `sitl.log`, `ros_gz_bridge.log`); читаются с хоста (`make logs`).
 - **`depends_on`**: `nav` ждёт `simulator` — `nav_up.sh` ждёт активации `/dev/rawbayer`, который зависит от потока камеры из Gazebo.
+
+
+--------------------------------
+Что такое `docker-compose.cpu.yml` и когда он нужен?
+--------------------------------
+
+`docker-compose.cpu.yml` — это **CPU-оверрайд** симуляционного стека: тонкий compose-файл, который кладётся ПОВЕРХ базового `docker-compose.yml` и переключает стек в режим работы **без GPU** (ветка `nn2_c3_cpu`, пока T4 на GCE в дефиците). Базовый compose он не меняет — переопределяет только нужные поля.
+
+## Когда нужен
+
+Когда прогоняешь симуляцию на машине **без NVIDIA-драйвера** (CPU-бокс). Боевой Orin и штатный GPU-sim остаются на базовом compose (`camera_node` + `runtime: nvidia`) — этот файл их не трогает.
+
+## Что он переопределяет
+
+| Поле | База | CPU-оверрайд | Зачем |
+|---|---|---|---|
+| `runtime` (обоих сервисов) | `nvidia` | `runc` | без NVIDIA-драйвера nvidia-runtime не стартует; `NVIDIA_*`-env при этом безвредны |
+| `simulator` GL | EGL/NVIDIA | `LIBGL_ALWAYS_SOFTWARE=1`, `GALLIUM_DRIVER=llvmpipe` | софтовый рендер камеры Gazebo вместо GPU |
+| `nav` камера | `camera_node` (CUDA) | `CAMERA_NODE=camera_node_cpu` | `sim_nav.launch.py` поднимает drop-in CPU-дебайер (`cv::*` вместо `cv::cuda::*`) |
+| разрешение (оба) | 1280×720 | `CAMERA_W=320`, `CAMERA_H=180` | llvmpipe на 1280×720 тянет ~2 Гц; 320×180 (×16 меньше пикселей) → ~30 Гц |
+
+`CAMERA_W/H` ставится **в обоих** сервисах одинаково — `sim_up.sh` патчит SDF Gazebo-камеры, `bayerizer`/`camera_node` берут тот же размер, интринсики VINS пересчитываются из `sim.yaml`.
+
+## Как применять
+
+Накладывается двумя `-f` (порядок важен — оверрайд вторым):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+```
+
+Через Makefile — просто **`CPU=1`** к любому таргету (он подставляет оба `-f`):
+
+```bash
+make CPU=1 build && make CPU=1 up && make CPU=1 logs
+make CPU=1 restart-all && make CPU=1 wait
+```
+
+⚠️ Флаг держать на **каждой** команде прогона, иначе часть пойдёт по базовому compose (с `runtime: nvidia`) и не совпадёт.
+
+## Замечания
+
+- Разрешение 320×180 здесь — **не** ради ускорения рендера (на RTF разрешение почти не влияет, горло — физика+геометрия сцены `mili_fortress`), а ради экономии CPU на nav-стороне и того, что llvmpipe масштабируется по числу пикселей под заполнение. Подробно про RTF и софтрендер — `src/sim/CLAUDE.md`.
+- `camera_node_cpu` — drop-in замена боевой ноды (тот же код через `camera_core.hpp`, CPU-дебайер вместо CUDA); см. `src/camera/`.
