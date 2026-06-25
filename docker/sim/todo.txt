@@ -62,8 +62,18 @@ armed=False стабильно) — путь A (force-arm в arm.sh) отпал.
     INS_USE2 0
     INS_USE3 0
 Плюс ранее туда же FS_THR_ENABLE 0 + BRD_SAFETY_DEFLT 0 (нет RC / safety-switch).
-СТАТУС: продиагностировано и применено, но прогоном ещё НЕ подтверждено
-(armed=true). Следующий прогон: fresh-start + arm → ждём armed=true.
+
+СЛОЙ 2 — после фикса гиро всплыла следующая обязательная проверка:
+"Arm: 3D Accel calibration needed". Параметрами (INS_ACCOFFS/ACCSCAL) НЕ снимается
+— нужен ID+флаг калибровки. ФИКС: простая level-cal командой
+PREFLIGHT_CALIBRATION(param5=4) из nav_up.sh при бутстрапе (дрон в SITL стоит
+ровно, проходит мгновенно; шлём 3× — ACK на низком RTF флапает, но cal
+проставляется). На живом стеке после cal: arm → success=True, armed=True ДЕРЖИТСЯ
+(5 чтений). ACK самой cal-команды флапает result=0/4 — это RTF-артефакт, не отказ.
+
+СТАТУС: на живом (poked) стеке цепочка GUIDED→arm→armed=true подтверждена.
+Осталось: ЧИСТАЯ изоляция через fresh-start (свежий eeprom + одна bootstrap-cal)
+→ ждём armed=true с нуля. Дальше — takeoff/hover/land + полный capture_scene с bag.
 
 Также пофикшен баг в самом arm.sh: sim_now() при незапущенном /clock возвращал
 текст предупреждения ros2 → ломал арифметику бюджета (race сразу после restart).
