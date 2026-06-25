@@ -705,3 +705,42 @@ make CPU=1 restart-all && make CPU=1 wait
 
 - Топики те же, что в sim: `imu_topic: /mavros/imu/data_raw`, `image_topic: /image_mono`.
 - Это конфиг для боевого стека `docker/orin/`; в симуляции используется `sim.yaml` (его выбирает `sim_nav.launch.py`).
+
+
+--------------------------------
+Что такое `mavlink_router` и зачем он в стеке?
+--------------------------------
+
+`mavlink_router` — это третий контейнер симуляционного стека (рядом с `simulator` и `nav`): **единая точка раздачи MAVLink-телеметрии**. ArduPilot SITL поднимает ОДИН TCP-сервер на `127.0.0.1:5760`, а потребителей несколько (MAVROS, QGroundControl, кастомные узлы). Чтобы они не дрались за единственный порт, `mavlink-router` подключается к SITL клиентом и веером раздаёт поток по UDP.
+
+```
+SITL (tcp:5760) → mavlink-router ─┬─► UDP 14550  QGroundControl
+                                  ├─► UDP 14540  MAVROS (контейнер nav)
+                                  └─► UDP 14541  кастомный C++/Python узел
+```
+
+## Зачем он нужен
+
+TCP-сервер SITL принимает соединения, но «размножать» один поток на несколько независимых клиентов с разными нуждами неудобно и хрупко. `mavlink-router` — стандартное решение: один аплинк к FCU, много даунлинков. В concept.txt был конфликт (два сервера на 5760) — он этим и снят: **router подключается клиентом** к tcp:5760, а наружу отдаёт UDP-эндпоинты.
+
+## Конфиг
+
+`docker/sim/config/mavlink-router.conf`, смонтирован в контейнер как `/etc/mavlink-router/main.conf:ro` (правки на хосте — без пересборки образа):
+- `[TcpEndpoint sitl]` `Mode=Client`, `127.0.0.1:5760` — источник (SITL).
+- `[UdpEndpoint qgc]` → 14550, `[UdpEndpoint mavros]` → 14540, `[UdpEndpoint cpp_node]` → 14541 — потребители.
+- `TcpServerPort=0` (свой TCP-сервер не поднимает), `MavlinkDialect=ardupilotmega`.
+
+MAVROS в `nav_up.sh` цепляется именно к 14540 (`fcu_url:=udp://:14540@127.0.0.1`).
+
+## Как устроен контейнер
+
+- Отдельный образ (`docker/sim/mavlink_router/Dockerfile`): ubuntu:22.04, собирает `mavlink-router` из исходников (meson/ninja). `CMD mavlink-routerd -c /etc/mavlink-router/main.conf`.
+- `network_mode: host` — чтобы UDP-эндпоинты на `127.0.0.1` были видны MAVROS и QGC на хосте.
+- `depends_on: simulator` — источник (SITL) живёт в контейнере `simulator`.
+- `restart: unless-stopped`.
+
+## Замечания
+
+- Это единственный контейнер стека **без** ROS и без GPU — чистый MAVLink-маршрутизатор.
+- Если MAVROS не видит FCU (`make status` не показывает `FCU: ArduCopter`) — проверять цепочку: SITL поднял tcp:5760? router подключился клиентом? MAVROS слушает 14540? Порты — в таблице «Порты MAVLink» в `README.md`.
+- QGroundControl (14550) можно подключить с хоста для ручного наблюдения за дроном в прогоне.
