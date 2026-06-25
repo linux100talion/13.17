@@ -12,3 +12,18 @@ DISARM_DELAY 0
 
 # Отключить все pre-arm проверки (в симуляции IMU "несогласованы").
 ARMING_CHECK 0
+
+# Нет RC-входа (запускаем без MAVProxy/джойстика) → radio/throttle failsafe иначе
+# режет арм И сбрасывает даже force-arm. Отключаем.
+FS_THR_ENABLE 0
+
+# Виртуальный safety-switch по умолчанию «взведён» (обычно снимается через
+# MAVProxy, которого у нас нет) → блокирует арм вне ARMING_CHECK. Снимаем.
+BRD_SAFETY_DEFLT 0
+
+# Арм режется "Arm: Gyros inconsistent" — два симулированных IMU расходятся по
+# гиро (на низком RTF / из-за IMU-timesync обвязки), а проверка консистентности
+# стреляет даже при ARMING_CHECK 0. Оставляем ОДИН IMU — сравнивать нечего.
+SIM_IMU_COUNT 1
+INS_USE2 0
+INS_USE3 0

@@ -20,7 +20,9 @@ WALL_CAP=${ARM_WALL_CAP:-1200}       # абсолютный потолок wall,
 get_field() {  # $1=топик  $2=поле
     timeout 10 ros2 topic echo --once --field "$2" "$1" 2>/dev/null | head -1
 }
-sim_now() { timeout 15 ros2 topic echo --once --field clock.sec /clock 2>/dev/null | head -1; }
+# Только число: при незапущенном /clock ros2 печатает предупреждение в stdout —
+# grep -oxE отбирает строку из одних цифр (значение clock.sec), мусор отбрасывает.
+sim_now() { timeout 15 ros2 topic echo --once --field clock.sec /clock 2>/dev/null | grep -oxE '[0-9]+' | head -1; }
 
 # Есть ли ещё бюджет ожидания: $1=sim-старт $2=wall-старт; код 0 = время осталось.
 budget_left() {
