@@ -525,3 +525,33 @@ ros2 launch /root/sim_ws/src/sim/sim_nav.launch.py
 - **Почему байеризатор и ноды по отдельности** (`nohup`, не один launch): если байеризатор падает внутри launch, launch-менеджер убивает всё дерево. Здесь он изолирован, а `nav_up.sh` гарантирует порядок: сначала байеризатор + ожидание `/dev/rawbayer`, потом launch.
 - Логи всех нод — в `docker/sim/output/` (`bayerizer.log`, `sim_nav.log`, `mavros.log`); читаются с хоста (`make logs`).
 - Парный скрипт на стороне Gazebo — `sim_up.sh` (поднимает Gazebo+SITL+bridge в контейнере `simulator`).
+
+
+--------------------------------
+Что делает `sim_up.sh` и как он запускается?
+--------------------------------
+
+`sim_up.sh` (`docker/sim/scripts/sim_up.sh`) — это **entrypoint стороны симулятора**: один скрипт, который внутри контейнера `simulator` поднимает Gazebo, ArduPilot SITL и мост Gazebo→ROS2. Парный к `nav_up.sh` (тот — nav-сторона: камера/VINS/MAVROS). Пишет в лог финальное «simulator: готово».
+
+## Как запускается
+
+- **Автоматически** — прописан как `command:` контейнера `simulator` в `docker-compose.yml`, стартует сам при `up`/`start`/`restart-all`.
+- **Вручную** — `make sim` (= `docker exec -i p1317_simulator bash -s < scripts/sim_up.sh`). Смонтирован как `/scripts/sim_up.sh:ro` — правки на хосте применяются без пересборки образа.
+
+Запускается через `bash -s` (неинтерактивный шелл): ENV из Dockerfile есть (PATH к SITL), но `.bashrc` не читается, поэтому ROS подключается явно (`source /opt/ros/humble/setup.bash`).
+
+## Что он делает по шагам
+
+1. **Патч разрешения камеры** (если `CAMERA_W`/`CAMERA_H` ≠ 1280×720): SDF статичен (gz не подставляет env), поэтому кладёт ПАТЧЕНУЮ копию модели `iris_cam` в `/tmp/sim_models`, правит `<width>/<height>` через `sed` и выводит её первой в `GZ_SIM_RESOURCE_PATH` — репозиторную модель не трогает (git чист).
+2. **Gazebo Harmonic** (`nohup`) — `gz sim -s --headless-rendering` мир `WORLD` (default `mili_fortress.sdf`); `ArduPilotPlugin` слушает порт 9002.
+3. **`sleep 5`** — дать Gazebo поднять физику/плагины до подключения SITL.
+4. **ArduPilot SITL** (`nohup`) — `sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON`, подключается к плагину@9002, MAVLink на tcp:5760. `--no-mavproxy` (телеметрию разводит mavlink_router), `--no-rebuild`. Применяет два .parm: `gazebo-iris.parm` + `sitl-extra.parm`.
+5. **`ros_gz_bridge`** (`nohup`) — мост Gazebo→ROS2 ровно двух топиков: `/camera/image_raw` и **`/clock`** (источник sim-времени для всех nav-нод).
+
+## Важные моменты
+
+- **Идемпотентен**: каждый шаг проверяет `pgrep` (`gz sim`/`sim_vehicle`/`ros_gz_bridge`) перед запуском — повторный `make sim` не плодит дубли.
+- **`ros_gz_bridge` здесь, а не в nav** и БЕЗ `use_sim_time` — он ИСТОЧНИК `/clock`, ему sim-время ставить нельзя. В мост заведены только камера и часы; **IMU через bridge НЕ идёт** (он приходит в ROS через SITL→MAVROS, см. `src/sim/CLAUDE.md`).
+- **SITL-параметры эфемерны**: критичные (`SCHED_LOOP_RATE 100`, `ARMING_CHECK 0` и др.) применяются в `.parm` внутри контейнера и теряются на `fresh-start` (пересоздание контейнера); `sitl-extra.parm` смонтирован с хоста и переживает. См. CLAUDE.md п.12.
+- Логи — в `docker/sim/output/` (`gz_sim.log`, `sitl.log`, `ros_gz_bridge.log`); читаются с хоста (`make logs`).
+- **`depends_on`**: `nav` ждёт `simulator` — `nav_up.sh` ждёт активации `/dev/rawbayer`, который зависит от потока камеры из Gazebo.
