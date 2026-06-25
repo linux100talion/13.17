@@ -66,7 +66,8 @@ capture_scene.sh [WxH] <команда> [арг] <команда> [арг] ...
   неизвестная команда → ошибка ещё ДО рестарта стека (стек впустую не поднимаем).
 
 Поток: рестарт → старт записи bag (`RECORD=1`) → исполнение последовательности
-команд по порядку → стоп записи → извлечение кадров по пути → заливка на Drive.
+команд по порядку → стоп записи → извлечение кадров по пути → сборка mp4 из всего
+потока камеры (`MP4=1`) → заливка кадров + `scene.mp4` на Drive.
 
 #### Запуск
 
@@ -90,6 +91,8 @@ RECORD=0 bash src/lab/capture_scene.sh arm takeoff 3 land             # дешё
 |---|---|---|
 | `RESTART` | 1 | 1 = перезапуск стека (restart-all/fresh-start + wait); 0 = на живом стеке (⚠️ рассинхрон) |
 | `RECORD` | 1 | 1 = писать rosbag (`/image_color` + поза) вокруг всей последовательности |
+| `MP4` | 1 | 1 = собрать `scene.mp4` из ВСЕХ кадров `/image_color` и залить с кадрами; 0 = выкл |
+| `MP4_MAXW` | 1280 | макс. ширина кадра в mp4, px (0 = не масштабировать) |
 | `DIST_M` | 0.5 | **шаг выборки кадров по пройденному пути, м** |
 | `N_FRAMES` | 30 | макс. число кадров (0 = без лимита) |
 | `TOPIC` | `/image_color` | топик камеры |
@@ -144,6 +147,29 @@ Env `extract_frames.py`: `SCENE_BAG` (default `…/output/scene_bag`), `SCENE_OU
 (`/mavros/local_position/pose`), `SCENE_DIST_M` (0.5), `SCENE_N` (30; 0 = без
 лимита). Требует overlay `/opt/overlay` (cv_bridge против CUDA-OpenCV).
 
+#### Видео из всего потока камеры (`make_video.py`)
+Параллельно JPEG-выборке `capture_scene` собирает **`scene.mp4`** — ВЕСЬ поток
+`/image_color` за прогон («как видела камера»), не выборку по пути. Пишется в
+`…/output/scene_img/scene.mp4`, заливается на Drive вместе с кадрами (`MP4=1` по
+умолчанию; `MP4=0` — выключить, `MP4_MAXW` — даунскейл по ширине).
+
+**FPS считается из `header.stamp` (sim-время камеры), а НЕ из времени записи bag.**
+Тонкость: 3-й элемент `read_next()` (bag-receive-время) — это **wall**-время; на
+низком RTF (CPU-бокс, RTF≈0.07) оно растянуто в ~14× → если по нему считать fps,
+выйдет «слайдшоу» ~2 fps вместо реальных ~30 sim-Гц. По `header.stamp` длительность
+ролика = длительности полёта в sim-времени. Заодно это диагностика для VINS: видно
+реальный sim-Гц камеры (на 960×540 ~30 Гц, втрое выше нужных VINS 10 Гц).
+
+Можно пересобрать отдельно по уже снятому bag (внутри nav):
+```bash
+docker exec -e SCENE_MAXW=1280 p1317_nav bash -lc \
+  'source /opt/ros/humble/setup.bash; source /opt/overlay/install/setup.bash; \
+   source /root/sim_ws/install/setup.bash; python3 /lab/make_video.py'
+```
+Env `make_video.py`: `SCENE_BAG`, `SCENE_MP4` (`…/scene_img/scene.mp4`),
+`SCENE_TOPIC` (`/image_color`), `SCENE_FPS` (0 = авто из sim-штампов),
+`SCENE_MAXW` (1280; 0 = без масштабирования). Кодек mp4v, требует overlay.
+
 #### Бюджет времени прогона (~4–7 мин)
 Складывается из стадий скрипта + физического прогрева FCU (значения — из скрипта
 и таймстампов `mavros.log`):
@@ -156,6 +182,7 @@ Env `extract_frames.py`: `SCENE_BAG` (default `…/output/scene_bag`), `SCENE_OU
 | `arm.sh`+`takeoff.sh`: GUIDED→arm→takeoff (циклы с ретраями до 180 итераций) | поллинг | 10–40с при успехе; до 180с при отказе |
 | `hover.sh` (sim-секунды) + запись bag | по `SIM_SEC` и RTF | зависит |
 | извлечение кадров по пути из bag (`extract_frames.py`) | внутри nav | ~15с |
+| сборка `scene.mp4` из всего потока (`make_video.py`, `MP4=1`) | внутри nav | ~10–20с |
 | заливка на Drive (rclone) | из лога | ~18с |
 
 Разброс даёт взлёт (`arm.sh`+`takeoff.sh`): при успешном весь прогон ≈ **4–5 мин**;

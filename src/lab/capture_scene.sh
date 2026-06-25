@@ -15,8 +15,9 @@
 #                  land           посадка (режим LAND)
 #                  disarm         дизарм
 #
-# Запись rosbag + извлечение кадров по пути + заливка на Google Drive идут
-# АВТОМАТИЧЕСКИ вокруг всей последовательности (управляются env, см. ниже).
+# Запись rosbag + извлечение кадров по пути + сборка mp4 (полный поток камеры) +
+# заливка на Google Drive идут АВТОМАТИЧЕСКИ вокруг всей последовательности
+# (управляются env, см. ниже). mp4 можно выключить: MP4=0.
 #
 # Запускать С ХОСТА из любого места.  Примеры:
 #   bash src/lab/capture_scene.sh 640x480 arm takeoff 5 hover 2 land
@@ -28,6 +29,8 @@ set -euo pipefail
 # ── параметры записи/извлечения/заливки (env; полётные параметры — позиционные) ─
 RESTART="${RESTART:-1}"         # 1 = перезапуск стека; 0 = на живом стеке (⚠️ рассинхрон)
 RECORD="${RECORD:-1}"           # 1 = писать rosbag (/image_color + поза)
+MP4="${MP4:-1}"                 # 1 = собрать mp4 из ВСЕХ кадров /image_color и залить с кадрами
+MP4_MAXW="${MP4_MAXW:-1280}"    # макс. ширина кадра в mp4, px (0 = не масштабировать)
 N_FRAMES="${N_FRAMES:-30}"      # макс. число кадров (0 = без лимита)
 DIST_M="${DIST_M:-0.5}"         # шаг выборки кадров по пройденному пути, м
 TOPIC="${TOPIC:-/image_color}"  # топик камеры
@@ -165,7 +168,20 @@ docker exec \
   -e SCENE_TOPIC="$TOPIC" -e SCENE_POSE="$POSE_TOPIC" \
   "$NAV" bash -lc "$SRC; python3 /lab/extract_frames.py" | tail -8
 
-# ── 6. заливка кадров на Google Drive ─────────────────────────────────────────
+# ── 5b. сборка mp4 из ВСЕХ кадров /image_color (полный поток камеры) ───────────
+# В отличие от шага 5 (JPEG-выборка по пути), здесь кодируется весь поток камеры
+# «как видела камера» за прогон. Пишется в $IMG_HOST → уедет на Drive шагом 6
+# вместе с кадрами. FPS считается из sim-штампов (header.stamp) → длительность
+# ролика = длительности полёта в sim-времени (не растянута низким RTF).
+if [ "$MP4" = "1" ]; then
+    log "сборка mp4 из всех кадров $TOPIC"
+    docker exec \
+      -e SCENE_TOPIC="$TOPIC" -e SCENE_MAXW="$MP4_MAXW" \
+      -e SCENE_MP4="/root/sim_ws/output/scene_img/scene.mp4" \
+      "$NAV" bash -lc "$SRC; python3 /lab/make_video.py" | tail -3
+fi
+
+# ── 6. заливка кадров (+ mp4) на Google Drive ─────────────────────────────────
 log "заливка кадров на Google Drive"
 
 cat > "$IMG_HOST/README.md" <<'EOF'
@@ -189,10 +205,14 @@ if [ "$GDRIVE_UP" = "1" ]; then
     echo "  Кадры остались локально: $IMG_HOST"
     exit 1
   fi
-  echo "Заливаю $IMG_HOST → ${GDRIVE_REMOTE}:${GDRIVE_DIR}"
+  echo "Заливаю $IMG_HOST → ${GDRIVE_REMOTE}:${GDRIVE_DIR} (кадры + scene.mp4)"
   rclone copy "$IMG_HOST" "${GDRIVE_REMOTE}:${GDRIVE_DIR}" --progress
   echo "Готово. Ссылка на папку:"
   rclone link "${GDRIVE_REMOTE}:${GDRIVE_DIR}" 2>/dev/null || true
+  if [ "$MP4" = "1" ] && [ -f "$IMG_HOST/scene.mp4" ]; then
+    echo "Ссылка на видео:"
+    rclone link "${GDRIVE_REMOTE}:${GDRIVE_DIR}/scene.mp4" 2>/dev/null || true
+  fi
 else
   echo "GDRIVE_UP=0 — кадры в $IMG_HOST, заливка пропущена."
 fi
