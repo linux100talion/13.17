@@ -43,7 +43,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm takeoff hover land disarm fly vins-watch capture-frames capture-scene clean
+.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm takeoff hover land disarm fly vins-watch sitl-cal capture-frames capture-scene clean
 
 # Дефолтная последовательность команд для `make capture-scene` (без разрешения →
 # restart-all). Переопределяется: make capture-scene CSARGS="640x480 arm takeoff 5 hover 2 land"
@@ -141,6 +141,9 @@ fly:             ## запустить облёт квадрата для ини
 
 vins-watch:      ## мониторинг VINS: Initialization/NON_LINEAR/ошибки + odometry Hz
 	docker exec -i $(NAV) bash /lab/vins_watch.sh
+
+sitl-cal:        ## ОДНОРАЗОВО: accel-калибровка SITL → персистентный eeprom (после make clean / 1-го подъёма)
+	docker exec $(SIM) bash -lc 'PYTHONPATH=/root/ardupilot/modules/mavlink python3 /scripts/sitl_accel_cal.py'
 
 capture-frames:  ## снять N кадров из Gazebo мира → worlds/preview/*.png  (N=5 default)
 	bash scripts/capture_frames.sh $(N)

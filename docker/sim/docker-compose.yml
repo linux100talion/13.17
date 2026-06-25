@@ -48,6 +48,7 @@ services:
       - ./output:/root/output:rw
       - ./scripts:/scripts:ro               # sim_up.sh запускается автоматически
       - ./config/sitl-extra.parm:/root/sitl-extra.parm:ro  # доп. параметры SITL
+      - sitl_eeprom:/root/sitl_state        # eeprom.bin SITL (калибровка акселя) — выживает при fresh-start
 
     # sim_up.sh стартует Gazebo+SITL+bridge в фоне, потом tail держит контейнер.
     # Итерация без пересоздания: docker compose stop && docker compose start
@@ -118,3 +119,4 @@ services:
 volumes:
   nav_colcon_build:   # colcon build artifacts (build/): выживают при fresh-start, сносятся make clean
   nav_colcon_install: # colcon install artifacts (install/): аналогично
+  sitl_eeprom:        # eeprom.bin SITL (одноразовая accel-калибровка + параметры): выживает при fresh-start, сносится make clean

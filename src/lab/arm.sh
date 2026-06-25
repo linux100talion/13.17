@@ -17,8 +17,12 @@ source /opt/ros/humble/setup.bash
 SIM_BUDGET=${ARM_SIM_BUDGET:-40}     # sim-секунд на готовность EKF + GUIDED/arm
 WALL_CAP=${ARM_WALL_CAP:-1200}       # абсолютный потолок wall, сек
 
-get_field() {  # $1=топик  $2=поле
-    timeout 10 ros2 topic echo --once --field "$2" "$1" 2>/dev/null | head -1
+get_field() {  # $1=топик  $2=поле — ретраим: --once на низком RTF часто пуст
+    local v
+    for _ in 1 2 3; do
+        v=$(timeout 10 ros2 topic echo --once --field "$2" "$1" 2>/dev/null | head -1)
+        [ -n "$v" ] && { echo "$v"; return; }
+    done
 }
 # Только число: при незапущенном /clock ros2 печатает предупреждение в stdout —
 # grep -oxE отбирает строку из одних цифр (значение clock.sec), мусор отбрасывает.

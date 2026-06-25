@@ -102,25 +102,14 @@ if ! pgrep -f "mavros_node" >/dev/null; then
         -p conn/timesync_mode:=NONE \
         >"$LOG/mavros.log" 2>&1 &
     echo "  MAVROS   -> $LOG/mavros.log"
-    # Дать MAVROS подключиться, затем поднять частоту IMU и откалибровать аксель.
-    (
-        sleep 20
-        # По умолчанию ArduPilot шлёт IMU ~7 Гц — VINS нужно >= 100 Гц.
-        ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-            '{stream_id: 1, message_rate: 200, on_off: true}' \
-            >> "$LOG/mavros.log" 2>&1 && echo "  stream_rate IMU 200 Гц установлен"
-        # Свежий eeprom (fresh-start) без MAVProxy не калибрует аксель → арм режет
-        # обязательной "Arm: 3D Accel calibration needed" (ARMING_CHECK 0 её НЕ
-        # выключает). Простая level-cal (PREFLIGHT_CALIBRATION param5=4): дрон в
-        # SITL стоит ровно, проходит мгновенно. Шлём 3× — ACK на низком RTF
-        # флапает, но калибровка проставляется (далее арм проходит, armed держится).
-        for _ in 1 2 3; do
-            ros2 service call /mavros/cmd/command mavros_msgs/srv/CommandLong \
-                '{command: 241, param5: 4.0}' >> "$LOG/mavros.log" 2>&1
-            sleep 5
-        done
-        echo "  accel level-cal отправлена"
-    ) &
+    # Дать MAVROS подключиться, затем поднять частоту IMU (RAW_SENSORS stream).
+    # По умолчанию ArduPilot шлёт IMU ~7 Гц — VINS нужно >= 100 Гц.
+    # (accel-калибровка делается ОДИН раз через make sitl-cal и живёт в
+    #  персистентном eeprom — на каждом старте не повторяется, FCU не ребутит.)
+    (sleep 20 && ros2 service call /mavros/set_stream_rate \
+        mavros_msgs/srv/StreamRate \
+        '{stream_id: 1, message_rate: 200, on_off: true}' \
+        >> "$LOG/mavros.log" 2>&1 && echo "  stream_rate IMU 200 Гц установлен") &
 else
     echo "  MAVROS   уже запущен"
 fi
