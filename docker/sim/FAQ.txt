@@ -599,3 +599,39 @@ make CPU=1 restart-all && make CPU=1 wait
 
 - Разрешение 320×180 здесь — **не** ради ускорения рендера (на RTF разрешение почти не влияет, горло — физика+геометрия сцены `mili_fortress`), а ради экономии CPU на nav-стороне и того, что llvmpipe масштабируется по числу пикселей под заполнение. Подробно про RTF и софтрендер — `src/sim/CLAUDE.md`.
 - `camera_node_cpu` — drop-in замена боевой ноды (тот же код через `camera_core.hpp`, CPU-дебайер вместо CUDA); см. `src/camera/`.
+
+
+--------------------------------
+Что такое `camera_node_cpu` и чем он отличается от боевого `camera_node`?
+--------------------------------
+
+`camera_node_cpu` (`src/camera/camera_node_cpu.cpp`) — это **drop-in CPU-версия** камера-ноды: тот же V4L2-захват и те же топики, что у боевого `camera_node`, но дебайер и gain считаются на CPU (`cv::*`) вместо GPU (`cv::cuda::*`). Нужен для прогона на машинах **без NVIDIA GPU/драйвера** (GPU-less sim, ветка `nn2_c3_cpu`). Боевой Orin и штатный GPU-sim остаются на `camera_node` — этот executable их не трогает.
+
+## Общая база (почему «drop-in»)
+
+Обе ноды наследуют `V4L2CameraBase` (`camera_core.hpp`), который держит всё общее: V4L2-захват, чтение кадра как `CV_16UC1`, нормализацию 16→8 (`NORM_MINMAX`), гамму, публикацию `/image_mono` (вход VINS) + `/image_color` (nav) + `/camera_info`, штамп `get_clock()->now()` (уважает `use_sim_time`). Различается **только** один виртуальный метод `process_frame()` — собственно дебайер + gain. Поэтому подмена ноды не меняет ни топики, ни тайминг, ни параметры.
+
+## В чём именно разница
+
+| | `camera_node` (боевой) | `camera_node_cpu` |
+|---|---|---|
+| Дебайер | `cv::cuda::demosaicing` (GPU) | `cv::cvtColor` (CPU) |
+| Код Байера | `BayerGB2RGB` | `BayerGR2BGR` |
+| Цвет→BGR | отдельный `cv::cuda::cvtColor RGB→BGR` | `cvtColor` сразу даёт BGR |
+| gain | на GPU | `cv::split`/`convertTo`/`merge` по BGR-каналам |
+| OpenCV-линковка | полный (вкл. CUDA-модули) | только `opencv_core/imgproc/videoio` — **без CUDA-рантайма** |
+
+⚠️ Разные коды Байера (`BayerGB2RGB` в CUDA vs `BayerGR2BGR` на CPU) — это **норма**, а не баг: в OpenCV CUDA-модуле сдвиг в именовании паттернов, оба обрабатывают один физический паттерн GRBG сенсора (см. CLAUDE.md, раздел про камеру). На CPU `cvtColor` отдаёт сразу BGR, поэтому отдельный RGB→BGR swap не нужен, а gain раскладывается прямо по BGR-каналам (ch0=B, ch1=G, ch2=R).
+
+## Как он выбирается
+
+Не правя код/launch — через env **`CAMERA_NODE`**, который читает `sim_nav.launch.py`:
+- по умолчанию `camera_node` (CUDA);
+- CPU-оверрайд compose (`docker-compose.cpu.yml`) ставит `CAMERA_NODE=camera_node_cpu`.
+
+То есть на практике он включается вместе со всем CPU-режимом — `make CPU=1 …` (см. запись про `docker-compose.cpu.yml`).
+
+## Замечания
+
+- Это отдельный executable (`add_executable(camera_node_cpu …)` в `CMakeLists.txt`), линкуемый **без** CUDA-модулей — бинарь не тянет зависимостей на GPU-рантайм, поэтому стартует на машине без драйвера.
+- Поскольку база общая, `/image_mono` для VINS считается ровно так же (mono из корректного BGR через `BGR2GRAY`) — поведение VINS от подмены ноды не меняется, отличается только устройство дебайера.
