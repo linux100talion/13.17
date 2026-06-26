@@ -102,21 +102,33 @@ if ! pgrep -f "mavros_node" >/dev/null; then
         -p conn/timesync_mode:=NONE \
         >"$LOG/mavros.log" 2>&1 &
     echo "  MAVROS   -> $LOG/mavros.log"
-    # Дать MAVROS подключиться, затем поднять частоты потоков MAVLink.
+    # Поднять частоты потоков MAVLink. КРИТИЧНО ждать коннект MAVROS<->FCU ПО ФАКТУ,
+    # а не фиксированным sleep: раньше был `sleep 20` — на медленном старте / низком
+    # RTF MAVROS к 20-й секунде ещё НЕ подключён к FCU, REQUEST_DATA_STREAM уходит в
+    # никуда, и /mavros/imu/data_raw остаётся ПУСТЫМ весь прогон (источник флаки
+    # "в части прогонов IMU не пишется"). Ниже: ждём connected=True, затем ставим
+    # потоки с РЕТРАЯМИ, пока IMU реально не пойдёт (запрос может потеряться на UDP).
     # (accel-калибровка делается ОДИН раз через make sitl-cal и живёт в
     #  персистентном eeprom — на каждом старте не повторяется, FCU не ребутит.)
-    (sleep 20
-        # RAW_SENSORS (stream_id 1): IMU. По умолчанию ArduPilot шлёт ~7 Гц,
-        # VINS нужно >= 100 Гц.
-        ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-            '{stream_id: 1, message_rate: 200, on_off: true}' \
-            >> "$LOG/mavros.log" 2>&1 && echo "  stream_rate IMU 200 Гц установлен"
-        # POSITION (stream_id 6): LOCAL_POSITION_NED + GLOBAL_POSITION_INT →
-        # /mavros/local_position/pose + /mavros/global_position/rel_alt. По
-        # умолчанию НЕ стримится → takeoff.sh не мог читать высоту z. 25 Гц хватает.
-        ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-            '{stream_id: 6, message_rate: 25, on_off: true}' \
-            >> "$LOG/mavros.log" 2>&1 && echo "  stream_rate POSITION 25 Гц установлен"
+    (
+        for _ in $(seq 1 60); do
+            [ "$(ros2 topic echo --once --field connected /mavros/state 2>/dev/null | head -1)" = "True" ] && break
+            sleep 3
+        done
+        for _ in $(seq 1 20); do
+            # RAW_SENSORS (stream_id 1): IMU (RAW_IMU/SCALED_IMU). VINS нужно >= 100 Гц.
+            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
+                '{stream_id: 1, message_rate: 200, on_off: true}' >> "$LOG/mavros.log" 2>&1
+            # POSITION (stream_id 6): LOCAL_POSITION_NED + GLOBAL_POSITION_INT →
+            # /mavros/local_position/pose (z для takeoff.sh) + rel_alt. 25 Гц хватает.
+            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
+                '{stream_id: 6, message_rate: 25, on_off: true}' >> "$LOG/mavros.log" 2>&1
+            # Подтверждаем ПО ФАКТУ: пришло ли хоть одно IMU-сообщение.
+            if timeout 10 ros2 topic echo --once /mavros/imu/data_raw >/dev/null 2>&1; then
+                echo "  stream_rate: IMU+POSITION подтверждены (идут)"; break
+            fi
+            sleep 3
+        done
     ) &
 else
     echo "  MAVROS   уже запущен"
