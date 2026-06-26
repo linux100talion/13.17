@@ -35,6 +35,7 @@ N_FRAMES="${N_FRAMES:-30}"      # макс. число кадров (0 = без 
 DIST_M="${DIST_M:-0.5}"         # шаг выборки кадров по пройденному пути, м
 TOPIC="${TOPIC:-/image_color}"  # топик камеры
 POSE_TOPIC="${POSE_TOPIC:-/mavros/local_position/pose}" # поза для расчёта пути
+TOPICS_EXTRA="${TOPICS_EXTRA:-}" # доп. топики в bag (через пробел), напр. диагностика IMU
 NAV="${NAV:-p1317_nav}"         # имя nav-контейнера
 CPU="${CPU:-}"                  # CPU=1 → GPU-less режим (docker-compose.cpu.yml)
 GDRIVE_UP="${GDRIVE_UP:-1}"            # 1 = заливать на Google Drive; 0 = только снять кадры
@@ -125,8 +126,8 @@ fi
 
 # ── 2. старт записи rosbag (вокруг всей последовательности команд) ─────────────
 if [ "$RECORD" = "1" ]; then
-    log "старт записи rosbag $TOPIC + $POSE_TOPIC"
-    docker exec "$NAV" bash -lc "$SRC; cd /root/sim_ws/output && exec ros2 bag record -o scene_bag $TOPIC $POSE_TOPIC" &
+    log "старт записи rosbag $TOPIC + $POSE_TOPIC${TOPICS_EXTRA:+ + $TOPICS_EXTRA}"
+    docker exec "$NAV" bash -lc "$SRC; cd /root/sim_ws/output && exec ros2 bag record -o scene_bag $TOPIC $POSE_TOPIC $TOPICS_EXTRA" &
     sleep 3
 fi
 
@@ -146,7 +147,12 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
             ;;
     esac
     echo "--- ${cmd}${arg:+ $arg} ---"
-    docker exec "$NAV" bash /lab/"$cmd".sh $arg
+    # Проброс бюджетов ожидания (arm.sh/takeoff.sh) — таймауты, не sleep: на успехе
+    # ничего не стоят, но спасают от гонки «бюджет арма vs прогрев EKF/GPS» (под
+    # lockstep готовность позиции наступает чуть позже стандартных 40 sim-сек).
+    docker exec \
+      -e ARM_SIM_BUDGET="${ARM_SIM_BUDGET:-}" -e ARM_WALL_CAP="${ARM_WALL_CAP:-}" \
+      "$NAV" bash /lab/"$cmd".sh $arg
     i=$((i+1))
 done
 
