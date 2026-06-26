@@ -97,6 +97,8 @@ RECORD=0 bash src/lab/capture_scene.sh arm takeoff 3 land             # дешё
 | `N_FRAMES` | 30 | макс. число кадров (0 = без лимита) |
 | `TOPIC` | `/image_color` | топик камеры |
 | `POSE_TOPIC` | `/mavros/local_position/pose` | поза для расчёта пути |
+| `TOPICS_EXTRA` | — | доп. топики в bag через пробел (напр. `"/mavros/imu/data /mavros/imu/data_raw"` для диагностики IMU) |
+| `SKIP_CAM` | 0 | `1` = не писать/не обрабатывать `/image_color`: лёгкий bag (мегабайты) для анализа только по IMU/позе (напр. FFT гироскопа). Гасит запись камеры, mp4, извлечение кадров и заливку |
 | `CPU` | — | `CPU=1` → GPU-less режим (накладывает `docker-compose.cpu.yml`) |
 | `GDRIVE_UP` | 1 | 1 = заливать на Drive; 0 = только снять кадры |
 | `GDRIVE_REMOTE` / `GDRIVE_DIR` | `gdrive` / `13.17/scene_img` | rclone-remote и папка на Drive |

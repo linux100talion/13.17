@@ -36,11 +36,23 @@ DIST_M="${DIST_M:-0.5}"         # шаг выборки кадров по про
 TOPIC="${TOPIC:-/image_color}"  # топик камеры
 POSE_TOPIC="${POSE_TOPIC:-/mavros/local_position/pose}" # поза для расчёта пути
 TOPICS_EXTRA="${TOPICS_EXTRA:-}" # доп. топики в bag (через пробел), напр. диагностика IMU
+SKIP_CAM="${SKIP_CAM:-0}"       # 1 = НЕ писать/не обрабатывать /image_color: лёгкий bag
+                                #     (мегабайты) для анализа только по IMU/позе, напр. FFT
 NAV="${NAV:-p1317_nav}"         # имя nav-контейнера
 CPU="${CPU:-}"                  # CPU=1 → GPU-less режим (docker-compose.cpu.yml)
 GDRIVE_UP="${GDRIVE_UP:-1}"            # 1 = заливать на Google Drive; 0 = только снять кадры
 GDRIVE_REMOTE="${GDRIVE_REMOTE:-gdrive}"      # имя rclone-remote (из rclone.conf)
 GDRIVE_DIR="${GDRIVE_DIR:-13.17/scene_img}"   # папка на Drive
+
+# SKIP_CAM=1: выкидываем камеру из всего пайплайна. Нельзя сделать просто
+# TOPIC="" снаружи — выше стоит ${TOPIC:-/image_color}, а ':-' подставляет дефолт
+# и на ПУСТУЮ строку. Поэтому отдельный флаг: гасит запись /image_color, сборку
+# mp4, извлечение кадров и заливку (заливать нечего — bag без картинки).
+if [ "$SKIP_CAM" = "1" ]; then
+    TOPIC=""        # из ros2 bag record выпадает -> пишется только поза + TOPICS_EXTRA
+    MP4=0           # нет кадров -> нет видео
+    GDRIVE_UP=0     # заливать нечего
+fi
 
 # ── разбор позиционных аргументов: [WxH] + последовательность команд ───────────
 CAMERA_W="" ; CAMERA_H=""
@@ -168,6 +180,12 @@ else
 fi
 
 # ── 5. извлечение кадров → JPEG ───────────────────────────────────────────────
+if [ "$SKIP_CAM" = "1" ]; then
+    log "SKIP_CAM=1 — камера не писалась, извлечение кадров/mp4/заливка пропущены"
+    echo "rosbag (только поза + IMU): $BAG_HOST ($(du -sh "$BAG_HOST" 2>/dev/null | cut -f1))"
+    log "ГОТОВО"
+    exit 0
+fi
 log "извлечение кадров по пути (шаг ${DIST_M}м, макс ${N_FRAMES})"
 docker exec \
   -e SCENE_N="$N_FRAMES" -e SCENE_DIST_M="$DIST_M" \
