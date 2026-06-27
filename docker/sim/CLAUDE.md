@@ -55,6 +55,38 @@ Gazebo, drop-in `CAMERA_NODE=camera_node_cpu` (cv::* вместо cv::cuda::*).
 Разрешение камеры `CAMERA_W/H` занижено (320×180) — llvmpipe не тянет 1280×720
 на fps; `sim_up.sh` патчит SDF. Боевой Orin и GPU-sim остаются на базовом compose.
 
+## EEPROM SITL (персистентная accel-калибровка)
+
+**Зачем.** На свежем SITL ArduCopter режет арм обязательной проверкой
+`"Arm: 3D Accel calibration needed"` — её НЕ снимает ни `ARMING_CHECK 0`, ни
+параметры (`INS_ACCOFFS/ACCSCAL`): «калибровка выполнена» — это внутреннее
+состояние eeprom, а не параметр. Снимается только level-cal
+(`PREFLIGHT_CALIBRATION param5=4`), но та принимается лишь когда EKF сошёлся,
+ребутит FCU и ненадёжна через MAVROS на низком RTF. Поэтому делаем её ОДИН раз
+надёжно (pymavlink прямо к SITL `tcp:5762`) и ПЕРСИСТИМ результат.
+
+**Как устроено.** SITL пишет `eeprom.bin` (калибровка + параметры) в cwd;
+`sim_up.sh` запускает SITL из `/root/sitl_state` — это named volume
+`sitl_eeprom`, поэтому eeprom переживает `fresh-start`. `--defaults`
+(`config/sitl-extra.parm`) применяется поверх eeprom на каждом boot, так что
+правки `.parm` продолжают работать. Per-boot MAVROS-калибровка в `nav_up.sh`
+УБРАНА (с персистом не нужна, ребутила FCU).
+
+**Как пересобрать** (`scripts/sitl_accel_cal.py` ← `make sitl-cal`): ждёт латч
+GUIDED (готовность FCU), шлёт level-cal до `ACK result=0`, проверяет что
+`"3D Accel cal needed"` ушёл, пишет в volume.
+
+```bash
+make CPU=1 fresh-start && make CPU=1 wait   # создаёт volume + свежий eeprom
+make CPU=1 sitl-cal                         # ОДИН раз: accel-cal → eeprom
+# дальше любой fresh-start стартует с откалиброванным eeprom
+```
+
+**Когда пересобирать.** Только когда volume `sitl_eeprom` пропал или сброшен:
+после `make clean` (`down --volumes`), на новом боксе при первой настройке, или
+если арм снова падает на «3D Accel calibration needed». Обычный `fresh-start`
+(`down/up` без `-v`) volume СОХРАНЯЕТ — повторять `sitl-cal` НЕ нужно.
+
 ## Грабли (не наступать)
 
 - **Прогон атомарен.** Поднимать стек ТОЛЬКО целиком через make (`restart-all`/
