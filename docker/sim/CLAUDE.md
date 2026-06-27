@@ -116,6 +116,22 @@ ARM_SIM_BUDGET=100 ARM_WALL_CAP=2400 \
 > Подтверждено: дрон армится (`armed=True`) и идёт на взлёт — lockstep арм не
 > ломает.
 
+> ⚠️ **Полный прогон на CPU работает ТОЛЬКО с поднятым бюджетом времени.**
+> Ключевые тут именно ПЕРВЫЕ два параметра — `ARM_SIM_BUDGET=100`
+> `ARM_WALL_CAP=2400`. На CPU (llvmpipe + lockstep) RTF низкий, поэтому EKF
+> сходится и арм/взлёт укладываются в окно ТОЛЬКО при большом бюджете wall-
+> времени; с дефолтами (`ARM_SIM_BUDGET=40`/`ARM_WALL_CAP=1200`) прогон не
+> доходит до конца. Остальные env в примере (`TOPICS_EXTRA`/`GDRIVE_UP=0`/
+> `MP4=0`/`N_FRAMES=0`) — для диагностики/облегчения bag, на сам факт прохождения
+> прогона не влияют. Рабочая форма полного CPU-прогона:
+>
+> ```bash
+> ARM_SIM_BUDGET=100 ARM_WALL_CAP=2400 \
+>   TOPICS_EXTRA="/mavros/imu/data /mavros/imu/data_raw" \
+>   GDRIVE_UP=0 MP4=0 N_FRAMES=0 \
+>   bash src/lab/capture_scene.sh arm takeoff 3 square 1 land
+> ```
+
 ## EEPROM SITL (персистентная accel-калибровка)
 
 **Зачем.** На свежем SITL ArduCopter режет арм обязательной проверкой
