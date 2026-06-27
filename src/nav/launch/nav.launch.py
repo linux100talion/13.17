@@ -13,26 +13,51 @@
 # передаётся аргументом — в симуляции выставляется в true.
 #
 #   ros2 launch nav_pkg nav.launch.py use_sim_time:=true
+#
+# ── Источник /mavros/vision_pose/pose (vision_pose_source) ──────────────────
+# GUIDED/ExternalNav нужна позиция в EKF. Её даёт РОВНО ОДИН издатель в
+# /mavros/vision_pose/pose — два издателя в один топик ломают фьюжн. Выбор:
+#   ray_tracer (default) — полный узел NN1: засечки по ориентирам + сброс дрейфа
+#                          (до 1-й засечки = сырой VINS). Боевой путь.
+#   bridge               — тонкий vision_pose_bridge: только сырой VINS →
+#                          vision_pose, без NN1-логики. Для тестов
+#                          ALT_HOLD-bootstrap/handover, пока ray_tracer отложен.
+# Узлы взаимоисключающие по этому аргументу (nn1_anchor поднимается всегда, но
+# в режиме bridge его детекции никто не слушает — это норма).
+#
+#   ros2 launch nav_pkg nav.launch.py use_sim_time:=true vision_pose_source:=bridge
 # ============================================================================
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
+    source = LaunchConfiguration("vision_pose_source")
     common = [{"use_sim_time": use_sim_time}]
+
+    # Взаимоисключающие условия: ровно один издатель vision_pose.
+    use_ray_tracer = IfCondition(PythonExpression(["'", source, "' == 'ray_tracer'"]))
+    use_bridge = IfCondition(PythonExpression(["'", source, "' == 'bridge'"]))
 
     return LaunchDescription([
         DeclareLaunchArgument("use_sim_time", default_value="false"),
+        DeclareLaunchArgument(
+            "vision_pose_source", default_value="ray_tracer",
+            description="кто публикует /mavros/vision_pose/pose: ray_tracer | bridge"),
 
         Node(package="nav_pkg", executable="openhd_streamer",
              output="screen", parameters=common),
         Node(package="nav_pkg", executable="nn1_anchor",
              output="screen", parameters=common),
+        # источник vision_pose — взаимоисключающие узлы:
         Node(package="nav_pkg", executable="ray_tracer",
-             output="screen", parameters=common),
+             output="screen", parameters=common, condition=use_ray_tracer),
+        Node(package="nav_pkg", executable="vision_pose_bridge",
+             output="screen", parameters=common, condition=use_bridge),
         Node(package="nav_pkg", executable="nn2_scene",
              output="screen", parameters=common),
         Node(package="nav_pkg", executable="relocalizer",

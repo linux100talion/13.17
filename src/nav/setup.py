@@ -32,6 +32,7 @@ setup(
     entry_points={
         "console_scripts": [
             "openhd_streamer = nav_pkg.openhd_streamer:main",
+            "vision_pose_bridge = nav_pkg.vision_pose_bridge:main",
             "nn1_anchor = nav_pkg.nn1.nn1_anchor:main",
             "ray_tracer = nav_pkg.nn1.ray_tracer:main",
             "nn2_scene = nav_pkg.nn2.nn2_scene:main",

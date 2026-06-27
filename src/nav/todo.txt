@@ -107,5 +107,24 @@ fly_square.py), bash — тонкая обёртка для секвенсора
   2. Хватает ли climb+раскачки монокуляру для init — иначе поднять BS_EXCITE /
      --excite-period.
 
+МОСТ vision_pose (для теста handover без NN1-логики)
+----------------------------------------------------
+ray_tracer пока ОТЛОЖЕН (рано использовать засечки/базу). Но handover в GUIDED
+требует, чтобы кто-то лил /mavros/vision_pose/pose в EKF (иначе нет позиции →
+GUIDED не латчится). Поэтому добавлен тонкий мост:
+- src/nav/nav_pkg/vision_pose_bridge.py — passthrough /vins_estimator/odometry →
+  /mavros/vision_pose/pose, без NN1 (то же, что ray_tracer с offset=0, но без
+  подписок на детекции/attitude/rel_alt/camera_info и без database.json).
+- Переключатель в nav.launch.py: аргумент vision_pose_source (ray_tracer | bridge),
+  узлы ВЗАИМОИСКЛЮЧАЮЩИЕ (ровно один издатель vision_pose — иначе фьюжн ломается).
+- Проброс: env VISION_POSE_SOURCE → docker-compose.cpu.yml (nav) → sim_nav.launch.py
+  → nav.launch.py. Default ray_tracer (поведение не меняется). Env применяется при
+  СОЗДАНИИ контейнера → флип через fresh-start, не restart-all:
+    VISION_POSE_SOURCE=bridge make CPU=1 fresh-start && make CPU=1 wait
+    make CPU=1 bootstrap BS_HANDOVER=1
+- Рывок на handover тот же (мост ориентацию VINS не выравнивает) — это и тестируем.
+  Базовый compose (docker-compose.yml) переключатель пока НЕ получил (работаем на
+  CPU-боксе через .cpu.yml); добавить туда же при возврате на GPU-путь.
+
 СЛЕДУЮЩЕЕ ЛОГИЧНОЕ:
 - yaw-выравнивание кадра VINS→NED в ray_tracer (убрать рывок на handover).

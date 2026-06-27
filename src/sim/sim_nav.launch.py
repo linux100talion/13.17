@@ -40,6 +40,13 @@ CAMERA_EXECUTABLE = os.environ.get("CAMERA_NODE", "camera_node")
 CAMERA_W = int(os.environ.get("CAMERA_W", "1280"))
 CAMERA_H = int(os.environ.get("CAMERA_H", "720"))
 
+# Источник /mavros/vision_pose/pose (см. nav.launch.py):
+#   ray_tracer (default) — полный узел NN1, боевой путь;
+#   bridge               — тонкий vision_pose_bridge (сырой VINS), для тестов
+#                          ALT_HOLD-bootstrap/handover пока ray_tracer отложен.
+# Переключается env VISION_POSE_SOURCE (nav_up.sh), не правя launch.
+VISION_POSE_SOURCE = os.environ.get("VISION_POSE_SOURCE", "ray_tracer")
+
 
 def _vins_config(width, height):
     """Конфиг VINS под текущее разрешение.
@@ -125,6 +132,7 @@ def generate_launch_description():
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 get_package_share_directory("nav_pkg"), "launch", "nav.launch.py")),
-            launch_arguments={"use_sim_time": "true"}.items(),
+            launch_arguments={"use_sim_time": "true",
+                              "vision_pose_source": VISION_POSE_SOURCE}.items(),
         ),
     ])

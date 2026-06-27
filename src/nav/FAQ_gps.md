@@ -452,14 +452,33 @@ VINS /odometry → ray_tracer._on_vins → /mavros/vision_pose/pose → EKF3 Ext
 
 1. **Рывок** (выше) — пока нет yaw-коррекции.
 2. **Зависимость от моста `vision_pose`.** Handover вообще требует, чтобы кто-то лил
-   `/mavros/vision_pose/pose` в EKF — сейчас это **только `ray_tracer`**. Без него у
-   EKF нет позиции → GUIDED не залатчится → handover упрётся в budget и уйдёт в LAND.
-   То есть для handover нужна не вся машинерия NN1 (детекции/база/засечки), а лишь
-   тонкий проброс `VINS → vision_pose` (его даёт даже «голый» ray_tracer с `offset=0`).
+   `/mavros/vision_pose/pose` в EKF. Без него у EKF нет позиции → GUIDED не залатчится →
+   handover упрётся в budget и уйдёт в LAND. Для handover нужна не вся машинерия NN1
+   (детекции/база/засечки), а лишь тонкий проброс `VINS → vision_pose`.
 
 Поэтому дефолтный прогон handover **не делает**: доводит VINS до сходимости и садится
 (`OBSERVE → LAND`) без рывка. `--handover` — отдельный диагностический прогон, чтобы
-этот рывок увидеть глазами; осмыслен только когда поднят ray_tracer (хотя бы как мост).
+этот рывок увидеть глазами; осмыслен только когда поднят источник `vision_pose`.
+
+### Источник `vision_pose`: `ray_tracer` или тонкий мост (переключатель)
+
+Издатель `/mavros/vision_pose/pose` должен быть **ровно один** (два в один топик
+ломают фьюжн EKF). В `nav.launch.py` они взаимоисключающие по аргументу
+`vision_pose_source` (env `VISION_POSE_SOURCE`, default `ray_tracer`):
+
+| source | узел | что делает |
+|---|---|---|
+| `ray_tracer` (default) | `nav_pkg/nn1/ray_tracer.py` | полный NN1: засечки по ориентирам + сброс дрейфа; до 1-й засечки = сырой VINS. Боевой путь. |
+| `bridge` | `nav_pkg/vision_pose_bridge.py` | тонкий passthrough: `/vins_estimator/odometry → vision_pose`, без NN1-логики/базы. Для тестов handover, пока ray_tracer отложен. |
+
+Мост даёт ровно то же, что ray_tracer с `offset=0` (тот же рывок, yaw не выровнен),
+но без подписок на детекции/attitude/rel_alt/camera_info и без `database.json`. Флип
+(env применяется при создании контейнера → нужен `fresh-start`):
+
+```
+VISION_POSE_SOURCE=bridge make CPU=1 fresh-start && make CPU=1 wait
+make CPU=1 bootstrap BS_HANDOVER=1     # handover на мосте, наблюдаем рывок
+```
 
 ### Последовательность
 

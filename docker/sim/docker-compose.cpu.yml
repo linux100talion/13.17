@@ -41,3 +41,8 @@ services:
       # camera_node делает S_FMT, интринсики VINS пересчитываются из sim.yaml.
       - CAMERA_W=${CAMERA_W:-320}
       - CAMERA_H=${CAMERA_H:-180}
+      # Источник /mavros/vision_pose/pose: ray_tracer (боевой, default) | bridge
+      # (тонкий VINS-passthrough для тестов ALT_HOLD-bootstrap/handover, пока
+      # ray_tracer отложен). Применяется при СОЗДАНИИ контейнера → флип:
+      #   VISION_POSE_SOURCE=bridge make CPU=1 fresh-start
+      - VISION_POSE_SOURCE=${VISION_POSE_SOURCE:-ray_tracer}
