@@ -197,6 +197,7 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 |---|---|---|
 | `nav_colcon_build:/root/sim_ws/build` | nav | colcon build-артефакты: выживают при `fresh-start` |
 | `nav_colcon_install:/root/sim_ws/install` | nav | colcon install-артефакты: выживают при `fresh-start` |
+| `sitl_eeprom:/root/sitl_state` | simulator | `eeprom.bin` SITL (одноразовая accel-калибровка + параметры): SITL запускается из этого каталога, eeprom выживает при `fresh-start`, сносится `make clean`. Пересборка — `make sitl-cal` (см. `docker/sim/CLAUDE.md`) |
 
 **Что выживает при `restart-all` (stop/start) и что теряется при `fresh-start` (down/up):**
 
