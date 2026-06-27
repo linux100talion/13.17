@@ -263,6 +263,56 @@ make land
 docker exec p1317_nav bash /lab/land.sh
 ```
 
+### `bootstrap.sh` / `alt_hold_bootstrap.py` — взлёт без GPS, init VINS в полёте
+Взлёт в **ALT_HOLD** и инициализация VINS в полёте (без GPS), под боевую
+GPS-denied-архитектуру. Обоснование и теория — `src/nav/FAQ_gps.md`, план —
+`src/nav/todo.txt`. Ветка `nn2_c3_vins_althold`.
+
+**Почему отдельно от `arm`/`takeoff`:** те работают в GUIDED (позиционный режим —
+без GPS/сошедшегося VINS не латчится). ALT_HOLD держит высоту по баро и НЕ требует
+горизонтальной позиции → можно оторваться и СОЗДАТЬ движение, нужное монокуляру
+для init. Но в ALT_HOLD нет авто-взлёта: высота — throttle-стиком (пружинный,
+центр=hold) → нужен **непрерывный RC override** (`/mavros/rc/override`, 20 Гц).
+Поэтому это нода (а не bash): она держит override весь полёт, иначе FCU по таймауту
+вернётся к своему RC и дрон просядет. `bootstrap` **сам владеет всей лётной фазой**
+(arm→climb→раскачка→ждёт VINS) → перед ним НЕ нужны `arm`/`takeoff`.
+
+Автомат: `PREARM(ALT_HOLD,газ=min) → ARM → CLIMB(газ>центр до alt) →
+EXCITE(газ=центр + импульсы roll/pitch) — ждём сходимости VINS →` далее по флагу:
+- **без handover (default):** `OBSERVE` (держит высоту `BS_OBSERVE` sim-сек) `→ LAND`
+  — самодостаточно, дрон садится сам; в секвенсоре после `bootstrap` НЕ добавлять `land`;
+- **`BS_HANDOVER=1`:** после init → `GUIDED` (самоудержание), дрон остаётся в воздухе
+  — тут проявляется **рывок** (кадр VINS не выровнен к NED, yaw-коррекция в ray_tracer
+  ещё не реализована); дальше можно `square`/`hover`/`land`.
+
+Высота меряется по `/mavros/global_position/rel_alt` (баро, доступна БЕЗ origin/GPS).
+Сходимость VINS — по устойчивому потоку `/vins_estimator/odometry`. Бюджеты — в
+sim-времени (`/clock`), RTF-независимо (как `arm.sh`).
+
+```bash
+make bootstrap                          # climb→init→observe→land (без рывка), alt=3
+make bootstrap BS_ALT=4 BS_HANDOVER=1   # после init → GUIDED (наблюдать рывок)
+# в секвенсоре (запись bag + кадры + Drive вокруг всего bootstrap):
+bash src/lab/capture_scene.sh bootstrap                 # без handover (сам садится)
+BS_HANDOVER=1 bash src/lab/capture_scene.sh bootstrap square 1 land   # handover → квадрат
+# напрямую:
+docker exec p1317_nav bash /lab/bootstrap.sh
+docker exec p1317_nav python3 /lab/alt_hold_bootstrap.py --alt 3 --handover
+```
+
+| Env (`bootstrap.sh`) | Default | Что |
+|---|---|---|
+| `BS_ALT` | 3 | целевая высота climb, м |
+| `BS_HANDOVER` | 0 | 1 = после init перейти в GUIDED (иначе OBSERVE→LAND) |
+| `BS_EXCITE` | 80 | амплитуда импульсов roll/pitch, PWM от центра (1500) |
+| `BS_OBSERVE` | 15 | держать высоту после init перед посадкой, sim-сек (без handover) |
+| `BS_VINS_TO` | 90 | таймаут ожидания сходимости VINS, sim-сек (по нему → LAND) |
+
+> ⚠️ **Проверить на первом прогоне:** принимает ли этот SITL RC override (нода логит
+> `rc/in throttle=…` в CLIMB; если высота не растёт — override не проходит, возможно
+> нужен `SYSID_MYGCS` или `RC_NOCHANGE=65535` в `alt_hold_bootstrap.py`). И хватает
+> ли climb+раскачки для init монокуляра (иначе поднять `BS_EXCITE` / `--excite-period`).
+
 ### `vins_watch.sh`
 Мониторинг VINS в реальном времени:
 - фильтрует `sim_nav.log` по ключевым событиям

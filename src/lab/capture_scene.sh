@@ -77,7 +77,7 @@ i=0
 while [ "$i" -lt "${#SEQ[@]}" ]; do
     cmd="${SEQ[$i]}"
     case "$cmd" in
-        arm|land|disarm) ;;
+        arm|land|disarm|bootstrap) ;;
         takeoff|hover|square)
             # опциональный числовой аргумент: если следующий токен — число, он наш
             # (takeoff=ALT, hover=SIM_SEC, square=число кругов)
@@ -86,7 +86,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
             ;;
         *)
             echo "ОШИБКА: неизвестная команда '$cmd'." >&2
-            echo "Допустимо: arm, takeoff [ALT], hover [SIM_SEC], square [LOOPS], land, disarm." >&2
+            echo "Допустимо: arm, bootstrap, takeoff [ALT], hover [SIM_SEC], square [LOOPS], land, disarm." >&2
             exit 2
             ;;
     esac
@@ -164,6 +164,8 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
     # lockstep готовность позиции наступает чуть позже стандартных 40 sim-сек).
     docker exec \
       -e ARM_SIM_BUDGET="${ARM_SIM_BUDGET:-}" -e ARM_WALL_CAP="${ARM_WALL_CAP:-}" \
+      -e BS_ALT="${BS_ALT:-}" -e BS_HANDOVER="${BS_HANDOVER:-}" -e BS_EXCITE="${BS_EXCITE:-}" \
+      -e BS_OBSERVE="${BS_OBSERVE:-}" -e BS_VINS_TO="${BS_VINS_TO:-}" \
       "$NAV" bash /lab/"$cmd".sh $arg
     i=$((i+1))
 done

@@ -43,7 +43,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm takeoff hover land disarm fly vins-watch sitl-cal capture-frames capture-scene clean
+.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm fly vins-watch sitl-cal capture-frames capture-scene clean
 
 # Дефолтная последовательность команд для `make capture-scene` (без разрешения →
 # restart-all). Переопределяется: make capture-scene CSARGS="640x480 arm takeoff 5 hover 2 land"
@@ -135,6 +135,10 @@ land:            ## посадка (режим LAND)
 
 disarm:          ## дизарм
 	docker exec $(NAV) bash /lab/disarm.sh
+
+bootstrap:       ## ALT_HOLD-взлёт + инициализация VINS в полёте без GPS (BS_* env; BS_HANDOVER=1 → GUIDED)
+	docker exec -e BS_ALT=$(BS_ALT) -e BS_HANDOVER=$(BS_HANDOVER) -e BS_EXCITE=$(BS_EXCITE) \
+	  -e BS_OBSERVE=$(BS_OBSERVE) -e BS_VINS_TO=$(BS_VINS_TO) $(NAV) bash /lab/bootstrap.sh
 
 fly:             ## запустить облёт квадрата для инициализации VINS (Ctrl+C для стопа)
 	docker exec -it $(NAV) python3 /lab/fly_square.py $(FLYARGS)
