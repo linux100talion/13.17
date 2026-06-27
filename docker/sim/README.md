@@ -46,12 +46,17 @@ ArduPilot SITL эмулирует полётный контроллер, Gazebo 
 cd docker/sim
 make host-setup     # хост: xhost + v4l2loopback (/dev/rawbayer), нужен sudo
 make build          # собрать образы (долго: SITL+Gazebo+OpenCV из исходников)
-make run            # up + sim (Gazebo+SITL+мост) + nav (colcon+ноды+MAVROS)
+make up             # создать контейнеры; sim_up.sh + nav_up.sh стартуют сами
+make wait           # ждать «nav: готово» (до 5 мин)
 make logs           # хвост логов всех нод (output/*.log)
-make stop           # погасить ноды (контейнеры живут); make restart — перезапуск
+make restart-all    # быстрый перезапуск (stop→start, ephemeral state жив)
+make fresh-start    # полный сброс (down→up, ephemeral state теряется)
 make down           # удалить контейнеры
 make help           # все цели
 ```
+
+> CPU-бокс без NVIDIA (ветка `nn2_c3_cpu`): добавляй `CPU=1` к любой цели —
+> детали в [`CLAUDE.md`](CLAUDE.md) (раздел «CPU-режим»).
 
 > 💬 Частые вопросы по обёртке Makefile (`restart-all` vs `fresh-start`, что
 > нужно сделать до первого `restart-all`) — см. [`FAQ.txt`](FAQ.txt).
@@ -62,6 +67,12 @@ make help           # все цели
 > и чек-листы ниже.
 
 ## Запуск (вручную, по шагам)
+
+> ⚠️ **Справочно — что делает Makefile под капотом.** Штатно стек поднимается
+> ТОЛЬКО целиком через `make` (см. «⚠️ Дисциплина прогона» в корневом
+> `CLAUDE.md`): ручной перезапуск отдельной ноды внутри контейнера
+> рассинхронизирует стек и даёт ложные диагнозы. Шаги ниже — для понимания
+> устройства, не для «прогона по кусочкам».
 
 ```bash
 # 1. Разрешить контейнеру доступ к дисплею (для GUI Gazebo)
@@ -88,87 +99,33 @@ docker exec -it p1317_nav bash
 
 ## Виртуальная камера (camera_node работает "как есть")
 
-В симуляции камера-нода (`camera_pkg`) НЕ переписывается. Вместо реального
-ArduCam она читает кадры из виртуального V4L2-устройства `/dev/rawbayer`,
-которое создаёт модуль ядра **v4l2loopback**. Байеризатор берёт RGB из Gazebo,
-"портит" его до сырого Bayer (как реальный сенсор) и пишет в это устройство.
+В симуляции камера-нода (`camera_pkg`) НЕ переписывается: вместо ArduCam читает
+кадры из виртуального V4L2-устройства `/dev/rawbayer` (модуль ядра
+**v4l2loopback** на хосте). Байеризатор берёт RGB из Gazebo, «портит» до сырого
+Bayer и пишет туда. Нода меняется только параметром `device:=/dev/rawbayer`.
 
 ```
-Gazebo /camera/image_raw (RGB)
-  → bayerizer.py        RGB→Bayer16
-  → write() → /dev/rawbayer (v4l2loopback)
-  → camera_node  (v4l2-ctl читает BA10 → CUDA debayer → /image_mono + OpenHD)
+Gazebo /camera/image_raw (RGB) → bayerizer.py → /dev/rawbayer (v4l2loopback)
+  → camera_node → /image_mono (VINS) + /image_color (nav)
 ```
 
-Нода меняется только параметром: `device:=/dev/rawbayer` (на железе — `/dev/video0`).
-
-### Настройка на ХОСТЕ (v4l2loopback — модуль ядра, не ставится в docker)
-
-```bash
-# 1. Установить и загрузить модуль (один раз)
-sudo apt install v4l2loopback-dkms v4l2loopback-utils
-# Создаём устройство с фиксированным именем /dev/rawbayer.
-# Подбери номер устройства так, чтобы не конфликтовал с вебкамерой.
-sudo modprobe v4l2loopback devices=1 video_nr=9 card_label="rawbayer" exclusive_caps=0
-
-# 2. Симлинк на фиксированное имя (docker пробрасывает именно /dev/rawbayer)
-sudo ln -sf /dev/video9 /dev/rawbayer
-```
-
-> ⚠️ Формат/размер кадра: camera_node берёт `Sizeimage` из `v4l2-ctl
-> --get-fmt-video`, поэтому ему важно, чтобы устройство отдавало
-> `width*height*2` байт (16-бит на пиксель). Если negotiation формата
-> BA10 на loopback не проходит — проверь это первым делом.
-
-### Запуск в контейнере nav
-
-```bash
-docker exec -it p1317_nav bash
-#   (внутри) cd /root/sim_ws && colcon build && source install/setup.bash
-#   (внутри) терминал 1 — байеризатор:
-python3 src/sim/bayerizer.py --ros-args \
-    -p input_topic:=/camera/image_raw -p device:=/dev/rawbayer -p pattern:=GRBG
-#   (внутри) терминал 2 — камера-нода как на железе, но с другим device:
-ros2 run camera_pkg camera_node --ros-args -p device:=/dev/rawbayer
-```
-
-> Если цвета перепутаны — поменяй `pattern` (GRBG/RGGB/BGGR/GBRG).
-
-### Запуск VINS в контейнере nav
-
-Конфиг симуляции — `sim.yaml` (нулевая дисторсия, интринсики Gazebo-камеры,
-пути `/root/sim_ws/`). Лежит рядом с боевым:
-`src/vins/VINS-MONO-ROS2/config_pkg/config/sim.yaml`.
-
-```bash
-CFG=/root/sim_ws/src/vins/VINS-MONO-ROS2/config_pkg/config/sim.yaml
-ros2 run feature_tracker feature_tracker --ros-args -p config_file:=$CFG
-ros2 run vins_estimator vins_estimator --ros-args -p config_file:=$CFG \
-    --remap /feature_tracker/feature:=/feature \
-    --remap /feature_tracker/restart:=/restart
-```
+> Подробности механики и грабли v4l2loopback (формат BGR4, padding 208 байт,
+> `ready_for_capture` после первого `write()`, задержка camera_node 4 c) — в
+> корневом `CLAUDE.md`, решение №4. Хост-настройка автоматизирована в
+> `make host-setup` (`scripts/host_setup.sh`: `modprobe v4l2loopback` + симлинк
+> `/dev/rawbayer`). Конфиг VINS под Gazebo — `sim.yaml` (нулевая дисторсия,
+> интринсики камеры), см. там же раздел «sim.yaml».
 
 ## Мир: Military fortress
 
-Мир `worlds/mili_fortress.sdf` — портированная под Harmonic карта из
-[engcang/gazebo_maps](https://github.com/engcang/gazebo_maps) (`mili_tech`),
-та самая, на которой в демо-видео работает VINS-Fusion + YOLO. Ассеты
-вендорены в `worlds/mili_tech/` (~27 МБ). Атрибуция — `worlds/mili_tech/ATTRIBUTION.md`.
+Мир `worlds/mili_fortress.sdf` — портированная под Harmonic карта `mili_tech` из
+[engcang/gazebo_maps](https://github.com/engcang/gazebo_maps), на которой в
+демо-видео работает VINS-Fusion + YOLO (текстуры уже годятся для VINS). Ассеты
+вендорены в `worlds/mili_tech/` (~27 МБ, атрибуция — `ATTRIBUTION.md`).
 
-Что было портировано из оригинального Gazebo Classic `mili.world`:
-- добавлены обязательные system-плагины gz-sim (physics/scene/sensors/imu/...)
-- `<population>` деревьев/огня заменены явной расстановкой (gz-sim не
-  поддерживает `<population>`)
-- `<road>` удалён, физика `ode` → дефолт DART
-- материалы `grass_plane`/`digital_wall` → PBR
-- убрана битая ссылка `model://home`
-
-### Запуск мира (контейнер simulator)
-
-```bash
-docker exec -it p1317_simulator bash
-#   (внутри) gz sim -v4 -r /root/worlds/mili_fortress.sdf
-```
+> Детали портирования Classic→Harmonic (system-плагины, `<population>`→явная
+> расстановка, `ode`→DART, Ogre→PBR) — в корневом `CLAUDE.md`, раздел «Мир —
+> Military fortress».
 
 ### ⚠️ Чек-лист проверки на ноуте (порт не тестировался без Gazebo)
 
@@ -188,55 +145,34 @@ docker exec -it p1317_simulator bash
 
 ## Дрон: iris + камера
 
-Модель `worlds/iris_cam/` — это `iris_with_ardupilot` из ardupilot_gazebo
-(проверенная под SITL: моторы, IMU, плагин `ArduPilotPlugin` на 127.0.0.1:9002)
-**плюс камера пилота**. Камера — параметры из `concept.txt` (поза `0.15 0 0.05`,
-наклон 0.26 рад, fov 1.5708, clip 0.1–10000), но разрешение **1280×720** под
-`camera_node`/`sim.yaml`. Жёстко прикреплена к `iris_with_standoffs::base_link`.
-Меши корпуса/винтов берутся из `model://iris_with_standoffs` (в образе ardupilot_gazebo).
+Модель `worlds/iris_cam/` — `iris_with_ardupilot` из ardupilot_gazebo
+(проверена под SITL: моторы, IMU, `ArduPilotPlugin`@9002) **плюс камера пилота**
+(параметры из `concept.txt`, разрешение 1280×720 под `camera_node`/`sim.yaml`,
+крепление к `iris_with_standoffs::base_link`). Спавнится в `mili_fortress.sdf`,
+публикует gz-топик `camera/image_raw`.
 
-Спавнится в `mili_fortress.sdf` (`<include> model://iris_cam` на `0 0 0.2`).
-Камера публикует gz-топик `camera/image_raw`.
-
-### Мост Gazebo → ROS (контейнер simulator)
-
-```bash
-# Камера + часы симуляции в ROS2
-ros2 run ros_gz_bridge parameter_bridge \
-  /camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image \
-  /clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock
-```
+> Детали (поза/наклон/fov камеры, источник мешей) — в корневом `CLAUDE.md`,
+> раздел «Дрон — worlds/iris_cam/».
 
 ## Полный пайплайн запуска
 
 ```
 gz sim (mili_fortress.sdf, дрон с камерой)
-  → SITL (sim_vehicle.py) ←→ ArduPilotPlugin (управление + IMU)
+  → SITL ←→ ArduPilotPlugin@9002 (управление + IMU) → mavlink_router → MAVROS
   → ros_gz_bridge: camera/image_raw + /clock → ROS2
   → [nav] bayerizer: RGB → /dev/rawbayer
-  → [nav] camera_node: /dev/rawbayer → /image_mono (+ OpenHD)
+  → [nav] camera_node: /dev/rawbayer → /image_mono (VINS) + /image_color (nav)
   → [nav] feature_tracker + vins_estimator (sim.yaml, use_sim_time:=true)
-  → MAVROS ← mavlink_router ← SITL
 ```
 
-1. **simulator**: `gz sim -v4 -r /root/worlds/mili_fortress.sdf`
-2. **simulator**: `sim_vehicle.py -v ArduCopter -f gazebo-iris --console`
-3. **simulator**: `ros_gz_bridge` (команда выше) — публикует `/clock`. **Этой
-   ноде `use_sim_time` НЕ ставится — она источник часов.**
-4. **nav**: один launch на все ноды (bayerizer + camera_node + feature_tracker +
-   vins_estimator), уже с `use_sim_time:=true`:
-   ```bash
-   ros2 launch /root/sim_ws/src/sim/sim_nav.launch.py
-   ```
-5. **nav**: MAVROS — отдельно, тоже с sim-временем:
-   ```bash
-   ros2 run mavros mavros_node --ros-args \
-     -p use_sim_time:=true -p fcu_url:="udp://:14540@127.0.0.1:14555"
-   ```
+Под капотом это поднимают `scripts/sim_up.sh` (Gazebo + SITL + `ros_gz_bridge`)
+и `scripts/nav_up.sh` (bayerizer + `sim_nav.launch.py` + MAVROS) — автоматически
+при `make up`/`restart-all`. Полная схема пайплайна и обоснования — в корневом
+`CLAUDE.md` (раздел «Полный пайплайн»).
 
-> **use_sim_time** прописан всем нодам через `src/sim/sim_nav.launch.py`
-> (camera_node штампует кадр через `get_clock()->now()` → уважает sim-время).
-> Единственное исключение — `ros_gz_bridge` (источник `/clock`).
+> **use_sim_time** прописан всем нодам через `src/sim/sim_nav.launch.py`.
+> Единственное исключение — `ros_gz_bridge` (источник `/clock`, ему sim-время НЕ
+> ставится). Тонкость IMU-таймсинка под SITL — решение №11 в корневом `CLAUDE.md`.
 
 ### ⚠️ Проверить на ноуте
 
