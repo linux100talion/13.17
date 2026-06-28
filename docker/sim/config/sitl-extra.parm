@@ -22,6 +22,31 @@ ARMING_CHECK 0
 # режет арм И сбрасывает даже force-arm. Отключаем.
 FS_THR_ENABLE 0
 
+# Отключить RC-переключатель полётного режима (канал FLTMODE_CH, дефолт 5).
+# Нужен для alt_hold_bootstrap: дрон держим в ALT_HOLD через set_mode + непрерывный
+# RC override (20 Гц). При дефолте симулированное радио по каналу 5 каждый тик
+# перебивало set_mode → режим слетал в STABILIZE, а там throttle=1650 ≈ висение и
+# дрон не набирал высоту (подтверждено прогоном: «режим=STABILIZE ≠ ALT_HOLD»,
+# rel_alt≈0). Ре-ассерт в ноде — недостаточный бэкстоп (остаются окна STABILIZE).
+# FLTMODE_CH 0 → режимом управляет только GCS/set_mode. GUIDED/GPS НЕ ломает (тот
+# тоже ставится set_mode); GPS-арм упирался в БЮДЖЕТ (ARM_SIM_BUDGET), не в это.
+FLTMODE_CH 0
+
+# RC override (alt_hold_bootstrap) проходит, только если sysid отправителя ==
+# MAV_GCS_SYSID. ArduCopter: handle_rc_channels_override() молча отбрасывает override
+# при msg.sysid != MAV_GCS_SYSID (дефолт 255). MAVROS шлёт как system_id=1 → 1≠255 →
+# КАЖДЫЙ override дропался → throttle оставался в min → моторы 1100, дрон не взлетал
+# (подтверждено: override ch3=1800 публикуется, /mavros/rc/in пуст, rel_alt≈0).
+# ⚠️ В ArduPilot 4.8 параметр ПЕРЕИМЕНОВАН SYSID_MYGCS → MAV_GCS_SYSID. Прежняя строка
+# `SYSID_MYGCS 1` прошивкой 4.8 ИГНОРИРОВАЛАСЬ (несуществующий параметр отвергается при
+# загрузке), MAV_GCS_SYSID оставался 255 → фикс не действовал. Подтверждено pymavlink
+# A/B-тестом напрямую к SITL (tcp:5762): override от sysid=1 → chan3=1000 (ОТБРОШЕН),
+# от sysid=255 → chan3=1800 (ПРИНЯТ); MAV_GCS_SYSID читался как 255, SYSID_MYGCS — нет.
+# Ставим 1 = system_id MAVROS. Арм/setpoint НЕ гейтятся sysid (GPS-полёт работал при
+# sysid 1), ломается ТОЛЬКО override. Свежесть override держит wall-таймер 20 Гц в
+# alt_hold_bootstrap.py (sim-таймер давал ~1.4 Гц wall при RTF 0.07).
+MAV_GCS_SYSID 1
+
 # Виртуальный safety-switch по умолчанию «взведён» (обычно снимается через
 # MAVProxy, которого у нас нет) → блокирует арм вне ARMING_CHECK. Снимаем.
 BRD_SAFETY_DEFLT 0
