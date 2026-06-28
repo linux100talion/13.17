@@ -115,35 +115,28 @@ if ! pgrep -f "mavros_node" >/dev/null; then
             [ "$(ros2 topic echo --once --field connected /mavros/state 2>/dev/null | head -1)" = "True" ] && break
             sleep 3
         done
-        # Частоты потоков ставим per-message через SET_MESSAGE_INTERVAL (MAV_CMD 511,
-        # /mavros/cmd/command) — НАДЁЖНЕЕ устаревшего REQUEST_DATA_STREAM
-        # (set_stream_rate): в ArduPilot 4.8 он часто не отрабатывает, из-за чего
-        # /mavros/imu/data_raw оставался ~33 Гц (мало для VINS и для FFT гиро).
-        # interval_us=5000 = запрос 200 Гц; FCU отдаёт НЕ выше SCHED_LOOP_RATE (тут
-        # 100) → реальный потолок IMU ~100 sim-Гц. msgid: 27=RAW_IMU
-        # (→ /mavros/imu/data_raw, вход VINS), 30=ATTITUDE (→ /mavros/imu/data),
-        # 32=LOCAL_POSITION_NED, 33=GLOBAL_POSITION_INT (→ pose + rel_alt).
-        set_interval() {  # $1=msgid  $2=interval_us
-            ros2 service call /mavros/cmd/command mavros_msgs/srv/CommandLong \
-                "{command: 511, param1: $1.0, param2: $2.0}" >> "$LOG/mavros.log" 2>&1
-        }
+        # Потоки телеметрии запрашиваем РАБОЧИМ методом — REQUEST_DATA_STREAM
+        # (set_stream_rate). SET_MESSAGE_INTERVAL (/mavros/cmd/command 511) в этом
+        # SITL НЕ отрабатывает (ATTITUDE не включался → /mavros/imu/data был ПУСТ).
+        # Статические SR*/MAV* в конфиге тоже не применяются для router-канала
+        # (см. sitl-extra.parm «Стрим IMU»). Три стрима:
+        #   1  RAW_SENSORS → RAW_IMU → /mavros/imu/data_raw (вход VINS, FFT гиро)
+        #   6  POSITION    → LOCAL_POSITION_NED + GLOBAL_POSITION_INT → pose + rel_alt
+        #   10 EXTRA1      → ATTITUDE → /mavros/imu/data (ориентация → угол, attitude.py)
+        # ⚠️ IMU-телеметрия в этом SITL капается ~24-34 sim-Гц (200 не отдаёт; потолок
+        # SCHED_LOOP=100 телеметрией тоже недостижим) — лимит SITL, не конфига.
         for _ in $(seq 1 20); do
-            # IMU: интервал на ВСЕ источники — mavros строит /imu/data_raw из того,
-            # что реально шлёт FCU (26=SCALED_IMU, 27=RAW_IMU, 105=HIGHRES_IMU,
-            # 116/129=SCALED_IMU2/3). 5000us = запрос 200 Гц (FCU cap ~SCHED_LOOP=100).
-            for mid in 26 27 105 116 129; do set_interval "$mid" 5000; done
-            set_interval 30  5000     # ATTITUDE → /mavros/imu/data (ориентация)
-            set_interval 32 40000     # LOCAL_POSITION_NED  → 25 Гц
-            set_interval 33 40000     # GLOBAL_POSITION_INT → 25 Гц
-            # подстраховка устаревшим REQUEST_DATA_STREAM: stream 1 = RAW_SENSORS (IMU)
             ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
                 '{stream_id: 1, message_rate: 200, on_off: true}' >> "$LOG/mavros.log" 2>&1
-            # Подтверждаем ПО SIM-ЧАСТОТЕ (не по факту наличия): на низком RTF wall-rate
-            # мизер, поэтому imu_rate.py считает Гц из header.stamp. Цель >= 80 sim-Гц.
+            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
+                '{stream_id: 6, message_rate: 25, on_off: true}' >> "$LOG/mavros.log" 2>&1
+            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
+                '{stream_id: 10, message_rate: 50, on_off: true}' >> "$LOG/mavros.log" 2>&1
+            # Подтверждаем по SIM-частоте data_raw (на низком RTF wall-rate мизер).
             hz=$(python3 /scripts/imu_rate.py 40 15 2>/dev/null | tail -1)
-            echo "  stream_rate: /mavros/imu/data_raw ≈ ${hz:-?} sim-Гц" >> "$LOG/mavros.log"
-            if [ -n "$hz" ] && awk "BEGIN{exit !(${hz:-0}>=80)}"; then
-                echo "  stream_rate: IMU подтверждён ${hz} sim-Гц"; break
+            echo "  stream_rate: /mavros/imu/data_raw ≈ ${hz:-?} sim-Гц (EXTRA1 запрошен)" >> "$LOG/mavros.log"
+            if [ -n "$hz" ] && awk "BEGIN{exit !(${hz:-0}>=15)}"; then
+                echo "  stream_rate: IMU идёт ${hz} sim-Гц, ATTITUDE/EXTRA1 запрошен"; break
             fi
             sleep 3
         done
