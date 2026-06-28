@@ -18,7 +18,8 @@ GUIDED (--handover) либо LAND. «Просто зависнуть в ALT_HOLD
 
 Конечный автомат (бюджеты — в SIM-времени по /clock, RTF-независимо):
   PREARM (ALT_HOLD, throttle=min) → ARM → CLIMB (throttle>центр до --alt)
-    → EXCITE (throttle=центр + импульсы roll/pitch) — ждём сходимости VINS
+    → EXCITE (throttle=центр + station-keeping forward/back +τ/−2τ/+τ + медленный
+      yaw) — ждём сходимости VINS, дрон держится около точки старта (не уезжает)
     → [--handover] GUIDED (наблюдаем рывок)  |  иначе: OBSERVE → LAND (самодостаточно)
 
 --handover ВЫКЛ по умолчанию: выравнивание кадра VINS→NED (yaw-коррекция в
@@ -233,16 +234,31 @@ class AltHoldBootstrap(Node):
                     self.result = "CLIMB_FAIL"; self.goto(S_LAND)
 
         elif st == S_EXCITE:
-            # throttle=центр (держим высоту), импульсы roll/pitch для параллакса +
-            # IMU excitation. Чередуем 4 направления (вперёд/назад/влево/вправо) —
-            # суммарный дрейф ~около нуля, но движение реальное.
+            # throttle=центр (держим высоту) + раскачка для параллакса/IMU excitation,
+            # НО station-keeping: дрон должен остаться примерно на месте (в круге
+            # R~10м), а не улетать за край сцены в «жёлтый экран».
+            #
+            # Подвох ALT_HOLD: стик pitch = угол наклона = УСКОРЕНИЕ (двойной
+            # интегратор), поэтому симметричный «вперёд τ / назад τ» НЕ возвращает
+            # позицию — за цикл уносит ~v·τ, и дрон линейно уезжает. Используем
+            # профиль ускорения +τ / −2τ / +τ (цикл 4τ): скорость 0→+→−→0 и позиция
+            # ВОЗВРАЩАЕТСЯ в исходную к концу цикла (go-and-back), excite-амплитуда
+            # масштабирует радиус (peak ~ a·τ²). Плюс медленный yaw — знак меняем
+            # каждый цикл, чтобы «подметать» сцену ±, а не уезжать в бесконечное
+            # вращение; смена курса заодно разворачивает ось вперёд/назад → параллакс
+            # покрывает 2D-диск вокруг точки старта.
             self.throttle = self.a.throttle_hold
             self.hold_alt_hold()
             amp = self.a.excite
-            phase = int(self.elapsed() / self.a.excite_period) % 4
-            offs = [(0, -amp), (0, +amp), (-amp, 0), (+amp, 0)][phase]
-            self.roll = RC_CENTER + offs[0]
-            self.pitch = RC_CENTER + offs[1]
+            T = self.a.excite_period
+            t = self.elapsed()
+            cyc = t % (4.0 * T)
+            p_sign = -1.0 if (T <= cyc < 3.0 * T) else 1.0   # +τ / −2τ / +τ
+            self.pitch = RC_CENTER + int(p_sign * amp)
+            self.roll = RC_CENTER
+            n = int(t / (4.0 * T))
+            y_sign = 1 if (n % 2 == 0) else -1               # yaw: подметаем ± каждый цикл
+            self.yaw = RC_CENTER + y_sign * self.a.yaw_rate
             if self.vins_converged():
                 self.get_logger().info(f"    ✅ VINS сошёлся ({self.odom_count} odom-сообщений)")
                 self.result = "VINS_OK"
@@ -303,7 +319,9 @@ def main():
                    help='после сходимости VINS перейти в GUIDED (увидеть рывок); по умолчанию OFF → OBSERVE+LAND')
     p.add_argument('--excite', type=int, default=80, help='амплитуда импульсов roll/pitch от центра, PWM (default 80)')
     p.add_argument('--excite-period', dest='excite_period', type=float, default=3.0,
-                   help='длительность одного направления раскачки, sim-сек (default 3)')
+                   help='базовая длительность τ профиля раскачки +τ/−2τ/+τ, sim-сек (цикл=4τ, default 3)')
+    p.add_argument('--yaw-rate', dest='yaw_rate', type=int, default=30,
+                   help='амплитуда медленного yaw в EXCITE, PWM от центра 1500 (0=без yaw, default 30)')
     p.add_argument('--vins-timeout', dest='vins_timeout', type=float, default=90.0,
                    help='сколько ждать сходимости VINS в EXCITE, sim-сек (default 90)')
     p.add_argument('--vins-min', dest='vins_min', type=int, default=40,

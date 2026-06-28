@@ -14,11 +14,13 @@
 #     воздухе (наблюдаем рывок) → дальше можно square/hover/land.
 #
 # Параметры через env (как SQ_* у square.sh):
-#   BS_ALT (3)        — целевая высота, м
-#   BS_HANDOVER (0)   — 1 = перейти в GUIDED после init (иначе OBSERVE→LAND)
-#   BS_EXCITE (80)    — амплитуда раскачки roll/pitch, PWM от центра
-#   BS_OBSERVE (15)   — держать высоту после init перед посадкой, sim-сек (без handover)
-#   BS_VINS_TO (90)   — таймаут ожидания сходимости VINS, sim-сек
+#   BS_ALT (3)            — целевая высота, м
+#   BS_HANDOVER (0)       — 1 = перейти в GUIDED после init (иначе OBSERVE→LAND)
+#   BS_EXCITE (80)        — амплитуда раскачки forward/back, PWM от центра (масштаб радиуса)
+#   BS_YAW (30)           — амплитуда медленного yaw в EXCITE, PWM от центра (0=без yaw)
+#   BS_EXCITE_PERIOD (3)  — базовая τ профиля раскачки +τ/−2τ/+τ, sim-сек (цикл=4τ)
+#   BS_OBSERVE (15)       — держать высоту после init перед посадкой, sim-сек (без handover)
+#   BS_VINS_TO (90)       — таймаут ожидания сходимости VINS, sim-сек
 # Бюджеты фаз автомата (sim-сек) — поднимать на низком RTF, как ARM_SIM_BUDGET у arm.sh
 # (EKF/латч/арм/набор высоты не успевают в дефолт при llvmpipe/lockstep). Пусто = дефолт ноды:
 #   BS_MODE_BUDGET (40)  — латч ALT_HOLD/GUIDED
@@ -31,10 +33,13 @@ source /root/sim_ws/install/setup.bash 2>/dev/null || true
 
 ALT="${BS_ALT:-3}"
 EXCITE="${BS_EXCITE:-80}"
+YAW="${BS_YAW:-30}"
+EXCITE_PERIOD="${BS_EXCITE_PERIOD:-3}"
 OBSERVE="${BS_OBSERVE:-15}"
 VINS_TO="${BS_VINS_TO:-90}"
 
-ARGS=(--alt "$ALT" --excite "$EXCITE" --observe "$OBSERVE" --vins-timeout "$VINS_TO")
+ARGS=(--alt "$ALT" --excite "$EXCITE" --yaw-rate "$YAW" --excite-period "$EXCITE_PERIOD"
+      --observe "$OBSERVE" --vins-timeout "$VINS_TO")
 [ "${BS_HANDOVER:-0}" = "1" ] && ARGS+=(--handover)
 # Газ на подъём (PWM). Дефолт ноды 1650 ≈ висение для iris → набор маргинальный;
 # поднять (напр. 1800) для уверенной скороподъёмности в ALT_HOLD. Пусто = дефолт ноды.
@@ -45,6 +50,6 @@ ARGS=(--alt "$ALT" --excite "$EXCITE" --observe "$OBSERVE" --vins-timeout "$VINS
 [ -n "${BS_CLIMB_BUDGET:-}" ] && ARGS+=(--climb-budget "$BS_CLIMB_BUDGET")
 [ -n "${BS_LAND_BUDGET:-}" ]  && ARGS+=(--land-budget "$BS_LAND_BUDGET")
 
-echo ">>> ALT_HOLD bootstrap: alt=${ALT}м excite=±${EXCITE}PWM handover=${BS_HANDOVER:-0} (sim-время)..."
+echo ">>> ALT_HOLD bootstrap: alt=${ALT}м excite=±${EXCITE}PWM yaw=±${YAW}PWM handover=${BS_HANDOVER:-0} (sim-время)..."
 python3 /lab/alt_hold_bootstrap.py "${ARGS[@]}"
 echo ">>> bootstrap завершён."

@@ -278,7 +278,8 @@ GPS-denied-архитектуру. Обоснование и теория — `s
 (arm→climb→раскачка→ждёт VINS) → перед ним НЕ нужны `arm`/`takeoff`.
 
 Автомат: `PREARM(ALT_HOLD,газ=min) → ARM → CLIMB(газ>центр до alt) →
-EXCITE(газ=центр + импульсы roll/pitch) — ждём сходимости VINS →` далее по флагу:
+EXCITE(газ=центр + station-keeping forward/back + медленный yaw) — ждём сходимости
+VINS →` далее по флагу:
 - **без handover (default):** `OBSERVE` (держит высоту `BS_OBSERVE` sim-сек) `→ LAND`
   — самодостаточно, дрон садится сам; в секвенсоре после `bootstrap` НЕ добавлять `land`;
 - **`BS_HANDOVER=1`:** после init → `GUIDED` (самоудержание), дрон остаётся в воздухе
@@ -300,18 +301,52 @@ docker exec p1317_nav bash /lab/bootstrap.sh
 docker exec p1317_nav python3 /lab/alt_hold_bootstrap.py --alt 3 --handover
 ```
 
+**Station-keeping в EXCITE:** дрон не «жмёт стик вперёд» (улетел бы за край сцены
+в жёлтый экран), а раскачивается **forward/back с возвратом** + медленно даёт yaw.
+В ALT_HOLD стик pitch = угол наклона = ускорение (двойной интегратор), поэтому
+симметричный «вперёд τ / назад τ» НЕ возвращает позицию (уносит ~v·τ за цикл).
+Используется профиль ускорения **+τ / −2τ / +τ** (цикл 4τ): скорость 0→+→−→0 и
+позиция возвращается в исходную к концу цикла → дрон держится в круге ~R10м около
+старта. `BS_EXCITE` масштабирует радиус (peak ≈ a·τ²), `BS_YAW` — медленное
+подметание курса (знак меняется каждый цикл, сцена покрывается 2D-диском).
+
 | Env (`bootstrap.sh`) | Default | Что |
 |---|---|---|
 | `BS_ALT` | 3 | целевая высота climb, м |
 | `BS_HANDOVER` | 0 | 1 = после init перейти в GUIDED (иначе OBSERVE→LAND) |
-| `BS_EXCITE` | 80 | амплитуда импульсов roll/pitch, PWM от центра (1500) |
+| `BS_EXCITE` | 80 | амплитуда forward/back раскачки, PWM от центра (1500) — масштаб радиуса |
+| `BS_YAW` | 30 | амплитуда медленного yaw в EXCITE, PWM от центра (0 = без yaw) |
+| `BS_EXCITE_PERIOD` | 3 | базовая τ профиля +τ/−2τ/+τ, sim-сек (цикл = 4τ) |
 | `BS_OBSERVE` | 15 | держать высоту после init перед посадкой, sim-сек (без handover) |
 | `BS_VINS_TO` | 90 | таймаут ожидания сходимости VINS, sim-сек (по нему → LAND) |
+| `BS_THROTTLE_CLIMB` | 1650 | PWM газа на подъёме (climb) |
+| `BS_MODE_BUDGET` | 40 | бюджет латча режима, sim-сек |
+| `BS_ARM_BUDGET` | 40 | бюджет арминга, sim-сек |
+| `BS_CLIMB_BUDGET` | 60 | бюджет набора высоты, sim-сек |
+| `BS_LAND_BUDGET` | 120 | бюджет посадки, sim-сек |
 
 > ⚠️ **Проверить на первом прогоне:** принимает ли этот SITL RC override (нода логит
 > `rc/in throttle=…` в CLIMB; если высота не растёт — override не проходит, возможно
 > нужен `SYSID_MYGCS` или `RC_NOCHANGE=65535` в `alt_hold_bootstrap.py`). И хватает
 > ли climb+раскачки для init монокуляра (иначе поднять `BS_EXCITE` / `--excite-period`).
+
+#### Полный прогон bootstrap с записью (атомарный, через capture_scene)
+Эталонная команда (CPU-бокс, 960×540, station-keeping + диагностика IMU в bag):
+```bash
+CPU=1 BS_EXCITE=40 BS_YAW=30 BS_EXCITE_PERIOD=3 \
+  BS_THROTTLE_CLIMB=1800 BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 \
+  BS_CLIMB_BUDGET=120 BS_VINS_TO=150 BS_LAND_BUDGET=180 \
+  TOPICS_EXTRA="/mavros/imu/data /mavros/imu/data_raw" \
+  GDRIVE_UP=1 MP4=1 \
+  bash src/lab/capture_scene.sh 960x540 bootstrap
+```
+Это **атомарный прогон** (рестарт стека → `wait` → bootstrap → bag → кадры → mp4 →
+Drive), как требует дисциплина прогона — пошагово вручную не запускать.
+
+**Подкрутка по `scene.mp4`** (радиус/раскачка station-keeping):
+- уезжает за край сцены → уменьшить `BS_EXCITE` (25–30) или `BS_EXCITE_PERIOD` (2);
+- мало параллакса / VINS не сходится → поднять `BS_EXCITE` или `BS_EXCITE_PERIOD`;
+- скорость разворота головы → `BS_YAW` (0 = совсем без yaw).
 
 ### `vins_watch.sh`
 Мониторинг VINS в реальном времени:
