@@ -116,7 +116,19 @@ SRC='source /opt/ros/humble/setup.bash; source /opt/overlay/install/setup.bash; 
 
 log() { echo -e "\n=== $* ==="; }
 
-# ── 0. очистка артефактов прошлого прогона (хост + Google Drive) ───────────────
+# ── 0. подготовка хоста + очистка артефактов прошлого прогона ─────────────────
+# fresh-start/restart монтируют /dev/rawbayer (v4l2loopback) в nav. Модуль ядра
+# может выгрузиться (ребут бокса) → docker не найдёт устройство и fresh-start
+# упадёт ("error gathering device information ... /dev/rawbayer"). Поднимаем
+# ЛЕНИВО — только если устройства нет (host_setup.sh идемпотентен, требует sudo).
+if [ ! -e /dev/rawbayer ]; then
+    log "host_setup: /dev/rawbayer нет — поднимаю v4l2loopback"
+    bash "$SIM_DIR/scripts/host_setup.sh" || {
+        echo "ОШИБКА: host_setup.sh не смог поднять /dev/rawbayer (нужен sudo)." >&2
+        exit 1
+    }
+fi
+
 # В НАЧАЛЕ прогона: с хоста удаляем старый bag, кадры и видео; на Google Drive
 # чистим корневую папку проекта (ТОЛЬКО её, GDRIVE_ROOT). Свежие артефакты этого
 # прогона создаются ниже.

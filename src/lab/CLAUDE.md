@@ -352,6 +352,27 @@ make vins-watch
 # ожидаем: "Initialization finish!" → "NON_LINEAR" через ~30с движения
 ```
 
+## Диагностические инструменты (по bag / live)
+
+Питон-утилиты в `src/lab/` (примонтированы как `/lab`), запускать ВНУТРИ
+`p1317_nav` с overlay (для `cv_bridge`):
+
+```bash
+SRC='source /opt/ros/humble/setup.bash; source /opt/overlay/install/setup.bash; source /root/sim_ws/install/setup.bash'
+docker exec p1317_nav bash -lc "$SRC; python3 /lab/<tool> ..."
+```
+
+| Инструмент | Что | Пример |
+|---|---|---|
+| `two_clocks.py [topic]` | wall-fps vs sim-Гц топика (разрыv RTF) | `/lab/two_clocks.py /mavros/imu/data_raw` |
+| `grab_live.py [out.png]` | снять 1 живой кадр `/image_color` + метрики (ORB/резкость/цвет → детект «оранж-фриза» рендера) | `/lab/grab_live.py` |
+| `gyro_fft.py [bag] [imu]` | FFT гироскопа из bag по окнам ground/air/late (осцилляции rate-loop, см. `docker/sim/FAQ_rate_loop.md`) | `/lab/gyro_fft.py` |
+| `bag_frames.py "n:wall,…"\|N` | кадры `/image_color` из bag по wall-моментам (= эпоха логов VINS) + монтаж + метрики | `/lab/bag_frames.py "init:1782653941,reboot:1782654163"` |
+
+Нужен IMU в bag для FFT — писать с `TOPICS_EXTRA="/mavros/imu/data /mavros/imu/data_raw"`.
+IMU sim-частоту в рантайме подтверждает `docker/sim/scripts/imu_rate.py` (его зовёт
+`nav_up.sh`: цель ≥80 sim-Гц через `MAV_CMD_SET_MESSAGE_INTERVAL`).
+
 ## Зависимости
 
 Скрипты запускаются внутри `p1317_nav` контейнера.

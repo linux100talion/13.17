@@ -115,17 +115,32 @@ if ! pgrep -f "mavros_node" >/dev/null; then
             [ "$(ros2 topic echo --once --field connected /mavros/state 2>/dev/null | head -1)" = "True" ] && break
             sleep 3
         done
+        # Частоты потоков ставим per-message через SET_MESSAGE_INTERVAL (MAV_CMD 511,
+        # /mavros/cmd/command) — НАДЁЖНЕЕ устаревшего REQUEST_DATA_STREAM
+        # (set_stream_rate): в ArduPilot 4.8 он часто не отрабатывает, из-за чего
+        # /mavros/imu/data_raw оставался ~33 Гц (мало для VINS и для FFT гиро).
+        # interval_us=5000 = запрос 200 Гц; FCU отдаёт НЕ выше SCHED_LOOP_RATE (тут
+        # 100) → реальный потолок IMU ~100 sim-Гц. msgid: 27=RAW_IMU
+        # (→ /mavros/imu/data_raw, вход VINS), 30=ATTITUDE (→ /mavros/imu/data),
+        # 32=LOCAL_POSITION_NED, 33=GLOBAL_POSITION_INT (→ pose + rel_alt).
+        set_interval() {  # $1=msgid  $2=interval_us
+            ros2 service call /mavros/cmd/command mavros_msgs/srv/CommandLong \
+                "{command: 511, param1: $1.0, param2: $2.0}" >> "$LOG/mavros.log" 2>&1
+        }
         for _ in $(seq 1 20); do
-            # RAW_SENSORS (stream_id 1): IMU (RAW_IMU/SCALED_IMU). VINS нужно >= 100 Гц.
+            set_interval 27  5000     # RAW_IMU  → 200 Гц (cap ~100 @ loop 100)
+            set_interval 30  5000     # ATTITUDE → 200 Гц
+            set_interval 32 40000     # LOCAL_POSITION_NED  → 25 Гц
+            set_interval 33 40000     # GLOBAL_POSITION_INT → 25 Гц
+            # подстраховка старым путём (на прошивках, где SET_MESSAGE_INTERVAL урезан)
             ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-                '{stream_id: 1, message_rate: 200, on_off: true}' >> "$LOG/mavros.log" 2>&1
-            # POSITION (stream_id 6): LOCAL_POSITION_NED + GLOBAL_POSITION_INT →
-            # /mavros/local_position/pose (z для takeoff.sh) + rel_alt. 25 Гц хватает.
-            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-                '{stream_id: 6, message_rate: 25, on_off: true}' >> "$LOG/mavros.log" 2>&1
-            # Подтверждаем ПО ФАКТУ: пришло ли хоть одно IMU-сообщение.
-            if timeout 10 ros2 topic echo --once /mavros/imu/data_raw >/dev/null 2>&1; then
-                echo "  stream_rate: IMU+POSITION подтверждены (идут)"; break
+                '{stream_id: 0, message_rate: 100, on_off: true}' >> "$LOG/mavros.log" 2>&1
+            # Подтверждаем ПО SIM-ЧАСТОТЕ (не по факту наличия): на низком RTF wall-rate
+            # мизер, поэтому imu_rate.py считает Гц из header.stamp. Цель >= 80 sim-Гц.
+            hz=$(python3 /scripts/imu_rate.py 40 15 2>/dev/null | tail -1)
+            echo "  stream_rate: /mavros/imu/data_raw ≈ ${hz:-?} sim-Гц" >> "$LOG/mavros.log"
+            if [ -n "$hz" ] && awk "BEGIN{exit !(${hz:-0}>=80)}"; then
+                echo "  stream_rate: IMU подтверждён ${hz} sim-Гц"; break
             fi
             sleep 3
         done
