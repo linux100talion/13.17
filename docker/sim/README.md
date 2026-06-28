@@ -59,7 +59,7 @@ make help           # все цели
 > детали в [`CLAUDE.md`](CLAUDE.md) (раздел «CPU-режим»).
 
 > 💬 Частые вопросы по обёртке Makefile (`restart-all` vs `fresh-start`, что
-> нужно сделать до первого `restart-all`) — см. [`FAQ.txt`](FAQ.txt).
+> нужно сделать до первого `restart-all`) — см. [`FAQ.md`](FAQ.md).
 
 > ⚠️ Не прогонялось без Gazebo. Спорные места в обёртке: `sim_vehicle.py
 > --no-mavproxy` (телеметрию ждём через mavlink_router), пауза 5 c перед SITL,

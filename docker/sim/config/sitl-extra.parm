@@ -6,7 +6,7 @@
 # loop 400 => нужно 720 Гц гиро => арм блокируется ("Gyro 0 rate 252Hz <
 # loop rate*1.8 720Hz" + "Main loop slow 250<400"). loop 100 => нужно 180 Гц,
 # есть 250 => ОК. Лимит-цикл крена ~9 Гц чинит lockstep (lock_step=1), не частота
-# контура. См. docker/sim/FAQ_rate_loop.txt.
+# контура. См. docker/sim/FAQ_rate_loop.md.
 SCHED_LOOP_RATE 100
 
 # Отключить автодизарм при потере GCS (в симуляции GCS нет).
@@ -63,7 +63,7 @@ INS_USE3 0
 # (голые INS_ACCOFFS/ACCSCAL не проставляют ID+флаг калибровки), а простой
 # level-cal командой PREFLIGHT_CALIBRATION(param5=4) из nav_up.sh при бутстрапе.
 
-# --- Гашение лимит-цикла крена ~9 Гц (см. docker/sim/FAQ_rate_loop.txt) ---
+# --- Гашение лимит-цикла крена ~9 Гц (см. docker/sim/FAQ_rate_loop.md) ---
 # FFT прогона "после lockstep" показал: lockstep дрожь НЕ убрал (roll RMS 80.6→70 °/с,
 # тот же ~9 Гц), и трясёт ТОЛЬКО крен (pitch 11, yaw 15 °/с). Значит корень не в
 # глобальном тайминге, а в перетянутом контуре КРЕНА для текущей связки (loop 100 Гц
