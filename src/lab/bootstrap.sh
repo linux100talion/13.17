@@ -19,6 +19,12 @@
 #   BS_EXCITE (80)    — амплитуда раскачки roll/pitch, PWM от центра
 #   BS_OBSERVE (15)   — держать высоту после init перед посадкой, sim-сек (без handover)
 #   BS_VINS_TO (90)   — таймаут ожидания сходимости VINS, sim-сек
+# Бюджеты фаз автомата (sim-сек) — поднимать на низком RTF, как ARM_SIM_BUDGET у arm.sh
+# (EKF/латч/арм/набор высоты не успевают в дефолт при llvmpipe/lockstep). Пусто = дефолт ноды:
+#   BS_MODE_BUDGET (40)  — латч ALT_HOLD/GUIDED
+#   BS_ARM_BUDGET (40)   — арминг
+#   BS_CLIMB_BUDGET (60) — набор высоты до BS_ALT
+#   BS_LAND_BUDGET (120) — посадка
 set -e
 source /opt/ros/humble/setup.bash
 source /root/sim_ws/install/setup.bash 2>/dev/null || true
@@ -30,6 +36,14 @@ VINS_TO="${BS_VINS_TO:-90}"
 
 ARGS=(--alt "$ALT" --excite "$EXCITE" --observe "$OBSERVE" --vins-timeout "$VINS_TO")
 [ "${BS_HANDOVER:-0}" = "1" ] && ARGS+=(--handover)
+# Газ на подъём (PWM). Дефолт ноды 1650 ≈ висение для iris → набор маргинальный;
+# поднять (напр. 1800) для уверенной скороподъёмности в ALT_HOLD. Пусто = дефолт ноды.
+[ -n "${BS_THROTTLE_CLIMB:-}" ] && ARGS+=(--throttle-climb "$BS_THROTTLE_CLIMB")
+# Бюджеты фаз — добавляем флаг только если env задан (иначе argparse-дефолт ноды):
+[ -n "${BS_MODE_BUDGET:-}" ]  && ARGS+=(--mode-budget "$BS_MODE_BUDGET")
+[ -n "${BS_ARM_BUDGET:-}" ]   && ARGS+=(--arm-budget "$BS_ARM_BUDGET")
+[ -n "${BS_CLIMB_BUDGET:-}" ] && ARGS+=(--climb-budget "$BS_CLIMB_BUDGET")
+[ -n "${BS_LAND_BUDGET:-}" ]  && ARGS+=(--land-budget "$BS_LAND_BUDGET")
 
 echo ">>> ALT_HOLD bootstrap: alt=${ALT}м excite=±${EXCITE}PWM handover=${BS_HANDOVER:-0} (sim-время)..."
 python3 /lab/alt_hold_bootstrap.py "${ARGS[@]}"

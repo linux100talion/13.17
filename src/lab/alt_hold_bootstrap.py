@@ -30,9 +30,11 @@ handover — отдельным прогоном.
 Через секвенсор:    src/lab/bootstrap.sh  (команда `bootstrap` в capture_scene.sh).
 """
 import argparse
+import time
 import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Float64
 from nav_msgs.msg import Odometry
 from mavros_msgs.msg import OverrideRCIn, State, RCIn
@@ -41,11 +43,12 @@ from mavros_msgs.srv import SetMode, CommandBool
 # --- RC (PWM) ---------------------------------------------------------------
 RC_CENTER = 1500       # центр стика; для throttle в ALT_HOLD центр = «держать высоту»
 RC_MIN_THR = 1000      # газ в минимум — нужно для арминга в ALT_HOLD
-# Каналы 1..4 = roll/pitch/throttle/yaw (ArduCopter). 5..18 — не трогаем.
-# 0 = «отпустить канал» (FCU берёт свой RC). Если в этом SITL это мешает (напр.
-# дефолтный RC-канал режима перебивает set_mode) — поменять на 65535 (UINT16_MAX =
-# «игнорировать, держать прежний override»). Помечено как кандидат на подстройку.
-RC_NOCHANGE = 0
+# Каналы 1..4 = roll/pitch/throttle/yaw (ArduCopter). 5..18 — не трогаем:
+# 65535 (UINT16_MAX) = «ИГНОРИРОВАТЬ канал», не отдаём его радио и не оверрайдим.
+# За удержание РЕЖИМА отвечает не этот канал, а SITL-параметр FLTMODE_CH 0
+# (sitl-extra.parm): он убирает RC-переключатель режима, чтобы радио не перебивало
+# set_mode("ALT_HOLD"). Подробности — там и в hold_alt_hold() ниже.
+RC_NOCHANGE = 65535
 
 # Состояния автомата
 S_PREARM, S_ARM, S_CLIMB, S_EXCITE, S_HANDOVER, S_OBSERVE, S_LAND, S_DONE = range(8)
@@ -66,10 +69,13 @@ class AltHoldBootstrap(Node):
         self.rc_pub = self.create_publisher(OverrideRCIn, '/mavros/rc/override', 10)
         # входы
         self.create_subscription(State, '/mavros/state', self._on_state, 10)
+        # rel_alt и rc/in MAVROS публикует с SensorData QoS (BEST_EFFORT) — дефолтная
+        # RELIABLE-подписка их НЕ получает («incompatible QoS, no messages», 1-й
+        # прогон: rel_alt=None → нода летела вслепую, не выходила из CLIMB).
         self.create_subscription(Float64, '/mavros/global_position/rel_alt',
-                                 self._on_relalt, 10)
+                                 self._on_relalt, qos_profile_sensor_data)
         self.create_subscription(Odometry, '/vins_estimator/odometry', self._on_odom, 10)
-        self.create_subscription(RCIn, '/mavros/rc/in', self._on_rcin, 10)
+        self.create_subscription(RCIn, '/mavros/rc/in', self._on_rcin, qos_profile_sensor_data)
         # сервисы
         self.mode_cli = self.create_client(SetMode, '/mavros/set_mode')
         self.arm_cli = self.create_client(CommandBool, '/mavros/cmd/arming')
@@ -86,6 +92,7 @@ class AltHoldBootstrap(Node):
         self.state = S_PREARM
         self.state_t0 = None          # базируется лениво при первом тике с живым /clock
         self.last_cmd = -1e9          # троттлинг вызовов сервисов (раз в ~1 sim-сек)
+        self.last_mode_assert = -1e9  # отдельный троттл для ре-ассерта ALT_HOLD
         self.result = "?"
         self.finished = False
 
@@ -95,7 +102,15 @@ class AltHoldBootstrap(Node):
         self.throttle = RC_MIN_THR
         self.yaw = RC_CENTER
 
-        self.timer = self.create_timer(0.05, self.tick)   # 20 Гц: override + автомат
+        # Автомат — на sim-времени (ROSClock/use_sim_time): бюджеты фаз RTF-
+        # независимы (как arm.sh/fly_square). 20 Гц sim ≈ 1.4 Гц wall при RTF 0.07.
+        self.timer = self.create_timer(0.05, self.tick)   # автомат (sim-время)
+        # RC override публикуется НЕ таймером, а из главного цикла по time.monotonic()
+        # (см. main): нужен СТАБИЛЬНЫЙ wall-rate ~20 Гц. FCU считает свежесть override
+        # в своём (wall) времени; на sim-таймере при RTF 0.07 вышло бы ≈1.4 Гц wall →
+        # override протухал бы. Отдельный STEADY_TIME-таймер rclpy под spin_once с
+        # use_sim_time оказался ненадёжен (мог не тикать → нода не публиковала вообще,
+        # RCIN оставался 1000) — поэтому публикуем явно в цикле.
         self.get_logger().info(
             f"alt_hold_bootstrap: alt={a.alt}м handover={a.handover} "
             f"excite=±{a.excite}PWM/{a.excite_period}s vins_timeout={a.vins_timeout}s (sim)")
@@ -135,6 +150,18 @@ class AltHoldBootstrap(Node):
             req = SetMode.Request(); req.custom_mode = mode
             self.mode_cli.call_async(req)
 
+    def hold_alt_hold(self):
+        # Защитный ре-ассерт: на фазах ARM/CLIMB/EXCITE режим обязан быть ALT_HOLD.
+        # Основной механизм удержания — FLTMODE_CH 0 в SITL (радио не трогает режим);
+        # это страховка на случай смены режима полётником (EKF/failsafe). Отдельный
+        # троттл (~раз в 2 sim-сек), чтобы не конфликтовать с throttle вызовов arm().
+        # '' — транзиент /mavros/state до первого валидного heartbeat (не режим).
+        if self.mode not in (None, "", "ALT_HOLD") and \
+                self.now_sim() - self.last_mode_assert >= 2.0:
+            self.last_mode_assert = self.now_sim()
+            self.get_logger().warn(f"режим={self.mode} ≠ ALT_HOLD — ре-ассерт")
+            self.set_mode("ALT_HOLD")
+
     def arm(self):
         if self.arm_cli.service_is_ready():
             req = CommandBool.Request(); req.value = True
@@ -149,8 +176,12 @@ class AltHoldBootstrap(Node):
         if len(m.channels) >= 3:
             self.rcin_thr = m.channels[2]
 
-    # --- публикация RC override ---------------------------------------------
-    def publish_rc(self):
+    # --- публикация RC override (WALL-таймер 20 Гц) -------------------------
+    def _wall_publish(self):
+        # Гейт публикации: в DONE и в GUIDED (после handover) override НЕ нужен —
+        # GUIDED держит позицию сам. До этого — держим override свежим на wall-частоте.
+        if self.state == S_DONE or (self.state == S_HANDOVER and self.mode == "GUIDED"):
+            return
         msg = OverrideRCIn()
         ch = [RC_NOCHANGE] * 18
         ch[0] = int(self.roll)
@@ -176,6 +207,7 @@ class AltHoldBootstrap(Node):
 
         elif st == S_ARM:
             self.throttle = RC_MIN_THR
+            self.hold_alt_hold()
             self._try(self.arm)
             if self.armed:
                 self.goto(S_CLIMB)
@@ -185,6 +217,7 @@ class AltHoldBootstrap(Node):
 
         elif st == S_CLIMB:
             self.throttle = self.a.throttle_climb     # газ вверх → подъём
+            self.hold_alt_hold()
             if not self.rcin_logged and self.rcin_thr is not None and self.elapsed() > 2:
                 self.get_logger().info(f"    rc/in throttle={self.rcin_thr} (override проходит, если ≈{self.a.throttle_climb})")
                 self.rcin_logged = True
@@ -204,6 +237,7 @@ class AltHoldBootstrap(Node):
             # IMU excitation. Чередуем 4 направления (вперёд/назад/влево/вправо) —
             # суммарный дрейф ~около нуля, но движение реальное.
             self.throttle = self.a.throttle_hold
+            self.hold_alt_hold()
             amp = self.a.excite
             phase = int(self.elapsed() / self.a.excite_period) % 4
             offs = [(0, -amp), (0, +amp), (-amp, 0), (+amp, 0)][phase]
@@ -257,10 +291,9 @@ class AltHoldBootstrap(Node):
                                    f"rel_alt={self.rel_alt}, odom={self.odom_count})")
             self.finished = True
             return
-
-        # В GUIDED/DONE override НЕ публикуем (GUIDED держит сам). До этого — публикуем.
-        if self.state not in (S_DONE,) and not (self.state == S_HANDOVER and self.mode == "GUIDED"):
-            self.publish_rc()
+        # RC override публикует отдельный WALL-таймер (_wall_publish), не tick:
+        # на низком RTF sim-таймер дал бы ~1.4 Гц wall и override протух бы. tick
+        # лишь обновляет self.roll/pitch/throttle/yaw — их шлёт wall-таймер 20 Гц.
 
 
 def main():
@@ -291,8 +324,16 @@ def main():
     rclpy.init()
     node = AltHoldBootstrap(args)
     try:
+        # RC override публикуем ИЗ ЦИКЛА по wall-часам (time.monotonic) ~20 Гц —
+        # гарантированный реальный темп независимо от RTF и семантики таймеров rclpy.
+        # spin_once крутит автомат (sim-таймер) и колбэки подписок.
+        last_pub = 0.0
         while rclpy.ok() and not node.finished:
-            rclpy.spin_once(node, timeout_sec=0.1)
+            rclpy.spin_once(node, timeout_sec=0.02)
+            now = time.monotonic()
+            if now - last_pub >= 0.05:
+                last_pub = now
+                node._wall_publish()
     except KeyboardInterrupt:
         node.get_logger().info("Прервано — садимся вручную (make land).")
     finally:
