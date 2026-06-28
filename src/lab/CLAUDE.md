@@ -318,7 +318,7 @@ docker exec p1317_nav python3 /lab/alt_hold_bootstrap.py --alt 3 --handover
 | `BS_YAW` | 30 | амплитуда медленного yaw в EXCITE, PWM от центра (0 = без yaw) |
 | `BS_EXCITE_PERIOD` | 3 | базовая τ профиля +τ/−2τ/+τ, sim-сек (цикл = 4τ) |
 | `BS_OBSERVE` | 15 | держать высоту после init перед посадкой, sim-сек (без handover) |
-| `BS_VINS_TO` | 90 | таймаут ожидания сходимости VINS, sim-сек (по нему → LAND) |
+| `BS_VINS_TO` | 60 | таймаут ожидания сходимости VINS, sim-сек (по нему → LAND) |
 | `BS_THROTTLE_CLIMB` | 1650 | PWM газа на подъёме (climb) |
 | `BS_MODE_BUDGET` | 40 | бюджет латча режима, sim-сек |
 | `BS_ARM_BUDGET` | 40 | бюджет арминга, sim-сек |

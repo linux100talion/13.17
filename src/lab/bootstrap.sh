@@ -20,7 +20,7 @@
 #   BS_YAW (30)           — амплитуда медленного yaw в EXCITE, PWM от центра (0=без yaw)
 #   BS_EXCITE_PERIOD (3)  — базовая τ профиля раскачки +τ/−2τ/+τ, sim-сек (цикл=4τ)
 #   BS_OBSERVE (15)       — держать высоту после init перед посадкой, sim-сек (без handover)
-#   BS_VINS_TO (90)       — таймаут ожидания сходимости VINS, sim-сек
+#   BS_VINS_TO (60)       — таймаут ожидания сходимости VINS, sim-сек
 # Бюджеты фаз автомата (sim-сек) — поднимать на низком RTF, как ARM_SIM_BUDGET у arm.sh
 # (EKF/латч/арм/набор высоты не успевают в дефолт при llvmpipe/lockstep). Пусто = дефолт ноды:
 #   BS_MODE_BUDGET (40)  — латч ALT_HOLD/GUIDED
@@ -36,7 +36,7 @@ EXCITE="${BS_EXCITE:-80}"
 YAW="${BS_YAW:-30}"
 EXCITE_PERIOD="${BS_EXCITE_PERIOD:-3}"
 OBSERVE="${BS_OBSERVE:-15}"
-VINS_TO="${BS_VINS_TO:-90}"
+VINS_TO="${BS_VINS_TO:-60}"
 
 ARGS=(--alt "$ALT" --excite "$EXCITE" --yaw-rate "$YAW" --excite-period "$EXCITE_PERIOD"
       --observe "$OBSERVE" --vins-timeout "$VINS_TO")

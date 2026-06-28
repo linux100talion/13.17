@@ -22,8 +22,10 @@ ARM     → арминг моторов (в ALT_HOLD)
   ↓
 CLIMB   → throttle > центра (default 1650, --throttle-climb) → набор до BS_ALT
   ↓
-EXCITE  → throttle = центр (hold) + импульсы roll/pitch (±BS_EXCITE PWM)
-          → параллакс + IMU-excitation, ЖДЁМ сходимости VINS (бюджет BS_VINS_TO)
+EXCITE  → throttle = центр (hold) + station-keeping forward/back (профиль
+          +τ/−2τ/+τ, возврат к точке старта) + медленный yaw (±BS_YAW)
+          → параллакс + IMU-excitation БЕЗ ухода за край сцены, ЖДЁМ
+            сходимости VINS (бюджет BS_VINS_TO)
   ↓
 далее по флагу BS_HANDOVER:
   • 0 (default): OBSERVE (держит высоту BS_OBSERVE sim-сек) → LAND → DONE
@@ -67,9 +69,11 @@ docker exec p1317_nav python3 /lab/alt_hold_bootstrap.py --alt 3 --handover
 |---|---|---|
 | `BS_ALT` | 3 | целевая высота climb, м |
 | `BS_HANDOVER` | 0 | 1 = после init перейти в GUIDED (иначе OBSERVE→LAND) |
-| `BS_EXCITE` | 80 | амплитуда импульсов roll/pitch, PWM от центра (1500) |
+| `BS_EXCITE` | 80 | амплитуда forward/back раскачки, PWM от центра (1500) — масштаб радиуса |
+| `BS_YAW` | 30 | амплитуда медленного yaw в EXCITE, PWM от центра (0 = без yaw) |
+| `BS_EXCITE_PERIOD` | 3 | базовая τ профиля +τ/−2τ/+τ, sim-сек (цикл = 4τ) |
 | `BS_OBSERVE` | 15 | держать высоту после init перед посадкой, sim-сек (без handover) |
-| `BS_VINS_TO` | 90 | таймаут ожидания сходимости VINS, sim-сек (по нему → LAND) |
+| `BS_VINS_TO` | 60 | таймаут ожидания сходимости VINS, sim-сек (по нему → LAND) |
 | `BS_THROTTLE_CLIMB` | 1650 | газ в CLIMB (PWM); >центра+deadzone, иначе не растёт высота |
 | `BS_MODE_BUDGET` / `BS_ARM_BUDGET` / `BS_CLIMB_BUDGET` / `BS_LAND_BUDGET` | 40/40/60/120 | бюджеты фаз, sim-сек |
 
