@@ -128,13 +128,16 @@ if ! pgrep -f "mavros_node" >/dev/null; then
                 "{command: 511, param1: $1.0, param2: $2.0}" >> "$LOG/mavros.log" 2>&1
         }
         for _ in $(seq 1 20); do
-            set_interval 27  5000     # RAW_IMU  → 200 Гц (cap ~100 @ loop 100)
-            set_interval 30  5000     # ATTITUDE → 200 Гц
+            # IMU: интервал на ВСЕ источники — mavros строит /imu/data_raw из того,
+            # что реально шлёт FCU (26=SCALED_IMU, 27=RAW_IMU, 105=HIGHRES_IMU,
+            # 116/129=SCALED_IMU2/3). 5000us = запрос 200 Гц (FCU cap ~SCHED_LOOP=100).
+            for mid in 26 27 105 116 129; do set_interval "$mid" 5000; done
+            set_interval 30  5000     # ATTITUDE → /mavros/imu/data (ориентация)
             set_interval 32 40000     # LOCAL_POSITION_NED  → 25 Гц
             set_interval 33 40000     # GLOBAL_POSITION_INT → 25 Гц
-            # подстраховка старым путём (на прошивках, где SET_MESSAGE_INTERVAL урезан)
+            # подстраховка устаревшим REQUEST_DATA_STREAM: stream 1 = RAW_SENSORS (IMU)
             ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-                '{stream_id: 0, message_rate: 100, on_off: true}' >> "$LOG/mavros.log" 2>&1
+                '{stream_id: 1, message_rate: 200, on_off: true}' >> "$LOG/mavros.log" 2>&1
             # Подтверждаем ПО SIM-ЧАСТОТЕ (не по факту наличия): на низком RTF wall-rate
             # мизер, поэтому imu_rate.py считает Гц из header.stamp. Цель >= 80 sim-Гц.
             hz=$(python3 /scripts/imu_rate.py 40 15 2>/dev/null | tail -1)
