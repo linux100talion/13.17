@@ -282,10 +282,23 @@ class AltHoldBootstrap(Node):
                         self.hold_sp = (self.gt_x, self.gt_y)
                         self.gz_ix = self.gz_iy = 0.0; self.gz_it = self.now_sim()
                         self.get_logger().info(
-                            f"    gz-hold: сетпойнт=({self.gt_x:.2f},{self.gt_y:.2f}) "
-                            f"kp={self.a.gz_kp} kd={self.a.gz_kd} ki={self.a.gz_ki}")
-                    ex = self.gt_x - self.hold_sp[0]
-                    ey = self.gt_y - self.hold_sp[1]
+                            f"    gz-hold: центр=({self.gt_x:.2f},{self.gt_y:.2f}) "
+                            f"kp={self.a.gz_kp} kd={self.a.gz_kd} ki={self.a.gz_ki} "
+                            f"traj_r={self.a.gz_traj_r} traj_t={self.a.gz_traj_t}")
+                    # Траекторный сетпойнт для параллакса VINS: водим точку удержания
+                    # по кругу R вокруг центра (PID следует за ней → контролируемое
+                    # движение, не убегает). Спираль из центра (offset (cosθ-1, sinθ)
+                    # → старт в центре без рывка) + плавный разгон радиуса за 1 период.
+                    # traj_r=0 → чистый холд (фикс. сетпойнт).
+                    spx, spy = self.hold_sp
+                    if self.a.gz_traj_r > 0.0:
+                        tt = self.elapsed()
+                        th = 2.0*math.pi*tt / self.a.gz_traj_t
+                        reff = self.a.gz_traj_r * min(1.0, tt / self.a.gz_traj_t)
+                        spx += reff * (math.cos(th) - 1.0)
+                        spy += reff * math.sin(th)
+                    ex = self.gt_x - spx
+                    ey = self.gt_y - spy
                     # I-член: интегрируем ошибку в WORLD (yaw-инвариантно), потом
                     # поворачиваем в тело. Anti-windup: клампим состояние так, чтобы
                     # вклад Ki*i не превышал gz_imax PWM по каждой оси.
@@ -314,8 +327,8 @@ class AltHoldBootstrap(Node):
                     if self.now_sim() - self._gz_log_t >= 2.0:
                         self._gz_log_t = self.now_sim()
                         self.get_logger().info(
-                            f"gz: yaw={math.degrees(self.gt_yaw):+.0f} e=({ex:+.1f},{ey:+.1f}) "
-                            f"efr=({e_fwd:+.1f},{e_rgt:+.1f}) v=({self.gt_vx:+.2f},{self.gt_vy:+.2f}) "
+                            f"gz: yaw={math.degrees(self.gt_yaw):+.0f} sp=({spx-self.hold_sp[0]:+.1f},{spy-self.hold_sp[1]:+.1f}) "
+                            f"e=({ex:+.1f},{ey:+.1f}) v=({self.gt_vx:+.2f},{self.gt_vy:+.2f}) "
                             f"i=({i_fwd:+.1f},{i_rgt:+.1f}) pitch_off={int(po):+d} roll_off={int(ro):+d}")
                 else:
                     self.roll = self.pitch = RC_CENTER   # gz нет → просто уровень
@@ -461,6 +474,10 @@ def main():
                    help='gz-hold: знак pitch-коррекции (±1; +1 выверен отладкой)')
     p.add_argument('--gz-rsign', dest='gz_rsign', type=float, default=1.0,
                    help='gz-hold: знак roll-коррекции (±1; +1 выверен отладкой)')
+    p.add_argument('--gz-traj-r', dest='gz_traj_r', type=float, default=0.0,
+                   help='gz-hold: радиус кругового траекторного сетпойнта, м (0=чистый холд; для параллакса VINS ~1-3)')
+    p.add_argument('--gz-traj-t', dest='gz_traj_t', type=float, default=20.0,
+                   help='gz-hold: период обхода круга, sim-сек (default 20)')
     p.add_argument('--throttle-climb', dest='throttle_climb', type=int, default=1650,
                    help='PWM газа на подъём (default 1650)')
     p.add_argument('--throttle-hold', dest='throttle_hold', type=int, default=RC_CENTER,

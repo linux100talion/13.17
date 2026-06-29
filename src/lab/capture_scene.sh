@@ -203,6 +203,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_GZHOLD="${BS_GZHOLD:-}" -e BS_GZ_KP="${BS_GZ_KP:-}" -e BS_GZ_KD="${BS_GZ_KD:-}" \
       -e BS_GZ_KI="${BS_GZ_KI:-}" -e BS_GZ_IMAX="${BS_GZ_IMAX:-}" \
       -e BS_GZ_MAX="${BS_GZ_MAX:-}" -e BS_GZ_PSIGN="${BS_GZ_PSIGN:-}" -e BS_GZ_RSIGN="${BS_GZ_RSIGN:-}" \
+      -e BS_GZ_TRAJ_R="${BS_GZ_TRAJ_R:-}" -e BS_GZ_TRAJ_T="${BS_GZ_TRAJ_T:-}" \
       -e BS_MODE_BUDGET="${BS_MODE_BUDGET:-}" -e BS_ARM_BUDGET="${BS_ARM_BUDGET:-}" \
       -e BS_CLIMB_BUDGET="${BS_CLIMB_BUDGET:-}" -e BS_LAND_BUDGET="${BS_LAND_BUDGET:-}" \
       -e BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-}" \
