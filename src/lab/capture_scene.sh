@@ -83,7 +83,7 @@ i=0
 while [ "$i" -lt "${#SEQ[@]}" ]; do
     cmd="${SEQ[$i]}"
     case "$cmd" in
-        arm|land|disarm|bootstrap) ;;
+        arm|land|disarm|bootstrap|liftland) ;;
         takeoff|hover|square)
             # опциональный числовой аргумент: если следующий токен — число, он наш
             # (takeoff=ALT, hover=SIM_SEC, square=число кругов)
@@ -92,7 +92,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
             ;;
         *)
             echo "ОШИБКА: неизвестная команда '$cmd'." >&2
-            echo "Допустимо: arm, bootstrap, takeoff [ALT], hover [SIM_SEC], square [LOOPS], land, disarm." >&2
+            echo "Допустимо: arm, bootstrap, liftland, takeoff [ALT], hover [SIM_SEC], square [LOOPS], land, disarm." >&2
             exit 2
             ;;
     esac
@@ -199,6 +199,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_ALT="${BS_ALT:-}" -e BS_HANDOVER="${BS_HANDOVER:-}" -e BS_EXCITE="${BS_EXCITE:-}" \
       -e BS_YAW="${BS_YAW:-}" -e BS_YAW_DUR="${BS_YAW_DUR:-}" -e BS_EXCITE_PERIOD="${BS_EXCITE_PERIOD:-}" \
       -e BS_OBSERVE="${BS_OBSERVE:-}" -e BS_VINS_TO="${BS_VINS_TO:-}" \
+      -e BS_HOLD_SEC="${BS_HOLD_SEC:-}" \
       -e BS_MODE_BUDGET="${BS_MODE_BUDGET:-}" -e BS_ARM_BUDGET="${BS_ARM_BUDGET:-}" \
       -e BS_CLIMB_BUDGET="${BS_CLIMB_BUDGET:-}" -e BS_LAND_BUDGET="${BS_LAND_BUDGET:-}" \
       -e BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-}" \

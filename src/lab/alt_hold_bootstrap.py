@@ -234,6 +234,18 @@ class AltHoldBootstrap(Node):
                     self.result = "CLIMB_FAIL"; self.goto(S_LAND)
 
         elif st == S_EXCITE:
+            # hold-only (liftland): диагностика дрейфа ALT_HOLD — БЕЗ раскачки.
+            # Держим уровень (все стики в центре) hold_sec sim-сек и садимся. Если
+            # дрон при этом уезжает за край — причина в AHRS-наклоне/остаточной
+            # скорости, а не в excite (изоляция). Реюзает arm/climb/land/override.
+            if self.a.hold_only:
+                self.roll = self.pitch = self.yaw = RC_CENTER
+                self.throttle = self.a.throttle_hold
+                self.hold_alt_hold()
+                if self.elapsed() > self.a.hold_sec:
+                    self.get_logger().info(f"    hold-only {self.a.hold_sec}s истекли — садимся")
+                    self.result = "HOLD_DONE"; self.goto(S_LAND)
+                return
             # throttle=центр (держим высоту) + station-keeping раскачка для
             # параллакса/IMU excitation. Дрон ДОЛЖЕН остаться в круге R~peak около
             # старта, а не улетать за край сцены в «жёлтый экран».
@@ -348,6 +360,10 @@ def main():
                    help='сколько odom-сообщений считать сходимостью (default 40)')
     p.add_argument('--observe', type=float, default=15.0,
                    help='держать высоту после init перед посадкой (без handover), sim-сек (default 15)')
+    p.add_argument('--hold-only', dest='hold_only', action='store_true',
+                   help='liftland-режим: БЕЗ раскачки — climb→держать уровень hold_sec→land (диагностика дрейфа)')
+    p.add_argument('--hold-sec', dest='hold_sec', type=float, default=30.0,
+                   help='сколько держать уровень в hold-only, sim-сек (default 30)')
     p.add_argument('--throttle-climb', dest='throttle_climb', type=int, default=1650,
                    help='PWM газа на подъём (default 1650)')
     p.add_argument('--throttle-hold', dest='throttle_hold', type=int, default=RC_CENTER,

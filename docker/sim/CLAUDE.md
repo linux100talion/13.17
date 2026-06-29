@@ -70,8 +70,31 @@ bash src/lab/capture_scene.sh [WxH] <команда> [арг] <команда> [
   стек ПЕРЕСОЗДАЁТСЯ (`fresh-start`, env применяется при создании контейнера);
   не задано → `restart-all`.
 - **команды** (каждая = скрипт в `src/lab/`): `arm` · `takeoff [ALT=3]` ·
-  `hover [SIM_SEC=10]` · `square [LOOPS]` · `land` · `disarm`. Числовой аргумент
-  привязывается к предыдущей команде.
+  `hover [SIM_SEC=10]` · `square [LOOPS]` · `land` · `disarm` · `bootstrap` (взлёт
+  в ALT_HOLD + раскачка для init VINS без GPS) · `liftland` (см. ниже). Числовой
+  аргумент привязывается к предыдущей команде.
+
+### `liftland` — взлёт → держать уровень → посадка (БЕЗ раскачки)
+Диагностический сценарий ALT_HOLD: «просто взлетаем и садимся, никуда не летим».
+Изолирует ДРЕЙФ ALT_HOLD (остаточная скорость / наклон AHRS) от excite-раскачки
+`bootstrap`: если дрон при нулевом excite всё равно уезжает за край сцены — причина
+в AHRS-уровне/скорости, а не в управлении. Реюзает машинерию `alt_hold_bootstrap.py`
+(`src/lab/liftland.sh` → `--hold-only`): arm → climb до `BS_ALT` → держать центр
+стиков `BS_HOLD_SEC` sim-сек → land. Никаких движений по roll/pitch/yaw.
+
+Эталонная команда (CPU-бокс, 960×540, с диагностикой IMU в bag):
+```bash
+CPU=1 BS_HOLD_SEC=30 \
+  BS_THROTTLE_CLIMB=1800 BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 \
+  BS_CLIMB_BUDGET=120 BS_LAND_BUDGET=180 \
+  TOPICS_EXTRA="/mavros/imu/data /mavros/imu/data_raw" \
+  GDRIVE_UP=1 MP4=1 \
+  bash src/lab/capture_scene.sh 960x540 liftland
+```
+Env: `BS_ALT` (3) — высота; `BS_HOLD_SEC` (30) — сколько висеть; бюджеты/газ — как у
+`bootstrap`. `960x540` → fresh-start → применяется `RC1_DZ=RC2_DZ=RC4_DZ=0` из
+`config/sitl-extra.parm` (мёртвая зона RC обнулена, иначе мелкий override-наклон
+её не пробивает). Детали раскачки/дрейфа — `src/lab/CLAUDE.md` (раздел `bootstrap`).
 
 Запись/кадры/mp4/заливка идут автоматически вокруг всей последовательности,
 управляются env:
