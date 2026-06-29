@@ -96,6 +96,38 @@ Env: `BS_ALT` (3) — высота; `BS_HOLD_SEC` (30) — сколько вис
 `config/sitl-extra.parm` (мёртвая зона RC обнулена, иначе мелкий override-наклон
 её не пробивает). Детали раскачки/дрейфа — `src/lab/CLAUDE.md` (раздел `bootstrap`).
 
+### gz-position-hold — стабилизатор «стоять на месте» (СИМ-костыль)
+**Зачем.** В GPS-denied EKF не держит горизонт: не отличает наклон от
+горизонт-ускорения (tilt/accel ambiguity, нет опорной скорости) → мелкий bias
+интегрируется в растущий наклон → дрон сам себя разгоняет и **уезжает за край
+сцены** (карта `grass_plane` 150×150 м; подтверждено ИСТИННОЙ позой Gazebo —
+SITL-`SIMSTATE` по позиции врёт при внешней физике). `AHRS_TRIM=0`/`SIM_WIND=0`
+ни при чём — лечится только референсом скорости/позиции (на боевом борту — VINS).
+
+**Костыль (ТОЛЬКО sim).** На время бутстрапа подменяем «идеальным VINS» = истинной
+позой Gazebo. `liftland`+`BS_GZHOLD=1` включает PID position-hold по истинной позе:
+- `worlds/iris_cam/model.sdf`: `gz-sim-odometry-publisher` → `/model/iris_cam/odometry`
+  (поза+скорость тела в world @50Гц), мост в `sim_up.sh` → `nav_msgs/Odometry`;
+- `alt_hold_bootstrap.py` (`--gz-hold`): ошибка+скорость world → тело (по yaw) →
+  PWM-смещения roll/pitch. Гейны `BS_GZ_KP`(40)/`KD`(120)/`KI`(8)/`IMAX`(100);
+  знаки `BS_GZ_PSIGN`/`RSIGN` (оба **+1**, выверены). I-член убирает статич. ошибку.
+
+Результат (истина Gazebo): дрон держится в **~0.2 м** (без костыля — runaway 50м+).
+На боевом Orin костыля НЕТ — там референс даёт реальный VINS.
+
+**Эталонная команда (gz-hold, 960×540, с заливкой видео на Google Drive):**
+```bash
+CPU=1 BS_GZHOLD=1 BS_HOLD_SEC=40 \
+  BS_THROTTLE_CLIMB=1800 BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 \
+  BS_CLIMB_BUDGET=120 BS_LAND_BUDGET=180 \
+  TOPICS_EXTRA="/mavros/imu/data /mavros/imu/data_raw" \
+  GDRIVE_UP=1 MP4=1 \
+  bash src/lab/capture_scene.sh 960x540 liftland
+```
+`GDRIVE_UP=1 MP4=1` → собирает `scene.mp4` (весь поток камеры) и заливает на Drive
+(remote `gdrive:`, см. настройку rclone в `src/lab/CLAUDE.md`); в конце лога — ссылка.
+Для лёгкого прогона только по телеметрии: `SKIP_CAM=1 GDRIVE_UP=0 MP4=0`.
+
 Запись/кадры/mp4/заливка идут автоматически вокруг всей последовательности,
 управляются env:
 
