@@ -79,6 +79,17 @@ else
     echo "  bayerizer уже запущен"
 fi
 
+# 2b. Конвертер gz-IMU FRD→FLU: /gz_imu/data (250Гц, мост) → /gz_imu/data_flu для
+#     VINS (drop-in замена /mavros/imu/data_raw в том же фрейме, но 250Гц вместо ~21).
+#     См. src/sim/imu_frd_to_flu.py и todo3.
+if ! pgrep -f "imu_frd_to_flu.py" >/dev/null; then
+    nohup python3 /root/sim_ws/src/sim/imu_frd_to_flu.py \
+        >"$LOG/imu_frd_to_flu.log" 2>&1 &
+    echo "  imu_frd_to_flu -> $LOG/imu_frd_to_flu.log"
+else
+    echo "  imu_frd_to_flu уже запущен"
+fi
+
 # 3. Все sim-ноды (camera_node + feature_tracker + vins_estimator),
 #    уже с use_sim_time:=true.
 if ! pgrep -f "sim_nav.launch" >/dev/null; then

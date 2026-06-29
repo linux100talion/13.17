@@ -17,7 +17,11 @@
 # ============================================================================
 
 # Основные пути и топики
-imu_topic: "/mavros/imu/data_raw"
+# IMU: gz-IMU @250Гц (обход MAVLink-тракта, который капается до ~21Гц в sim;
+# боевой Orin берёт IMU с FCU ~200Гц). /gz_imu/data_flu = gz-IMU, сконвертированный
+# из FRD во FLU (imu_frd_to_flu.py, nav_up.sh) → drop-in замена /mavros/imu/data_raw
+# в том же фрейме. Откат на MAVLink-IMU: imu_topic: "/mavros/imu/data_raw". См. todo3.
+imu_topic: "/gz_imu/data_flu"
 image_topic: "/image_mono"
 output_path: "/root/sim_ws/output/"
 vins_folder: "/root/sim_ws/src/vins/VINS-MONO-ROS2/config_pkg/"
