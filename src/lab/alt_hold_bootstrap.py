@@ -103,6 +103,8 @@ class AltHoldBootstrap(Node):
         self.gt_px = self.gt_py = None     # пред. позиция для разности
         self.gt_pt = None                  # пред. sim-время
         self.hold_sp = None                # (x0, y0) сетпойнт, фиксируется на входе в hold
+        self.gz_ix = self.gz_iy = 0.0      # интеграл ошибки позиции (world) — I-член
+        self.gz_it = None                  # пред. sim-время для dt интеграла
         self._gz_log_t = -1e9              # троттл отладочного лога gz-hold
 
         self.state = S_PREARM
@@ -278,18 +280,32 @@ class AltHoldBootstrap(Node):
                     # в тело (по yaw) → offset PWM по pitch(вперёд)/roll(вправо).
                     if self.hold_sp is None:
                         self.hold_sp = (self.gt_x, self.gt_y)
+                        self.gz_ix = self.gz_iy = 0.0; self.gz_it = self.now_sim()
                         self.get_logger().info(
                             f"    gz-hold: сетпойнт=({self.gt_x:.2f},{self.gt_y:.2f}) "
-                            f"kp={self.a.gz_kp} kd={self.a.gz_kd}")
+                            f"kp={self.a.gz_kp} kd={self.a.gz_kd} ki={self.a.gz_ki}")
                     ex = self.gt_x - self.hold_sp[0]
                     ey = self.gt_y - self.hold_sp[1]
+                    # I-член: интегрируем ошибку в WORLD (yaw-инвариантно), потом
+                    # поворачиваем в тело. Anti-windup: клампим состояние так, чтобы
+                    # вклад Ki*i не превышал gz_imax PWM по каждой оси.
+                    now = self.now_sim()
+                    if self.a.gz_ki > 0 and self.gz_it is not None and now > self.gz_it:
+                        dt = now - self.gz_it
+                        self.gz_ix += ex*dt; self.gz_iy += ey*dt
+                        cap = self.a.gz_imax / self.a.gz_ki
+                        self.gz_ix = max(-cap, min(cap, self.gz_ix))
+                        self.gz_iy = max(-cap, min(cap, self.gz_iy))
+                    self.gz_it = now
                     c = math.cos(self.gt_yaw); s = math.sin(self.gt_yaw)
-                    e_fwd =  ex*c + ey*s;        e_rgt = -ex*s + ey*c
+                    e_fwd =  ex*c + ey*s;            e_rgt = -ex*s + ey*c
                     v_fwd =  self.gt_vx*c + self.gt_vy*s
                     v_rgt = -self.gt_vx*s + self.gt_vy*c
+                    i_fwd =  self.gz_ix*c + self.gz_iy*s
+                    i_rgt = -self.gz_ix*s + self.gz_iy*c
                     mx = self.a.gz_max
-                    po = self.a.gz_psign * (self.a.gz_kp*e_fwd + self.a.gz_kd*v_fwd)
-                    ro = self.a.gz_rsign * (self.a.gz_kp*e_rgt + self.a.gz_kd*v_rgt)
+                    po = self.a.gz_psign * (self.a.gz_kp*e_fwd + self.a.gz_kd*v_fwd + self.a.gz_ki*i_fwd)
+                    ro = self.a.gz_rsign * (self.a.gz_kp*e_rgt + self.a.gz_kd*v_rgt + self.a.gz_ki*i_rgt)
                     po = max(-mx, min(mx, po)); ro = max(-mx, min(mx, ro))
                     self.pitch = RC_CENTER + int(po)
                     self.roll  = RC_CENTER + int(ro)
@@ -300,7 +316,7 @@ class AltHoldBootstrap(Node):
                         self.get_logger().info(
                             f"gz: yaw={math.degrees(self.gt_yaw):+.0f} e=({ex:+.1f},{ey:+.1f}) "
                             f"efr=({e_fwd:+.1f},{e_rgt:+.1f}) v=({self.gt_vx:+.2f},{self.gt_vy:+.2f}) "
-                            f"pitch_off={int(po):+d} roll_off={int(ro):+d}")
+                            f"i=({i_fwd:+.1f},{i_rgt:+.1f}) pitch_off={int(po):+d} roll_off={int(ro):+d}")
                 else:
                     self.roll = self.pitch = RC_CENTER   # gz нет → просто уровень
                 if self.elapsed() > self.a.hold_sec:
@@ -432,6 +448,10 @@ def main():
                    help='gz-hold: PWM на метр ошибки позиции (default 40)')
     p.add_argument('--gz-kd', dest='gz_kd', type=float, default=120.0,
                    help='gz-hold: PWM на (м/с) скорости — демпфирование (default 120)')
+    p.add_argument('--gz-ki', dest='gz_ki', type=float, default=8.0,
+                   help='gz-hold: PWM на (м·с) интеграла — убирает статич. ошибку (0=без I, default 8)')
+    p.add_argument('--gz-imax', dest='gz_imax', type=float, default=100.0,
+                   help='gz-hold: макс вклад I-члена, PWM (anti-windup, default 100)')
     p.add_argument('--gz-max', dest='gz_max', type=float, default=150.0,
                    help='gz-hold: макс |offset| PWM по roll/pitch (default 150 ≈ 13°)')
     # Знаки эмпирически выверены отладкой (pitch_off<0 → ускорение ВПЕРЁД, не назад;

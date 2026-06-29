@@ -201,6 +201,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_OBSERVE="${BS_OBSERVE:-}" -e BS_VINS_TO="${BS_VINS_TO:-}" \
       -e BS_HOLD_SEC="${BS_HOLD_SEC:-}" \
       -e BS_GZHOLD="${BS_GZHOLD:-}" -e BS_GZ_KP="${BS_GZ_KP:-}" -e BS_GZ_KD="${BS_GZ_KD:-}" \
+      -e BS_GZ_KI="${BS_GZ_KI:-}" -e BS_GZ_IMAX="${BS_GZ_IMAX:-}" \
       -e BS_GZ_MAX="${BS_GZ_MAX:-}" -e BS_GZ_PSIGN="${BS_GZ_PSIGN:-}" -e BS_GZ_RSIGN="${BS_GZ_RSIGN:-}" \
       -e BS_MODE_BUDGET="${BS_MODE_BUDGET:-}" -e BS_ARM_BUDGET="${BS_ARM_BUDGET:-}" \
       -e BS_CLIMB_BUDGET="${BS_CLIMB_BUDGET:-}" -e BS_LAND_BUDGET="${BS_LAND_BUDGET:-}" \
