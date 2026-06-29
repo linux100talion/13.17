@@ -234,31 +234,48 @@ class AltHoldBootstrap(Node):
                     self.result = "CLIMB_FAIL"; self.goto(S_LAND)
 
         elif st == S_EXCITE:
-            # throttle=центр (держим высоту) + раскачка для параллакса/IMU excitation,
-            # НО station-keeping: дрон должен остаться примерно на месте (в круге
-            # R~10м), а не улетать за край сцены в «жёлтый экран».
+            # throttle=центр (держим высоту) + station-keeping раскачка для
+            # параллакса/IMU excitation. Дрон ДОЛЖЕН остаться в круге R~peak около
+            # старта, а не улетать за край сцены в «жёлтый экран».
             #
             # Подвох ALT_HOLD: стик pitch = угол наклона = УСКОРЕНИЕ (двойной
             # интегратор), поэтому симметричный «вперёд τ / назад τ» НЕ возвращает
-            # позицию — за цикл уносит ~v·τ, и дрон линейно уезжает. Используем
-            # профиль ускорения +τ / −2τ / +τ (цикл 4τ): скорость 0→+→−→0 и позиция
-            # ВОЗВРАЩАЕТСЯ в исходную к концу цикла (go-and-back), excite-амплитуда
-            # масштабирует радиус (peak ~ a·τ²). Плюс медленный yaw — знак меняем
-            # каждый цикл, чтобы «подметать» сцену ±, а не уезжать в бесконечное
-            # вращение; смена курса заодно разворачивает ось вперёд/назад → параллакс
-            # покрывает 2D-диск вокруг точки старта.
+            # позицию — за цикл уносит ~v·τ. Используем профиль ускорения +τ/−2τ/+τ
+            # (translate, длительность 4τ): скорость 0→+→−→0 и позиция ВОЗВРАЩАЕТСЯ
+            # в исходную к концу цикла (peak ~ a·τ², масштаб через excite).
+            #
+            # ⚠️ Компенсация работает ТОЛЬКО при постоянном курсе: импульсы
+            # вперёд/назад гасятся лишь когда смотрят в одну сторону в МИРОВОЙ
+            # системе. Поэтому yaw НЕЛЬЗЯ лить непрерывно во время translate (так
+            # было раньше → курс проворачивался внутри цикла → проекция импульсов в
+            # мир не обнулялась → дрон линейно уезжал). Yaw даём ОТДЕЛЬНЫМ импульсом
+            # в точке возврата (v≈0, x≈0) МЕЖДУ translate-циклами: курс меняется
+            # ступенькой, а сам translate идёт при фиксированном курсе → station-
+            # keeping держится. Знак yaw чередуем каждый цикл → «подметаем» сцену ±
+            # вокруг старта (translate-ось разворачивается → параллакс на 2D-диске).
             self.throttle = self.a.throttle_hold
             self.hold_alt_hold()
+            self.roll = RC_CENTER
             amp = self.a.excite
             T = self.a.excite_period
+            yaw_amp = self.a.yaw_rate
+            yaw_dur = self.a.yaw_dur if yaw_amp > 0 else 0.0   # 0 yaw → чистый translate
+            cycle = 4.0 * T + yaw_dur
             t = self.elapsed()
-            cyc = t % (4.0 * T)
-            p_sign = -1.0 if (T <= cyc < 3.0 * T) else 1.0   # +τ / −2τ / +τ
-            self.pitch = RC_CENTER + int(p_sign * amp)
-            self.roll = RC_CENTER
-            n = int(t / (4.0 * T))
-            y_sign = 1 if (n % 2 == 0) else -1               # yaw: подметаем ± каждый цикл
-            self.yaw = RC_CENTER + y_sign * self.a.yaw_rate
+            local = t % cycle
+            n = int(t / cycle)
+            if local < yaw_dur:
+                # YAW-импульс в точке возврата: поворот курса БЕЗ трансляции
+                self.pitch = RC_CENTER
+                y_sign = 1 if (n % 2 == 0) else -1
+                self.yaw = RC_CENTER + y_sign * yaw_amp
+            else:
+                # TRANSLATE при ФИКСИРОВАННОМ курсе: +τ/−2τ/+τ → импульсы в мире
+                # компенсируются, позиция возвращается к старту в конце цикла
+                tt = local - yaw_dur
+                p_sign = -1.0 if (T <= tt < 3.0 * T) else 1.0
+                self.pitch = RC_CENTER + int(p_sign * amp)
+                self.yaw = RC_CENTER
             if self.vins_converged():
                 self.get_logger().info(f"    ✅ VINS сошёлся ({self.odom_count} odom-сообщений)")
                 self.result = "VINS_OK"
@@ -321,7 +338,10 @@ def main():
     p.add_argument('--excite-period', dest='excite_period', type=float, default=3.0,
                    help='базовая длительность τ профиля раскачки +τ/−2τ/+τ, sim-сек (цикл=4τ, default 3)')
     p.add_argument('--yaw-rate', dest='yaw_rate', type=int, default=30,
-                   help='амплитуда медленного yaw в EXCITE, PWM от центра 1500 (0=без yaw, default 30)')
+                   help='амплитуда yaw-импульса в EXCITE, PWM от центра 1500 (0=без yaw, default 30)')
+    p.add_argument('--yaw-dur', dest='yaw_dur', type=float, default=1.5,
+                   help='длительность yaw-импульса МЕЖДУ translate-циклами, sim-сек '
+                        '(курс меняем только тут, во время translate курс фиксирован; default 1.5)')
     p.add_argument('--vins-timeout', dest='vins_timeout', type=float, default=90.0,
                    help='сколько ждать сходимости VINS в EXCITE, sim-сек (default 90)')
     p.add_argument('--vins-min', dest='vins_min', type=int, default=40,

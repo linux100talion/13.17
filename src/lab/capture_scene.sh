@@ -197,6 +197,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
     docker exec \
       -e ARM_SIM_BUDGET="${ARM_SIM_BUDGET:-}" -e ARM_WALL_CAP="${ARM_WALL_CAP:-}" \
       -e BS_ALT="${BS_ALT:-}" -e BS_HANDOVER="${BS_HANDOVER:-}" -e BS_EXCITE="${BS_EXCITE:-}" \
+      -e BS_YAW="${BS_YAW:-}" -e BS_YAW_DUR="${BS_YAW_DUR:-}" -e BS_EXCITE_PERIOD="${BS_EXCITE_PERIOD:-}" \
       -e BS_OBSERVE="${BS_OBSERVE:-}" -e BS_VINS_TO="${BS_VINS_TO:-}" \
       -e BS_MODE_BUDGET="${BS_MODE_BUDGET:-}" -e BS_ARM_BUDGET="${BS_ARM_BUDGET:-}" \
       -e BS_CLIMB_BUDGET="${BS_CLIMB_BUDGET:-}" -e BS_LAND_BUDGET="${BS_LAND_BUDGET:-}" \

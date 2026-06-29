@@ -17,7 +17,8 @@
 #   BS_ALT (3)            — целевая высота, м
 #   BS_HANDOVER (0)       — 1 = перейти в GUIDED после init (иначе OBSERVE→LAND)
 #   BS_EXCITE (80)        — амплитуда раскачки forward/back, PWM от центра (масштаб радиуса)
-#   BS_YAW (30)           — амплитуда медленного yaw в EXCITE, PWM от центра (0=без yaw)
+#   BS_YAW (30)           — амплитуда yaw-импульса в EXCITE, PWM от центра (0=без yaw)
+#   BS_YAW_DUR (1.5)      — длительность yaw-импульса МЕЖДУ translate-циклами, sim-сек
 #   BS_EXCITE_PERIOD (3)  — базовая τ профиля раскачки +τ/−2τ/+τ, sim-сек (цикл=4τ)
 #   BS_OBSERVE (15)       — держать высоту после init перед посадкой, sim-сек (без handover)
 #   BS_VINS_TO (60)       — таймаут ожидания сходимости VINS, sim-сек
@@ -44,6 +45,8 @@ ARGS=(--alt "$ALT" --excite "$EXCITE" --yaw-rate "$YAW" --excite-period "$EXCITE
 # Газ на подъём (PWM). Дефолт ноды 1650 ≈ висение для iris → набор маргинальный;
 # поднять (напр. 1800) для уверенной скороподъёмности в ALT_HOLD. Пусто = дефолт ноды.
 [ -n "${BS_THROTTLE_CLIMB:-}" ] && ARGS+=(--throttle-climb "$BS_THROTTLE_CLIMB")
+# Длительность yaw-импульса между translate-циклами (пусто = дефолт ноды 1.5с):
+[ -n "${BS_YAW_DUR:-}" ] && ARGS+=(--yaw-dur "$BS_YAW_DUR")
 # Бюджеты фаз — добавляем флаг только если env задан (иначе argparse-дефолт ноды):
 [ -n "${BS_MODE_BUDGET:-}" ]  && ARGS+=(--mode-budget "$BS_MODE_BUDGET")
 [ -n "${BS_ARM_BUDGET:-}" ]   && ARGS+=(--arm-budget "$BS_ARM_BUDGET")
