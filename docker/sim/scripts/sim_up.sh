@@ -61,12 +61,19 @@ else
 fi
 
 # 3. Мост Gazebo -> ROS2: камера + /clock (источник sim-времени) + ground-truth
-#    одометрия дрона (СИМ-костыль для gz-position-hold в alt_hold_bootstrap).
+#    одометрия дрона (gz-position-hold) + IMU дрона @250Гц (для VINS — обход
+#    MAVLink-телеметрии, которая капается до ~21-50 Гц; реальный борт берёт IMU с
+#    FCU на ~200Гц, в sim телеметрийный тракт столько не может → кормим gz-IMU).
+#    gz IMU-сенсор уже есть (его юзает ArduPilotPlugin), публикует 250Гц sim;
+#    мостим его длинный gz-топик в чистый ROS /gz_imu/data (remap).
+GZ_IMU="/world/default/model/iris_cam/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu"
 if ! pgrep -f "ros_gz_bridge" >/dev/null; then
     nohup ros2 run ros_gz_bridge parameter_bridge \
         "/camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image" \
         "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock" \
         "/model/iris_cam/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry" \
+        "${GZ_IMU}@sensor_msgs/msg/Imu[gz.msgs.IMU" \
+        --ros-args -r "${GZ_IMU}:=/gz_imu/data" \
         >"$LOG/ros_gz_bridge.log" 2>&1 &
     echo "  ros_gz_bridge -> $LOG/ros_gz_bridge.log"
 else
