@@ -98,11 +98,13 @@ fisheye: 0
 flow_back: 1
 
 # Параметры шума IMU.
-# В симуляции нет вибраций рамы, поэтому значения acc_n/gyr_n возвращены к
-# базовым (в боевом конфиге они были подняты ~в 10 раз под вибрации). При
-# расхождении VINS на старте — подстрой под модель IMU из ardupilot_gazebo.
-acc_n: 0.08        # физически верно: нет вибраций рамы в sim (check2 был из-за ill-conditioned cov, не из-за acc_n)
-gyr_n: 0.004
+# Подняты под СЫРОЙ gz-IMU (/gz_imu/data_flu, 250Гц, без фильтра SITL): измеренный
+# шум в воздухе gz accel std ~0.3 м/с², gyro std ~0.05-0.2 рад/с (vs отфильтрованный
+# MAVROS ~0.04). На прежних acc_n=0.08/gyr_n=0.004 (под MAVROS) VINS недооценивал
+# шум → failure detection/reboot после init. Поднимаем acc_n ×2.5, gyr_n ×5.
+# Откат под MAVROS-IMU: acc_n 0.08, gyr_n 0.004.
+acc_n: 0.2
+gyr_n: 0.02
 acc_w: 0.0004
 gyr_w: 2.0e-5
 g_norm: 9.81
