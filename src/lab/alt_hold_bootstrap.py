@@ -31,6 +31,7 @@ handover — отдельным прогоном.
 Через секвенсор:    src/lab/bootstrap.sh  (команда `bootstrap` в capture_scene.sh).
 """
 import argparse
+import math
 import time
 import rclpy
 from rclpy.node import Node
@@ -77,6 +78,10 @@ class AltHoldBootstrap(Node):
                                  self._on_relalt, qos_profile_sensor_data)
         self.create_subscription(Odometry, '/vins_estimator/odometry', self._on_odom, 10)
         self.create_subscription(RCIn, '/mavros/rc/in', self._on_rcin, qos_profile_sensor_data)
+        # Ground-truth одометрия из Gazebo (СИМ-костыль для gz-position-hold):
+        # истинная поза+скорость тела в world. Мостится ros_gz_bridge из
+        # /model/iris_cam/odometry. На боевом Orin её НЕТ (там референс — VINS).
+        self.create_subscription(Odometry, '/model/iris_cam/odometry', self._on_gt_odom, 10)
         # сервисы
         self.mode_cli = self.create_client(SetMode, '/mavros/set_mode')
         self.arm_cli = self.create_client(CommandBool, '/mavros/cmd/arming')
@@ -89,6 +94,16 @@ class AltHoldBootstrap(Node):
         self.last_odom_sim = -1e9
         self.rcin_thr = None
         self.rcin_logged = False
+
+        # gz-position-hold: истинная поза/скорость (world) + сетпойнт удержания
+        self.gt_have = False
+        self.gt_x = self.gt_y = 0.0
+        self.gt_yaw = 0.0
+        self.gt_vx = self.gt_vy = 0.0      # world-скорость (конечная разность)
+        self.gt_px = self.gt_py = None     # пред. позиция для разности
+        self.gt_pt = None                  # пред. sim-время
+        self.hold_sp = None                # (x0, y0) сетпойнт, фиксируется на входе в hold
+        self._gz_log_t = -1e9              # троттл отладочного лога gz-hold
 
         self.state = S_PREARM
         self.state_t0 = None          # базируется лениво при первом тике с живым /clock
@@ -177,6 +192,21 @@ class AltHoldBootstrap(Node):
         if len(m.channels) >= 3:
             self.rcin_thr = m.channels[2]
 
+    def _on_gt_odom(self, m):
+        # истинная поза Gazebo (world) + world-скорость через конечную разность по
+        # sim-времени (twist-фрейм одометрии неоднозначен — считаем сами, надёжнее).
+        x = m.pose.pose.position.x; y = m.pose.pose.position.y
+        q = m.pose.pose.orientation
+        self.gt_yaw = math.atan2(2.0*(q.w*q.z + q.x*q.y), 1.0 - 2.0*(q.y*q.y + q.z*q.z))
+        t = self.now_sim()
+        if self.gt_pt is not None and t > self.gt_pt:
+            dt = t - self.gt_pt; a = 0.4   # EMA-сглаживание скорости
+            self.gt_vx = (1.0-a)*self.gt_vx + a*(x - self.gt_px)/dt
+            self.gt_vy = (1.0-a)*self.gt_vy + a*(y - self.gt_py)/dt
+        self.gt_px, self.gt_py, self.gt_pt = x, y, t
+        self.gt_x, self.gt_y = x, y
+        self.gt_have = True
+
     # --- публикация RC override (WALL-таймер 20 Гц) -------------------------
     def _wall_publish(self):
         # Гейт публикации: в DONE и в GUIDED (после handover) override НЕ нужен —
@@ -239,9 +269,40 @@ class AltHoldBootstrap(Node):
             # дрон при этом уезжает за край — причина в AHRS-наклоне/остаточной
             # скорости, а не в excite (изоляция). Реюзает arm/climb/land/override.
             if self.a.hold_only:
-                self.roll = self.pitch = self.yaw = RC_CENTER
                 self.throttle = self.a.throttle_hold
                 self.hold_alt_hold()
+                self.yaw = RC_CENTER
+                if self.a.gz_hold and self.gt_have:
+                    # PD position-hold по ИСТИННОЙ позе Gazebo: держим сетпойнт
+                    # (позиция на входе в hold). Ошибку+скорость из world переводим
+                    # в тело (по yaw) → offset PWM по pitch(вперёд)/roll(вправо).
+                    if self.hold_sp is None:
+                        self.hold_sp = (self.gt_x, self.gt_y)
+                        self.get_logger().info(
+                            f"    gz-hold: сетпойнт=({self.gt_x:.2f},{self.gt_y:.2f}) "
+                            f"kp={self.a.gz_kp} kd={self.a.gz_kd}")
+                    ex = self.gt_x - self.hold_sp[0]
+                    ey = self.gt_y - self.hold_sp[1]
+                    c = math.cos(self.gt_yaw); s = math.sin(self.gt_yaw)
+                    e_fwd =  ex*c + ey*s;        e_rgt = -ex*s + ey*c
+                    v_fwd =  self.gt_vx*c + self.gt_vy*s
+                    v_rgt = -self.gt_vx*s + self.gt_vy*c
+                    mx = self.a.gz_max
+                    po = self.a.gz_psign * (self.a.gz_kp*e_fwd + self.a.gz_kd*v_fwd)
+                    ro = self.a.gz_rsign * (self.a.gz_kp*e_rgt + self.a.gz_kd*v_rgt)
+                    po = max(-mx, min(mx, po)); ro = max(-mx, min(mx, ro))
+                    self.pitch = RC_CENTER + int(po)
+                    self.roll  = RC_CENTER + int(ro)
+                    # отладка: что контроллер видит и командует (раз в ~2 sim-сек).
+                    # Связь e→коррекция→отклик однозначно ловит знак/фрейм.
+                    if self.now_sim() - self._gz_log_t >= 2.0:
+                        self._gz_log_t = self.now_sim()
+                        self.get_logger().info(
+                            f"gz: yaw={math.degrees(self.gt_yaw):+.0f} e=({ex:+.1f},{ey:+.1f}) "
+                            f"efr=({e_fwd:+.1f},{e_rgt:+.1f}) v=({self.gt_vx:+.2f},{self.gt_vy:+.2f}) "
+                            f"pitch_off={int(po):+d} roll_off={int(ro):+d}")
+                else:
+                    self.roll = self.pitch = RC_CENTER   # gz нет → просто уровень
                 if self.elapsed() > self.a.hold_sec:
                     self.get_logger().info(f"    hold-only {self.a.hold_sec}s истекли — садимся")
                     self.result = "HOLD_DONE"; self.goto(S_LAND)
@@ -364,6 +425,22 @@ def main():
                    help='liftland-режим: БЕЗ раскачки — climb→держать уровень hold_sec→land (диагностика дрейфа)')
     p.add_argument('--hold-sec', dest='hold_sec', type=float, default=30.0,
                    help='сколько держать уровень в hold-only, sim-сек (default 30)')
+    # gz-position-hold (СИМ-костыль): держим точку по истинной позе Gazebo
+    p.add_argument('--gz-hold', dest='gz_hold', action='store_true',
+                   help='hold-only: держать ПОЗИЦИЮ по истинной позе Gazebo (/model/iris_cam/odometry)')
+    p.add_argument('--gz-kp', dest='gz_kp', type=float, default=40.0,
+                   help='gz-hold: PWM на метр ошибки позиции (default 40)')
+    p.add_argument('--gz-kd', dest='gz_kd', type=float, default=120.0,
+                   help='gz-hold: PWM на (м/с) скорости — демпфирование (default 120)')
+    p.add_argument('--gz-max', dest='gz_max', type=float, default=150.0,
+                   help='gz-hold: макс |offset| PWM по roll/pitch (default 150 ≈ 13°)')
+    # Знаки эмпирически выверены отладкой (pitch_off<0 → ускорение ВПЕРЁД, не назад;
+    # roll аналогично): для торможения сноса оба знака = +1. Конвенция pwm оказалась
+    # противоположной комментарию excite. Оставлены тюнящимися на всякий случай.
+    p.add_argument('--gz-psign', dest='gz_psign', type=float, default=1.0,
+                   help='gz-hold: знак pitch-коррекции (±1; +1 выверен отладкой)')
+    p.add_argument('--gz-rsign', dest='gz_rsign', type=float, default=1.0,
+                   help='gz-hold: знак roll-коррекции (±1; +1 выверен отладкой)')
     p.add_argument('--throttle-climb', dest='throttle_climb', type=int, default=1650,
                    help='PWM газа на подъём (default 1650)')
     p.add_argument('--throttle-hold', dest='throttle_hold', type=int, default=RC_CENTER,

@@ -60,11 +60,13 @@ else
     echo "  SITL     уже запущен"
 fi
 
-# 3. Мост Gazebo -> ROS2: камера + /clock (источник sim-времени).
+# 3. Мост Gazebo -> ROS2: камера + /clock (источник sim-времени) + ground-truth
+#    одометрия дрона (СИМ-костыль для gz-position-hold в alt_hold_bootstrap).
 if ! pgrep -f "ros_gz_bridge" >/dev/null; then
     nohup ros2 run ros_gz_bridge parameter_bridge \
         "/camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image" \
         "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock" \
+        "/model/iris_cam/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry" \
         >"$LOG/ros_gz_bridge.log" 2>&1 &
     echo "  ros_gz_bridge -> $LOG/ros_gz_bridge.log"
 else

@@ -23,6 +23,13 @@ ALT="${BS_ALT:-3}"
 HOLD="${BS_HOLD_SEC:-30}"
 
 ARGS=(--hold-only --alt "$ALT" --hold-sec "$HOLD")
+# gz-position-hold (СИМ-костыль): держать точку по истинной позе Gazebo
+[ "${BS_GZHOLD:-0}" = "1" ] && ARGS+=(--gz-hold)
+[ -n "${BS_GZ_KP:-}" ]    && ARGS+=(--gz-kp "$BS_GZ_KP")
+[ -n "${BS_GZ_KD:-}" ]    && ARGS+=(--gz-kd "$BS_GZ_KD")
+[ -n "${BS_GZ_MAX:-}" ]   && ARGS+=(--gz-max "$BS_GZ_MAX")
+[ -n "${BS_GZ_PSIGN:-}" ] && ARGS+=(--gz-psign "$BS_GZ_PSIGN")
+[ -n "${BS_GZ_RSIGN:-}" ] && ARGS+=(--gz-rsign "$BS_GZ_RSIGN")
 [ -n "${BS_THROTTLE_CLIMB:-}" ] && ARGS+=(--throttle-climb "$BS_THROTTLE_CLIMB")
 [ -n "${BS_MODE_BUDGET:-}" ]  && ARGS+=(--mode-budget "$BS_MODE_BUDGET")
 [ -n "${BS_ARM_BUDGET:-}" ]   && ARGS+=(--arm-budget "$BS_ARM_BUDGET")

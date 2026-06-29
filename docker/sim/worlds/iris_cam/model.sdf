@@ -882,6 +882,22 @@
 
     </plugin>
 
+    <!-- ====== Ground-truth одометрия дрона (СИМ-костыль) ======
+         Истинная поза+скорость тела (iris_with_standoffs::base_link) в world @50Гц.
+         Нужна gz-position-hold стабилизатору в alt_hold_bootstrap: в GPS-denied EKF
+         не держит горизонт (tilt/accel ambiguity → runaway), поэтому на ВРЕМЯ
+         бутстрапа подменяем «идеальным VINS» = истинной позой Gazebo, чтобы дрон
+         стоял на месте и VINS успел заinit'иться. На боевом Orin этого НЕТ — там
+         референс даёт реальный VINS. Мостится ros_gz_bridge → /model/iris_cam/odometry. -->
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <dimensions>3</dimensions>
+      <odom_frame>world</odom_frame>
+      <robot_base_frame>iris_with_standoffs::base_link</robot_base_frame>
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <odom_topic>/model/iris_cam/odometry</odom_topic>
+    </plugin>
+
     <!-- ====== Камера пилота (параметры из concept.txt) ======
          Разрешение 1280x720 (НЕ 1920x1200 из concept) — под него заточены
          camera_node (width_/height_) и sim.yaml (fx=fy=640, cx=640, cy=360).
