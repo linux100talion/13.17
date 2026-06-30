@@ -26,6 +26,8 @@ v0 = ТОЛЬКО боковой (ROLL). Продольный (looming→PITCH) 
   ros2 run ... либо  python3 src/lab/flow_damp_node.py --ros-args -p kp:=...
 """
 
+import os
+import sys
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -33,6 +35,10 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 from sensor_msgs.msg import Image, Imu
 from mavros_msgs.msg import OverrideRCIn, State, RCIn
+
+# FlowEstimator вынесен в отдельный модуль (без ROS) — шарится с flow_derotation_check.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from flow_estimator import FlowEstimator  # noqa: E402
 
 try:
     import cv2
@@ -44,74 +50,6 @@ RC_MIN, RC_MAX = 1000, 2000
 # Каналы 1..4 = roll/pitch/throttle/yaw. Индексы 0..3 в channels[].
 CH_ROLL, CH_PITCH, CH_THR, CH_YAW = 0, 1, 2, 3
 NOCHANGE = 65535       # OverrideRCIn: «не трогать канал»
-
-
-class FlowEstimator:
-    """Чистая зрительная часть: кадр+гироскоп → (боковой_поток, дивергенция, confidence).
-
-    Изолирована от управления НАРОЧНО (см. спеку §8 «изоляция переменной»): её можно
-    юнит-тестить/визуализировать отдельно, не трогая RC override.
-    """
-
-    def __init__(self, fx, fy, cx, cy, R_cam_imu, max_feats=200):
-        self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
-        self.R = np.asarray(R_cam_imu, dtype=np.float64).reshape(3, 3)
-        self.max_feats = max_feats
-        self.prev_gray = None
-        self.prev_pts = None
-        self.prev_stamp = None
-        # параметры LK / детектора углов
-        self._lk = dict(winSize=(21, 21), maxLevel=3,
-                        criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
-        self._feat = dict(maxCorners=max_feats, qualityLevel=0.01, minDistance=8, blockSize=7)
-
-    def _detect(self, gray):
-        pts = cv2.goodFeaturesToTrack(gray, mask=None, **self._feat)
-        return pts
-
-    def process(self, gray, stamp, omega_imu):
-        """omega_imu: угловая скорость в FLU (rad/s). Возвращает dict или None (нет данных)."""
-        out = None
-        if self.prev_gray is not None and self.prev_pts is not None and len(self.prev_pts) > 0:
-            dt = max(1e-3, stamp - self.prev_stamp)
-            nxt, st, err = cv2.calcOpticalFlowPyrLK(self.prev_gray, gray,
-                                                    self.prev_pts, None, **self._lk)
-            st = st.reshape(-1).astype(bool)
-            p0 = self.prev_pts.reshape(-1, 2)[st]
-            p1 = nxt.reshape(-1, 2)[st]
-            n = len(p0)
-            if n >= 8:
-                # измеренный поток в пикселях/кадр
-                flow = (p1 - p0)
-                # --- derotation -------------------------------------------------
-                # ω в фрейме КАМЕРЫ: ω_cam = R · ω_imu   (R = extrinsicRotation)
-                # TODO[sign]: направление R (cam→imu vs imu→cam) на валидацию (оракул).
-                w = self.R @ np.asarray(omega_imu, dtype=np.float64)
-                wx, wy, wz = w
-                # нормированные координаты точек (p0)
-                xn = (p0[:, 0] - self.cx) / self.fx
-                yn = (p0[:, 1] - self.cy) / self.fy
-                # вращательный поток (Longuet-Higgins/Prazdny), нормир. плоскость, ×dt:
-                # TODO[sign]: знаки/перестановку проверить вместе с extrinsic.
-                u_rot_n = (xn * yn * wx - (1.0 + xn ** 2) * wy + yn * wz) * dt
-                v_rot_n = ((1.0 + yn ** 2) * wx - xn * yn * wy - xn * wz) * dt
-                u_rot = self.fx * u_rot_n
-                v_rot = self.fy * v_rot_n
-                # остаточный ТРАНСЛЯЦИОННЫЙ поток (пиксели/кадр)
-                tr = flow - np.column_stack([u_rot, v_rot])
-                # --- агрегаты (v0: только боковой) ------------------------------
-                # робастная средняя горизонт. компонента = прокси боковой скорости.
-                lateral = float(np.median(tr[:, 0]))
-                # TODO[phase2]: дивергенция (looming) из аффинного фита tr по (xn,yn):
-                #   divergence ∝ ∂u/∂x + ∂v/∂y → прокси продольной скорости → PITCH.
-                divergence = 0.0
-                out = dict(lateral=lateral, divergence=divergence,
-                           n=n, dt=dt, conf=float(n) / float(self.max_feats))
-        # обновляем «prev» (переинициализируем фичи каждый кадр — дёшево для скелета)
-        self.prev_gray = gray
-        self.prev_pts = self._detect(gray)
-        self.prev_stamp = stamp
-        return out
 
 
 class FlowDampNode(Node):

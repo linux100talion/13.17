@@ -152,3 +152,60 @@ rot-flow) — связано с оракулом estimate_extrinsic (todo4).
 Заодно проверит гипотезу, что срыв ~25 с (todo4) — не от кривого extrinsic.
 Боевой `dummy_13_7.yaml` — identity-ротация (вероятный placeholder, нужна Kalibr перед
 боевым полётом; касается и VINS, и демпфера).
+
+---
+
+# ПРОДОЛЖЕНИЕ В РАБОЧЕМ БОКСЕ (handoff)
+
+Файлы написаны и закоммичены на телефоне (стек тут не поднять). Новая сессия на сим-боксе
+продолжает отсюда. Ветка: **nn2_c3_vins_althold_4**.
+
+## Что уже есть (код)
+- `src/lab/flow_estimator.py` — `FlowEstimator` (numpy+cv2, БЕЗ ROS): sparse LK → derotate
+  (ω_cam=R·ω_imu) → боковой поток + диагностика. Параметры `R_cam_imu`, `rotflow_sign`.
+- `src/lab/flow_damp_node.py` — v0-нода (импортирует FlowEstimator): стик=setpoint → PID →
+  ROLL-override; pitch/yaw/throttle сквозные; confidence→fade-out.
+- `src/lab/flow_derotation_check.py` — ОФФЛАЙН-валидация знака по bag (mono8 ИЛИ bgr8/rgb8).
+- Всё проходит `py_compile`; рантайм-зависимости (rclpy/cv2/rosbag2_py) — только в nav.
+
+## Шаг 1 (ПЕРВЫЙ) — снять TODO[sign] через derotation-check. НЕ нужен полный сим-прогон,
+нужен лишь bag с КАМЕРОЙ + `/gz_imu/data_flu` + СЕГМЕНТОМ ВРАЩЕНИЯ (yaw/раскачка).
+ВАЖНО: дефолтный bag пишет `/image_color` (НЕ `/image_mono`) и MAVROS-IMU (НЕ gz-IMU).
+Поэтому записать ЦЕЛЕВОЙ лёгкий bag (на сим-боксе, атомарно через capture_scene):
+```bash
+# взлёт+раскачка с yaw, в bag кладём gz-IMU и цветной кадр (mp4/кадры/заливку гасим)
+CPU=1 TOPICS_EXTRA="/gz_imu/data_flu" TOPIC="/image_color" \
+  GDRIVE_UP=0 MP4=0 N_FRAMES=0 \
+  ARM_SIM_BUDGET=100 ARM_WALL_CAP=2400 \
+  bash src/lab/capture_scene.sh arm takeoff 3 bootstrap land
+# (bootstrap = взлёт в ALT_HOLD + раскачка → даёт вращение; см. src/lab/CLAUDE.md)
+```
+Потом прогнать анализ В КОНТЕЙНЕРЕ nav против записанного bag:
+```bash
+docker exec <nav> bash -lc \
+ "cd /root/sim_ws/output && python3 /root/sim_ws/src/.../flow_derotation_check.py \
+   scene_bag --image-topic /image_color --imu-topic /gz_imu/data_flu --omega-thresh 0.3"
+# (путь к скрипту — где смонтирован src/lab; обычно /root/sim_ws/src/lab или /scripts)
+```
+Вывод даст победителя `{R|R^T}×{знак}` по минимуму остатка на вращательных кадрах.
+→ Вписать победный R + `rotflow_sign` в дефолты `flow_estimator.py` (или параметры ноды).
+Если ни один не бьёт baseline — копать формулу rot-flow/extrinsic (или мало вращения).
+
+## Шаг 2 — конфликт override / запуск. Два публишера в `/mavros/rc/override`
+(`alt_hold_bootstrap` для взлёта vs `flow_damp_node`) КОНФЛИКТУЮТ. Решить ОДНО из:
+- (a) свернуть в `alt_hold_bootstrap.py` как ветку `--flow-hold` (реюз PID-блока ~277–330,
+  меняется только источник скорости: FlowEstimator вместо gz-истины) — как в спеке §8; ИЛИ
+- (b) секвенс: bootstrap взлетает и ОТПУСКАЕТ override (в DONE/гейт), затем стартует
+  flow_damp_node и берёт override. Риск рассинхрона — (a) чище.
+
+## Шаг 3 — тюнинг гейнов (атомарными прогонами). Оракул дрейфа = ИСТИННАЯ поза Gazebo
+(`/model/iris_cam/odometry`). Ветер — `SIM_WIND_*`. Метрика: насколько демпфер срезает
+скорость бокового сноса vs baseline. Тюнить `kp/ki/kd`, `k_stick`, `conf_min/full`,
+`max_offset`. Проверить fade-out (убрать текстуру/затемнить → плавный возврат в ALT_HOLD).
+
+## Шаг 4 (вторичное) — оракул `estimate_extrinsic=2` как независимая сверка Шага 1
+(см. «Хвост параллельной задачи» выше). Заодно проверит гипотезу срыва ~25 с.
+
+## Граф зависимостей шагов
+Шаг1 (знак) → Шаг3 (тюнинг). Шаг2 (запуск) независим, но нужен для Шага3.
+Шаг4 — необязательная сверка Шага1.
