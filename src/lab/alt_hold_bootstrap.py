@@ -153,13 +153,12 @@ class AltHoldBootstrap(Node):
 
         # Автомат — на sim-времени (ROSClock/use_sim_time): бюджеты фаз RTF-
         # независимы (как arm.sh/fly_square). 20 Гц sim ≈ 1.4 Гц wall при RTF 0.07.
-        self.timer = self.create_timer(0.05, self.tick)   # автомат (sim-время)
-        # RC override публикуется НЕ таймером, а из главного цикла по time.monotonic()
-        # (см. main): нужен СТАБИЛЬНЫЙ wall-rate ~20 Гц. FCU считает свежесть override
-        # в своём (wall) времени; на sim-таймере при RTF 0.07 вышло бы ≈1.4 Гц wall →
-        # override протухал бы. Отдельный STEADY_TIME-таймер rclpy под spin_once с
-        # use_sim_time оказался ненадёжен (мог не тикать → нода не публиковала вообще,
-        # RCIN оставался 1000) — поэтому публикуем явно в цикле.
+        self.timer = self.create_timer(0.05, self.tick)   # автомат + publish (sim-время)
+        # override публикуется в tick() (sim-таймер) — точки СМЕНЫ значения на sim-
+        # времени → детерминированный контур (раньше publish был только из wall-цикла
+        # main → смена в случайных sim-точках → недетерминированный демпфер). Wall-цикл
+        # main ДОПОЛНИТЕЛЬНО ре-публикует то же значение для свежести override на FCU
+        # (на низком RTF sim-publish ~1.4 Гц wall сам по себе мог бы протухнуть).
         self.get_logger().info(
             f"alt_hold_bootstrap: alt={a.alt}м handover={a.handover} "
             f"excite=±{a.excite}PWM/{a.excite_period}s vins_timeout={a.vins_timeout}s (sim)")
@@ -289,6 +288,17 @@ class AltHoldBootstrap(Node):
 
     # --- автомат -------------------------------------------------------------
     def tick(self):
+        # ДЕТЕРМИНИЗМ override: сначала логика автомата (sim-таймер 20 Гц обновляет
+        # self.roll/pitch/...), затем СРАЗУ публикуем на ЭТОМ sim-тике. self.roll
+        # меняется ТОЛЬКО здесь → точки смены привязаны к sim-времени, а не к wall-
+        # clock (раньше publish шёл только из wall-цикла → FCU видел смену в случайных
+        # sim-точках run-to-run → недетерминированный боковой контур демпфера). Wall-
+        # цикл в main оставлен для СВЕЖЕСТИ: между тиками re-шлёт то же значение (новых
+        # точек смены не вносит, значение между тиками константно).
+        self._tick_logic()
+        self._wall_publish()
+
+    def _tick_logic(self):
         st = self.state
 
         if st == S_PREARM:
@@ -384,7 +394,15 @@ class AltHoldBootstrap(Node):
                     ro = self.a.gz_rsign * (self.a.gz_kp*e_rgt + self.a.gz_kd*v_rgt + self.a.gz_ki*i_rgt)
                     po = max(-mx, min(mx, po)); ro = max(-mx, min(mx, ro))
                     self.pitch = RC_CENTER + int(po)
-                    self.roll  = RC_CENTER + int(ro)
+                    # ГИБРИД (gz+flow): если flow_hold тоже включён — продольную (pitch)
+                    # держит gz-истина (дрон НЕ уезжает за сцену), а боковую (roll)
+                    # отдаём флоу-демпферу (его и тюним, изолированно). Только gz → roll
+                    # тоже от gz (полный position-hold, как раньше).
+                    if self.a.flow_hold:
+                        fresh = (self.now_sim() - self.flow_last_sim) < 0.5
+                        self.roll = RC_CENTER + (int(self.flow_roll_off) if fresh else 0)
+                    else:
+                        self.roll = RC_CENTER + int(ro)
                     # Наложенный yaw (derotation-тест): позиция держится PID'ом, а
                     # курс качаем ± с периодом gz_yaw_period → много чистых
                     # вращательных кадров без трансляции. 0 → штатный холд без yaw.
@@ -398,7 +416,9 @@ class AltHoldBootstrap(Node):
                         self.get_logger().info(
                             f"gz: yaw={math.degrees(self.gt_yaw):+.0f} sp=({spx-self.hold_sp[0]:+.1f},{spy-self.hold_sp[1]:+.1f}) "
                             f"e=({ex:+.1f},{ey:+.1f}) v=({self.gt_vx:+.2f},{self.gt_vy:+.2f}) "
-                            f"i=({i_fwd:+.1f},{i_rgt:+.1f}) pitch_off={int(po):+d} roll_off={int(ro):+d}")
+                            f"i=({i_fwd:+.1f},{i_rgt:+.1f}) pitch_off={int(po):+d} "
+                            f"roll_off={int(self.roll - RC_CENTER):+d}"
+                            f"{'(flow)' if self.a.flow_hold else ''}")
                 elif self.a.flow_hold:
                     # боковой демпфер: ROLL ← поток (PID в _on_flow_image), pitch/yaw
                     # центр (продольный/курс = фаза 2/пилот). Сталл кадров → центр
@@ -508,9 +528,8 @@ class AltHoldBootstrap(Node):
                                    f"rel_alt={self.rel_alt}, odom={self.odom_count})")
             self.finished = True
             return
-        # RC override публикует отдельный WALL-таймер (_wall_publish), не tick:
-        # на низком RTF sim-таймер дал бы ~1.4 Гц wall и override протух бы. tick
-        # лишь обновляет self.roll/pitch/throttle/yaw — их шлёт wall-таймер 20 Гц.
+        # override публикуется в обёртке tick() сразу после этой логики (sim-тик,
+        # детерминированные точки смены) + доп. wall-re-публикация в main для свежести.
 
 
 def main():
@@ -611,9 +630,11 @@ def main():
     rclpy.init()
     node = AltHoldBootstrap(args)
     try:
-        # RC override публикуем ИЗ ЦИКЛА по wall-часам (time.monotonic) ~20 Гц —
-        # гарантированный реальный темп независимо от RTF и семантики таймеров rclpy.
-        # spin_once крутит автомат (sim-таймер) и колбэки подписок.
+        # ДЕТЕРМИНИЗМ: точки СМЕНЫ override теперь задаёт tick() (sim-таймер) —
+        # см. tick(). Этот wall-цикл (time.monotonic ~20 Гц) лишь РЕ-публикует
+        # текущее (между sim-тиками неизменное) значение для СВЕЖЕСТИ override на FCU,
+        # независимо от RTF. Значение между тиками константно → wall-re-publish новых
+        # точек смены не вносит. spin_once крутит автомат (sim-таймер) и колбэки.
         last_pub = 0.0
         while rclpy.ok() and not node.finished:
             rclpy.spin_once(node, timeout_sec=0.02)
