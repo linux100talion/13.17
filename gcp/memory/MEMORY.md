@@ -5,3 +5,4 @@
 - [VINS blocker](vins-blocker.md) — устарело, см. vins-init
 - [VINS init debug](vins-init.md) — check2+extrinsic+td исправлены; БЛОКЕР: scale=0.02 (features далеко) + gravity direction систематически wrong ([9.5,0,-2.5] вместо [0,9.5,2.5]) → failure detection каждые ~30с
 - [Sim workflow](sim-workflow.md) — make restart-all/fresh-start/status/wait; что теряется при fresh-start; патчи nav_up.sh; команды арминга
+- [FLOW-DAMP](flow-damper.md) — scale-free velocity-демпфер бокового сноса по одной форвард-камере (ветка nn2_c3_vins_althold_4); код-скелет написан на телефоне, продолжение по handoff-разделу docker/sim/FLOW_DAMP_spec.md (Шаг1 derotation-check → тюнинг)
