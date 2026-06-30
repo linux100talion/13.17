@@ -33,6 +33,7 @@ handover — отдельным прогоном.
 import argparse
 import math
 import time
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
@@ -51,6 +52,13 @@ RC_MIN_THR = 1000      # газ в минимум — нужно для арми
 # (sitl-extra.parm): он убирает RC-переключатель режима, чтобы радио не перебивало
 # set_mode("ALT_HOLD"). Подробности — там и в hold_alt_hold() ниже.
 RC_NOCHANGE = 65535
+
+# FLOW-DAMP (--flow-hold): интринсики + extrinsicRotation камеры из sim.yaml.
+# Матрица R и rotflow_sign=+1 ПОДТВЕРЖДЕНЫ flow_derotation_check (Шаг 1: остаток
+# 0.55× baseline на 1189 чистых вращательных кадрах gz-hold+yaw, неверный знак ×2.24).
+FLOW_FX = FLOW_FY = 640.0
+FLOW_CX, FLOW_CY = 640.0, 360.0
+FLOW_R = [0.0, -1.0, 0.0, -0.25708, 0.0, -0.96639, 0.96639, 0.0, -0.25708]
 
 # Состояния автомата
 S_PREARM, S_ARM, S_CLIMB, S_EXCITE, S_HANDOVER, S_OBSERVE, S_LAND, S_DONE = range(8)
@@ -106,6 +114,29 @@ class AltHoldBootstrap(Node):
         self.gz_ix = self.gz_iy = 0.0      # интеграл ошибки позиции (world) — I-член
         self.gz_it = None                  # пред. sim-время для dt интеграла
         self._gz_log_t = -1e9              # троттл отладочного лога gz-hold
+
+        # --- FLOW-DAMP (--flow-hold): боковой демпфер по камере (вариант a спеки) --
+        # Зрение+PID в _on_flow_image (раз на кадр), контроль в tick (S_EXCITE/flow),
+        # публикация — общий _wall_publish 20 Гц. Реюз hold-only-каркаса.
+        self.flow_omega = np.zeros(3)      # последняя ω IMU (FLU) для derotation
+        self.flow_roll_off = 0.0           # последний выход PID (PWM-смещение ROLL)
+        self.flow_last_sim = -1e9          # sim-время свежего кадра (fade на сталле)
+        self._flow_i = 0.0                 # интегратор PID
+        self._flow_prev_err = 0.0
+        self.est = None
+        if a.flow_hold:
+            from sensor_msgs.msg import Image, Imu
+            from flow_estimator import FlowEstimator
+            self.est = FlowEstimator(FLOW_FX, FLOW_FY, FLOW_CX, FLOW_CY,
+                                     FLOW_R, a.flow_rsign)
+            self.create_subscription(Image, a.flow_image_topic, self._on_flow_image,
+                                     qos_profile_sensor_data)
+            self.create_subscription(Imu, a.flow_imu_topic, self._on_flow_imu,
+                                     qos_profile_sensor_data)
+            self.get_logger().info(
+                f"FLOW-DAMP: демпфер ROLL по {a.flow_image_topic}+{a.flow_imu_topic} "
+                f"(kp={a.flow_kp} ki={a.flow_ki} rsign={a.flow_rsign:+.0f} "
+                f"osign={a.flow_osign:+.0f})")
 
         self.state = S_PREARM
         self.state_t0 = None          # базируется лениво при первом тике с живым /clock
@@ -208,6 +239,38 @@ class AltHoldBootstrap(Node):
         self.gt_px, self.gt_py, self.gt_pt = x, y, t
         self.gt_x, self.gt_y = x, y
         self.gt_have = True
+
+    # --- FLOW-DAMP колбэки (только при --flow-hold) -------------------------
+    def _on_flow_imu(self, m):
+        self.flow_omega = np.array([m.angular_velocity.x, m.angular_velocity.y,
+                                    m.angular_velocity.z])
+
+    def _on_flow_image(self, m):
+        # mono8 → grayscale без cv_bridge; LK+derotation в FlowEstimator; PID ЗДЕСЬ
+        # (раз на свежий кадр, dt=res['dt'] — настоящий интервал кадра, без двойного
+        # интегрирования в 20-Гц tick). tick лишь переносит flow_roll_off в self.roll.
+        if self.est is None or m.encoding not in ('mono8', '8UC1'):
+            return
+        gray = np.frombuffer(m.data, dtype=np.uint8).reshape(m.height, m.width)
+        stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        res = self.est.process(gray, stamp, self.flow_omega)
+        if res is None:
+            return
+        a = self.a
+        # стик в sim не подаём → desired=0 (центр): гасим снос (дрейф/ветер).
+        err = res['lateral'] - 0.0
+        self._flow_i = float(np.clip(self._flow_i + a.flow_ki * err * res['dt'],
+                                     -a.flow_imax, a.flow_imax))
+        d = a.flow_kd * (err - self._flow_prev_err) / max(1e-3, res['dt'])
+        self._flow_prev_err = err
+        u = float(np.clip(a.flow_kp * err + self._flow_i + d, -a.flow_max, a.flow_max))
+        # confidence (число треков) → плавный fade-out: мало фич → демпфер к нулю.
+        conf = res['conf']
+        blend = float(np.clip((conf - a.flow_conf_min) /
+                              max(1e-6, a.flow_conf_full - a.flow_conf_min), 0.0, 1.0))
+        # flow_osign — направление ROLL-торможения (TODO: тюнить Шагом 3, как gz_rsign).
+        self.flow_roll_off = a.flow_osign * blend * u
+        self.flow_last_sim = self.now_sim()
 
     # --- публикация RC override (WALL-таймер 20 Гц) -------------------------
     def _wall_publish(self):
@@ -336,6 +399,19 @@ class AltHoldBootstrap(Node):
                             f"gz: yaw={math.degrees(self.gt_yaw):+.0f} sp=({spx-self.hold_sp[0]:+.1f},{spy-self.hold_sp[1]:+.1f}) "
                             f"e=({ex:+.1f},{ey:+.1f}) v=({self.gt_vx:+.2f},{self.gt_vy:+.2f}) "
                             f"i=({i_fwd:+.1f},{i_rgt:+.1f}) pitch_off={int(po):+d} roll_off={int(ro):+d}")
+                elif self.a.flow_hold:
+                    # боковой демпфер: ROLL ← поток (PID в _on_flow_image), pitch/yaw
+                    # центр (продольный/курс = фаза 2/пилот). Сталл кадров → центр
+                    # (fade в чистый ALT_HOLD); override продолжает идти wall-таймером.
+                    self.pitch = RC_CENTER
+                    fresh = (self.now_sim() - self.flow_last_sim) < 0.5
+                    self.roll = RC_CENTER + (int(self.flow_roll_off) if fresh else 0)
+                    if self.now_sim() - self._gz_log_t >= 2.0:
+                        self._gz_log_t = self.now_sim()
+                        self.get_logger().info(
+                            f"flow: roll_off={int(self.flow_roll_off):+d} "
+                            f"fresh={fresh} (e_world=({self.gt_x:+.1f},{self.gt_y:+.1f}) "
+                            f"если есть gt)")
                 else:
                     self.roll = self.pitch = RC_CENTER   # gz нет → просто уровень
                 if self.elapsed() > self.a.hold_sec:
@@ -493,6 +569,32 @@ def main():
                         '(0=без вращения; ~80 ≈ умеренное ω для derotation-теста)')
     p.add_argument('--gz-yaw-period', dest='gz_yaw_period', type=float, default=6.0,
                    help='gz-hold: период смены знака наложенного yaw, sim-сек (default 6)')
+    # FLOW-DAMP (--flow-hold): боковой velocity-демпфер по камере вместо gz-истины.
+    # Спека docker/sim/FLOW_DAMP_spec.md (вариант a). Живёт в каркасе hold-only,
+    # реюзит wall-publisher 20 Гц. gz-hold и flow-hold взаимоисключающи (gz приоритетнее).
+    p.add_argument('--flow-hold', dest='flow_hold', action='store_true',
+                   help='hold-only: гасить боковой снос демпфером по камере '
+                        '(image_mono + gz-гироскоп) → ROLL-override; pitch/yaw центр')
+    p.add_argument('--flow-kp', dest='flow_kp', type=float, default=8.0,
+                   help='flow: P по боковому потоку (px/кадр → PWM), default 8')
+    p.add_argument('--flow-ki', dest='flow_ki', type=float, default=2.0, help='flow: I (default 2)')
+    p.add_argument('--flow-kd', dest='flow_kd', type=float, default=0.0, help='flow: D (default 0)')
+    p.add_argument('--flow-imax', dest='flow_imax', type=float, default=120.0,
+                   help='flow: anti-windup, макс |I| PWM (default 120)')
+    p.add_argument('--flow-max', dest='flow_max', type=float, default=150.0,
+                   help='flow: макс |ROLL-offset| PWM (default 150 ≈ 13°)')
+    p.add_argument('--flow-conf-min', dest='flow_conf_min', type=float, default=0.05,
+                   help='flow: ниже этой confidence начинается fade-out (default 0.05)')
+    p.add_argument('--flow-conf-full', dest='flow_conf_full', type=float, default=0.20,
+                   help='flow: выше — полный авторитет демпфера (default 0.20)')
+    p.add_argument('--flow-rsign', dest='flow_rsign', type=float, default=1.0,
+                   help='flow: знак derotation (rotflow_sign; +1 подтверждён Шагом 1)')
+    p.add_argument('--flow-osign', dest='flow_osign', type=float, default=1.0,
+                   help='flow: знак ROLL-offset/направление торможения (TODO: тюнить Шагом 3)')
+    p.add_argument('--flow-image-topic', dest='flow_image_topic', default='/image_mono',
+                   help='flow: топик камеры mono8 (default /image_mono)')
+    p.add_argument('--flow-imu-topic', dest='flow_imu_topic', default='/gz_imu/data_flu',
+                   help='flow: топик FLU-гироскопа (default /gz_imu/data_flu)')
     p.add_argument('--throttle-climb', dest='throttle_climb', type=int, default=1650,
                    help='PWM газа на подъём (default 1650)')
     p.add_argument('--throttle-hold', dest='throttle_hold', type=int, default=RC_CENTER,
@@ -503,6 +605,8 @@ def main():
     p.add_argument('--land-budget', dest='land_budget', type=float, default=120.0, help='бюджет посадки, sim-сек')
     p.add_argument('--ground-z', dest='ground_z', type=float, default=0.3, help='порог касания по rel_alt, м')
     args = p.parse_args()
+    if args.flow_hold:
+        args.hold_only = True   # flow-демпфер живёт в каркасе hold-only (фаза EXCITE)
 
     rclpy.init()
     node = AltHoldBootstrap(args)
