@@ -176,57 +176,62 @@ undistorted-точки с УЖЕ посчитанными скоростями (
 
 ---
 
-# ПРОДОЛЖЕНИЕ В РАБОЧЕМ БОКСЕ (handoff)
+# СТАТУС v0 — Шаги 1–3 ЗАКРЫТЫ ✅ (ветка nn2_c3_vins_althold_4)
 
-Файлы написаны и закоммичены на телефоне (стек тут не поднять). Новая сессия на сим-боксе
-продолжает отсюда. Ветка: **nn2_c3_vins_althold_4**.
+**FLOW-DAMP v0 валидирован в симуляции: боковой демпфер режет снос ×6 по оси ROLL.**
+Ниже — что сделано по каждому шагу + остаток (Шаг 4 / фаза 2 / продольный конфаунд).
 
-## Что уже есть (код)
+## Код (актуально)
 - `src/lab/flow_estimator.py` — `FlowEstimator` (numpy+cv2, БЕЗ ROS): sparse LK → derotate
-  (ω_cam=R·ω_imu) → боковой поток + диагностика. Параметры `R_cam_imu`, `rotflow_sign`.
-- `src/lab/flow_damp_node.py` — v0-нода (импортирует FlowEstimator): стик=setpoint → PID →
-  ROLL-override; pitch/yaw/throttle сквозные; confidence→fade-out.
-- `src/lab/flow_derotation_check.py` — ОФФЛАЙН-валидация знака по bag (mono8 ИЛИ bgr8/rgb8).
-- Всё проходит `py_compile`; рантайм-зависимости (rclpy/cv2/rosbag2_py) — только в nav.
+  (ω_cam=R·ω_imu) → боковой поток + диагностика. Дефолты `R`+`rotflow_sign=+1` ПОДТВЕРЖДЕНЫ
+  (Шаг 1). Шарится между демпфером и оффлайн-чеком.
+- `src/lab/alt_hold_bootstrap.py` — демпфер живёт здесь веткой **`--flow-hold`** (вариант a,
+  Шаг 2): реюз hold-only-каркаса + wall-publisher'а 20 Гц. Колбэк `_on_flow_image` (зрение+PID
+  раз на кадр) → `flow_roll_off` → ветка `S_EXCITE/flow` (ROLL, pitch/yaw центр) → `_wall_publish`.
+  Флаги `--flow-kp/ki/kd/imax/max/conf-*/rsign/osign/*-topic`. `flow_damp_node.py` — устаревший
+  standalone (оставлен как боевой вариант фазы 2; в sim не используется).
+- `src/lab/flow_derotation_check.py` — оффлайн-валидация знака по bag; добавлен `--omega-max`
+  (band-pass по |ω|, отсекает слом LK на быстром вращении).
+- gz-hold получил **`--gz-yaw`/`--gz-yaw-period`** — наложенный yaw поверх удержания позиции
+  (диагностический чистый-вращение режим, использован в Шаге 1).
 
-## Шаг 1 (ПЕРВЫЙ) — снять TODO[sign] через derotation-check. НЕ нужен полный сим-прогон,
-нужен лишь bag с КАМЕРОЙ + `/gz_imu/data_flu` + СЕГМЕНТОМ ВРАЩЕНИЯ (yaw/раскачка).
-ВАЖНО: дефолтный bag пишет `/image_color` (НЕ `/image_mono`) и MAVROS-IMU (НЕ gz-IMU).
-Поэтому записать ЦЕЛЕВОЙ лёгкий bag (на сим-боксе, атомарно через capture_scene):
-```bash
-# взлёт+раскачка с yaw, в bag кладём gz-IMU и цветной кадр (mp4/кадры/заливку гасим)
-CPU=1 TOPICS_EXTRA="/gz_imu/data_flu" TOPIC="/image_color" \
-  GDRIVE_UP=0 MP4=0 N_FRAMES=0 \
-  ARM_SIM_BUDGET=100 ARM_WALL_CAP=2400 \
-  bash src/lab/capture_scene.sh arm takeoff 3 bootstrap land
-# (bootstrap = взлёт в ALT_HOLD + раскачка → даёт вращение; см. src/lab/CLAUDE.md)
-```
-Потом прогнать анализ В КОНТЕЙНЕРЕ nav против записанного bag:
-```bash
-docker exec <nav> bash -lc \
- "cd /root/sim_ws/output && python3 /root/sim_ws/src/.../flow_derotation_check.py \
-   scene_bag --image-topic /image_color --imu-topic /gz_imu/data_flu --omega-thresh 0.3"
-# (путь к скрипту — где смонтирован src/lab; обычно /root/sim_ws/src/lab или /scripts)
-```
-Вывод даст победителя `{R|R^T}×{знак}` по минимуму остатка на вращательных кадрах.
-→ Вписать победный R + `rotflow_sign` в дефолты `flow_estimator.py` (или параметры ноды).
-Если ни один не бьёт baseline — копать формулу rot-flow/extrinsic (или мало вращения).
+## Шаг 1 — знак derotation ✅ ЗАКРЫТ
+**Итог: `R` (матрица sim.yaml) + `rotflow_sign=+1` — это текущие дефолты, менять не нужно.**
+`flow_derotation_check` на чистом bag'е (gz-hold держит позицию e≈0.1 м + наложенный yaw →
+поток rotation-доминирован): **остаток 0.55× baseline на 1189 кадрах**, неверный знак ×2.24,
+`Rᵀ` ×1.34. Ключевой приём: дрейф ALT_HOLD доминирует поток, поэтому «чистое вращение» нужно
+ловить под gz-hold (`BS_GZHOLD=1 BS_GZ_YAW=80`), а не в свободном bag'е (там 0.76–0.97×).
+Ветра в стеке НЕТ (SIM_WIND_SPD=0, нет `<wind>` в SDF) — снос это собственный дрейф ALT_HOLD.
 
-## Шаг 2 — конфликт override / запуск. Два публишера в `/mavros/rc/override`
-(`alt_hold_bootstrap` для взлёта vs `flow_damp_node`) КОНФЛИКТУЮТ. Решить ОДНО из:
-- (a) свернуть в `alt_hold_bootstrap.py` как ветку `--flow-hold` (реюз PID-блока ~277–330,
-  меняется только источник скорости: FlowEstimator вместо gz-истины) — как в спеке §8; ИЛИ
-- (b) секвенс: bootstrap взлетает и ОТПУСКАЕТ override (в DONE/гейт), затем стартует
-  flow_damp_node и берёт override. Риск рассинхрона — (a) чище.
+## Шаг 2 — конфликт override ✅ ЗАКРЫТ выбором варианта (a)
+Демпфер свёрнут в `alt_hold_bootstrap.py` веткой `--flow-hold` → публишер ОДИН (конфликт
+растворён). Унаследован проверенный wall-publisher 20 Гц: override не протухает на низком RTF
+и не обрывается при плохом потоке (fade-out: confidence→blend→0, сталл кадров→ROLL центр, но
+публикация ИДЁТ). Гейт mode/armed неявный — ветка живёт только после ARM+CLIMB в ALT_HOLD.
 
-## Шаг 3 — тюнинг гейнов (атомарными прогонами). Оракул дрейфа = ИСТИННАЯ поза Gazebo
-(`/model/iris_cam/odometry`). Ветер — `SIM_WIND_*`. Метрика: насколько демпфер срезает
-скорость бокового сноса vs baseline. Тюнить `kp/ki/kd`, `k_stick`, `conf_min/full`,
-`max_offset`. Проверить fade-out (убрать текстуру/затемнить → плавный возврат в ALT_HOLD).
+## Шаг 3 — валидация демпфера ✅ ЗАКРЫТ (A/B по истинной позе)
+Атомарные прогоны `liftland` + `BS_FLOWHOLD=1` (damped) vs без флага (baseline); оракул —
+`/model/iris_cam/odometry`. Сравнение боковой (ROLL, демпфер) vs продольной (pitch, не
+управляется = встроенный baseline), окно «на текстуре» (первые ~15 с воздуха):
 
-## Шаг 4 (вторичное) — оракул `estimate_extrinsic=2` как независимая сверка Шага 1
-(см. «Хвост параллельной задачи» выше). Заодно проверит гипотезу срыва ~25 с.
+| ось | BASELINE | DAMPED |
+|---|---|---|
+| продольная (pitch, общий режим) | 2.44–2.81 м/с | 2.47 м/с |
+| **боковая (roll, демпфер)** | **~3.0 м/с** | **0.51 м/с** |
 
-## Граф зависимостей шагов
-Шаг1 (знак) → Шаг3 (тюнинг). Шаг2 (запуск) независим, но нужен для Шага3.
-Шаг4 — необязательная сверка Шага1.
+→ **демпфер режет боковой снос ×6** (3.0→0.51 м/с). Продольные оси совпали → forward-снос
+не зависит от демпфера (не смещает сравнение). Per-sample-yaw проекция подтвердила (yaw-смаз
+не виноват). **`osign=+1` верный** (подавляет, не разгоняет). Команда: `liftland`+`BS_FLOWHOLD=1`
+`TOPICS_EXTRA="/gz_imu/data_flu /model/iris_cam/odometry"`; анализ дрейфа — в scratchpad.
+
+## Остаток
+- **Тюнинг гейнов** (Шаг 3 был на дефолтах `kp8/ki2`): можно подкрутить `kp/ki/kd`,
+  `conf_min/full`, `flow_max` для меньшего остаточного дрейфа. Дефолты уже дают ×6.
+- **`--flow-osign` строго**: знак выверен по A/B (подавляет), но не оракулом — ок для v0.
+- **Продольный forward-снос — ОТКРЫТ**: причина не установлена (AHRS/EKF-lean без опорной
+  скорости, та же болезнь, что лечил gz-hold). Демпфер на pitch не влияет (v0 = только ROLL).
+  Всплывёт в фазе 2 (looming→PITCH) или при настоящем position-hold.
+- **Фаза 2**: looming-зануление (продольный) + визуальный yaw-hold — поверх доказанного ядра.
+- **Шаг 4 (вторичное)**: оракул `estimate_extrinsic=2` как независимая сверка Шага 1 +
+  гипотеза срыва VINS ~25 с (todo4).
+- **Стик=setpoint**: в sim desired=0 (нет пульта); реальный `k_stick*(стик−центр)` — боевой борт.
