@@ -96,6 +96,10 @@ def main():
     ap.add_argument('--imu-topic', default='/gz_imu/data_flu')
     ap.add_argument('--omega-thresh', type=float, default=0.3,
                     help='|ω| (rad/s) выше которого кадр считается «вращательным»')
+    ap.add_argument('--omega-max', type=float, default=float('inf'),
+                    help='ВЕРХНЯЯ граница |ω| (rad/s): берём только полосу '
+                         'omega_thresh<|ω|≤omega_max. Отсекает слишком быстрые кадры, '
+                         'где LK ломается (поток-мусор маскирует derotation). default=inf')
     ap.add_argument('--fx', type=float, default=DEF_FX)
     ap.add_argument('--fy', type=float, default=DEF_FY)
     ap.add_argument('--cx', type=float, default=DEF_CX)
@@ -121,7 +125,8 @@ def main():
 
     for stamp, gray in images:
         w = nearest_omega(imus, imu_stamps, stamp)
-        rot_frame = np.linalg.norm(w) > a.omega_thresh
+        wn = np.linalg.norm(w)
+        rot_frame = a.omega_thresh < wn <= a.omega_max
         for k, est in ests.items():
             res = est.process(gray, stamp, w)
             if res is not None and rot_frame:
@@ -129,7 +134,8 @@ def main():
         if rot_frame:
             n_rot += 1
 
-    print(f'\nвращательных кадров (|ω|>{a.omega_thresh}): {n_rot}\n')
+    band = f'{a.omega_thresh}<|ω|≤{a.omega_max}' if a.omega_max != float('inf') else f'|ω|>{a.omega_thresh}'
+    print(f'\nвращательных кадров ({band}): {n_rot}\n')
     if n_rot < 5:
         print('⚠️  мало вращательных кадров — нужен bag с yaw/раскачкой (excite). '
               'Результат ненадёжен.')

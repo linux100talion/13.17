@@ -322,6 +322,12 @@ class AltHoldBootstrap(Node):
                     po = max(-mx, min(mx, po)); ro = max(-mx, min(mx, ro))
                     self.pitch = RC_CENTER + int(po)
                     self.roll  = RC_CENTER + int(ro)
+                    # Наложенный yaw (derotation-тест): позиция держится PID'ом, а
+                    # курс качаем ± с периодом gz_yaw_period → много чистых
+                    # вращательных кадров без трансляции. 0 → штатный холд без yaw.
+                    if self.a.gz_yaw > 0.0:
+                        y_sign = 1 if (int(self.elapsed() / self.a.gz_yaw_period) % 2 == 0) else -1
+                        self.yaw = RC_CENTER + int(y_sign * self.a.gz_yaw)
                     # отладка: что контроллер видит и командует (раз в ~2 sim-сек).
                     # Связь e→коррекция→отклик однозначно ловит знак/фрейм.
                     if self.now_sim() - self._gz_log_t >= 2.0:
@@ -478,6 +484,15 @@ def main():
                    help='gz-hold: радиус кругового траекторного сетпойнта, м (0=чистый холд; для параллакса VINS ~1-3)')
     p.add_argument('--gz-traj-t', dest='gz_traj_t', type=float, default=20.0,
                    help='gz-hold: период обхода круга, sim-сек (default 20)')
+    # Наложенный yaw поверх удержания позиции — для ЧИСТОГО derotation-теста:
+    # дрон стоит на месте (PID держит позицию, он yaw-инвариантен), а курс
+    # вращается → поток rotation-доминирован → flow_derotation_check видит саму
+    # derotation, не маскированную трансляционным дрейфом ALT_HOLD.
+    p.add_argument('--gz-yaw', dest='gz_yaw', type=float, default=0.0,
+                   help='gz-hold: амплитуда наложенного yaw, PWM от центра '
+                        '(0=без вращения; ~80 ≈ умеренное ω для derotation-теста)')
+    p.add_argument('--gz-yaw-period', dest='gz_yaw_period', type=float, default=6.0,
+                   help='gz-hold: период смены знака наложенного yaw, sim-сек (default 6)')
     p.add_argument('--throttle-climb', dest='throttle_climb', type=int, default=1650,
                    help='PWM газа на подъём (default 1650)')
     p.add_argument('--throttle-hold', dest='throttle_hold', type=int, default=RC_CENTER,
