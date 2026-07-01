@@ -21,3 +21,5 @@ __pycache__/
 # Симуляция — временные выходные данные
 docker/sim/output/
 docker/sim/worlds/preview/*.bag
+# Персистентные калибровочные бэги (крупные, вне git; см. HowToFlow_PID_synth.md)
+docker/sim/bags/
