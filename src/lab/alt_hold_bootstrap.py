@@ -130,8 +130,12 @@ class AltHoldBootstrap(Node):
         self.flow_last_sim = -1e9          # sim-время свежего кадра (fade на сталле)
         self._flow_i = 0.0                 # интегратор PID
         self._flow_prev_err = 0.0
+        # YAW-hold (фаза 2): визуальный курс-холд по yaw_flow (heading = ∫yaw_flow)
+        self.yaw_head = 0.0                # накопленный визуальный курс (px), от входа в hold
+        self.yaw_off = 0.0                 # последний YAW-override (PWM от центра)
+        self.yaw_last_sim = -1e9
         self.est = None
-        if a.flow_hold:
+        if a.flow_hold or a.yaw_hold:
             from sensor_msgs.msg import Image, Imu
             from flow_estimator import FlowEstimator
             self.est = FlowEstimator(FLOW_FX, FLOW_FY, FLOW_CX, FLOW_CY,
@@ -140,10 +144,15 @@ class AltHoldBootstrap(Node):
                                      qos_profile_sensor_data)
             self.create_subscription(Imu, a.flow_imu_topic, self._on_flow_imu,
                                      qos_profile_sensor_data)
-            self.get_logger().info(
-                f"FLOW-DAMP: демпфер ROLL по {a.flow_image_topic}+{a.flow_imu_topic} "
-                f"(kp={a.flow_kp} ki={a.flow_ki} rsign={a.flow_rsign:+.0f} "
-                f"osign={a.flow_osign:+.0f})")
+            if a.flow_hold:
+                self.get_logger().info(
+                    f"FLOW-DAMP: демпфер ROLL по {a.flow_image_topic}+{a.flow_imu_topic} "
+                    f"(kp={a.flow_kp} ki={a.flow_ki} rsign={a.flow_rsign:+.0f} "
+                    f"osign={a.flow_osign:+.0f})")
+            if a.yaw_hold:
+                self.get_logger().info(
+                    f"YAW-HOLD: визуальный курс-холд (kp={a.yaw_kp} ki={a.yaw_ki} "
+                    f"osign={a.yaw_osign:+.0f})")
 
         self.state = S_PREARM
         self.state_t0 = None          # базируется лениво при первом тике с живым /clock
@@ -263,21 +272,30 @@ class AltHoldBootstrap(Node):
         if res is None:
             return
         a = self.a
-        # стик в sim не подаём → desired=0 (центр): гасим снос (дрейф/ветер).
-        err = res['lateral'] - 0.0
-        self._flow_i = float(np.clip(self._flow_i + a.flow_ki * err * res['dt'],
-                                     -a.flow_imax, a.flow_imax))
-        d = a.flow_kd * (err - self._flow_prev_err) / max(1e-3, res['dt'])
-        self._flow_prev_err = err
-        u = float(np.clip(a.flow_kp * err + self._flow_i + d, -a.flow_max, a.flow_max))
-        # confidence (число треков) → плавный fade-out: мало фич → демпфер к нулю.
+        now = self.now_sim()
+        # confidence (число треков) → плавный fade-out: мало фич → к нулю.
         conf = res['conf']
         blend = float(np.clip((conf - a.flow_conf_min) /
                               max(1e-6, a.flow_conf_full - a.flow_conf_min), 0.0, 1.0))
-        # flow_osign — направление ROLL-торможения (TODO: тюнить Шагом 3, как gz_rsign).
-        self.flow_roll_off = a.flow_osign * blend * u
         self.flow_conf = conf
-        self.flow_last_sim = self.now_sim()
+        if a.flow_hold:
+            # ROLL-демпфер (Шаг 1): стик=0 → гасим боковой снос (дрейф/ветер).
+            err = res['lateral'] - 0.0
+            self._flow_i = float(np.clip(self._flow_i + a.flow_ki * err * res['dt'],
+                                         -a.flow_imax, a.flow_imax))
+            d = a.flow_kd * (err - self._flow_prev_err) / max(1e-3, res['dt'])
+            self._flow_prev_err = err
+            u = float(np.clip(a.flow_kp * err + self._flow_i + d, -a.flow_max, a.flow_max))
+            self.flow_roll_off = a.flow_osign * blend * u
+            self.flow_last_sim = now
+        if a.yaw_hold:
+            # YAW курс-холд (фаза 2): heading = ∫yaw_flow (визуальный курс). kp гасит
+            # yaw-rate, ki ДЕРЖИТ курс (тут интеграл ПОЛЕЗЕН — зеркало roll, где вреден).
+            yf = res['yaw_flow']
+            self.yaw_head = float(np.clip(self.yaw_head + yf, -a.yaw_imax, a.yaw_imax))
+            yu = float(np.clip(a.yaw_kp * yf + a.yaw_ki * self.yaw_head, -a.yaw_max, a.yaw_max))
+            self.yaw_off = a.yaw_osign * blend * yu
+            self.yaw_last_sim = now
 
     def excite_total(self):
         """Длительность всей pulse-последовательности (для триггера land)."""
@@ -433,6 +451,7 @@ class AltHoldBootstrap(Node):
                         self.hold_sp = (self.gt_x, self.gt_y)
                         self.hold_yaw0 = self.gt_yaw          # ось «вправо» для челнока
                         self.hold_t0 = self.now_sim()         # старт тайминга челнока
+                        self.yaw_head = 0.0                   # курс-референс yaw-hold = вход
                         self.gz_ix = self.gz_iy = 0.0; self.gz_it = self.now_sim()
                         self.get_logger().info(
                             f"    gz-hold: центр=({self.gt_x:.2f},{self.gt_y:.2f}) "
@@ -494,10 +513,12 @@ class AltHoldBootstrap(Node):
                         self.roll = RC_CENTER + (int(self.flow_roll_off) if fresh else 0)
                     else:
                         self.roll = RC_CENTER + int(ro)
-                    # Наложенный yaw (derotation-тест): позиция держится PID'ом, а
-                    # курс качаем ± с периодом gz_yaw_period → много чистых
-                    # вращательных кадров без трансляции. 0 → штатный холд без yaw.
-                    if self.a.gz_yaw > 0.0:
+                    # YAW: визуальный курс-холд (фаза 2, перебивает всё) / наложенный yaw
+                    # (derotation-тест) / центр.
+                    if self.a.yaw_hold:
+                        fresh = (self.now_sim() - self.yaw_last_sim) < 0.5
+                        self.yaw = RC_CENTER + (int(self.yaw_off) if fresh else 0)
+                    elif self.a.gz_yaw > 0.0:
                         y_sign = 1 if (int(self.elapsed() / self.a.gz_yaw_period) % 2 == 0) else -1
                         self.yaw = RC_CENTER + int(y_sign * self.a.gz_yaw)
                     # отладка: что контроллер видит и командует (раз в ~2 sim-сек).
@@ -718,6 +739,21 @@ def main():
                    help='flow: знак derotation (rotflow_sign; +1 подтверждён Шагом 1)')
     p.add_argument('--flow-osign', dest='flow_osign', type=float, default=1.0,
                    help='flow: знак ROLL-offset/направление торможения (TODO: тюнить Шагом 3)')
+    # YAW-hold (фаза 2): визуальный курс-холд по yaw_flow (heading=∫yaw_flow). Сила
+    # yaw'а — depth-independent (не упирается в дальнюю сцену, в отличие от roll). kp
+    # гасит yaw-rate, ki ДЕРЖИТ курс (интеграл тут полезен). Реюзит FlowEstimator/подписки.
+    p.add_argument('--yaw-hold', dest='yaw_hold', action='store_true',
+                   help='фаза 2: визуальный курс-холд YAW-override по камере+гиро')
+    p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=4.0,
+                   help='yaw: P по yaw_flow (демпф yaw-rate), PWM/(px/кадр); default 4')
+    p.add_argument('--yaw-ki', dest='yaw_ki', type=float, default=2.0,
+                   help='yaw: I по ∫yaw_flow (ДЕРЖИТ курс — полезно), PWM/px; default 2')
+    p.add_argument('--yaw-imax', dest='yaw_imax', type=float, default=200.0,
+                   help='yaw: кламп накопленного курса ∫yaw_flow, px (anti-windup); default 200')
+    p.add_argument('--yaw-max', dest='yaw_max', type=float, default=150.0,
+                   help='yaw: макс |YAW-offset| PWM; default 150')
+    p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=1.0,
+                   help='yaw: знак YAW-коррекции (±1; тюнить как osign, оракул — истинный yaw)')
     p.add_argument('--flow-smooth', dest='flow_smooth', type=int, default=1,
                    help='flow: временное сглаживание lateral, медиана по N кадрам (1=выкл; ~5 режет белый шум ~√N)')
     p.add_argument('--flow-image-topic', dest='flow_image_topic', default='/image_mono',

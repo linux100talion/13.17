@@ -88,10 +88,19 @@ class FlowEstimator:
                 if len(self._lat_buf) > self.smooth_n:
                     self._lat_buf.pop(0)
                 lateral = float(np.median(self._lat_buf)) if self.smooth_n > 1 else lateral_raw
+                # --- ВИЗУАЛЬНЫЙ YAW (фаза 2): derotate ТОЛЬКО roll+pitch (гиро x,y —
+                # гравитация-референс, НЕ дрейфуют), yaw гиро НЕ вычитаем → остаток =
+                # yaw-вращение + трансляция. В ДАЛЬНЕЙ сцене трансляция ≈0 (тот самый
+                # depth, что убил боковую ось) → остаток ≈ чистый визуальный yaw.
+                oi = np.asarray(omega_imu, dtype=np.float64)
+                w_ny = self.R @ np.array([oi[0], oi[1], 0.0])   # FLU: yaw (z) обнулён
+                rot_ny = self._rot_flow(p0, w_ny[0], w_ny[1], w_ny[2], dt)
+                yaw_flow = float(np.median((flow - rot_ny)[:, 0]))  # px/кадр ∝ визуальный yaw
                 # TODO[phase2]: дивергенция (looming) из аффинного фита tr по (xn,yn) → PITCH.
                 divergence = 0.0
                 out = dict(
-                    lateral=lateral, lateral_raw=lateral_raw, divergence=divergence, n=n, dt=dt,
+                    lateral=lateral, lateral_raw=lateral_raw, yaw_flow=yaw_flow,
+                    divergence=divergence, n=n, dt=dt,
                     conf=float(n) / float(self.max_feats),
                     # --- диагностика для flow_derotation_check ---
                     resid_rms=float(np.sqrt(np.mean(np.sum(tr ** 2, axis=1)))),
