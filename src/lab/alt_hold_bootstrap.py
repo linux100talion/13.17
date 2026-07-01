@@ -277,27 +277,35 @@ class AltHoldBootstrap(Node):
         self.flow_conf = conf
         self.flow_last_sim = self.now_sim()
 
+    def excite_total(self):
+        """Длительность всей pulse-последовательности (для триггера land)."""
+        a = self.a
+        n = max(1, a.roll_excite_nrep)
+        return 4.0 * n * a.roll_excite_tau + a.roll_excite_settle   # вправо+влево+пауза
+
     def _roll_excite_cmd(self):
         """system-ID: заданный roll_off (PWM-offset от центра). roll_off экзогенный.
         Режимы (--roll-excite-mode):
-        - 'balanced' (по умолч.): БАЛАНСИРОВАННЫЕ тычки. Профиль ускорения +τ/−2τ/+τ
-          (как bootstrap EXCITE) → скорость 0→+→−→0 и позиция ВОЗВРАЩАЕТСЯ к старту
-          каждый цикл (4τ) → дрон на сцене, не сносит. Сторона чередуется каждые
-          nrep циклов («N вправо, N влево»). Затем liftland сам садит.
-        - 'chirp': линейный чирп f0→f1 + ступени (богатый спектр, НО сносит позицию
-          ∝ amp/f₀² — уводит дрон за сцену; оставлен для полноты)."""
+        - 'pulse' (по умолч.): ТЫЧОК = +amp(τ) разгон / −amp(τ) торможение → дрон едет
+          и ВСТАЁТ за 2τ (сам ALT_HOLD не тормозит). nrep тычков вправо, nrep влево
+          (возврат к старту), потом центр → land (excite_total). Короткая
+          последовательность (~4nτ) → снос от возмущения не успевает разогнаться, дрон
+          на сцене. amp у макс для v над шумом (см. расчёт в HowTo).
+        - 'chirp': линейный чирп f0→f1 + ступени (СНОСИТ позицию ∝ amp/f₀²; для полноты)."""
         a = self.a
         t = self.elapsed()
-        if a.roll_excite_mode == 'balanced':
-            T = max(1e-3, a.roll_excite_tau)
-            cycle = 4.0 * T
-            tt = t % cycle
-            n = int(t / cycle)
-            # +τ/−2τ/+τ: импульсы в мире компенсируются → позиция возвращается
-            p = -1.0 if (T <= tt < 3.0 * T) else 1.0
-            # сторона: nrep циклов в одну, nrep в обратную (сцену подметаем ±, net-0)
-            c = 1.0 if ((n // max(1, a.roll_excite_nrep)) % 2 == 0) else -1.0
-            return c * p * a.roll_excite_amp
+        if a.roll_excite_mode == 'pulse':
+            tau = max(1e-3, a.roll_excite_tau)
+            n = max(1, a.roll_excite_nrep)
+            t_right = n * 2.0 * tau
+            t_left = 2.0 * t_right
+            if t < t_right:                          # тычок(и) вправо: +amp/−amp → стоп
+                ph = t % (2.0 * tau)
+                return a.roll_excite_amp if ph < tau else -a.roll_excite_amp
+            if t < t_left:                           # тычок(и) влево: −amp/+amp → назад, стоп
+                ph = (t - t_right) % (2.0 * tau)
+                return -a.roll_excite_amp if ph < tau else a.roll_excite_amp
+            return 0.0                               # готово → центр (land по excite_total)
         # 'chirp'
         if t <= a.roll_excite_chirp:
             T = max(1e-3, a.roll_excite_chirp)
@@ -482,7 +490,12 @@ class AltHoldBootstrap(Node):
                             f"если есть gt)")
                 else:
                     self.roll = self.pitch = RC_CENTER   # gz нет → просто уровень
-                if self.elapsed() > self.a.hold_sec:
+                # land: pulse-excite → сразу после последовательности тычков; иначе по hold_sec
+                if self.a.roll_excite and self.a.roll_excite_mode == 'pulse':
+                    if self.elapsed() > self.excite_total():
+                        self.get_logger().info(f"    pulse-excite ({self.excite_total():.1f}s) завершён — садимся")
+                        self.result = "HOLD_DONE"; self.goto(S_LAND)
+                elif self.elapsed() > self.a.hold_sec:
                     self.get_logger().info(f"    hold-only {self.a.hold_sec}s истекли — садимся")
                     self.result = "HOLD_DONE"; self.goto(S_LAND)
                 return
@@ -670,15 +683,17 @@ def main():
     # замкнутом O2, где roll_off∝v_right). Требует записи /mavros/rc/override в bag.
     p.add_argument('--roll-excite', dest='roll_excite', action='store_true',
                    help='system-ID: заданный roll_off на roll, pitch gz-held (демпфер выкл)')
-    p.add_argument('--roll-excite-mode', dest='roll_excite_mode', default='balanced',
-                   choices=['balanced', 'chirp'],
-                   help="balanced (+τ/−2τ/+τ, позиция возвращается, на сцене) или chirp (сносит)")
-    p.add_argument('--roll-excite-tau', dest='roll_excite_tau', type=float, default=2.0,
-                   help='balanced: базовая τ профиля +τ/−2τ/+τ, sim-сек (цикл=4τ); default 2')
-    p.add_argument('--roll-excite-nrep', dest='roll_excite_nrep', type=int, default=3,
-                   help='balanced: циклов в одну сторону перед сменой (N вправо/N влево); default 3')
-    p.add_argument('--roll-excite-amp', dest='roll_excite_amp', type=float, default=50.0,
-                   help='roll-excite: амплитуда, PWM от центра (default 50)')
+    p.add_argument('--roll-excite-mode', dest='roll_excite_mode', default='pulse',
+                   choices=['pulse', 'chirp'],
+                   help="pulse (тычок +τ/−τ: разгон/торможение → стоп; вправо, влево, land) или chirp (сносит)")
+    p.add_argument('--roll-excite-tau', dest='roll_excite_tau', type=float, default=1.5,
+                   help='pulse: полудуга разгон/торможение, sim-сек (тычок=2τ, «до остановки за 2τ»); default 1.5')
+    p.add_argument('--roll-excite-nrep', dest='roll_excite_nrep', type=int, default=1,
+                   help='pulse: тычков в каждую сторону (1 = вправо, влево); default 1')
+    p.add_argument('--roll-excite-settle', dest='roll_excite_settle', type=float, default=1.5,
+                   help='pulse: пауза-успокоение по центру перед land, sim-сек; default 1.5')
+    p.add_argument('--roll-excite-amp', dest='roll_excite_amp', type=float, default=250.0,
+                   help='roll-excite: амплитуда, PWM от центра (default 250 → v_пик~3.75 м/с)')
     p.add_argument('--roll-excite-f0', dest='roll_excite_f0', type=float, default=0.15,
                    help='roll-excite: начальная частота чирпа, Гц (default 0.15)')
     p.add_argument('--roll-excite-f1', dest='roll_excite_f1', type=float, default=1.5,
