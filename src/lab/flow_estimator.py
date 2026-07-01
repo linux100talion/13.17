@@ -27,7 +27,7 @@ except ImportError:
 
 class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
-                 smooth_n=1):
+                 smooth_n=1, yaw_smooth_n=1):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -40,6 +40,8 @@ class FlowEstimator:
         # мал и петля к нему нечувствительна (τ-развёртка в flow_loop_sim). 1 = выкл.
         self.smooth_n = max(1, int(smooth_n))
         self._lat_buf = []
+        self.yaw_smooth_n = max(1, int(yaw_smooth_n))   # сглаживание визуального yaw
+        self._yaw_buf = []
         self.prev_gray = None
         self.prev_pts = None
         self.prev_stamp = None
@@ -95,7 +97,11 @@ class FlowEstimator:
                 oi = np.asarray(omega_imu, dtype=np.float64)
                 w_ny = self.R @ np.array([oi[0], oi[1], 0.0])   # FLU: yaw (z) обнулён
                 rot_ny = self._rot_flow(p0, w_ny[0], w_ny[1], w_ny[2], dt)
-                yaw_flow = float(np.median((flow - rot_ny)[:, 0]))  # px/кадр ∝ визуальный yaw
+                yaw_flow_raw = float(np.median((flow - rot_ny)[:, 0]))  # px/кадр ∝ визуальный yaw
+                self._yaw_buf.append(yaw_flow_raw)                  # сглаживание (медиана по N)
+                if len(self._yaw_buf) > self.yaw_smooth_n:
+                    self._yaw_buf.pop(0)
+                yaw_flow = float(np.median(self._yaw_buf)) if self.yaw_smooth_n > 1 else yaw_flow_raw
                 # TODO[phase2]: дивергенция (looming) из аффинного фита tr по (xn,yn) → PITCH.
                 divergence = 0.0
                 out = dict(

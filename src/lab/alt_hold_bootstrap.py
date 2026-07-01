@@ -139,7 +139,8 @@ class AltHoldBootstrap(Node):
             from sensor_msgs.msg import Image, Imu
             from flow_estimator import FlowEstimator
             self.est = FlowEstimator(FLOW_FX, FLOW_FY, FLOW_CX, FLOW_CY,
-                                     FLOW_R, a.flow_rsign, smooth_n=a.flow_smooth)
+                                     FLOW_R, a.flow_rsign, smooth_n=a.flow_smooth,
+                                     yaw_smooth_n=a.yaw_smooth)
             self.create_subscription(Image, a.flow_image_topic, self._on_flow_image,
                                      qos_profile_sensor_data)
             self.create_subscription(Imu, a.flow_imu_topic, self._on_flow_imu,
@@ -754,6 +755,8 @@ def main():
                    help='yaw: макс |YAW-offset| PWM; default 150')
     p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=1.0,
                    help='yaw: знак YAW-коррекции (±1; тюнить как osign, оракул — истинный yaw)')
+    p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=1,
+                   help='yaw: временное сглаживание yaw_flow, медиана по N кадрам (1=выкл; режет шум перед ki)')
     p.add_argument('--flow-smooth', dest='flow_smooth', type=int, default=1,
                    help='flow: временное сглаживание lateral, медиана по N кадрам (1=выкл; ~5 режет белый шум ~√N)')
     p.add_argument('--flow-image-topic', dest='flow_image_topic', default='/image_mono',
