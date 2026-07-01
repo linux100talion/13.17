@@ -212,6 +212,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_FLOW_RSIGN="${BS_FLOW_RSIGN:-}" -e BS_FLOW_OSIGN="${BS_FLOW_OSIGN:-}" \
       -e BS_FLOW_SMOOTH="${BS_FLOW_SMOOTH:-}" \
       -e BS_ROLL_EXCITE="${BS_ROLL_EXCITE:-}" -e BS_RE_AMP="${BS_RE_AMP:-}" \
+      -e BS_RE_MODE="${BS_RE_MODE:-}" -e BS_RE_TAU="${BS_RE_TAU:-}" -e BS_RE_NREP="${BS_RE_NREP:-}" \
       -e BS_RE_F0="${BS_RE_F0:-}" -e BS_RE_F1="${BS_RE_F1:-}" \
       -e BS_RE_CHIRP="${BS_RE_CHIRP:-}" -e BS_RE_STEP="${BS_RE_STEP:-}" \
       -e BS_MODE_BUDGET="${BS_MODE_BUDGET:-}" -e BS_ARM_BUDGET="${BS_ARM_BUDGET:-}" \

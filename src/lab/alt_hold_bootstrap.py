@@ -278,11 +278,27 @@ class AltHoldBootstrap(Node):
         self.flow_last_sim = self.now_sim()
 
     def _roll_excite_cmd(self):
-        """system-ID: заданный roll_off (PWM-offset от центра). Линейный чирп f0→f1 за
-        chirp сек (богатый спектр → s/τ/частотная характеристика), затем квадрат ±amp с
-        полупериодом step (чистый DC → идентификация k). roll_off экзогенный."""
+        """system-ID: заданный roll_off (PWM-offset от центра). roll_off экзогенный.
+        Режимы (--roll-excite-mode):
+        - 'balanced' (по умолч.): БАЛАНСИРОВАННЫЕ тычки. Профиль ускорения +τ/−2τ/+τ
+          (как bootstrap EXCITE) → скорость 0→+→−→0 и позиция ВОЗВРАЩАЕТСЯ к старту
+          каждый цикл (4τ) → дрон на сцене, не сносит. Сторона чередуется каждые
+          nrep циклов («N вправо, N влево»). Затем liftland сам садит.
+        - 'chirp': линейный чирп f0→f1 + ступени (богатый спектр, НО сносит позицию
+          ∝ amp/f₀² — уводит дрон за сцену; оставлен для полноты)."""
         a = self.a
         t = self.elapsed()
+        if a.roll_excite_mode == 'balanced':
+            T = max(1e-3, a.roll_excite_tau)
+            cycle = 4.0 * T
+            tt = t % cycle
+            n = int(t / cycle)
+            # +τ/−2τ/+τ: импульсы в мире компенсируются → позиция возвращается
+            p = -1.0 if (T <= tt < 3.0 * T) else 1.0
+            # сторона: nrep циклов в одну, nrep в обратную (сцену подметаем ±, net-0)
+            c = 1.0 if ((n // max(1, a.roll_excite_nrep)) % 2 == 0) else -1.0
+            return c * p * a.roll_excite_amp
+        # 'chirp'
         if t <= a.roll_excite_chirp:
             T = max(1e-3, a.roll_excite_chirp)
             phase = 2.0 * math.pi * (a.roll_excite_f0 * t +
@@ -653,7 +669,14 @@ def main():
     # roll_off становится ЭКЗОГЕННЫМ → flow_calib.py чисто разделяет k/s/τ/d (не как в
     # замкнутом O2, где roll_off∝v_right). Требует записи /mavros/rc/override в bag.
     p.add_argument('--roll-excite', dest='roll_excite', action='store_true',
-                   help='system-ID: заданный roll_off (чирп+ступени) на roll, pitch gz-held')
+                   help='system-ID: заданный roll_off на roll, pitch gz-held (демпфер выкл)')
+    p.add_argument('--roll-excite-mode', dest='roll_excite_mode', default='balanced',
+                   choices=['balanced', 'chirp'],
+                   help="balanced (+τ/−2τ/+τ, позиция возвращается, на сцене) или chirp (сносит)")
+    p.add_argument('--roll-excite-tau', dest='roll_excite_tau', type=float, default=2.0,
+                   help='balanced: базовая τ профиля +τ/−2τ/+τ, sim-сек (цикл=4τ); default 2')
+    p.add_argument('--roll-excite-nrep', dest='roll_excite_nrep', type=int, default=3,
+                   help='balanced: циклов в одну сторону перед сменой (N вправо/N влево); default 3')
     p.add_argument('--roll-excite-amp', dest='roll_excite_amp', type=float, default=50.0,
                    help='roll-excite: амплитуда, PWM от центра (default 50)')
     p.add_argument('--roll-excite-f0', dest='roll_excite_f0', type=float, default=0.15,

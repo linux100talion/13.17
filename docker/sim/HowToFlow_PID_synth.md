@@ -147,12 +147,14 @@ docker exec -i -e SAFE_SEC=30 -e R_SAFE=40 -e CAL_KP=4 p1317_nav \
 бэги с ЗАДАННЫМ возбуждением развязывают идентификацию. Все три — под gz-hold (дрон
 на сцене), с `/flow_dbg` в bag.
 
-**1. roll-chirp (главный: k, s, τ, частотная характеристика).** Pitch держит gz, на
-roll — заданный чирп `roll_off` (f0→f1) + ступени, демпфер ВЫКЛ. `roll_off` экзогенный
-→ чистые k/s/τ из данных.
+**1. roll-excite BALANCED (главный: k, s, τ).** Pitch держит gz, на roll — заданный
+`roll_off` профилем **`+τ/−2τ/+τ`** (`BS_RE_MODE=balanced`, по умолч.): скорость
+0→+→−→0, позиция **ВОЗВРАЩАЕТСЯ** к старту каждый цикл → дрон на сцене, не сносит
+(сторона чередуется каждые `BS_RE_NREP` циклов — «N вправо, N влево»). `roll_off`
+экзогенный → чистые k/s/τ из данных.
 ```bash
-CPU=1 BS_GZHOLD=1 BS_ROLL_EXCITE=1 BS_HOLD_SEC=40 \
-  BS_RE_AMP=50 BS_RE_F0=0.15 BS_RE_F1=1.5 BS_RE_CHIRP=25 BS_RE_STEP=3 \
+CPU=1 BS_GZHOLD=1 BS_ROLL_EXCITE=1 BS_RE_MODE=balanced BS_HOLD_SEC=40 \
+  BS_RE_AMP=50 BS_RE_TAU=2 BS_RE_NREP=3 \
   TOPIC="/image_color" \
   TOPICS_EXTRA="/gz_imu/data_flu /model/iris_cam/odometry /flow_dbg" \
   BS_THROTTLE_CLIMB=1800 BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 \
@@ -160,8 +162,11 @@ CPU=1 BS_GZHOLD=1 BS_ROLL_EXCITE=1 BS_HOLD_SEC=40 \
   bash src/lab/capture_scene.sh 960x540 liftland
 # калибровка: docker exec -i -e SAFE_SEC=35 -e R_SAFE=40 p1317_nav \
 #   bash -lc 'source /opt/ros/humble/setup.bash; python3 /lab/flow_calib.py'
-# (roll_off экзогенный → k из данных; если дрон уходит за R_SAFE — поднять BS_RE_F0/уменьшить AMP)
+# (roll_off экзогенный → k из данных. Пик сноса ~a·τ²; мал → на сцене всё окно)
 ```
+> ⚠️ Режим `BS_RE_MODE=chirp` (чирп f0→f1) СНОСИТ позицию ∝ amp/f₀² (двойной
+> интегратор ускорения) → дрон уходит за сцену за ~12с. Оставлен для полноты; для
+> калибровки использовать `balanced`.
 
 **2. hover-baseline (d + шумовой пол потока в покое).** gz-hold ОБЕ оси, демпфер и
 excite ВЫКЛ. v_right≈0 → flow = чистый шум/биас (пол), а gz-`roll_off` удержания
