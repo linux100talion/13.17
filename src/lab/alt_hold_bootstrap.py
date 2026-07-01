@@ -281,30 +281,34 @@ class AltHoldBootstrap(Node):
         """Длительность всей pulse-последовательности (для триггера land)."""
         a = self.a
         n = max(1, a.roll_excite_nrep)
-        return 4.0 * n * a.roll_excite_tau + a.roll_excite_settle   # вправо+влево+пауза
+        return 4.0 * n * a.roll_excite_tau + a.roll_excite_gap + a.roll_excite_settle
 
     def _roll_excite_cmd(self):
         """system-ID: заданный roll_off (PWM-offset от центра). roll_off экзогенный.
         Режимы (--roll-excite-mode):
-        - 'pulse' (по умолч.): ТЫЧОК = +amp(τ) разгон / −amp(τ) торможение → дрон едет
-          и ВСТАЁТ за 2τ (сам ALT_HOLD не тормозит). nrep тычков вправо, nrep влево
-          (возврат к старту), потом центр → land (excite_total). Короткая
-          последовательность (~4nτ) → снос от возмущения не успевает разогнаться, дрон
-          на сцене. amp у макс для v над шумом (см. расчёт в HowTo).
+        - 'pulse' (по умолч.): ТЫЧОК = синусоида ускорения amp·sin(π·t/τ) за 2τ:
+          roll_off 0→+amp→0→−amp→0 ПЛАВНО (конечный jerk, не бэнг-бэнг → нет резкого
+          рыскания), скорость 0→пик→0 → дрон едет и ВСТАЁТ. nrep тычков вправо, ПАУЗА
+          gap (замереть), nrep влево (возврат), центр → land (excite_total). Короткая
+          последовательность → снос от возмущения не разгоняется, дрон на сцене.
         - 'chirp': линейный чирп f0→f1 + ступени (СНОСИТ позицию ∝ amp/f₀²; для полноты)."""
         a = self.a
         t = self.elapsed()
         if a.roll_excite_mode == 'pulse':
             tau = max(1e-3, a.roll_excite_tau)
             n = max(1, a.roll_excite_nrep)
-            t_right = n * 2.0 * tau
-            t_left = 2.0 * t_right
-            if t < t_right:                          # тычок(и) вправо: +amp/−amp → стоп
-                ph = t % (2.0 * tau)
-                return a.roll_excite_amp if ph < tau else -a.roll_excite_amp
-            if t < t_left:                           # тычок(и) влево: −amp/+amp → назад, стоп
-                ph = (t - t_right) % (2.0 * tau)
-                return -a.roll_excite_amp if ph < tau else a.roll_excite_amp
+            block = n * 2.0 * tau
+            t_right = block                          # тычки вправо
+            t_gap = block + a.roll_excite_gap        # пауза-замереть
+            t_left = 2.0 * block + a.roll_excite_gap  # тычки влево
+            if t < t_right:
+                tt = t % (2.0 * tau)
+                return a.roll_excite_amp * math.sin(math.pi * tt / tau)
+            if t < t_gap:
+                return 0.0                           # ПАУЗА между тычками (замереть)
+            if t < t_left:
+                tt = (t - t_gap) % (2.0 * tau)
+                return -a.roll_excite_amp * math.sin(math.pi * tt / tau)
             return 0.0                               # готово → центр (land по excite_total)
         # 'chirp'
         if t <= a.roll_excite_chirp:
@@ -690,6 +694,8 @@ def main():
                    help='pulse: полудуга разгон/торможение, sim-сек (тычок=2τ, «до остановки за 2τ»); default 1.5')
     p.add_argument('--roll-excite-nrep', dest='roll_excite_nrep', type=int, default=1,
                    help='pulse: тычков в каждую сторону (1 = вправо, влево); default 1')
+    p.add_argument('--roll-excite-gap', dest='roll_excite_gap', type=float, default=3.0,
+                   help='pulse: пауза по центру МЕЖДУ тычком вправо и влево (замереть), sim-сек; default 3')
     p.add_argument('--roll-excite-settle', dest='roll_excite_settle', type=float, default=1.5,
                    help='pulse: пауза-успокоение по центру перед land, sim-сек; default 1.5')
     p.add_argument('--roll-excite-amp', dest='roll_excite_amp', type=float, default=250.0,
