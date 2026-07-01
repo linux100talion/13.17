@@ -133,7 +133,7 @@ class AltHoldBootstrap(Node):
             from sensor_msgs.msg import Image, Imu
             from flow_estimator import FlowEstimator
             self.est = FlowEstimator(FLOW_FX, FLOW_FY, FLOW_CX, FLOW_CY,
-                                     FLOW_R, a.flow_rsign)
+                                     FLOW_R, a.flow_rsign, smooth_n=a.flow_smooth)
             self.create_subscription(Image, a.flow_image_topic, self._on_flow_image,
                                      qos_profile_sensor_data)
             self.create_subscription(Imu, a.flow_imu_topic, self._on_flow_imu,
@@ -642,6 +642,8 @@ def main():
                    help='flow: знак derotation (rotflow_sign; +1 подтверждён Шагом 1)')
     p.add_argument('--flow-osign', dest='flow_osign', type=float, default=1.0,
                    help='flow: знак ROLL-offset/направление торможения (TODO: тюнить Шагом 3)')
+    p.add_argument('--flow-smooth', dest='flow_smooth', type=int, default=1,
+                   help='flow: временное сглаживание lateral, медиана по N кадрам (1=выкл; ~5 режет белый шум ~√N)')
     p.add_argument('--flow-image-topic', dest='flow_image_topic', default='/image_mono',
                    help='flow: топик камеры mono8 (default /image_mono)')
     p.add_argument('--flow-imu-topic', dest='flow_imu_topic', default='/gz_imu/data_flu',

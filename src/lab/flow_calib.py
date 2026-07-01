@@ -131,7 +131,10 @@ def main():
     ar = np.gradient(vr_s, tv)                        # боковое ускорение
 
     # --- реплей flow через FlowEstimator (гиро — ближайший до кадра) ---
-    est = FlowEstimator(FX, FY, CX, CY, R, rotflow_sign=1.0)
+    smooth_n = int(os.environ.get('SMOOTH', '1'))
+    est = FlowEstimator(FX, FY, CX, CY, R, rotflow_sign=1.0, smooth_n=smooth_n)
+    if smooth_n > 1:
+        print(f'сглаживание потока: медиана по {smooth_n} кадрам')
     igt = ig[:, 0] - t0
     ft, fl, fc = [], [], []
     for (ts_abs, h, w, enc, buf) in im:

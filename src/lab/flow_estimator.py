@@ -26,13 +26,20 @@ except ImportError:
 
 
 class FlowEstimator:
-    def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200):
+    def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
+                 smooth_n=1):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
         self.R = np.asarray(R_cam_imu, dtype=np.float64).reshape(3, 3)
         self.rotflow_sign = float(rotflow_sign)
         self.max_feats = max_feats
+        # ВРЕМЕННОЕ СГЛАЖИВАНИЕ lateral: медиана по N кадрам. Шум потока БЕЛЫЙ
+        # (автокорр≈0, см. flow_calib) → усреднение по N режет пол как √N, а сигнал
+        # (боковая скорость) на низкой частоте почти не смазывается. Лаг ~N/2 кадров
+        # мал и петля к нему нечувствительна (τ-развёртка в flow_loop_sim). 1 = выкл.
+        self.smooth_n = max(1, int(smooth_n))
+        self._lat_buf = []
         self.prev_gray = None
         self.prev_pts = None
         self.prev_stamp = None
@@ -75,11 +82,16 @@ class FlowEstimator:
                 else:
                     rot = np.zeros_like(flow)                   # baseline: без derotation
                 tr = flow - rot                                 # трансляционный остаток
-                lateral = float(np.median(tr[:, 0]))            # v0: прокси бокового сноса
+                lateral_raw = float(np.median(tr[:, 0]))        # v0: прокси бокового сноса
+                # временное сглаживание (медиана по N кадрам) — режет белый шум ~√N
+                self._lat_buf.append(lateral_raw)
+                if len(self._lat_buf) > self.smooth_n:
+                    self._lat_buf.pop(0)
+                lateral = float(np.median(self._lat_buf)) if self.smooth_n > 1 else lateral_raw
                 # TODO[phase2]: дивергенция (looming) из аффинного фита tr по (xn,yn) → PITCH.
                 divergence = 0.0
                 out = dict(
-                    lateral=lateral, divergence=divergence, n=n, dt=dt,
+                    lateral=lateral, lateral_raw=lateral_raw, divergence=divergence, n=n, dt=dt,
                     conf=float(n) / float(self.max_feats),
                     # --- диагностика для flow_derotation_check ---
                     resid_rms=float(np.sqrt(np.mean(np.sum(tr ** 2, axis=1)))),

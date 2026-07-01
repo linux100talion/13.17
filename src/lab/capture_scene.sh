@@ -210,6 +210,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_FLOW_IMAX="${BS_FLOW_IMAX:-}" -e BS_FLOW_MAX="${BS_FLOW_MAX:-}" \
       -e BS_FLOW_CONF_MIN="${BS_FLOW_CONF_MIN:-}" -e BS_FLOW_CONF_FULL="${BS_FLOW_CONF_FULL:-}" \
       -e BS_FLOW_RSIGN="${BS_FLOW_RSIGN:-}" -e BS_FLOW_OSIGN="${BS_FLOW_OSIGN:-}" \
+      -e BS_FLOW_SMOOTH="${BS_FLOW_SMOOTH:-}" \
       -e BS_ROLL_EXCITE="${BS_ROLL_EXCITE:-}" -e BS_RE_AMP="${BS_RE_AMP:-}" \
       -e BS_RE_F0="${BS_RE_F0:-}" -e BS_RE_F1="${BS_RE_F1:-}" \
       -e BS_RE_CHIRP="${BS_RE_CHIRP:-}" -e BS_RE_STEP="${BS_RE_STEP:-}" \
