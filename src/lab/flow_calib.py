@@ -115,6 +115,11 @@ def main():
     out = np.where((ot > t_to) & (rh > R_SAFE))[0]
     if len(out) and ot[out[0]] < t_end:
         t_end = ot[out[0]]
+    # АБСОЛЮТНОЕ окно (sim-время от старта bag ≈ видео-секунды): выборка чистого
+    # крейсера челнока. WIN_T0/WIN_T1 переопределяют авто-окно взлёт+SAFE_SEC.
+    w0 = os.environ.get('WIN_T0'); w1 = os.environ.get('WIN_T1')
+    if w0 and w1:
+        t_to, t_end = float(w0), float(w1)
     print(f'окно [{t_to:.1f},{t_end:.1f}]s ({t_end-t_to:.1f}s), kp={CAL_KP:g} osign={CAL_OSIGN:+g}')
 
     # --- истинная боковая скорость/ускорение (per-sample yaw) ---
