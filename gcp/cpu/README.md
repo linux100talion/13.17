@@ -8,7 +8,7 @@
 |-----------|-----------------------------------|
 | Instance  | `dev-workspace-1317-cpu`          |
 | Zone      | `europe-west4-a` (env-override `ZONE=…`) |
-| Type      | `c2d-standard-16` (16 vCPU AMD Milan) |
+| Type      | `c2d-standard-8` (8 vCPU AMD Milan) |
 | GPU       | нет                               |
 
 Это **не** GPU-инстанс `dev-workspace-1317` — отдельное имя, отдельный диск.
@@ -29,9 +29,15 @@
 отдельной обёртки, бокс одноразово создан так):
 
 ```bash
-GPU=0 MACHINE_TYPE=c2d-standard-16 INSTANCE_NAME=dev-workspace-1317-cpu \
+GPU=0 MACHINE_TYPE=c2d-standard-8 INSTANCE_NAME=dev-workspace-1317-cpu \
     ./01_create_workspace.sh 120
 ```
 
-💰 CPU-инстанс тарифицируется, пока `RUNNING` (c2d-standard-16 ≈ $0.75/час
+Смена числа vCPU на лету (инстанс должен быть `TERMINATED`, диск/зона остаются):
+```bash
+gcloud compute instances set-machine-type dev-workspace-1317-cpu \
+    --zone=europe-west4-a --machine-type=c2d-standard-8
+```
+
+💰 CPU-инстанс тарифицируется, пока `RUNNING` (c2d-standard-8 ≈ $0.38/час
 on-demand). Гаси `./stop.sh`, когда не нужен.

@@ -7,7 +7,7 @@
 #
 # ТОНКИЙ старт существующего инстанса (gcloud instances start). CPU-ёмкость
 # дефицитом обычно не страдает. Создание — ../01_create_workspace.sh с тогглами
-# (GPU=0 MACHINE_TYPE=c2d-standard-16 INSTANCE_NAME=dev-workspace-1317-cpu).
+# (GPU=0 MACHINE_TYPE=c2d-standard-8 INSTANCE_NAME=dev-workspace-1317-cpu).
 
 set -e
 
@@ -20,7 +20,7 @@ g() { gcloud "$@" --project="$PROJECT"; }
 
 if ! g compute instances describe "$INSTANCE_NAME" --zone="$ZONE" >/dev/null 2>&1; then
     echo "ℹ️  Инстанса '$INSTANCE_NAME' нет в $ZONE."
-    echo "   Создай: GPU=0 MACHINE_TYPE=c2d-standard-16 INSTANCE_NAME=$INSTANCE_NAME \\"
+    echo "   Создай: GPU=0 MACHINE_TYPE=c2d-standard-8 INSTANCE_NAME=$INSTANCE_NAME \\"
     echo "           ../01_create_workspace.sh"
     exit 1
 fi
