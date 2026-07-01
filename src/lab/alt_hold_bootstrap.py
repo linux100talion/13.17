@@ -40,6 +40,7 @@ from rclpy.parameter import Parameter
 from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Float64
 from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Vector3Stamped
 from mavros_msgs.msg import OverrideRCIn, State, RCIn
 from mavros_msgs.srv import SetMode, CommandBool
 
@@ -77,6 +78,9 @@ class AltHoldBootstrap(Node):
 
         # выходы
         self.rc_pub = self.create_publisher(OverrideRCIn, '/mavros/rc/override', 10)
+        # debug для system-ID (flow_calib.py): sim-штампованный roll_off/flow/conf.
+        # Vector3Stamped, т.к. OverrideRCIn без header → под низким RTF не привязать к sim-времени.
+        self.dbg_pub = self.create_publisher(Vector3Stamped, '/flow_dbg', 10)
         # входы
         self.create_subscription(State, '/mavros/state', self._on_state, 10)
         # rel_alt и rc/in MAVROS публикует с SensorData QoS (BEST_EFFORT) — дефолтная
@@ -120,6 +124,7 @@ class AltHoldBootstrap(Node):
         # публикация — общий _wall_publish 20 Гц. Реюз hold-only-каркаса.
         self.flow_omega = np.zeros(3)      # последняя ω IMU (FLU) для derotation
         self.flow_roll_off = 0.0           # последний выход PID (PWM-смещение ROLL)
+        self.flow_conf = 0.0               # последняя confidence (для /flow_dbg)
         self.flow_last_sim = -1e9          # sim-время свежего кадра (fade на сталле)
         self._flow_i = 0.0                 # интегратор PID
         self._flow_prev_err = 0.0
@@ -269,7 +274,22 @@ class AltHoldBootstrap(Node):
                               max(1e-6, a.flow_conf_full - a.flow_conf_min), 0.0, 1.0))
         # flow_osign — направление ROLL-торможения (TODO: тюнить Шагом 3, как gz_rsign).
         self.flow_roll_off = a.flow_osign * blend * u
+        self.flow_conf = conf
         self.flow_last_sim = self.now_sim()
+
+    def _roll_excite_cmd(self):
+        """system-ID: заданный roll_off (PWM-offset от центра). Линейный чирп f0→f1 за
+        chirp сек (богатый спектр → s/τ/частотная характеристика), затем квадрат ±amp с
+        полупериодом step (чистый DC → идентификация k). roll_off экзогенный."""
+        a = self.a
+        t = self.elapsed()
+        if t <= a.roll_excite_chirp:
+            T = max(1e-3, a.roll_excite_chirp)
+            phase = 2.0 * math.pi * (a.roll_excite_f0 * t +
+                                     0.5 * (a.roll_excite_f1 - a.roll_excite_f0) * t * t / T)
+            return a.roll_excite_amp * math.sin(phase)
+        n = int((t - a.roll_excite_chirp) / max(1e-3, a.roll_excite_step))
+        return a.roll_excite_amp * (1.0 if n % 2 == 0 else -1.0)
 
     # --- публикация RC override (WALL-таймер 20 Гц) -------------------------
     def _wall_publish(self):
@@ -297,6 +317,14 @@ class AltHoldBootstrap(Node):
         # точек смены не вносит, значение между тиками константно).
         self._tick_logic()
         self._wall_publish()
+        # sim-штампованный debug для калибровки (flow_calib.py): фактический roll_off,
+        # текущий flow (0 если демпфер выкл), confidence. Пишется в bag → system-ID.
+        d = Vector3Stamped()
+        d.header.stamp = self.get_clock().now().to_msg()
+        d.vector.x = float(self.roll - RC_CENTER)
+        d.vector.y = float(getattr(self, 'flow_roll_off', 0.0))
+        d.vector.z = float(getattr(self, 'flow_conf', 0.0))
+        self.dbg_pub.publish(d)
 
     def _tick_logic(self):
         st = self.state
@@ -398,7 +426,11 @@ class AltHoldBootstrap(Node):
                     # держит gz-истина (дрон НЕ уезжает за сцену), а боковую (roll)
                     # отдаём флоу-демпферу (его и тюним, изолированно). Только gz → roll
                     # тоже от gz (полный position-hold, как раньше).
-                    if self.a.flow_hold:
+                    if self.a.roll_excite:
+                        # system-ID: заданный чирп/ступени на roll (демпфер выкл),
+                        # pitch держит gz. roll_off экзогенный → чистая калибровка.
+                        self.roll = RC_CENTER + int(self._roll_excite_cmd())
+                    elif self.a.flow_hold:
                         fresh = (self.now_sim() - self.flow_last_sim) < 0.5
                         self.roll = RC_CENTER + (int(self.flow_roll_off) if fresh else 0)
                     else:
@@ -418,7 +450,7 @@ class AltHoldBootstrap(Node):
                             f"e=({ex:+.1f},{ey:+.1f}) v=({self.gt_vx:+.2f},{self.gt_vy:+.2f}) "
                             f"i=({i_fwd:+.1f},{i_rgt:+.1f}) pitch_off={int(po):+d} "
                             f"roll_off={int(self.roll - RC_CENTER):+d}"
-                            f"{'(flow)' if self.a.flow_hold else ''}")
+                            f"{'(excite)' if self.a.roll_excite else '(flow)' if self.a.flow_hold else ''}")
                 elif self.a.flow_hold:
                     # боковой демпфер: ROLL ← поток (PID в _on_flow_image), pitch/yaw
                     # центр (продольный/курс = фаза 2/пилот). Сталл кадров → центр
@@ -614,6 +646,22 @@ def main():
                    help='flow: топик камеры mono8 (default /image_mono)')
     p.add_argument('--flow-imu-topic', dest='flow_imu_topic', default='/gz_imu/data_flu',
                    help='flow: топик FLU-гироскопа (default /gz_imu/data_flu)')
+    # ROLL-EXCITE — открытый контур для system-ID (docker/sim/HowToFlow_PID_synth.md).
+    # Под gz-hold-pitch подаёт ЗАДАННЫЙ профиль roll_off (чирп→ступени), демпфер ВЫКЛ.
+    # roll_off становится ЭКЗОГЕННЫМ → flow_calib.py чисто разделяет k/s/τ/d (не как в
+    # замкнутом O2, где roll_off∝v_right). Требует записи /mavros/rc/override в bag.
+    p.add_argument('--roll-excite', dest='roll_excite', action='store_true',
+                   help='system-ID: заданный roll_off (чирп+ступени) на roll, pitch gz-held')
+    p.add_argument('--roll-excite-amp', dest='roll_excite_amp', type=float, default=50.0,
+                   help='roll-excite: амплитуда, PWM от центра (default 50)')
+    p.add_argument('--roll-excite-f0', dest='roll_excite_f0', type=float, default=0.15,
+                   help='roll-excite: начальная частота чирпа, Гц (default 0.15)')
+    p.add_argument('--roll-excite-f1', dest='roll_excite_f1', type=float, default=1.5,
+                   help='roll-excite: конечная частота чирпа, Гц (default 1.5)')
+    p.add_argument('--roll-excite-chirp', dest='roll_excite_chirp', type=float, default=25.0,
+                   help='roll-excite: длительность чирпа, sim-сек; дальше ступени (default 25)')
+    p.add_argument('--roll-excite-step', dest='roll_excite_step', type=float, default=3.0,
+                   help='roll-excite: полупериод ступени после чирпа, sim-сек (default 3)')
     p.add_argument('--throttle-climb', dest='throttle_climb', type=int, default=1650,
                    help='PWM газа на подъём (default 1650)')
     p.add_argument('--throttle-hold', dest='throttle_hold', type=int, default=RC_CENTER,
@@ -626,6 +674,9 @@ def main():
     args = p.parse_args()
     if args.flow_hold:
         args.hold_only = True   # flow-демпфер живёт в каркасе hold-only (фаза EXCITE)
+    if args.roll_excite:
+        args.hold_only = True   # тот же каркас; pitch держит gz, roll = заданный чирп
+        args.gz_hold = True
 
     rclpy.init()
     node = AltHoldBootstrap(args)

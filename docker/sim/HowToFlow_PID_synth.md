@@ -105,8 +105,12 @@ python3 /lab/flow_loop_sim.py --osign -1
 Мост «реальность→синтетика»: реальные кадры+гиро гоняются оффлайн через ТОТ ЖЕ
 `FlowEstimator` (детерминированно), истинная поза Gazebo даёт скорость/ускорение.
 
-Нужен bag с тремя топиками (даёт эталонный гибрид-прогон, см. ниже):
-`/image_color`, `/gz_imu/data_flu`, `/model/iris_cam/odometry`.
+Нужен bag с топиками: `/image_color`, `/gz_imu/data_flu`, `/model/iris_cam/odometry`
+и (желательно) `/flow_dbg` — sim-штампованный **фактический `roll_off`** от ноды
+(Vector3Stamped: x=roll_off, y=flow, z=conf). С `/flow_dbg` `k` и `d` фитятся
+**из данных** (в open-loop excite `roll_off` экзогенный → чистая регрессия
+`a_right=k·roll_off+d`); без него — `k` из физики руля, `d` из стационара, а `roll_off`
+реконструируется как `osign·kp·flow` (годно только для замкнутого прогона).
 
 ```bash
 docker exec -i -e SAFE_SEC=30 -e R_SAFE=40 -e CAL_KP=4 p1317_nav \
@@ -118,10 +122,13 @@ docker exec -i -e SAFE_SEC=30 -e R_SAFE=40 -e CAL_KP=4 p1317_nav \
 Что фитит:
 - **s, bias**: `flow ≈ s·v_right + bias` (реплей flow vs истинная боковая скорость) —
   прямое сенсорное отношение + реальный DC LK-снос;
-- **noise**: СКО остатка фита (реалистичный `--noise` для B);
+- **noise + структура**: СКО остатка фита (реалистичный `--noise` для B) + автокорреляция
+  лаг-1 (белый шум vs коррелированный — коррелированный объясняет, почему высокий kp
+  реально хуже, чем в модели с белым шумом);
 - **τ**: лаг кросс-корреляции `flow ↔ v_right`;
-- **k**: физика руля (`roll_off` PWM → угол крена → `a=g·tanθ`), знак из `osign`;
-- **d**: возмущение lean-сноса из стационара `a = k·roll_off + d`.
+- **k**: из ДАННЫХ (`a_right=k·roll_off+d`, если есть `/flow_dbg` с экзогенным roll_off),
+  иначе из физики руля (`roll_off`→угол→`a=g·tanθ`), знак из `osign`;
+- **d**: из той же регрессии (данные) либо из стационара.
 
 Валидация в конце: `v_term_pred = d/(|k|·kp·s)` vs наблюдаемая `RMS(v_right)`. Внизу
 печатается готовая команда `flow_loop_sim.py --sweep …` с зафикшенными параметрами.
@@ -132,6 +139,50 @@ docker exec -i -e SAFE_SEC=30 -e R_SAFE=40 -e CAL_KP=4 p1317_nav \
 > RANSAC вместо raw-median / отбор фич).
 
 ---
+
+## Кампания калибровочных бэгов (open-loop system-ID)
+
+Замкнутый прогон демпфера — плохой вход для калибровки (`roll_off∝v_right` → k/d не
+разделяются, `flow↔v` меряется лишь вдоль одной траектории; у O2 R²=0.19). Целевые
+бэги с ЗАДАННЫМ возбуждением развязывают идентификацию. Все три — под gz-hold (дрон
+на сцене), с `/flow_dbg` в bag.
+
+**1. roll-chirp (главный: k, s, τ, частотная характеристика).** Pitch держит gz, на
+roll — заданный чирп `roll_off` (f0→f1) + ступени, демпфер ВЫКЛ. `roll_off` экзогенный
+→ чистые k/s/τ из данных.
+```bash
+CPU=1 BS_GZHOLD=1 BS_ROLL_EXCITE=1 BS_HOLD_SEC=40 \
+  BS_RE_AMP=50 BS_RE_F0=0.15 BS_RE_F1=1.5 BS_RE_CHIRP=25 BS_RE_STEP=3 \
+  TOPIC="/image_color" \
+  TOPICS_EXTRA="/gz_imu/data_flu /model/iris_cam/odometry /flow_dbg" \
+  BS_THROTTLE_CLIMB=1800 BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 \
+  BS_CLIMB_BUDGET=120 BS_LAND_BUDGET=180 GDRIVE_UP=1 MP4=1 N_FRAMES=0 \
+  bash src/lab/capture_scene.sh 960x540 liftland
+# калибровка: docker exec -i -e SAFE_SEC=35 -e R_SAFE=40 p1317_nav \
+#   bash -lc 'source /opt/ros/humble/setup.bash; python3 /lab/flow_calib.py'
+# (roll_off экзогенный → k из данных; если дрон уходит за R_SAFE — поднять BS_RE_F0/уменьшить AMP)
+```
+
+**2. hover-baseline (d + шумовой пол потока в покое).** gz-hold ОБЕ оси, демпфер и
+excite ВЫКЛ. v_right≈0 → flow = чистый шум/биас (пол), а gz-`roll_off` удержания
+выявляет возмущение d.
+```bash
+CPU=1 BS_GZHOLD=1 BS_HOLD_SEC=40 \
+  TOPIC="/image_color" TOPICS_EXTRA="/gz_imu/data_flu /model/iris_cam/odometry /flow_dbg" \
+  ... GDRIVE_UP=1 bash src/lab/capture_scene.sh 960x540 liftland
+```
+
+**3. yaw-derot (проверка rsign/derotation на РЕАЛЬНОЙ сцене).** gz-hold + импульсы yaw
+(`BS_GZ_YAW`), трансляции нет → поток rotation-доминирован. Анализ — `flow_derotation_check.py`.
+```bash
+CPU=1 BS_GZHOLD=1 BS_GZ_YAW=80 BS_GZ_YAW_PERIOD=6 BS_HOLD_SEC=40 \
+  TOPIC="/image_color" TOPICS_EXTRA="/gz_imu/data_flu /model/iris_cam/odometry" \
+  ... GDRIVE_UP=1 bash src/lab/capture_scene.sh 960x540 liftland
+```
+
+`BS_ROLL_EXCITE` env → `--roll-excite*`: `BS_RE_AMP` (PWM), `BS_RE_F0/F1` (Гц чирпа),
+`BS_RE_CHIRP` (сек чирпа), `BS_RE_STEP` (полупериод ступени). Реализация —
+`alt_hold_bootstrap.py:_roll_excite_cmd`.
 
 ## Рабочий цикл тюнинга
 

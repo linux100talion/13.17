@@ -33,6 +33,7 @@ import rosbag2_py
 from rclpy.serialization import deserialize_message
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu, Image
+from geometry_msgs.msg import Vector3Stamped   # /flow_dbg: x=roll_off, y=flow, z=conf
 
 sys.path.insert(0, '/lab')
 from flow_estimator import FlowEstimator  # noqa: E402
@@ -46,6 +47,7 @@ BAG = os.environ.get('SCENE_BAG', '/root/sim_ws/output/scene_bag')
 ODOM = os.environ.get('ODOM_TOPIC', '/model/iris_cam/odometry')
 IMU = os.environ.get('IMU_TOPIC', '/gz_imu/data_flu')
 IMG = os.environ.get('IMG_TOPIC', '/image_color')
+DBG = os.environ.get('DBG_TOPIC', '/flow_dbg')   # Vector3Stamped: x=roll_off, y=flow, z=conf
 SAFE_SEC = float(os.environ.get('SAFE_SEC', '30'))
 R_SAFE = float(os.environ.get('R_SAFE', '40'))
 Z_TO = float(os.environ.get('Z_TO', '2.0'))
@@ -59,7 +61,7 @@ def read_bag():
     r = rosbag2_py.SequentialReader()
     r.open(rosbag2_py.StorageOptions(uri=BAG, storage_id='sqlite3'),
            rosbag2_py.ConverterOptions('cdr', 'cdr'))
-    od, im, ig = [], [], []
+    od, im, ig, rc = [], [], [], []
     while r.has_next():
         topic, data, _ = r.read_next()
         if topic == ODOM:
@@ -76,8 +78,12 @@ def read_bag():
             m = deserialize_message(data, Image)
             im.append((m.header.stamp.sec + m.header.stamp.nanosec * 1e-9,
                        m.height, m.width, m.encoding, bytes(m.data)))
-    return (np.array(od, dtype=float), im,
-            np.array(ig, dtype=float))
+        elif topic == DBG:
+            m = deserialize_message(data, Vector3Stamped)
+            rc.append((m.header.stamp.sec + m.header.stamp.nanosec * 1e-9,
+                       m.vector.x, m.vector.y, m.vector.z))   # t, roll_off, flow, conf
+    return (np.array(od, dtype=float), im, np.array(ig, dtype=float),
+            np.array(rc, dtype=float) if rc else np.empty((0, 4)))
 
 
 def to_gray(h, w, enc, buf):
@@ -92,10 +98,11 @@ def to_gray(h, w, enc, buf):
 
 
 def main():
-    od, im, ig = read_bag()
+    od, im, ig, rc = read_bag()
     if len(od) == 0 or len(im) == 0 or len(ig) == 0:
         raise RuntimeError('в бэге нет нужных топиков (odom/img/imu)')
     t0 = od[0, 0]
+    have_dbg = len(rc) > 0      # /flow_dbg есть → фактический roll_off (открытый контур)
     ot = od[:, 0] - t0; X, Y, Z, YAW = od[:, 1], od[:, 2], od[:, 3], od[:, 4]
 
     # --- окно (как drift_check): взлёт Z>Z_TO, +SAFE_SEC, обрезка по R_SAFE ---
@@ -159,23 +166,44 @@ def main():
     dt_med = float(np.median(np.diff(tv)))
     tau_fit = max(0.0, lags[np.argmax(cc)] * dt_med)
 
-    # --- k из физики руля; d из стационара ---
-    roll_off = CAL_OSIGN * CAL_KP * fl          # реконструкция (ki=kd=0, blend≈1)
-    roll_off = np.clip(roll_off, -150, 150)
-    k_mag = G * math.tan(ANGLE_MAX) / 500.0     # м/с² на 1 PWM (полный стик 500 → ANGLE_MAX)
-    k_fit = -abs(k_mag) if CAL_OSIGN > 0 else abs(k_mag)   # знак: osign=+1 → демпфер → k<0
-    ro_at = np.interp(tv, ft, roll_off)
-    d_fit = float(np.mean(ar - k_fit * ro_at))  # a = k·roll_off + d → d = <a - k·roll_off>
+    # --- ФАКТИЧЕСКИЙ roll_off (PWM) на odom-сетке: из /flow_dbg, иначе реконструкция ---
+    if have_dbg:
+        rt = rc[:, 0] - t0
+        ro_at = np.interp(tv, rt, rc[:, 1])     # реальный roll_off (эксперим. экзогенный)
+        src_ro = 'дан /flow_dbg (экзогенный)'
+    else:
+        roll_off = np.clip(CAL_OSIGN * CAL_KP * fl, -150, 150)   # реконструкция (замкнутый)
+        ro_at = np.interp(tv, ft, roll_off)
+        src_ro = 'реконстр. osign·kp·flow'
+
+    # --- k, d: a_right = k·roll_off + d ---
+    k_mag = G * math.tan(ANGLE_MAX) / 500.0     # физика руля: полный стик 500 → ANGLE_MAX
+    k_phys = -abs(k_mag) if CAL_OSIGN > 0 else abs(k_mag)
+    if have_dbg:
+        # roll_off ЭКЗОГЕННЫЙ (open-loop excite) → регрессия чистая: фитим k И d из данных
+        Ak = np.column_stack([ro_at, np.ones_like(ro_at)])
+        (k_fit, d_fit), *_ = np.linalg.lstsq(Ak, ar, rcond=None)
+        r2_k = 1.0 - np.var(ar - Ak @ [k_fit, d_fit]) / max(1e-9, np.var(ar))
+        k_src = f'ДАННЫЕ (R²={r2_k:.2f}; физика={k_phys:+.4f})'
+    else:
+        k_fit = k_phys; d_fit = float(np.mean(ar - k_fit * ro_at))   # k физика, d стационар
+        k_src = f'физика руля ANGLE_MAX={math.degrees(ANGLE_MAX):.0f}°'
+
+    # --- структура шума: автокорреляция остатка flow (белый vs коррелированный) ---
+    rr = resid - resid.mean()
+    ac1 = float(np.sum(rr[1:] * rr[:-1]) / max(1e-9, np.sum(rr * rr)))   # AR(1) при лаге 1
+    noise_kind = 'белый' if abs(ac1) < 0.25 else ('коррелир.' if ac1 > 0 else 'антикоррелир.')
 
     rms_vr = float(np.sqrt(np.mean(vr_s ** 2)))
     print()
     print('=== КАЛИБРОВКА планта (для flow_loop_sim.py) ===')
+    print(f'  roll_off: {src_ro}')
     print(f'  s    = {s_fit:+.3f}  px/кадр на 1 м/с   (R²={r2:.2f} — доля дисперсии flow от v)')
-    print(f'  noise= {noise_fit:.3f} px СКО   (шум потока; при R²={r2:.2f} — {100*(1-r2):.0f}% flow = шум/прочее)')
+    print(f'  noise= {noise_fit:.3f} px СКО   ({100*(1-r2):.0f}% flow = шум/прочее; лаг-1 автокорр={ac1:+.2f} → {noise_kind})')
     print(f'  bias = {bias_fit:+.3f} px   (реальный DC LK-снос → windup при ki>0)')
     print(f'  τ    = {tau_fit:.2f} с   (лаг flow↔v_right)')
-    print(f'  k    = {k_fit:+.4f} м/с² на 1 PWM   (руль: ANGLE_MAX={math.degrees(ANGLE_MAX):.0f}°)')
-    print(f'  d    = {d_fit:+.3f} м/с²   (возмущение lean-сноса, стационар)')
+    print(f'  k    = {k_fit:+.4f} м/с² на 1 PWM   ({k_src})')
+    print(f'  d    = {d_fit:+.3f} м/с²   (возмущение lean-сноса)')
     print()
     # --- валидация: предсказанная терминальная скорость vs наблюдаемая ---
     c = abs(k_fit) * CAL_KP * abs(s_fit)
