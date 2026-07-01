@@ -115,6 +115,8 @@ class AltHoldBootstrap(Node):
         self.gt_px = self.gt_py = None     # пред. позиция для разности
         self.gt_pt = None                  # пред. sim-время
         self.hold_sp = None                # (x0, y0) сетпойнт, фиксируется на входе в hold
+        self.hold_yaw0 = 0.0               # yaw входа (ось «вправо» для челнока)
+        self.hold_t0 = None                # старт тайминга челнока
         self.gz_ix = self.gz_iy = 0.0      # интеграл ошибки позиции (world) — I-член
         self.gz_it = None                  # пред. sim-время для dt интеграла
         self._gz_log_t = -1e9              # троттл отладочного лога gz-hold
@@ -283,6 +285,26 @@ class AltHoldBootstrap(Node):
         n = max(1, a.roll_excite_nrep)
         return 4.0 * n * a.roll_excite_tau + a.roll_excite_gap + a.roll_excite_settle
 
+    def _shuttle_offset(self):
+        """Смещение сетпойнта (м) вдоль оси «вправо»: 0→−A (влево, const-V), пауза,
+        −A→0 (вправо). Мягкий полёт для калибровки s на крейсере (камера ~ровная)."""
+        a = self.a
+        V = max(0.1, a.gz_shuttle_v); A = a.gz_shuttle_a; P = a.gz_shuttle_pause
+        tleg = A / V
+        ts = self.now_sim() - (self.hold_t0 or self.now_sim())
+        if ts < tleg:                       # влево к −A
+            return -V * ts
+        if ts < tleg + P:                   # пауза на −A
+            return -A
+        if ts < 2.0 * tleg + P:             # вправо назад к 0
+            return -A + V * (ts - (tleg + P))
+        return 0.0                          # готово (land по shuttle_total)
+
+    def shuttle_total(self):
+        a = self.a
+        V = max(0.1, a.gz_shuttle_v)
+        return 2.0 * (a.gz_shuttle_a / V) + 2.0 * a.gz_shuttle_pause   # 2 плеча + паузы
+
     def _roll_excite_cmd(self):
         """system-ID: заданный roll_off (PWM-offset от центра). roll_off экзогенный.
         Режимы (--roll-excite-mode):
@@ -409,6 +431,8 @@ class AltHoldBootstrap(Node):
                     # в тело (по yaw) → offset PWM по pitch(вперёд)/roll(вправо).
                     if self.hold_sp is None:
                         self.hold_sp = (self.gt_x, self.gt_y)
+                        self.hold_yaw0 = self.gt_yaw          # ось «вправо» для челнока
+                        self.hold_t0 = self.now_sim()         # старт тайминга челнока
                         self.gz_ix = self.gz_iy = 0.0; self.gz_it = self.now_sim()
                         self.get_logger().info(
                             f"    gz-hold: центр=({self.gt_x:.2f},{self.gt_y:.2f}) "
@@ -426,6 +450,13 @@ class AltHoldBootstrap(Node):
                         reff = self.a.gz_traj_r * min(1.0, tt / self.a.gz_traj_t)
                         spx += reff * (math.cos(th) - 1.0)
                         spy += reff * math.sin(th)
+                    if self.a.gz_shuttle_a > 0.0:
+                        # боковой ЧЕЛНОК: сетпойнт едет const-V вдоль оси «вправо»
+                        # (yaw входа): 0→−A (влево), пауза, −A→0 (вправо). Малое
+                        # ускорение → крен ~3-5° → чистая боковая трансляция на крейсере.
+                        d = self._shuttle_offset()
+                        rx, ry = math.sin(self.hold_yaw0), -math.cos(self.hold_yaw0)
+                        spx += d * rx; spy += d * ry
                     ex = self.gt_x - spx
                     ey = self.gt_y - spy
                     # I-член: интегрируем ошибку в WORLD (yaw-инвариантно), потом
@@ -494,10 +525,14 @@ class AltHoldBootstrap(Node):
                             f"если есть gt)")
                 else:
                     self.roll = self.pitch = RC_CENTER   # gz нет → просто уровень
-                # land: pulse-excite → сразу после последовательности тычков; иначе по hold_sec
+                # land: pulse-excite / челнок → сразу после последовательности; иначе по hold_sec
                 if self.a.roll_excite and self.a.roll_excite_mode == 'pulse':
                     if self.elapsed() > self.excite_total():
                         self.get_logger().info(f"    pulse-excite ({self.excite_total():.1f}s) завершён — садимся")
+                        self.result = "HOLD_DONE"; self.goto(S_LAND)
+                elif self.a.gz_shuttle_a > 0.0:
+                    if self.elapsed() > self.shuttle_total() + 1.5:
+                        self.get_logger().info(f"    челнок ({self.shuttle_total():.1f}s) завершён — садимся")
                         self.result = "HOLD_DONE"; self.goto(S_LAND)
                 elif self.elapsed() > self.a.hold_sec:
                     self.get_logger().info(f"    hold-only {self.a.hold_sec}s истекли — садимся")
@@ -648,6 +683,14 @@ def main():
     # дрон стоит на месте (PID держит позицию, он yaw-инвариантен), а курс
     # вращается → поток rotation-доминирован → flow_derotation_check видит саму
     # derotation, не маскированную трансляционным дрейфом ALT_HOLD.
+    # боковой ЧЕЛНОК (калибровка s): сетпойнт gz-hold едет ±A вдоль оси «вправо»
+    # мягко (const-V, малый крен) → чистая боковая трансляция на крейсере; pitch держится.
+    p.add_argument('--gz-shuttle-a', dest='gz_shuttle_a', type=float, default=0.0,
+                   help='gz-hold: амплитуда бокового челнока, м (0=выкл; ~5 для калибровки s)')
+    p.add_argument('--gz-shuttle-v', dest='gz_shuttle_v', type=float, default=1.5,
+                   help='gz-hold: крейсерская скорость челнока, м/с (мягко → малый крен); default 1.5')
+    p.add_argument('--gz-shuttle-pause', dest='gz_shuttle_pause', type=float, default=2.0,
+                   help='gz-hold: пауза на −A и в конце, sim-сек; default 2')
     p.add_argument('--gz-yaw', dest='gz_yaw', type=float, default=0.0,
                    help='gz-hold: амплитуда наложенного yaw, PWM от центра '
                         '(0=без вращения; ~80 ≈ умеренное ω для derotation-теста)')
