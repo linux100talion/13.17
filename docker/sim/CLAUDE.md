@@ -187,6 +187,43 @@ ARM_SIM_BUDGET=100 ARM_WALL_CAP=2400 \
 >   bash src/lab/capture_scene.sh arm takeoff 3 square 1 land
 > ```
 
+### roll-excite — калибровочное возбуждение потока (system-ID)
+Открытый контур для калибровки планта флоу-демпфера (`flow_calib.py`, слой C):
+под gz-hold-pitch на roll подаётся ЗАДАННЫЙ `roll_off` (демпфер ВЫКЛ) → `roll_off`
+экзогенный → чистая идентификация `k/s/τ/d`. Полный контекст и три бэга кампании —
+`docker/sim/HowToFlow_PID_synth.md`. `/flow_dbg` в bag обязателен (фактический
+`roll_off`).
+
+**Эталонная команда (balanced — позиция ВОЗВРАЩАЕТСЯ, дрон на сцене):**
+```bash
+CPU=1 BS_GZHOLD=1 BS_ROLL_EXCITE=1 BS_RE_MODE=balanced BS_HOLD_SEC=40 \
+  BS_RE_AMP=50 BS_RE_TAU=2 BS_RE_NREP=3 \
+  TOPIC="/image_color" \
+  TOPICS_EXTRA="/gz_imu/data_flu /model/iris_cam/odometry /flow_dbg" \
+  BS_THROTTLE_CLIMB=1800 BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 \
+  BS_CLIMB_BUDGET=120 BS_LAND_BUDGET=180 GDRIVE_UP=1 MP4=1 N_FRAMES=0 \
+  bash src/lab/capture_scene.sh 960x540 liftland
+# калибровка (после сохранения bag): docker exec -i -e SAFE_SEC=35 -e R_SAFE=40 \
+#   p1317_nav bash -lc 'source /opt/ros/humble/setup.bash; python3 /lab/flow_calib.py'
+```
+`balanced` = профиль `+τ/−2τ/+τ` (как bootstrap EXCITE): скорость 0→+→−→0, позиция
+возвращается каждый цикл (4τ), сторона чередуется каждые `BS_RE_NREP` циклов.
+
+**Вариант chirp (СНОСИТ — не для калибровки):** `BS_RE_MODE=chirp BS_RE_AMP=50
+BS_RE_F0=0.15 BS_RE_F1=1.5 BS_RE_CHIRP=25 BS_RE_STEP=3`. Линейный чирп f0→f1 богат
+спектром, НО уносит позицию ∝ `amp/f₀²` (ускорение — двойной интегратор) → дрон за
+сцену за ~12с. Оставлен для полноты; предпочитать `balanced`.
+
+Env (`BS_RE_*` → `--roll-excite-*`): `MODE` (balanced/chirp), `AMP` (PWM),
+`TAU` (сек, цикл=4τ), `NREP` (циклов на сторону), `F0/F1/CHIRP/STEP` (для chirp).
+Реализация — `alt_hold_bootstrap.py:_roll_excite_cmd`.
+
+**Персист bag** (иначе следующий `capture_scene` сотрёт `output/scene_bag*`):
+```bash
+cp -r docker/sim/output/scene_bag docker/sim/bags/roll_excite_$(date +%Y%m%d)
+```
+`docker/sim/bags/` — в `.gitignore` (бэги крупные, вне git).
+
 ## EEPROM SITL (персистентная accel-калибровка)
 
 **Зачем.** На свежем SITL ArduCopter режет арм обязательной проверкой
