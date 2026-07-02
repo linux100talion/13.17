@@ -79,16 +79,16 @@ SRC='source /opt/ros/humble/setup.bash'
 log() { echo -e "\n############ $* ############"; }
 
 # ── фиксированная база env для КАЖДОГО capture_scene (не меняется между прогонами) ─
-# GDRIVE_UP=0 — Drive не трогаем из capture_scene (льём сами, с уникальным именем).
-# MP4=1 — собрать scene.mp4 локально. RECORD=1 (default) — нужен bag для yaw_check.
-# TOPICS_EXTRA — ground-truth одометрия (оракул yaw_check).
+# TOPICS_EXTRA — ground-truth одометрия (оракул yaw_check). RECORD=1 (default) —
+# нужен bag для yaw_check. Заливку из capture_scene ГЛУШИМ инлайн на его вызове
+# (GDRIVE_UP=0 MP4=1), чтобы он не чистил Drive и не лил scene.mp4 — это делаем сами
+# с уникальным именем. НЕ экспортируем GDRIVE_UP тут: это МОЙ флаг (purge/upload).
 export_base_env() {
   export CPU BS_ALT BS_HOLD_SEC
   export BS_YAWHOLD=1 BS_GZHOLD=1 BS_YAWH_OSIGN=1
   export BS_THROTTLE_CLIMB=1800 BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 \
          BS_CLIMB_BUDGET=120 BS_LAND_BUDGET=180
   export TOPICS_EXTRA="/model/iris_cam/odometry"
-  export GDRIVE_UP=0 MP4=1 N_FRAMES=1
 }
 
 # ── очистка папки свипа на Drive (ОДИН раз) ───────────────────────────────────
@@ -158,9 +158,11 @@ for cfg in "${CONFIGS[@]}"; do
 
   echo ">>> capture_scene: ${cs_args[*]}  (BS_YAWH_KP=$kp BS_YAWH_KI=$ki BS_YAWH_SMOOTH=$sm)"
   if [ "$DRY_RUN" = "1" ]; then
-    echo "  [DRY] bash $CAPTURE ${cs_args[*]}"
+    echo "  [DRY] GDRIVE_UP=0 MP4=1 N_FRAMES=1 bash $CAPTURE ${cs_args[*]}"
   else
-    bash "$CAPTURE" "${cs_args[@]}" || { echo "⚠️ прогон [$idx] $label упал — записываю na, продолжаю"; }
+    # GDRIVE_UP=0 инлайн: capture_scene НЕ трогает Drive (льём/чистим сами)
+    GDRIVE_UP=0 MP4=1 N_FRAMES=1 bash "$CAPTURE" "${cs_args[@]}" \
+      || { echo "⚠️ прогон [$idx] $label упал — записываю na, продолжаю"; }
   fi
 
   # метрика по свежему bag (до следующего capture_scene, который bag перезапишет)
