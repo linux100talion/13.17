@@ -506,11 +506,13 @@ class AltHoldBootstrap(Node):
                     ro = self.a.gz_rsign * (self.a.gz_kp*e_rgt + self.a.gz_kd*v_rgt + self.a.gz_ki*i_rgt)
                     po = max(-mx, min(mx, po)); ro = max(-mx, min(mx, ro))
                     self.pitch = RC_CENTER + int(po)
-                    # system-ID продольной оси (зеркало roll_excite): pitch = заданный
-                    # профиль (демпфер выкл), ROLL держит gz-истина (дрон не уходит вбок).
-                    # pitch_off экзогенный → чистая калибровка looming/вертикального потока.
+                    # system-ID продольной оси: зонд ADDITIVE ПОВЕРХ gz-hold pitch (НЕ
+                    # open-loop!). gz истиной держит позицию — гасит БАЗОВЫЙ форвард-снос
+                    # Gazebo (IMU его не видит) + уводы; иначе open-loop pitch = двойной
+                    # интегратор → runaway (9 м/с за секунды, подтверждено). Excite лишь
+                    # подмешивает продольные колебания → vx гуляет, дрон ограничен.
                     if self.a.pitch_excite:
-                        self.pitch = RC_CENTER + int(self._roll_excite_cmd())
+                        self.pitch = RC_CENTER + int(po) + int(self._roll_excite_cmd())
                     # ГИБРИД (gz+flow): если flow_hold тоже включён — продольную (pitch)
                     # держит gz-истина (дрон НЕ уезжает за сцену), а боковую (roll)
                     # отдаём флоу-демпферу (его и тюним, изолированно). Только gz → roll
@@ -782,8 +784,9 @@ def main():
     p.add_argument('--roll-excite', dest='roll_excite', action='store_true',
                    help='system-ID: заданный roll_off на roll, pitch gz-held (демпфер выкл)')
     p.add_argument('--pitch-excite', dest='pitch_excite', action='store_true',
-                   help='system-ID продольной оси: заданный pitch_off на pitch, ROLL gz-held '
-                        '(демпфер выкл). Реюзит все --roll-excite-* параметры/профиль')
+                   help='system-ID продольной оси: зонд ADDITIVE поверх gz-hold pitch '
+                        '(НЕ open-loop — иначе runaway от баз. форвард-сноса Gazebo). '
+                        'ROLL тоже gz-held. Реюзит --roll-excite-* профиль/параметры')
     p.add_argument('--roll-excite-mode', dest='roll_excite_mode', default='pulse',
                    choices=['pulse', 'chirp'],
                    help="pulse (тычок +τ/−τ: разгон/торможение → стоп; вправо, влево, land) или chirp (сносит)")
