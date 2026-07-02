@@ -210,6 +210,37 @@ mkdir -p /root/.config/rclone && mv /home/*/rclone.conf /root/.config/rclone/
 
 Проверка: `rclone listremotes` должен показать `gdrive:`.
 
+### `yaw_tune_sweep.sh` — СВИП тюнинга визуального YAW-hold (фаза 2)
+Серия ЧИСТЫХ атомарных прогонов `capture_scene … liftland`, по одному на тройку
+гейнов `(BS_YAWH_KP, BS_YAWH_KI, BS_YAWH_SMOOTH)`. После каждого — метрика
+`yaw_check.py` (СКО/размах/дрейф курса по ground-truth `/model/iris_cam/odometry`)
+и заливка видео на Drive под именем с ПОРЯДКОВЫМ номером прогона + параметрами
+(`00_baseline_kp16_ki1_sm1.mp4`, …) в папку `13.17/yaw_tune/`. Результаты копятся
+в `output/yaw_tune.csv`, в конце — ранжирование по СКО.
+
+Логика (bring-up: сначала демпфер, потом restoring; знак `osign` подтверждён,
+не свипаем):
+- **Фаза 0** — база: воспроизвести текущую раскачку (`kp=16 ki=1 sm=1`);
+- **Фаза 1** — демпфер (`ki=0 sm=3`): свип `kp∈{3,6,9}`;
+- **Фаза 2** — сглаживание вокруг `kp=6`: `sm∈{1,5}`;
+- **Фаза 3** — restoring (`kp=6 sm=3`): `ki∈{0.5,1,2}`.
+
+Фазы 2–3 заякорены на `kp=6/sm=3` — если победитель фазы 1 иной, правь массив
+`CONFIGS` в шапке скрипта и перезапусти. Финальный подтверждающий прогон — вручную.
+
+> ⚠️ Обходит перезатирание видео: `capture_scene` при `GDRIVE_UP=1` чистит всю
+> папку `13.17` на Drive и льёт как `scene.mp4`. Поэтому свип зовёт его с
+> `GDRIVE_UP=0 MP4=1` (Drive не трогается, mp4 локально), а заливку с уникальным
+> именем делает сам; папку `13.17/yaw_tune` чистит ОДИН раз в начале.
+
+```bash
+DRY_RUN=1 bash src/lab/yaw_tune_sweep.sh   # показать команды, не запуская (ревью)
+bash src/lab/yaw_tune_sweep.sh             # весь свип (~9 прогонов; на CPU-боксе ~1.5–2 ч)
+GDRIVE_UP=0 bash src/lab/yaw_tune_sweep.sh  # без заливки (видео/CSV только локально)
+```
+Env: `BS_ALT(3)`, `BS_HOLD_SEC(25)`, `SAFE_SEC(18)`, `CPU(1)`, `GDRIVE_UP(1)`,
+`GDRIVE_REMOTE(gdrive)`, `YAW_GDIR(13.17/yaw_tune)`, `RES(960x540)`.
+
 ### `fly_square.py`
 Непрерывный облёт квадрата через `setpoint_position/local`.
 Нужен для инициализации VINS: создаёт параллакс и IMU excitation.

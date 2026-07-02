@@ -130,8 +130,8 @@ class AltHoldBootstrap(Node):
         self.flow_last_sim = -1e9          # sim-время свежего кадра (fade на сталле)
         self._flow_i = 0.0                 # интегратор PID
         self._flow_prev_err = 0.0
-        # YAW-hold (фаза 2): визуальный курс-холд по yaw_flow (heading = ∫yaw_flow)
-        self.yaw_head = 0.0                # накопленный визуальный курс (px), от входа в hold
+        # YAW-hold (фаза 2): PI по yaw-СКОРОСТИ (уставка 0). ∫yaw_flow = визуальный курс
+        self.yaw_head = 0.0                # ∫yf: накопл. курс (px) = I-состояние, от входа в hold
         self.yaw_off = 0.0                 # последний YAW-override (PWM от центра)
         self.yaw_last_sim = -1e9
         self.est = None
@@ -290,8 +290,13 @@ class AltHoldBootstrap(Node):
             self.flow_roll_off = a.flow_osign * blend * u
             self.flow_last_sim = now
         if a.yaw_hold:
-            # YAW курс-холд (фаза 2): heading = ∫yaw_flow (визуальный курс). kp гасит
-            # yaw-rate, ki ДЕРЖИТ курс (тут интеграл ПОЛЕЗЕН — зеркало roll, где вреден).
+            # YAW курс-холд (фаза 2). Это PI-регулятор по yaw-СКОРОСТИ с уставкой 0
+            # («не вращаться»): ошибка = yf (визуальная yaw-скорость), kp = P по
+            # скорости (гасит yaw-rate), ki = I по скорости. Т.к. ∫yf = визуальный
+            # курс (yaw_head), I-член ДЕРЖИТ курс (даёт нужный DC-offset). Имена kp/ki
+            # даны в скоростной рамке и КОРРЕКТНЫ; та же пара членов = PD по КУРСУ
+            # (kp·yf → D, ki·yaw_head → P), т.к. ∫rate=heading — отсюда «зеркало» roll,
+            # где интеграл вреден, а тут полезен.
             yf = res['yaw_flow']
             self.yaw_head = float(np.clip(self.yaw_head + yf, -a.yaw_imax, a.yaw_imax))
             yu = float(np.clip(a.yaw_kp * yf + a.yaw_ki * self.yaw_head, -a.yaw_max, a.yaw_max))
@@ -741,14 +746,16 @@ def main():
     p.add_argument('--flow-osign', dest='flow_osign', type=float, default=1.0,
                    help='flow: знак ROLL-offset/направление торможения (TODO: тюнить Шагом 3)')
     # YAW-hold (фаза 2): визуальный курс-холд по yaw_flow (heading=∫yaw_flow). Сила
-    # yaw'а — depth-independent (не упирается в дальнюю сцену, в отличие от roll). kp
-    # гасит yaw-rate, ki ДЕРЖИТ курс (интеграл тут полезен). Реюзит FlowEstimator/подписки.
+    # yaw'а — depth-independent (не упирается в дальнюю сцену, в отличие от roll).
+    # Это PI по yaw-СКОРОСТИ с уставкой 0: kp = P по скорости (гасит yaw-rate),
+    # ki = I по скорости (∫yf=курс → ДЕРЖИТ курс). Имена в скоростной рамке корректны;
+    # эквивалентно PD по КУРСУ (kp→D, ki→P). Реюзит FlowEstimator/подписки.
     p.add_argument('--yaw-hold', dest='yaw_hold', action='store_true',
                    help='фаза 2: визуальный курс-холд YAW-override по камере+гиро')
     p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=4.0,
-                   help='yaw: P по yaw_flow (демпф yaw-rate), PWM/(px/кадр); default 4')
+                   help='yaw: P по yaw_flow=yaw-скорости (демпф yaw-rate; =D по курсу), PWM/(px/кадр); default 4')
     p.add_argument('--yaw-ki', dest='yaw_ki', type=float, default=2.0,
-                   help='yaw: I по ∫yaw_flow (ДЕРЖИТ курс — полезно), PWM/px; default 2')
+                   help='yaw: I по yaw-скорости, ∫yf=курс → ДЕРЖИТ курс (=P по курсу), PWM/px; default 2')
     p.add_argument('--yaw-imax', dest='yaw_imax', type=float, default=200.0,
                    help='yaw: кламп накопленного курса ∫yaw_flow, px (anti-windup); default 200')
     p.add_argument('--yaw-max', dest='yaw_max', type=float, default=150.0,
