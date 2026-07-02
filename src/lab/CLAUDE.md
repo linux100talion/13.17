@@ -238,7 +238,7 @@ DRY_RUN=1 bash src/lab/yaw_tune_sweep.sh   # показать команды, н
 bash src/lab/yaw_tune_sweep.sh             # весь свип (~9 прогонов; на CPU-боксе ~1.5–2 ч)
 GDRIVE_UP=0 bash src/lab/yaw_tune_sweep.sh  # без заливки (видео/CSV только локально)
 ```
-Env: `BS_ALT(3)`, `BS_HOLD_SEC(25)`, `SAFE_SEC(18)`, `CPU(1)`, `GDRIVE_UP(1)`,
+Env: `BS_ALT(3)`, `BS_HOLD_SEC(10)`, `SAFE_SEC(8)`, `CPU(1)`, `GDRIVE_UP(1)`,
 `GDRIVE_REMOTE(gdrive)`, `YAW_GDIR(13.17/yaw_tune)`, `RES(960x540)`.
 
 ### `fly_square.py`
