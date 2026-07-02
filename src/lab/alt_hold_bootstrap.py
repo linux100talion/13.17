@@ -476,12 +476,20 @@ class AltHoldBootstrap(Node):
                         spx += reff * (math.cos(th) - 1.0)
                         spy += reff * math.sin(th)
                     if self.a.gz_shuttle_a > 0.0:
-                        # боковой ЧЕЛНОК: сетпойнт едет const-V вдоль оси «вправо»
-                        # (yaw входа): 0→−A (влево), пауза, −A→0 (вправо). Малое
-                        # ускорение → крен ~3-5° → чистая боковая трансляция на крейсере.
+                        # ЧЕЛНОК: сетпойнт едет const-V, gz-hold его отслеживает (дрон
+                        # летит с нужной скоростью, позиц. ОС не даёт runaway). Профиль
+                        # 0→−A→0 (плечо A/V сек). Малое ускорение → малый крен → чистая
+                        # трансляция на крейсере.
                         d = self._shuttle_offset()
-                        rx, ry = math.sin(self.hold_yaw0), -math.cos(self.hold_yaw0)
-                        spx += d * rx; spy += d * ry
+                        if self.a.gz_shuttle_fwd:
+                            # ПРОДОЛЬНЫЙ (для looming/pitch-ID): вперёд A, назад к 0.
+                            # −d → вперёд-первым (d идёт 0→−A→0). yaw-hold держит курс.
+                            fx, fy = math.cos(self.hold_yaw0), math.sin(self.hold_yaw0)
+                            spx += -d * fx; spy += -d * fy
+                        else:
+                            # боковой (yaw входа): 0→−A (влево), пауза, −A→0 (вправо).
+                            rx, ry = math.sin(self.hold_yaw0), -math.cos(self.hold_yaw0)
+                            spx += d * rx; spy += d * ry
                     ex = self.gt_x - spx
                     ey = self.gt_y - spy
                     # I-член: интегрируем ошибку в WORLD (yaw-инвариантно), потом
@@ -725,6 +733,9 @@ def main():
                    help='gz-hold: крейсерская скорость челнока, м/с (мягко → малый крен); default 1.5')
     p.add_argument('--gz-shuttle-pause', dest='gz_shuttle_pause', type=float, default=2.0,
                    help='gz-hold: пауза на −A и в конце, sim-сек; default 2')
+    p.add_argument('--gz-shuttle-fwd', dest='gz_shuttle_fwd', action='store_true',
+                   help='gz-hold: челнок вдоль ПРОДОЛЬНОЙ оси (вперёд A, назад к 0) вместо '
+                        'боковой — для ID looming/продольного потока (плечо=A/V сек при скорости V)')
     p.add_argument('--gz-yaw', dest='gz_yaw', type=float, default=0.0,
                    help='gz-hold: амплитуда наложенного yaw, PWM от центра '
                         '(0=без вращения; ~80 ≈ умеренное ω для derotation-теста)')

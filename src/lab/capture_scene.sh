@@ -206,7 +206,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_GZ_TRAJ_R="${BS_GZ_TRAJ_R:-}" -e BS_GZ_TRAJ_T="${BS_GZ_TRAJ_T:-}" \
       -e BS_GZ_YAW="${BS_GZ_YAW:-}" -e BS_GZ_YAW_PERIOD="${BS_GZ_YAW_PERIOD:-}" \
       -e BS_GZ_SHUTTLE_A="${BS_GZ_SHUTTLE_A:-}" -e BS_GZ_SHUTTLE_V="${BS_GZ_SHUTTLE_V:-}" \
-      -e BS_GZ_SHUTTLE_PAUSE="${BS_GZ_SHUTTLE_PAUSE:-}" \
+      -e BS_GZ_SHUTTLE_PAUSE="${BS_GZ_SHUTTLE_PAUSE:-}" -e BS_GZ_SHUTTLE_FWD="${BS_GZ_SHUTTLE_FWD:-}" \
       -e BS_FLOWHOLD="${BS_FLOWHOLD:-}" -e BS_FLOW_KP="${BS_FLOW_KP:-}" \
       -e BS_FLOW_KI="${BS_FLOW_KI:-}" -e BS_FLOW_KD="${BS_FLOW_KD:-}" \
       -e BS_FLOW_IMAX="${BS_FLOW_IMAX:-}" -e BS_FLOW_MAX="${BS_FLOW_MAX:-}" \
