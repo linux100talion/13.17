@@ -102,11 +102,21 @@ class FlowEstimator:
                 if len(self._yaw_buf) > self.yaw_smooth_n:
                     self._yaw_buf.pop(0)
                 yaw_flow = float(np.median(self._yaw_buf)) if self.yaw_smooth_n > 1 else yaw_flow_raw
-                # TODO[phase2]: дивергенция (looming) из аффинного фита tr по (xn,yn) → PITCH.
-                divergence = 0.0
+                # --- ПРОДОЛЬНАЯ ось (phase2, looming): два кандидата сигнала из tr.
+                # longitudinal = медиана ВЕРТИКАЛЬНОГО остатка (для down-tilt камеры ∝
+                # продольной скорости; прямой аналог lateral по оси Y).
+                longitudinal = float(np.median(tr[:, 1]))
+                # divergence = расширение поля из АФФИННОГО фита tr ~ [1, xn, yn]:
+                # ∂u/∂xn + ∂v/∂yn ∝ Tz/Z (looming — движение вдоль оптической оси).
+                xn = (p0[:, 0] - self.cx) / self.fx
+                yn = (p0[:, 1] - self.cy) / self.fy
+                M = np.column_stack([np.ones_like(xn), xn, yn])
+                cu, *_ = np.linalg.lstsq(M, tr[:, 0], rcond=None)
+                cv, *_ = np.linalg.lstsq(M, tr[:, 1], rcond=None)
+                divergence = float(cu[1] + cv[2])
                 out = dict(
                     lateral=lateral, lateral_raw=lateral_raw, yaw_flow=yaw_flow,
-                    divergence=divergence, n=n, dt=dt,
+                    longitudinal=longitudinal, divergence=divergence, n=n, dt=dt,
                     conf=float(n) / float(self.max_feats),
                     # --- диагностика для flow_derotation_check ---
                     resid_rms=float(np.sqrt(np.mean(np.sum(tr ** 2, axis=1)))),
