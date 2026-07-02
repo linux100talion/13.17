@@ -47,6 +47,17 @@ IMU_TOPIC = os.environ.get('IMU_TOPIC', '/gz_imu/data_flu')
 ODOM = os.environ.get('ODOM_TOPIC', '/model/iris_cam/odometry')
 SAFE_SEC = float(os.environ.get('SAFE_SEC', '28'))
 Z_TO = float(os.environ.get('Z_TO', '2.0'))
+SMOOTH_N = int(os.environ.get('SMOOTH_N', '1'))   # причинная медиана по N кадрам (1=выкл)
+
+
+def causal_median(x, n):
+    """Медиана по последним n сэмплам (как буфер в ноде): x[i]=median(x[i-n+1..i])."""
+    if n <= 1:
+        return x
+    out = np.empty_like(x)
+    for i in range(len(x)):
+        out[i] = np.median(x[max(0, i - n + 1):i + 1])
+    return out
 
 
 def _stamp(hdr):
@@ -120,6 +131,8 @@ def main():
         if res is not None:
             ts.append(st); lon.append(res['longitudinal']); div.append(res['divergence']); ns.append(res['n'])
     ts = np.array(ts); lon = np.array(lon); div = np.array(div); ns = np.array(ns)
+    if SMOOTH_N > 1:                       # причинная медиана (как в ноде)
+        lon = causal_median(lon, SMOOTH_N); div = causal_median(div, SMOOTH_N)
 
     t0bag = min(ts[0], od['t'][0], imu['t'][0])
     to_idx = np.where(od['z'] > Z_TO)[0]
