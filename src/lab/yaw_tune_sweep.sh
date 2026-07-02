@@ -40,6 +40,12 @@
 set -euo pipefail
 
 # ── список прогонов: "label:KP:KI:SMOOTH" (порядок = порядок в плане) ──────────
+# Можно переопределить извне: YAW_CONFIGS="s5:6:0:5 s7:6:0:7" (через пробел) —
+# для добора/refine, чтобы не гонять полный план. YAW_CSV/YAW_GDIR — отдельные
+# CSV и папку на Drive, чтобы не затирать результаты/видео основного свипа.
+if [ -n "${YAW_CONFIGS:-}" ]; then
+  read -r -a CONFIGS <<< "$YAW_CONFIGS"
+else
 CONFIGS=(
   # Фаза 0 — БАЗА: текущая раскачка (сырой сигнал sm=1, задран kp=16). Эталон, что бьём.
   "baseline:16:1:1"
@@ -55,6 +61,7 @@ CONFIGS=(
   "p3rest:6:1:3"
   "p3rest:6:2:3"
 )
+fi
 
 # ── параметры (env) ───────────────────────────────────────────────────────────
 CPU="${CPU:-1}"
@@ -73,7 +80,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CAPTURE="$REPO_ROOT/src/lab/capture_scene.sh"
 OUTPUT_DIR="$REPO_ROOT/docker/sim/output"
 MP4_HOST="$OUTPUT_DIR/scene_img/scene.mp4"
-CSV="$OUTPUT_DIR/yaw_tune.csv"
+CSV="${YAW_CSV:-$OUTPUT_DIR/yaw_tune.csv}"
 SRC='source /opt/ros/humble/setup.bash'
 
 log() { echo -e "\n############ $* ############"; }

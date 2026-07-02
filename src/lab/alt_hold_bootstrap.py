@@ -752,18 +752,18 @@ def main():
     # эквивалентно PD по КУРСУ (kp→D, ki→P). Реюзит FlowEstimator/подписки.
     p.add_argument('--yaw-hold', dest='yaw_hold', action='store_true',
                    help='фаза 2: визуальный курс-холд YAW-override по камере+гиро')
-    p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=4.0,
-                   help='yaw: P по yaw_flow=yaw-скорости (демпф yaw-rate; =D по курсу), PWM/(px/кадр); default 4')
-    p.add_argument('--yaw-ki', dest='yaw_ki', type=float, default=2.0,
-                   help='yaw: I по yaw-скорости, ∫yf=курс → ДЕРЖИТ курс (=P по курсу), PWM/px; default 2')
+    p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=6.0,
+                   help='yaw: P по yaw_flow=yaw-скорости (демпф yaw-rate; =D по курсу), PWM/(px/кадр); default 6 (оптимум свипа 2026-07-02, U-кривая)')
+    p.add_argument('--yaw-ki', dest='yaw_ki', type=float, default=0.0,
+                   help='yaw: I по yaw-скорости (=P по курсу). ВРЕДЕН: интегрирует bias yaw_flow → уводит истинный курс + раскачка (свип: ki=2 разнёс). default 0')
     p.add_argument('--yaw-imax', dest='yaw_imax', type=float, default=200.0,
                    help='yaw: кламп накопленного курса ∫yaw_flow, px (anti-windup); default 200')
     p.add_argument('--yaw-max', dest='yaw_max', type=float, default=150.0,
                    help='yaw: макс |YAW-offset| PWM; default 150')
     p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=1.0,
                    help='yaw: знак YAW-коррекции (±1; тюнить как osign, оракул — истинный yaw)')
-    p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=1,
-                   help='yaw: временное сглаживание yaw_flow, медиана по N кадрам (1=выкл; режет шум перед ki)')
+    p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=5,
+                   help='yaw: временное сглаживание yaw_flow, медиана по N кадрам (1=выкл). default 5 (свип 2026-07-02: sm 1→3→5 монотонно ровнее, лаг ещё не мешал)')
     p.add_argument('--flow-smooth', dest='flow_smooth', type=int, default=1,
                    help='flow: временное сглаживание lateral, медиана по N кадрам (1=выкл; ~5 режет белый шум ~√N)')
     p.add_argument('--flow-image-topic', dest='flow_image_topic', default='/image_mono',
