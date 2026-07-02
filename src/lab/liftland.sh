@@ -61,6 +61,8 @@ ARGS=(--hold-only --alt "$ALT" --hold-sec "$HOLD")
 [ -n "${BS_YAWH_SMOOTH:-}" ] && ARGS+=(--yaw-smooth "$BS_YAWH_SMOOTH")
 # ROLL-EXCITE (--roll-excite): открытый контур для system-ID (калибровка flow_calib)
 [ "${BS_ROLL_EXCITE:-0}" = "1" ] && ARGS+=(--roll-excite)
+# PITCH-EXCITE (--pitch-excite): то же для продольной оси (roll держит gz); реюзит BS_RE_*
+[ "${BS_PITCH_EXCITE:-0}" = "1" ] && ARGS+=(--pitch-excite)
 [ -n "${BS_RE_MODE:-}" ]   && ARGS+=(--roll-excite-mode "$BS_RE_MODE")
 [ -n "${BS_RE_TAU:-}" ]    && ARGS+=(--roll-excite-tau "$BS_RE_TAU")
 [ -n "${BS_RE_NREP:-}" ]   && ARGS+=(--roll-excite-nrep "$BS_RE_NREP")

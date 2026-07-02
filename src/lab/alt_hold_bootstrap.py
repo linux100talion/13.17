@@ -506,6 +506,11 @@ class AltHoldBootstrap(Node):
                     ro = self.a.gz_rsign * (self.a.gz_kp*e_rgt + self.a.gz_kd*v_rgt + self.a.gz_ki*i_rgt)
                     po = max(-mx, min(mx, po)); ro = max(-mx, min(mx, ro))
                     self.pitch = RC_CENTER + int(po)
+                    # system-ID продольной оси (зеркало roll_excite): pitch = заданный
+                    # профиль (демпфер выкл), ROLL держит gz-истина (дрон не уходит вбок).
+                    # pitch_off экзогенный → чистая калибровка looming/вертикального потока.
+                    if self.a.pitch_excite:
+                        self.pitch = RC_CENTER + int(self._roll_excite_cmd())
                     # ГИБРИД (gz+flow): если flow_hold тоже включён — продольную (pitch)
                     # держит gz-истина (дрон НЕ уезжает за сцену), а боковую (roll)
                     # отдаём флоу-демпферу (его и тюним, изолированно). Только gz → roll
@@ -534,9 +539,9 @@ class AltHoldBootstrap(Node):
                         self.get_logger().info(
                             f"gz: yaw={math.degrees(self.gt_yaw):+.0f} sp=({spx-self.hold_sp[0]:+.1f},{spy-self.hold_sp[1]:+.1f}) "
                             f"e=({ex:+.1f},{ey:+.1f}) v=({self.gt_vx:+.2f},{self.gt_vy:+.2f}) "
-                            f"i=({i_fwd:+.1f},{i_rgt:+.1f}) pitch_off={int(po):+d} "
+                            f"i=({i_fwd:+.1f},{i_rgt:+.1f}) pitch_off={int(self.pitch - RC_CENTER):+d} "
                             f"roll_off={int(self.roll - RC_CENTER):+d}"
-                            f"{'(excite)' if self.a.roll_excite else '(flow)' if self.a.flow_hold else ''}")
+                            f"{'(r-excite)' if self.a.roll_excite else '(p-excite)' if self.a.pitch_excite else '(flow)' if self.a.flow_hold else ''}")
                 elif self.a.flow_hold:
                     # боковой демпфер: ROLL ← поток (PID в _on_flow_image), pitch/yaw
                     # центр (продольный/курс = фаза 2/пилот). Сталл кадров → центр
@@ -553,7 +558,7 @@ class AltHoldBootstrap(Node):
                 else:
                     self.roll = self.pitch = RC_CENTER   # gz нет → просто уровень
                 # land: pulse-excite / челнок → сразу после последовательности; иначе по hold_sec
-                if self.a.roll_excite and self.a.roll_excite_mode == 'pulse':
+                if (self.a.roll_excite or self.a.pitch_excite) and self.a.roll_excite_mode == 'pulse':
                     if self.elapsed() > self.excite_total():
                         self.get_logger().info(f"    pulse-excite ({self.excite_total():.1f}s) завершён — садимся")
                         self.result = "HOLD_DONE"; self.goto(S_LAND)
@@ -776,6 +781,9 @@ def main():
     # замкнутом O2, где roll_off∝v_right). Требует записи /mavros/rc/override в bag.
     p.add_argument('--roll-excite', dest='roll_excite', action='store_true',
                    help='system-ID: заданный roll_off на roll, pitch gz-held (демпфер выкл)')
+    p.add_argument('--pitch-excite', dest='pitch_excite', action='store_true',
+                   help='system-ID продольной оси: заданный pitch_off на pitch, ROLL gz-held '
+                        '(демпфер выкл). Реюзит все --roll-excite-* параметры/профиль')
     p.add_argument('--roll-excite-mode', dest='roll_excite_mode', default='pulse',
                    choices=['pulse', 'chirp'],
                    help="pulse (тычок +τ/−τ: разгон/торможение → стоп; вправо, влево, land) или chirp (сносит)")
@@ -811,6 +819,9 @@ def main():
         args.hold_only = True   # flow-демпфер живёт в каркасе hold-only (фаза EXCITE)
     if args.roll_excite:
         args.hold_only = True   # тот же каркас; pitch держит gz, roll = заданный чирп
+        args.gz_hold = True
+    if args.pitch_excite:
+        args.hold_only = True   # зеркало roll_excite: roll держит gz, pitch = заданный профиль
         args.gz_hold = True
 
     rclpy.init()

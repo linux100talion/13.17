@@ -216,7 +216,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_YAWHOLD="${BS_YAWHOLD:-}" -e BS_YAWH_KP="${BS_YAWH_KP:-}" -e BS_YAWH_KI="${BS_YAWH_KI:-}" \
       -e BS_YAWH_IMAX="${BS_YAWH_IMAX:-}" -e BS_YAWH_MAX="${BS_YAWH_MAX:-}" -e BS_YAWH_OSIGN="${BS_YAWH_OSIGN:-}" \
       -e BS_YAWH_SMOOTH="${BS_YAWH_SMOOTH:-}" \
-      -e BS_ROLL_EXCITE="${BS_ROLL_EXCITE:-}" -e BS_RE_AMP="${BS_RE_AMP:-}" \
+      -e BS_ROLL_EXCITE="${BS_ROLL_EXCITE:-}" -e BS_PITCH_EXCITE="${BS_PITCH_EXCITE:-}" -e BS_RE_AMP="${BS_RE_AMP:-}" \
       -e BS_RE_MODE="${BS_RE_MODE:-}" -e BS_RE_TAU="${BS_RE_TAU:-}" -e BS_RE_NREP="${BS_RE_NREP:-}" \
       -e BS_RE_GAP="${BS_RE_GAP:-}" -e BS_RE_SETTLE="${BS_RE_SETTLE:-}" \
       -e BS_RE_F0="${BS_RE_F0:-}" -e BS_RE_F1="${BS_RE_F1:-}" \
