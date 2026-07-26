@@ -18,11 +18,20 @@ class AxisPolicy(Enum):
 
 @dataclass
 class MotionIntent:
+    # ПОЗИЦИОННОЕ намерение (для position-hold: Gz/Vins интегрируют/отслеживают)
     d_fwd: float = 0.0     # смещение уставки вперёд от точки входа, м (тело)
     d_right: float = 0.0   # смещение вправо, м (тело)
+    # СКОРОСТНАЯ команда (для velocity-damp: Flow/Yaw). НОРМИРОВАНО [-1..1] (стик):
+    # до VINS метрической скорости нет → команда во флоу-домене, стабилизатор масштабирует.
+    c_fwd: float = 0.0     # продольная (looming), тело
+    c_right: float = 0.0   # боковая (flow-damp по roll)
+    c_yaw: float = 0.0     # рыскание (yaw-rate assist)
 
 
 @dataclass
 class Setpoint:
-    x: float = 0.0         # абсолютная цель в МИРЕ, м
+    x: float = 0.0         # абсолютная цель в МИРЕ, м (position-hold)
     y: float = 0.0
+    c_fwd: float = 0.0     # нормир. скорость-команда (velocity-damp стабилизаторы, тело)
+    c_right: float = 0.0
+    c_yaw: float = 0.0

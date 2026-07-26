@@ -87,7 +87,8 @@ class BootstrapArch2Node(Node):
     def _make_pilot(self, cfg, kind):
         if kind == 'ros':
             return RosPilot(self)
-        script = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}.get(cfg.control_mode, [])
+        script = {'assisted': ASSISTED_SCRIPT, 'flow_assist': ASSISTED_SCRIPT,
+                  'manual': MANUAL_SCRIPT}.get(cfg.control_mode, [])
         return ScriptedPilot(self.clock, script)
 
     def _tick(self):
@@ -121,7 +122,7 @@ class BootstrapArch2Node(Node):
 def _parse() -> tuple:
     p = argparse.ArgumentParser()
     p.add_argument('--control-mode', dest='control_mode', default='shuttle',
-                   choices=['shuttle', 'assisted', 'manual'])
+                   choices=['shuttle', 'assisted', 'manual', 'flow_assist'])
     p.add_argument('--pilot', default='scripted', choices=['scripted', 'ros'],
                    help='источник стиков: scripted (sim-профиль) | ros (/mavros/rc/in)')
     p.add_argument('--excite-max-sec', dest='excite_max_sec', type=float, default=0.0,
@@ -156,8 +157,10 @@ def _parse() -> tuple:
     d.pop('pilot')
     cfg = BootstrapConfig(**d)
     # Автотриггер land для пилот-режимов: садимся после демо-профиля (+2с успокоение).
-    if cfg.excite_max_sec <= 0 and cfg.control_mode in ('assisted', 'manual') and pilot_kind == 'scripted':
-        total = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}[cfg.control_mode][-1][0]
+    if cfg.excite_max_sec <= 0 and cfg.control_mode in ('assisted', 'manual', 'flow_assist') \
+            and pilot_kind == 'scripted':
+        total = {'assisted': ASSISTED_SCRIPT, 'flow_assist': ASSISTED_SCRIPT,
+                 'manual': MANUAL_SCRIPT}[cfg.control_mode][-1][0]
         cfg.excite_max_sec = total + 2.0
     return cfg, pilot_kind
 

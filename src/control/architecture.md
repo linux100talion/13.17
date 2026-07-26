@@ -319,7 +319,24 @@ src/mission/                     # ament_python пакет mission_pkg (рядо
   pilot-поля в `DroneState`, `recipes.build_control_stack` (shuttle|assisted|manual).
   Нода: `--control-mode`, `--pilot`, Arbiter в контуре тика. Тесты: pilot-стратегии
   (RcTransmitter/PilotPassthrough/Arbiter) + FSM-smoke assisted/manual/seize. Осталось:
-  атомарный прогон в симе (`--control-mode assisted`). Срез 3 (excitation) — далее.
+  атомарный прогон в симе (`--control-mode assisted`) — ✅ HOLD_DONE, видео на Drive.
+
+- **Срез 3 (пре-VINS флоу-стабилизатор + per-axis): ДОМЕН ГОТОВ, оффлайн-гейты зелёные.**
+  Главное боевое назначение — до init VINS дать пилоту НАШ демпфер по оптическому потоку.
+  - `ControlStack` теперь PER-AXIS: стабилизаторов СПИСОК, каждый владеет осями (`axes`);
+    база стека = сырые стики пилота (незанятая ось → ручной наклон); стабилизатор
+    перезаписывает свои оси. `manual` = пустой список (всё пилоту), `flow_assist` =
+    `[FlowDamper(roll), YawHold(yaw)]` + пилот (pitch сырой).
+  - `FlowDamper`(roll)/`YawHold`(yaw) — порт закона из монолита (flow_hold/yaw_hold,
+    yaw ki=0 [[yaw-hold-tuning]]), velocity-assist (стик=цель потока), ПОКАДРОВАЯ
+    интеграция (flow_seq), conf-fade, stale-fade. Читают `flow_*` из `DroneState`.
+  - `MotionIntent`/`Setpoint`: добавлены нормир. скорость-команды `c_fwd/c_right/c_yaw`
+    (velocity-assist; позиция d_* остаётся для Gz/Vins → срез 1 Δ=0 сохранён).
+  - Тесты: `test_flow_strategies.py` (демпф/velocity-assist/покадрово/stale/conf),
+    `test_multiaxis_stack.py` (пилот-подложка + частичные оси).
+  ОСТАЛОСЬ по срезу 3: `RosPerception` (камера+IMU → `FlowEstimator` → `flow_*` в
+  DroneState; вопрос — где живёт `flow_estimator.py` для борта) + атомарный прогон
+  `--control-mode flow_assist` в симе. Дальше: рантайм switch Flow→Vins по «VINS ready».
 
 - **Гранулярность:** один модуль на роль (все стратегии стабилизации в одном файле),
   а не файл-на-стратегию — это код, который мутирует; дробить в 15 крошек вредно.

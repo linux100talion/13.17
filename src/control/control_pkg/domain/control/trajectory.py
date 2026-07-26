@@ -90,6 +90,10 @@ class RcTransmitter(TrajectoryStrategy):
         self._prev_t = t
         fwd = self.psign * self._axis(s.pilot_pitch)
         rgt = self.rsign * self._axis(s.pilot_roll)
-        self._d_fwd += fwd * self.vel_gain * dt      # интеграл стик→смещение уставки
+        yaw = self._axis(s.pilot_yaw)
+        # ПОЗИЦИЯ (position-hold Gz/Vins): интеграл стик→смещение уставки.
+        self._d_fwd += fwd * self.vel_gain * dt
         self._d_right += rgt * self.vel_gain * dt
-        return MotionIntent(d_fwd=self._d_fwd, d_right=self._d_right)
+        # СКОРОСТЬ-команда (velocity-damp Flow/Yaw): нормированный стик [-1..1] как есть.
+        return MotionIntent(d_fwd=self._d_fwd, d_right=self._d_right,
+                            c_fwd=fwd, c_right=rgt, c_yaw=yaw)

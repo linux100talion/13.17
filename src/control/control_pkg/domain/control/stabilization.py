@@ -67,9 +67,112 @@ class PilotPassthrough(StabilizationStrategy):
     Уставку (sp) игнорирует — отслеживать нечего. throttle центр (миссия держит
     высоту в EXCITE; при seize пилоту throttle отдаёт Arbiter). Читает pilot_* из
     DroneState — sim (ScriptedPilot) и борт (RosPilot) одинаково.
+
+    NB: в per-axis модели (срез 3) этот класс избыточен — manual = ПУСТОЙ список
+    стабилизаторов (база стека = сырые стики). Оставлен для совместимости.
     """
     axes = frozenset({"roll", "pitch", "yaw"})
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
         return RcCommand(roll=s.pilot_roll, pitch=s.pilot_pitch,
                          throttle=RC_CENTER, yaw=s.pilot_yaw)
+
+
+def _blend(conf, conf_min, conf_full):
+    """confidence (число треков) → авторитет демпфера [0..1] (плавный fade-out)."""
+    return clamp((conf - conf_min) / max(1e-6, conf_full - conf_min), 0.0, 1.0)
+
+
+class FlowDamper(StabilizationStrategy):
+    """СРЕЗ 3 (БОЕВОЙ пре-VINS): боковой демпфер сноса по оптическому потоку → ROLL.
+
+    Наш простой стабилизатор ДО инициализации VINS (нет GPS/VINS/gt). Гасит боковую
+    визуальную скорость (flow_lateral) к ЦЕЛИ. Velocity-assist: цель = c_right·cmd_gain
+    (нормир. стик пилота) → пилот рулит боком, флоу убирает снос; стик в центре → цель 0
+    → чистый демпф дрейфа. Порт закона из alt_hold_bootstrap._on_flow_image (flow_hold).
+
+    PID интегрирует ПО КАДРАМ (flow_seq), не по тикам: на стоячем сигнале 20-Гц тик не
+    должен накручивать интеграл. Между кадрами держим последний выход; протух (stale) →
+    fade в центр. Confidence (flow_conf) → плавный авторитет. Читает flow_* из DroneState
+    (наполняет RosPerception через FlowEstimator — sim и борт одинаково).
+    """
+    axes = frozenset({"roll"})
+
+    def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_pwm=150.0,
+                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=0.0, stale_sec=0.5):
+        self.kp, self.ki, self.kd = kp, ki, kd
+        self.imax, self.max = imax, max_pwm
+        self.conf_min, self.conf_full = conf_min, conf_full
+        self.osign, self.cmd_gain, self.stale = osign, cmd_gain, stale_sec
+        self._i = 0.0
+        self._prev_err = 0.0
+        self._last_seq = -1
+        self._out = 0.0
+        self._last_frame_sim = -1e9
+
+    def enter(self, s: DroneState) -> None:
+        self._i = 0.0
+        self._prev_err = 0.0
+        self._last_seq = -1
+        self._out = 0.0
+        self._last_frame_sim = -1e9
+
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+        if s.flow_seq != self._last_seq:            # НОВЫЙ кадр → продвигаем PID
+            self._last_seq = s.flow_seq
+            fdt = max(1e-3, s.flow_dt)
+            blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
+            target = sp.c_right * self.cmd_gain      # velocity-assist: желаемый боковой поток
+            err = s.flow_lateral - target
+            self._i = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
+            d = self.kd * (err - self._prev_err) / fdt
+            self._prev_err = err
+            u = clamp(self.kp * err + self._i + d, -self.max, self.max)
+            self._out = self.osign * blend * u
+            self._last_frame_sim = s.now_sim
+        fresh = (s.now_sim - self._last_frame_sim) < self.stale
+        off = int(self._out) if fresh else 0         # протух → fade в центр
+        return RcCommand(roll=RC_CENTER + off, throttle=RC_CENTER)
+
+
+class YawHold(StabilizationStrategy):
+    """СРЕЗ 3 (БОЕВОЙ пре-VINS): визуальный курс/рыскание по потоку → YAW.
+
+    Гасит визуальную yaw-скорость (flow_yaw) к ЦЕЛИ. Velocity-assist: цель =
+    c_yaw·cmd_gain (стик) → пилот рулит курсом, флоу гасит паразитное вращение; центр
+    → удержание. Победитель свипа [[yaw-hold-tuning]] — ki=0 (чистый демпф yaw-rate;
+    интеграл ВРЕДЕН, накручивает bias yaw_flow). Порт из _on_flow_image (yaw_hold).
+    Depth-independent (курс не упирается в дальнюю сцену, в отличие от roll).
+    """
+    axes = frozenset({"yaw"})
+
+    def __init__(self, kp=6.0, ki=0.0, imax=200.0, max_pwm=150.0,
+                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=0.0, stale_sec=0.5):
+        self.kp, self.ki = kp, ki
+        self.imax, self.max = imax, max_pwm
+        self.conf_min, self.conf_full = conf_min, conf_full
+        self.osign, self.cmd_gain, self.stale = osign, cmd_gain, stale_sec
+        self._head = 0.0
+        self._last_seq = -1
+        self._out = 0.0
+        self._last_frame_sim = -1e9
+
+    def enter(self, s: DroneState) -> None:
+        self._head = 0.0
+        self._last_seq = -1
+        self._out = 0.0
+        self._last_frame_sim = -1e9
+
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+        if s.flow_seq != self._last_seq:
+            self._last_seq = s.flow_seq
+            blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
+            target = sp.c_yaw * self.cmd_gain
+            err = s.flow_yaw - target
+            self._head = clamp(self._head + err, -self.imax, self.imax)   # ∫err = курс-ошибка
+            yu = clamp(self.kp * err + self.ki * self._head, -self.max, self.max)
+            self._out = self.osign * blend * yu
+            self._last_frame_sim = s.now_sim
+        fresh = (s.now_sim - self._last_frame_sim) < self.stale
+        off = int(self._out) if fresh else 0
+        return RcCommand(yaw=RC_CENTER + off, throttle=RC_CENTER)

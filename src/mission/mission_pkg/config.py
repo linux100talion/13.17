@@ -43,3 +43,20 @@ class BootstrapConfig:
     pilot_full: int = 400            # полное отклонение стика от центра, PWM
     pilot_pitch_sign: float = 1.0    # знак «стик вперёд» (борт: сверить с радио)
     pilot_roll_sign: float = 1.0
+    # flow-assist (срез 3, БОЕВОЙ пре-VINS): демпфер сноса по оптическому потоку.
+    # Дефолты — победители монолита (flow_hold + yaw_hold [[yaw-hold-tuning]]: yaw ki=0).
+    flow_kp: float = 8.0
+    flow_ki: float = 2.0
+    flow_kd: float = 0.0
+    flow_imax: float = 120.0
+    flow_max: float = 150.0
+    flow_conf_min: float = 0.05
+    flow_conf_full: float = 0.20
+    flow_osign: float = 1.0
+    flow_cmd_gain: float = 0.0       # velocity-assist: стик→целевой поток (0=демпф к нулю)
+    yaw_kp: float = 6.0
+    yaw_ki: float = 0.0              # ВРЕДЕН (bias yaw_flow) — держим 0
+    yaw_imax: float = 200.0
+    yaw_max: float = 150.0
+    yaw_osign: float = 1.0
+    yaw_cmd_gain: float = 0.0
