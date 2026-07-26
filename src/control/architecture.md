@@ -1,372 +1,310 @@
 # src/control — архитектура управления (hexagonal + DDD)
 
-Статус: **проектный документ**, код ещё не написан. Ветка `nn2_c3_control`.
-Источник: рефакторинг монолита `src/lab/alt_hold_bootstrap.py` (~865 строк) в
-переиспользуемое боевое ядро управления.
+**Living design-of-record.** Тело описывает АКТУАЛЬНОЕ состояние кода; история — в
+разделе «Статус» внизу. Ветка `nn2_c3_control`. Источник: рефакторинг монолита
+`src/lab/alt_hold_bootstrap.py` (~865 строк) в переиспользуемое боевое ядро управления.
 
-## Зачем
+## Зачем и северная звезда
 
-`alt_hold_bootstrap.py` был сделан на скорую руку и сплавил в одном классе-ноде
-четыре разные вещи:
+`alt_hold_bootstrap.py` сплавил в одном классе-ноде четыре разные вещи: конечный
+автомат миссии, законы управления, ROS2-инфраструктуру и ~60 argparse-флагов. Цель
+рефактора — разнести это по hexagonal-слоям так, чтобы законы тестировались на числах
+без Gazebo, одно ядро работало в симе и на борту, режимы свободно комбинировались без
+лестниц `if gz/elif flow/…`, и — главное — **реальный пульт подключался как стратегия**.
 
-1. **Конечный автомат миссии** — `PREARM→ARM→CLIMB→EXCITE→HANDOVER/OBSERVE→LAND→DONE`.
-2. **Законы управления** — gz-position-hold (PID world→body), flow-damper, yaw-hold,
-   генераторы возбуждения (pulse/chirp, translate +τ/−2τ/+τ, shuttle, круговая траектория).
-3. **ROS2-инфраструктуру** — подписки с QoS, sim-clock, сервис-клиенты, `OverrideRCIn`.
-4. **Конфигурацию** — ~60 argparse-флагов.
+**Северная звезда (боевое назначение):** до инициализации VINS дать пилоту НАШ простой
+стабилизатор для стиков. На борту до VINS нет опоры позиции (ни GPS, ни VINS, ни gt) →
+«наш простой» = **демпфер сноса по оптическому потоку** (даёт скорость/курс без GPS).
+Пилот рулит, флоу убирает дрейф ALT_HOLD. Отсюда лестница опор — **один пилот-слой,
+сменный стабилизатор**:
 
-Цель — разнести это по hexagonal-слоям так, чтобы:
-- **законы управления тестировались на числах** без Gazebo/ROS;
-- **одно ядро работало и в симе, и на боевом Orin** (там нет ground-truth Gazebo —
-  источник позы VINS): меняется только адаптер, домен идентичен;
-- **режимы стабилизации/движения свободно комбинировались** в рантайме без лестниц
-  `if gz_hold / elif flow_hold / elif ...`;
-- **реальный пульт подключался как стратегия** — управление можно переключить на
-  живого пилота, стабилизация при этом остаётся доступной (assisted-режим).
+| Стабилизатор | Опора | Когда |
+|---|---|---|
+| `GzPositionHold` | ground-truth Gazebo (СИМ) | **оракул** для тюнинга законов, sim-only |
+| `FlowDamper` + `YawHold` | камера (борт) | **ДО init VINS — наш пре-VINS демпфер (ГЛАВНОЕ)** |
+| `VinsHold` (будущий) | VINS | ПОСЛЕ init: точный hold / авто-манёвры |
 
-Прецедент в репо уже есть: `src/lab/flow_estimator.py` — чистый перцепт-сервис
-(только numpy+cv2, ноль ROS), шарится между 5+ инструментами. Мы распространяем
-эту культуру на весь слой управления.
+```
+взлёт ─► [FlowDamper+YawHold, пилот рулит] ──VINS сошёлся──► switch_stabilization(VinsHold) ─► [точный hold / авто]
+              наш пре-VINS демпфер            (рантайм hot-swap)      пилот RcTransmitter НЕ меняется
+```
+
+Прецедент чистого перцепт-сервиса уже был: `flow_estimator.py` (numpy+cv2, ноль ROS).
+Он и стал каноничным в `control_pkg/perception/` (см. «Пакеты»).
 
 ## Ключевая модель: три роли, а не две
 
-Наивная декомпозиция «движение + стабилизация», где итоговая команда =
-`rc_motion + rc_stab − центр`, **физически неверна**: в исходном коде движение и
-стабилизация комбинируются ТРЕМЯ разными способами:
+Наивная декомпозиция «движение + стабилизация» с суммой `rc_motion + rc_stab − центр`
+**физически неверна**: движение и стабилизация комбинируются ТРЕМЯ способами — впрыск
+сетпойнта (shuttle двигает уставку PID), аддитивно (pitch-excite поверх выхода), замена
+оси (roll-excite вытесняет). Недостающее измерение — **политика композиции по оси**.
+Отсюда три роли:
 
-1. **Впрыск сетпойнта** (shuttle, circle): траектория не добавляется к RC — она
-   *двигает уставку* position-hold PID, а PID её отслеживает (`sp += offset`, затем
-   `e = pose − sp`). Складывать выходы = двойной счёт.
-2. **Аддитивно** (pitch-excite): зонд кладётся ПОВЕРХ выхода стабилизатора
-   (`ADDITIVE, НЕ open-loop, иначе runaway`).
-3. **Замена оси** (roll-excite, ALT_HOLD translate): зонд ВЫТЕСНЯЕТ стабилизатор на
-   оси. Для system-ID это принципиально — контроллер не должен гасить экзогенный сигнал.
+- **Trajectory** → *намерение*: смещение уставки (`d_*`, для position-hold) и/или
+  нормированная скорость-команда (`c_*`, для velocity-damp). Не знает про PWM. Сюда
+  садится и **пульт** (`RcTransmitter` — источник намерения).
+- **Stabilization** → намерение + обратная связь → RC **по своим осям** (`axes`).
+  `GzPositionHold`, `FlowDamper`, `YawHold`, будущий `VinsHold`.
+- **Excitation** → экзогенный зонд для system-ID (pulse/chirp) с политикой на ось
+  (`ADDITIVE`/`REPLACE`). Не движение — другая задача (возбудить, не долететь).
 
-Недостающее измерение — **политика композиции по оси**. Отсюда три роли:
+### Режимы (recipes) → тройки стратегий
 
-- **Trajectory (Motion)** → выдаёт *намерение*: смещение уставки / скорость. Знает
-  геометрию манёвра, не знает про PWM. Сюда садится и **пульт** (источник намерения).
-- **Stabilization** → берёт намерение + обратную связь → RC по регулируемым осям.
-  gz-hold, flow-damper, yaw-hold, будущий vins-hold, pilot-passthrough.
-- **Excitation** → экзогенный зонд для system-ID (pulse/chirp) с явной политикой на
-  ось (`ADDITIVE` / `REPLACE`). Это НЕ движение — другая эпистемическая задача
-  (возбудить, а не долететь).
-
-### Проверка на всех режимах монолита
-
-| Режим `alt_hold_bootstrap` | Trajectory | Stabilization | Excitation |
+| Режим (`recipes.build_control_stack`) | Trajectory | Stabilization (список) | Excitation |
 |---|---|---|---|
-| ALT_HOLD translate (+τ/−2τ/+τ) | — (баро) | — | Translate (replace pitch/yaw) |
-| gz-hold (чистый) | Static | GzPositionHold | — |
-| gz-hold + shuttle / circle | Shuttle / Circle | GzPositionHold | — |
-| roll-excite | Static | Gz (только pitch) | Pulse (**replace** roll) |
-| pitch-excite | Static | Gz (обе оси) | Pulse (**additive** pitch) |
-| flow-hold | — | FlowDamper (roll) | — |
-| yaw-hold | … | + YawHold (yaw) | … |
-| **assisted (пульт)** | **RcTransmitter** | VinsHold / FlowDamper | — |
-| **ручной (пульт)** | RcTransmitter | **PilotPassthrough** | — |
-| **автономный боевой** | Shuttle / Circle / waypoint | VinsHold | — |
+| `shuttle` (sim system-ID) | `Shuttle` | `[GzPositionHold]` (roll+pitch) | — |
+| `assisted` (пульт+gt) | `RcTransmitter` | `[GzPositionHold]` | — |
+| `manual` | `StaticSetpoint` | `[]` — всё пилоту | — |
+| **`flow_assist`** (пре-VINS, борт) | `RcTransmitter` | `[FlowDamper(roll), YawHold(yaw)]` | — |
+| (будущий) авто-манёвр | `Shuttle`/`Circle`/waypoint | `[VinsHold]` | — |
+| (system-ID оси) | `Static` | `[GzPositionHold]` | `Pulse`/`Chirp` |
 
-Всё встаёт без единого `if`. Комбинаторика при этом **разрежена** (flow/gz
-взаимоисключающи, roll-excite требует gz и т.д.) — валидные тройки собирает
+Комбинаторика разрежена (flow/gz взаимоисключающи и т.п.) — валидные тройки собирает
 `recipes.py`, а не «любая клетка легальна».
 
-## Пульт как стратегия (центральная цель)
+## Пульт и per-axis композиция (центральная цель)
 
-Реальный пульт — не «режим сбоку», а **источник намерения** на месте Shuttle/Circle.
-Два уровня авторитета выражаются штатно, из тех же кирпичей:
+Пульт — не «режим сбоку», а **источник намерения** + **подложка стека**. `ControlStack`
+композит по осям: **база = сырые стики пилота**, каждый стабилизатор перезаписывает
+СВОИ оси, excitation — сверху. Отсюда без единого `if`:
 
-- **Assisted**: `Trajectory = RcTransmitter` (стики → `MotionIntent`) +
-  `Stabilization = VinsHold/FlowDamper` (борт исполняет чисто).
-- **Ручной**: `Stabilization = PilotPassthrough` (сырые стики → RC, обратной связи нет).
+- **незанятая ось → сырой стик пилота** (ручной наклон);
+- **flow-ось → velocity-assist**: стик задаёт цель (`c_*`·gain), флоу гасит к ней; стик
+  в центре → демпф сноса к нулю;
+- **`manual` = пустой список** стабилизаторов (пилот владеет всем; `PilotPassthrough`
+  стал избыточен, оставлен для совместимости);
+- **микс**: «пульт + только yaw» = `[YawHold]`; «пульт + flow(roll)» = `[FlowDamper]`.
 
-Адаптер пилота (`/mavros/rc/in` → `RcCommand`) работает **идентично** в симе
-(SITL-стики) и на борту (радио) — разница только в том, что на борту стики двигает
-человек. Это и есть «переключить управление на реальный пульт» без изменения ядра.
+Плюс `Arbiter` (safety-supervisor поверх миссии): тумблер MANUAL → сырые стики (incl
+throttle) безусловно. Адаптер пилота (`/mavros/rc/in` → `RcCommand`) идентичен в симе
+(SITL/скрипт) и на борту (радио) — «переключить на реальный пульт» без изменения ядра.
 
 ## Слои и порты
 
 ```
         driving (входящий)                         driven (исходящие)
-   timer 20Гц → MissionRunner.tick        RcOutput · FlightMode · Clock · Logger · DebugSink
+   timer 20Гц → node._tick                 RcOutput · FlightMode · Clock · Logger · DebugSink
         │                                          ▲
         ▼                                          │
    ┌─────────────── application ───────────────────┴───┐
-   │  MissionRunner (FSM, в mission_pkg) · ControlStack · Arbiter │
+   │  MissionRunner (FSM, mission_pkg) · ControlStack · Arbiter │
    └───────────────────────┬───────────────────────────┘
                            │ (только доменные типы)
    ┌───────────────────── domain ──────────────────────┐
    │  RcCommand · DroneState · Setpoint/MotionIntent    │
    │  Stabilization/Trajectory/Excitation (ABC + impl)  │
-   │  ports.py (Protocol-контракты)                     │
+   │  ports.py (Protocol) · perception/flow_estimator   │
    └────────────────────────────────────────────────────┘
                            ▲ реализуют
    ┌───────────────── infrastructure ──────────────────┐
-   │  ros_node · mavros_actuator · ros_telemetry        │
-   │  ros_perception (FlowEstimator) · ros_pilot · clock │
+   │  ros_clock · ros_telemetry · mavros_actuator · ros_io │
+   │  ros_perception (FlowEstimator) · ros_pilot           │
    └────────────────────────────────────────────────────┘
 ```
 
-Правило: `domain/` не импортит ни `rclpy`, ни `mavros_msgs`, ни `cv2`. Проверяется
-дисциплиной + простым import-тестом.
+Инвариант: `domain/` не импортит `rclpy`/`mavros_msgs` (perception — только numpy/cv2).
+Проверяется grep'ом. Точка входа/проводка (composition root) — `mission_pkg/nodes/bootstrap_node.py`.
 
 ### Value objects (`domain/`)
 
 ```python
 # rc.py
 RC_CENTER, RC_MIN_THR, RC_NOCHANGE = 1500, 1000, 65535
-
 @dataclass
 class RcCommand:
-    roll: int = RC_CENTER
-    pitch: int = RC_CENTER
-    throttle: int = RC_CENTER
-    yaw: int = RC_CENTER
+    roll: int = RC_CENTER; pitch: int = RC_CENTER
+    throttle: int = RC_CENTER; yaw: int = RC_CENTER
 
-# state.py — снапшот телеметрии, домен читает каждый тик (адаптер наполняет)
+# state.py — снапшот, домен читает каждый тик (адаптеры наполняют)
 @dataclass
 class DroneState:
-    mode: str | None = None
-    armed: bool = False
-    rel_alt: float | None = None
-    rcin_throttle: int | None = None
-    # VINS
-    vins_odom_count: int = 0
-    vins_last_sim: float = -1e9
-    # Ground-truth (СИМ; на Orin пусто → источник позы = VINS-адаптер, домен не меняется)
-    gt_valid: bool = False
-    gt_x: float = 0.0; gt_y: float = 0.0; gt_yaw: float = 0.0
-    gt_vx: float = 0.0; gt_vy: float = 0.0
-    # Поток: СЫРЫЕ агрегаты от FlowEstimator (PID теперь в домене, не в колбэке)
-    flow_lateral: float = 0.0; flow_yaw: float = 0.0; flow_conf: float = 0.0
-    flow_seq: int = 0            # счётчик кадров (см. «тонкость 1»)
-    flow_dt: float = 0.0         # интервал последнего кадра
-    now_sim: float = 0.0         # проставляет адаптер из Clock
+    mode: str|None = None; armed: bool = False; rel_alt: float|None = None; rcin_throttle: int|None = None
+    vins_odom_count: int = 0; vins_last_sim: float = -1e9
+    gt_valid: bool = False; gt_x=gt_y=gt_yaw=0.0; gt_vx=gt_vy=0.0   # СИМ; на Orin gt_valid=False
+    flow_lateral=flow_yaw=flow_conf=0.0                            # СЫРЫЕ агрегаты (PID в домене)
+    flow_seq: int = 0; flow_dt: float = 0.0                        # покадровая интеграция (тонкость 1)
+    pilot_roll=pilot_pitch=pilot_throttle=pilot_yaw = RC_CENTER    # стики (ScriptedPilot/RosPilot)
+    pilot_switch: int = 0                                          # тумблер авто/ручной (Arbiter)
+    now_sim: float = 0.0
 
 # setpoint.py
-class AxisPolicy(Enum):
-    REGULATE = auto()   # стабилизатор ведёт ось к уставке
-    ADDITIVE = auto()   # зонд ПОВЕРХ выхода стабилизатора (pitch-excite)
-    REPLACE  = auto()   # зонд ВЫТЕСНЯЕТ стабилизатор на оси (roll-excite, translate)
-
+class AxisPolicy(Enum): REGULATE=auto(); ADDITIVE=auto(); REPLACE=auto()
 @dataclass
-class MotionIntent:      # чего хочет Trajectory — смещение уставки от точки входа, в ТЕЛЕ
-    d_fwd: float = 0.0
-    d_right: float = 0.0
-
+class MotionIntent:
+    d_fwd=d_right = 0.0          # ПОЗИЦИЯ уставки от входа, тело (position-hold Gz/Vins)
+    c_fwd=c_right=c_yaw = 0.0    # СКОРОСТЬ-команда, нормир.[-1..1] (velocity-damp Flow/Yaw)
 @dataclass
-class Setpoint:          # абсолютная цель в МИРЕ (ControlStack = origin + intent)
-    x: float = 0.0
-    y: float = 0.0
+class Setpoint:
+    x=y = 0.0                    # абсолютная цель в МИРЕ (ControlStack = origin + d_*)
+    c_fwd=c_right=c_yaw = 0.0    # скорость-команда, прокинутая из intent
 ```
 
 ### Порты (`domain/ports.py`, Protocol)
 
-```python
-class Clock(Protocol):
-    def now_sim(self) -> float: ...
-
-class Telemetry(Protocol):
-    def snapshot(self) -> DroneState: ...
-
-class RcOutput(Protocol):
-    def publish(self, cmd: RcCommand) -> None: ...
-
-class FlightMode(Protocol):                # КОМАНДЫ (не RC) — отдельный порт
-    def set_mode(self, mode: str) -> None: ...
-    def arm(self) -> None: ...
-    def ready(self) -> bool: ...
-
-class PilotInput(Protocol):                # пульт: сим (SITL) и боевой (радио) — одинаково
-    def sticks(self) -> RcCommand: ...     # сырой PWM с /mavros/rc/in
-    def mode_switch(self) -> int: ...      # тумблер авто/ручной — для арбитража
-
-class Logger(Protocol):
-    def info(self, m: str) -> None: ...
-    def warn(self, m: str) -> None: ...
-    def error(self, m: str) -> None: ...
-
-class DebugSink(Protocol):
-    def publish(self, roll_off: float, flow_off: float, conf: float, stamp: float) -> None: ...
-```
+`Clock.now_sim`, `Telemetry.snapshot`, `RcOutput.publish`, `FlightMode.set_mode/arm/ready`
+(КОМАНДЫ, отдельно от RC), `PilotInput.sticks/mode_switch` (сим и борт — одинаково),
+`Logger.info/warn/error`, `DebugSink.publish`.
 
 ### Контракты трёх ролей (`domain/control/base.py`)
 
 ```python
 class TrajectoryStrategy(ABC):
-    @abstractmethod
-    def intent(self, s: DroneState, t: float) -> MotionIntent: ...
-    def done(self, t: float) -> bool: return False        # челнок сам говорит «отлетал»
+    def intent(self, s, t) -> MotionIntent: ...
+    def done(self, t) -> bool: return False               # челнок сам говорит «отлетал»
 
 class StabilizationStrategy(ABC):
-    axes: frozenset[str]                                  # {"roll","pitch","yaw"}
-    def enter(self, s: DroneState) -> None: ...           # сброс интеграторов при switch
-    @abstractmethod
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand: ...
+    axes: frozenset                                       # какие оси регулирует
+    def enter(self, s) -> None: ...                       # сброс интеграторов при switch/входе
+    def update(self, s, sp, dt) -> RcCommand: ...         # значимы только поля из axes
 
 class ExcitationStrategy(ABC):
-    @abstractmethod
-    def offset(self, s: DroneState, t: float) -> dict[str, tuple[int, AxisPolicy]]: ...
-    def done(self, t: float) -> bool: return False        # excite_total → триггер land
+    def offset(self, s, t) -> dict: ...                   # ось → (pwm, AxisPolicy)
+    def done(self, t) -> bool: return False
 ```
+
+Стабилизаторы и их оси: `GzPositionHold`={roll,pitch}, `FlowDamper`={roll},
+`YawHold`={yaw}, `PilotPassthrough`={roll,pitch,yaw} (легаси).
 
 ## Приложение (`application/`)
 
 ```python
-# control_stack.py — сведённые StabilizationManager + MotionManager + Excitation-слот.
-# Композиция трёх ролей в строгом порядке с политикой осей. Юзабелен и БЕЗ миссии.
+# control_stack.py — per-axis композиция. Стабилизаторов СПИСОК. Юзабелен и без миссии.
 class ControlStack:
-    def switch_stabilization(self, s): ...    # горячая замена в рантайме
+    def __init__(self, stabilization, trajectory, excitation):
+        self.stabs = _as_list(stabilization)              # один | список | []
+    def switch_stabilization(self, s): self.stabs = _as_list(s)   # ГОРЯЧАЯ замена (пока не вызывается)
     def switch_trajectory(self, t): ...
     def switch_excitation(self, e): ...
-    def enter(self, s: DroneState): ...        # захват origin/yaw0/t0, stab.enter()
-    def update(self, s: DroneState) -> RcCommand:
-        intent = self.traj.intent(s, t)                     # намерение (тело)
-        sp     = self._origin_plus(intent, s)               # → world Setpoint
-        rc     = self.stab.update(s, sp, dt)                # регулируемые оси
-        for axis, (off, pol) in self.excite.offset(s, t).items():
-            rc = _compose(rc, axis, off, pol)               # REGULATE/ADDITIVE/REPLACE
+    def enter(self, s):                                   # захват origin/yaw0/t0 + stab.enter() каждому
+        ...
+    def update(self, s) -> RcCommand:
+        intent = self.traj.intent(s, t)                   # позиция d_* + скорость c_*
+        sp = self._origin_plus(intent)                    # world-уставка + c_* passthrough
+        rc = RcCommand(roll=s.pilot_roll, pitch=s.pilot_pitch,   # БАЗА = стики пилота
+                       throttle=RC_CENTER, yaw=s.pilot_yaw)
+        for st in self.stabs:                             # каждый перезаписывает СВОИ оси
+            out = st.update(s, sp, dt)
+            for ax in st.axes: setattr(rc, ax, getattr(out, ax))
+        for axis,(off,pol) in self.excite.offset(s,t).items():
+            rc = _compose(rc, axis, off, pol)             # ADDITIVE/REPLACE
         return rc
-    def excite_done(self) -> bool: ...
 
-# arbiter.py — SAFETY: авто ↔ ручной по mode_switch пилота.
-# На БОЕВОМ дроне пилот выхватывает управление безусловно; FLTMODE_CH остаётся
-# включённым (в отличие от сима, где мы его обнулили). Заложить с самого начала.
+# arbiter.py — SAFETY: тумблер MANUAL → сырые стики (incl throttle) безусловно.
+# На борту FLTMODE_CH остаётся ВКЛ (в симе обнулён) — второй барьер на уровне FCU.
 class Arbiter:
-    def resolve(self, s: DroneState, autonomous: RcCommand) -> RcCommand: ...
-```
+    def resolve(self, s, autonomous) -> RcCommand: ...
 
-```python
-# mission_pkg: mission_runner.py — FSM фаз. Потребитель ControlStack. Control о
-# миссии НЕ знает (зависимость строго mission → control).
-class MissionRunner:
-    def __init__(self, cfg, clock: Clock, mode: FlightMode, stack: ControlStack, log: Logger): ...
-    def tick(self, s: DroneState) -> RcCommand: ...   # автомат фаз; в EXCITE → stack.update
-    @property
-    def finished(self) -> bool: ...
-    @property
-    def result(self) -> str: ...
+# mission_pkg/mission_runner.py — FSM фаз, потребитель ControlStack. Control о миссии НЕ знает.
+class MissionRunner:                                      # PREARM→ARM→CLIMB→EXCITE→LAND→DONE
+    def tick(self, s) -> RcCommand: ...                   # команды-фазы → FlightMode; EXCITE → stack.update
 ```
 
 ## Поток данных (один тик)
 
 ```
-timer 20Гц (ros_node) → telemetry.snapshot() + perception.merge → DroneState
-  → MissionRunner.tick(state):
-        фазы-команды (PREARM/ARM/CLIMB/LAND) → FlightMode.set_mode/arm + простой RcCommand
-        фаза EXCITE                          → ControlStack.update → RcCommand
-  → Arbiter.resolve(state, rc)   # уступить пилоту, если тумблер в «ручной»
-  → RcOutput.publish(rc)  +  DebugSink.publish(...)
-wall-цикл в main → RcOutput.publish(тот же rc)   # свежесть override на FCU (как сейчас)
+timer 20Гц → telemetry.snapshot() → DroneState
+  → perception.merge(s)   # только flow_assist: камера → flow_* (+ flow_seq++)
+  → s.pilot_* ← pilot.sticks()/mode_switch()             # стики в снапшот (как телеметрия)
+  → MissionRunner.tick(s):  PREARM/ARM/CLIMB/LAND → FlightMode + простой RcCommand
+                            EXCITE                 → ControlStack.update → RcCommand
+  → Arbiter.resolve(s, rc)                                # уступить пилоту, если MANUAL
+  → RcOutput.publish(rc) + DebugSink.publish(...)
+wall-цикл в main → RcOutput.publish(тот же rc)            # свежесть override на FCU
 ```
 
-Детерминизм override сохраняется: точки СМЕНЫ значения задаёт sim-таймер (tick),
-wall-цикл лишь ре-публикует неизменное между тиками значение для свежести на FCU.
+Детерминизм override: точки СМЕНЫ значения задаёт sim-таймер (tick), wall-цикл лишь
+ре-публикует неизменное между тиками значение.
 
 ## Две тонкости (иначе сломается)
 
-1. **Flow-PID интегрирует ПО КАДРАМ, а не по тикам.** Сейчас PID в `_on_flow_image`
-   с `dt=res['dt']`, чтобы не интегрировать одну ошибку 20 раз/с на стоячем сигнале.
-   Переносим PID в домен (`FlowDamper`), но адаптер кладёт `flow_seq`+`flow_dt`, а
-   `FlowDamper.update` продвигает интегратор ТОЛЬКО при смене `flow_seq`. Стратегия
-   остаётся чистой (вызов из тика), физика per-frame сохранена.
-
+1. **Flow-PID интегрирует ПО КАДРАМ, не по тикам.** Адаптер кладёт `flow_seq`+`flow_dt`,
+   а `FlowDamper/YawHold` продвигают интегратор ТОЛЬКО при смене `flow_seq` (иначе 20-Гц
+   тик накрутил бы одну ошибку на стоячем сигнале). Стратегия чистая, физика per-frame.
 2. **Точку входа (origin/yaw0/t0) владеет `ControlStack.enter()`, не стратегии.**
-   Trajectory отдаёт смещение относительно входа (тело), стабилизатор — абсолютную
-   world-уставку. Это текущая логика `hold_sp`/`hold_yaw0`, но в одном месте.
+   Trajectory отдаёт смещение относительно входа (тело), стек — абсолютную world-уставку.
 
 ## Пакеты и упаковка
 
 ```
-src/control/                     # ament_python пакет control_pkg
-  package.xml setup.py setup.cfg resource/control_pkg
-  architecture.md                # этот файл
-  control_pkg/                   # модуль-дир = имя пакета (конвенция репо, ср. nav_pkg)
-    domain/                      # ✅ срез 1: чистый, 0 импортов rclpy/cv (проверено grep)
-      rc.py  state.py  setpoint.py  ports.py
-      control/  base.py  stabilization.py  trajectory.py  excitation.py
-    application/
-      control_stack.py           # ✅ срез 1;  arbiter.py — срез 2 (пилот)
-    infrastructure/              # ✅ срез 1: ros_clock/ros_telemetry/mavros_actuator/ros_io
-      ros_perception.py ros_pilot.py   # — срез 2/3
-    nodes/
-      control_node.py            # — срез 2: bare пилот+стабилизация, БЕЗ FSM
-  test/
-    test_gz_shuttle_equiv.py     # ✅ числовая эквивалентность закона с монолитом (Δ=0)
+src/control/                       # ament_python пакет control_pkg
+  package.xml setup.py setup.cfg resource/control_pkg  architecture.md
+  control_pkg/
+    domain/          rc.py state.py setpoint.py ports.py
+      control/       base.py stabilization.py trajectory.py excitation.py
+    application/     control_stack.py arbiter.py
+    infrastructure/  ros_clock.py ros_telemetry.py mavros_actuator.py ros_io.py
+                     ros_pilot.py ros_perception.py
+    perception/      flow_estimator.py           # КАНОНИЧНАЯ копия (борт self-contained; вариант A)
+  test/              test_gz_shuttle_equiv.py test_pilot_strategies.py
+                     test_flow_strategies.py test_multiaxis_stack.py
 
-src/mission/                     # ament_python пакет mission_pkg (рядом, потребитель control)
+src/mission/                       # ament_python пакет mission_pkg (потребитель control)
   package.xml setup.py setup.cfg resource/mission_pkg
   mission_pkg/
-    config.py                    # BootstrapConfig (срез 1)
-    application/  mission_runner.py     # ✅ FSM фаз bootstrap
-    nodes/        bootstrap_node.py      # ✅ точка входа (console_script bootstrap_arch2)
-  test/
-    test_bootstrap_fsm.py        # ✅ оффлайн smoke автомата PREARM→DONE на фейках
+    config.py  recipes.py
+    application/  mission_runner.py
+    nodes/        bootstrap_node.py               # console_script bootstrap_arch2
+  test/  test_bootstrap_fsm.py test_pilot_fsm.py
 ```
 
-### Статус реализации
+- **Гранулярность:** модуль на роль (все стабилизаторы в одном файле) — код мутирует,
+  дробить в крошки вредно.
+- **colcon:** оба пакета bind-mount в `nav` (сим) и на Orin, инкрементальная сборка в
+  `nav_up.sh` (`--packages-select control_pkg mission_pkg`).
+- **Зависимость строго `mission_pkg → control_pkg`**, никогда обратно.
+- `flow_estimator.py` — вариант A: канонично в `control_pkg/perception/`; легаси-копия
+  `src/lab/flow_estimator.py` живёт для монолит-инструментов до их вывода.
 
-- **Срез 1 (gz-hold + shuttle): КОД ГОТОВ, оффлайн-гейты зелёные.** Домен+приложение
-  побитово воспроизводят закон монолита (5 кейсов, Δroll/pitch=0); автомат фаз
-  проходит PREARM→…→DONE на фейках-портах. Осталось: colcon-интеграция (mounts в
-  `docker/sim/docker-compose.yml` + сборка `control_pkg`/`mission_pkg`) и АТОМАРНЫЙ
-  прогон в симе (`ros2 run mission_pkg bootstrap_arch2`) со сверкой по метрике.
-- **Срез 2 (пульт-как-стратегия): КОД ГОТОВ, оффлайн-гейты зелёные.** Добавлены:
-  `RcTransmitter` (trajectory: стик=скорость уставки, интеграл → assisted-режим),
-  `PilotPassthrough` (stabilization: сырые стики → RC, manual), `Arbiter`
-  (application: safety-seize по тумблеру), порт-адаптеры `RosPilot`
-  (/mavros/rc/in — борт) и `ScriptedPilot` (профиль стиков — sim без живого пульта),
-  pilot-поля в `DroneState`, `recipes.build_control_stack` (shuttle|assisted|manual).
-  Нода: `--control-mode`, `--pilot`, Arbiter в контуре тика. Тесты: pilot-стратегии
-  (RcTransmitter/PilotPassthrough/Arbiter) + FSM-smoke assisted/manual/seize. Осталось:
-  атомарный прогон в симе (`--control-mode assisted`) — ✅ HOLD_DONE, видео на Drive.
+## Совместимость и запуск
 
-- **Срез 3 (пре-VINS флоу-стабилизатор + per-axis): ДОМЕН ГОТОВ, оффлайн-гейты зелёные.**
-  Главное боевое назначение — до init VINS дать пилоту НАШ демпфер по оптическому потоку.
-  - `ControlStack` теперь PER-AXIS: стабилизаторов СПИСОК, каждый владеет осями (`axes`);
-    база стека = сырые стики пилота (незанятая ось → ручной наклон); стабилизатор
-    перезаписывает свои оси. `manual` = пустой список (всё пилоту), `flow_assist` =
-    `[FlowDamper(roll), YawHold(yaw)]` + пилот (pitch сырой).
-  - `FlowDamper`(roll)/`YawHold`(yaw) — порт закона из монолита (flow_hold/yaw_hold,
-    yaw ki=0 [[yaw-hold-tuning]]), velocity-assist (стик=цель потока), ПОКАДРОВАЯ
-    интеграция (flow_seq), conf-fade, stale-fade. Читают `flow_*` из `DroneState`.
-  - `MotionIntent`/`Setpoint`: добавлены нормир. скорость-команды `c_fwd/c_right/c_yaw`
-    (velocity-assist; позиция d_* остаётся для Gz/Vins → срез 1 Δ=0 сохранён).
-  - Тесты: `test_flow_strategies.py` (демпф/velocity-assist/покадрово/stale/conf),
-    `test_multiaxis_stack.py` (пилот-подложка + частичные оси).
-  ОСТАЛОСЬ по срезу 3: `RosPerception` (камера+IMU → `FlowEstimator` → `flow_*` в
-  DroneState; вопрос — где живёт `flow_estimator.py` для борта) + атомарный прогон
-  `--control-mode flow_assist` в симе. Дальше: рантайм switch Flow→Vins по «VINS ready».
+- **Монолит `alt_hold_bootstrap.py` жив параллельно** (`bootstrap`/`liftland` его гоняют).
+  Новое ядро — отдельная нода: `ros2 run mission_pkg bootstrap_arch2` (обёртка
+  `src/lab/bootstrap_arch2.sh`, команда `bootstrap_arch2` в `capture_scene.sh`).
+- CLI-флаги новой ноды совместимы с монолитом (подмножество) + `--control-mode
+  {shuttle|assisted|manual|flow_assist}`, `--pilot {scripted|ros}`.
+- Сверка поведения — метрикой (`drift_check.py`/`yaw_check.py`/`scene.mp4`), не на глаз.
 
-- **Гранулярность:** один модуль на роль (все стратегии стабилизации в одном файле),
-  а не файл-на-стратегию — это код, который мутирует; дробить в 15 крошек вредно.
-  Взорвём позже, если роль разрастётся.
-- **colcon:** `control_pkg` и `mission_pkg` монтируются и собираются в ОБОИХ
-  контейнерах (`nav` в симе, `vins_project_13_7` на Orin) — как сейчас `src/nav`.
-  Интеграция по существующему шаблону (Dockerfile/compose mounts +
-  `colcon build --packages-select control_pkg mission_pkg`).
-- `flow_estimator.py` переиспользуется как есть (перцепт-сервис), не переписывается.
+## Статус
 
-## Совместимость и план миграции
+**Все три среза закодированы, покрыты 6 оффлайн-гейтами и прогнаны в симе.** Домен
+чист (grep), зависимость `mission→control` соблюдена.
 
-- **CLI не ломаем.** За ~60 argparse-флагов держатся `bootstrap.sh`, `liftland.sh`,
-  `yaw_tune_sweep.sh`. Точка входа сохраняет флаги 1:1. На первом этапе флаг
-  `--arch2` включает новый путь, без флага — старый монолит.
-- **Инкрементально, вертикальными срезами.** Каждый срез доводится до рабочего в
-  симе и сверяется с текущим поведением метрикой (`yaw_check.py`, `drift_check.py`,
-  `scene.mp4` из `capture_scene`), а не на глаз.
-- **Срез 1 (сейчас): `gz-hold + shuttle`** — трогает Stabilization + Trajectory
-  (впрыск сетпойнта) + порты RcOutput/FlightMode/Clock/Telemetry. Валидирует ядро
-  композиции до переписывания всех 865 строк.
-- **Срез 2: пульт-как-стратегия** (`RcTransmitter` / `PilotPassthrough`) — доказывает
-  главную цель, без ground-truth.
-- Когда срезы зелёные — переключаем дефолт на `--arch2` и выпиливаем монолит.
+| Срез | Что | Оффлайн | Прогон в симе |
+|---|---|---|---|
+| 1 · `shuttle` | gz-hold + челнок; ядро композиции | эквивалентность Δ=0 vs монолит (5 кейсов) + FSM | ✅ `HOLD_DONE` |
+| 2 · `assisted`/`manual` | пульт-как-стратегия + Arbiter | pilot-стратегии + FSM assisted/manual/seize | ✅ `HOLD_DONE` |
+| 3 · `flow_assist` | пре-VINS флоу-демпфер + per-axis стек | флоу-стратегии + per-axis композиция | ✅ (см. ниже) |
 
-## Инварианты (не нарушать при реализации)
+**Оффлайн-гейты (чистый python, без ROS):** `test_gz_shuttle_equiv` (закон побитово =
+монолит), `test_bootstrap_fsm`, `test_pilot_strategies`, `test_pilot_fsm`,
+`test_flow_strategies`, `test_multiaxis_stack`.
 
-1. `domain/` без `rclpy`/`mavros_msgs`/`cv2`.
-2. Зависимость строго `mission_pkg → control_pkg`, никогда обратно.
-3. `FlightMode` (команды set_mode/arm) — отдельный порт от `RcOutput` (RC).
+**Подтверждённые факты (drift_check в симе):**
+- `flow_osign = −1` — знак торможения флоу-демпфера. `+1` РАЗГОНЯЛ снос (метрика
+  боковая/продольная RMS_v = 3.47, дрон улетел на 25м), `−1` ГАСИТ (0.49 < 1.0). Монолит
+  помечал «TODO tune» — теперь подтверждён, дефолт `−1`.
+- `yaw ki = 0` — победитель свипа [[yaw-hold-tuning]] (интеграл вреден, bias yaw_flow).
+
+**Известные лимиты v0:**
+- Продольная ось (pitch) НЕ демпфируется — looming не портирован → дрон уходит по pitch
+  (drift_check это учитывает: pitch = встроенный baseline).
+- Флоу-метрика 0.49 vs монолит-цель 0.21 — зазор от run-to-run variance / интринсик
+  (монолит fx=640 на 960-кадрах, у нас честный fx=W/2) / недобора гейнов, НЕ архитектуры.
+
+**Дальше (не начато):**
+1. Добор флоу до ~0.21 (свип gains / прогон на 1280) + порт продольного looming (pitch).
+2. **Рантайм switch `Flow→Vins`** по событию «VINS ready» — `ControlStack.switch_*`
+   определён, но пока НЕ вызывается ни одним потребителем.
+3. Excitation (`Pulse`/`Chirp`/`Translate`) — контракт `offset()` готов, реализаций нет.
+4. `control_node.py` (bare пилот+стабилизация без FSM) — не написан.
+5. Порт на боевой Orin (VinsHold-адаптер, colcon в orin-контейнере).
+
+## Инварианты (не нарушать)
+
+1. `domain/` без `rclpy`/`mavros_msgs`; perception — только numpy/cv2.
+2. Зависимость строго `mission_pkg → control_pkg`.
+3. `FlightMode` (команды) — отдельный порт от `RcOutput` (RC).
 4. Все бюджеты/таймеры — в sim-времени по `/clock` (RTF-независимо).
-5. На боевом борту пилот выхватывает управление безусловно (Arbiter + FLTMODE_CH вкл).
+5. На борту пилот выхватывает управление безусловно (Arbiter + FLTMODE_CH вкл).
 6. `ControlStack` самодостаточен — работает и без `MissionRunner`.
+7. Пилот — БАЗА стека; незанятая ось = сырой стик, flow-ось = velocity-assist.
