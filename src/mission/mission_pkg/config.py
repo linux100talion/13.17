@@ -60,3 +60,7 @@ class BootstrapConfig:
     yaw_max: float = 150.0
     yaw_osign: float = 1.0
     yaw_cmd_gain: float = 0.0
+    # сглаживание FlowEstimator (перцепт): медиана по N кадрам. yaw sm=5 — победитель.
+    flow_smooth: int = 1
+    yaw_smooth: int = 5
+    flow_hold_sec: float = 30.0      # flow_assist: сколько держать (флоу гасит снос) до land

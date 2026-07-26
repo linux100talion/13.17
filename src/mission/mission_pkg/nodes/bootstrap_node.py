@@ -15,6 +15,7 @@ gz-hold) и manual (пилот полностью). Режим выбирает 
     ros2 run mission_pkg bootstrap_arch2 --control-mode manual              # срез 2 (ручной)
 """
 import argparse
+import os
 import time
 
 import rclpy
@@ -26,12 +27,18 @@ from control_pkg.domain.rc import RC_CENTER, RcCommand
 from control_pkg.infrastructure.mavros_actuator import MavrosActuator
 from control_pkg.infrastructure.ros_clock import RosClock
 from control_pkg.infrastructure.ros_io import RosDebugSink, RosLogger
+from control_pkg.infrastructure.ros_perception import RosPerception
 from control_pkg.infrastructure.ros_pilot import RosPilot, ScriptedPilot
 from control_pkg.infrastructure.ros_telemetry import RosTelemetry
 
 from ..application.mission_runner import S_DONE, MissionRunner
 from ..config import BootstrapConfig
 from ..recipes import build_control_stack
+
+# Экстринсик камеры (R_cam_imu) + знак derotation — из sim.yaml/монолита, ПОДТВЕРЖДЕНЫ
+# flow_derotation_check (остаток 0.55× baseline). Интринсики — из разрешения (см. RosPerception).
+FLOW_R = [0.0, -1.0, 0.0, -0.25708, 0.0, -0.96639, 0.96639, 0.0, -0.25708]
+FLOW_ROTSIGN = 1.0
 
 # Демо-профили стиков для ScriptedPilot (sim, без живого пульта). Кортежи
 # (t_until, roll, pitch, yaw) в PWM; pitch>центр = вперёд (наш знак psign=+1).
@@ -72,6 +79,13 @@ class BootstrapArch2Node(Node):
         self.debug = RosDebugSink(self)
         self.pilot = self._make_pilot(cfg, pilot_kind)
         self.arbiter = Arbiter()
+        # Зрение нужно только флоу-режиму (камера+IMU → FlowEstimator → flow_*).
+        self.perception = None
+        if cfg.control_mode == 'flow_assist':
+            w = float(os.environ.get('CAMERA_W', 1280))
+            h = float(os.environ.get('CAMERA_H', 720))
+            self.perception = RosPerception(self, w, h, FLOW_R, FLOW_ROTSIGN,
+                                            smooth_n=cfg.flow_smooth, yaw_smooth_n=cfg.yaw_smooth)
 
         # домен/приложение: стек по режиму (recipes)
         stack = build_control_stack(cfg)
@@ -87,12 +101,15 @@ class BootstrapArch2Node(Node):
     def _make_pilot(self, cfg, kind):
         if kind == 'ros':
             return RosPilot(self)
-        script = {'assisted': ASSISTED_SCRIPT, 'flow_assist': ASSISTED_SCRIPT,
-                  'manual': MANUAL_SCRIPT}.get(cfg.control_mode, [])
+        # flow_assist — НЕЙТРАЛЬНЫЙ пилот (центр): флоу-демпфер держит снос сам;
+        # изолирует боевой пре-VINS сценарий (аналог liftland --flow-hold монолита).
+        script = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}.get(cfg.control_mode, [])
         return ScriptedPilot(self.clock, script)
 
     def _tick(self):
         s = self.telemetry.snapshot()
+        if self.perception is not None:
+            self.perception.merge(s)          # камера → flow_* в снапшот
         # пилот → в снапшот (домен читает pilot_* как телеметрию)
         sticks = self.pilot.sticks()
         s.pilot_roll, s.pilot_pitch = sticks.roll, sticks.pitch
@@ -151,17 +168,26 @@ def _parse() -> tuple:
     p.add_argument('--pilot-full', dest='pilot_full', type=int, default=400)
     p.add_argument('--pilot-pitch-sign', dest='pilot_pitch_sign', type=float, default=1.0)
     p.add_argument('--pilot-roll-sign', dest='pilot_roll_sign', type=float, default=1.0)
+    # flow-assist (пре-VINS): osign монолит помечал «TODO tune» — оракул drift_check.
+    p.add_argument('--flow-kp', dest='flow_kp', type=float, default=8.0)
+    p.add_argument('--flow-ki', dest='flow_ki', type=float, default=2.0)
+    p.add_argument('--flow-osign', dest='flow_osign', type=float, default=1.0)
+    p.add_argument('--flow-cmd-gain', dest='flow_cmd_gain', type=float, default=0.0)
+    p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=6.0)
+    p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=1.0)
+    p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=30.0)
     a = p.parse_args()
     pilot_kind = a.pilot
     d = vars(a)
     d.pop('pilot')
     cfg = BootstrapConfig(**d)
     # Автотриггер land для пилот-режимов: садимся после демо-профиля (+2с успокоение).
-    if cfg.excite_max_sec <= 0 and cfg.control_mode in ('assisted', 'manual', 'flow_assist') \
-            and pilot_kind == 'scripted':
-        total = {'assisted': ASSISTED_SCRIPT, 'flow_assist': ASSISTED_SCRIPT,
-                 'manual': MANUAL_SCRIPT}[cfg.control_mode][-1][0]
-        cfg.excite_max_sec = total + 2.0
+    if cfg.excite_max_sec <= 0 and pilot_kind == 'scripted':
+        if cfg.control_mode == 'flow_assist':
+            cfg.excite_max_sec = cfg.flow_hold_sec        # держим, флоу гасит снос
+        elif cfg.control_mode in ('assisted', 'manual'):
+            total = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}[cfg.control_mode][-1][0]
+            cfg.excite_max_sec = total + 2.0
     return cfg, pilot_kind
 
 
