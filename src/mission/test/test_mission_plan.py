@@ -148,6 +148,14 @@ def main():
     checks.append(("mission: bootstrap раскрылся в токены (climb…hover…land)",
                    boot[0].startswith("climb") and boot[-1] == "land"))
 
+    # 7. resolve_mission идемпотентна (узел резолвит → compile_mission резолвит ещё раз) --
+    toks = resolve_mission(cfg, "Mission1")
+    checks.append(("resolve: список токенов не ре-резолвится (list unhashable)",
+                   resolve_mission(cfg, toks) == toks))
+    st2 = compile_mission(cfg, toks, "GzPosHold")   # приняв уже-список — как из ноды
+    checks.append(("compile: принимает уже-резолвленный список",
+                   [x.name for x in st2] == names))
+
     print("Оффлайн-гейт stab×mission:")
     ok_all = True
     for name, ok in checks:

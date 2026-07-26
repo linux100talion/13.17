@@ -68,7 +68,10 @@ MISSIONS = {
 
 
 def resolve_mission(cfg, spec):
-    """Имя из MISSIONS (в т.ч. callable(cfg)) ИЛИ инлайн-список токенов → список токенов."""
+    """Имя из MISSIONS (в т.ч. callable(cfg)) ИЛИ инлайн-строка/уже-список токенов → список.
+    Идемпотентна: приняв уже разрешённый список, возвращает его как есть (двойной резолв)."""
+    if isinstance(spec, (list, tuple)):
+        return list(spec)
     if spec in MISSIONS:
         val = MISSIONS[spec]
         return list(val(cfg)) if callable(val) else list(val)
