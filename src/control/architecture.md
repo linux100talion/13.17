@@ -279,26 +279,39 @@ wall-цикл лишь ре-публикует неизменное между �
 
 ```
 src/control/                     # ament_python пакет control_pkg
-  package.xml, setup.py          # deps: rclpy, mavros_msgs (домен их НЕ импортит)
+  package.xml setup.py setup.cfg resource/control_pkg
   architecture.md                # этот файл
-  control/
-    domain/
+  control_pkg/                   # модуль-дир = имя пакета (конвенция репо, ср. nav_pkg)
+    domain/                      # ✅ срез 1: чистый, 0 импортов rclpy/cv (проверено grep)
       rc.py  state.py  setpoint.py  ports.py
       control/  base.py  stabilization.py  trajectory.py  excitation.py
     application/
-      control_stack.py  arbiter.py
-    infrastructure/
-      ros_node.py  mavros_actuator.py  ros_telemetry.py
-      ros_perception.py  ros_pilot.py  ros_clock.py  ros_io.py
+      control_stack.py           # ✅ срез 1;  arbiter.py — срез 2 (пилот)
+    infrastructure/              # ✅ срез 1: ros_clock/ros_telemetry/mavros_actuator/ros_io
+      ros_perception.py ros_pilot.py   # — срез 2/3
     nodes/
-      control_node.py            # bare: пилот + стабилизация, БЕЗ FSM (loiter-ассист)
+      control_node.py            # — срез 2: bare пилот+стабилизация, БЕЗ FSM
+  test/
+    test_gz_shuttle_equiv.py     # ✅ числовая эквивалентность закона с монолитом (Δ=0)
 
 src/mission/                     # ament_python пакет mission_pkg (рядом, потребитель control)
-  package.xml, setup.py
-  mission/
-    application/  mission_runner.py     # FSM фаз bootstrap
-    nodes/        alt_hold_bootstrap.py # тонкая точка входа: MissionRunner + control_pkg
+  package.xml setup.py setup.cfg resource/mission_pkg
+  mission_pkg/
+    config.py                    # BootstrapConfig (срез 1)
+    application/  mission_runner.py     # ✅ FSM фаз bootstrap
+    nodes/        bootstrap_node.py      # ✅ точка входа (console_script bootstrap_arch2)
+  test/
+    test_bootstrap_fsm.py        # ✅ оффлайн smoke автомата PREARM→DONE на фейках
 ```
+
+### Статус реализации
+
+- **Срез 1 (gz-hold + shuttle): КОД ГОТОВ, оффлайн-гейты зелёные.** Домен+приложение
+  побитово воспроизводят закон монолита (5 кейсов, Δroll/pitch=0); автомат фаз
+  проходит PREARM→…→DONE на фейках-портах. Осталось: colcon-интеграция (mounts в
+  `docker/sim/docker-compose.yml` + сборка `control_pkg`/`mission_pkg`) и АТОМАРНЫЙ
+  прогон в симе (`ros2 run mission_pkg bootstrap_arch2`) со сверкой по метрике.
+- Срез 2 (пульт-как-стратегия), срез 3 (excitation) — далее.
 
 - **Гранулярность:** один модуль на роль (все стратегии стабилизации в одном файле),
   а не файл-на-стратегию — это код, который мутирует; дробить в 15 крошек вредно.
