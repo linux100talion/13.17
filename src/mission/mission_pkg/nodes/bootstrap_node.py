@@ -33,8 +33,9 @@ from control_pkg.infrastructure.ros_perception import RosPerception
 from control_pkg.infrastructure.ros_pilot import RosPilot, ScriptedPilot
 from control_pkg.infrastructure.ros_telemetry import RosTelemetry
 
-from ..application.mission_runner import S_DONE, MissionRunner
 from ..config import BootstrapConfig
+from ..plan.bootstrap_plan import build_bootstrap_plan
+from ..plan.runner import PlanRunner
 from ..recipes import build_control_stack
 
 # Экстринсик камеры (R_cam_imu) + знак derotation — из sim.yaml/монолита, ПОДТВЕРЖДЕНЫ
@@ -98,8 +99,8 @@ class BootstrapArch2Node(Node):
                             cfg.gz_max, cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain)
             handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec)
             self.logger.info(f"handover Flow→Vins ВКЛ: ready при ≥{cfg.vins_min} odom")
-        self.runner = MissionRunner(cfg, self.clock, self.actuator, stack, self.logger,
-                                    handover=handover)
+        plan = build_bootstrap_plan(cfg, stack, handover)
+        self.runner = PlanRunner(plan, self.clock, self.actuator, self.logger)
 
         self._last_rc = RcCommand()
         self._arb_seized = False
@@ -137,7 +138,7 @@ class BootstrapArch2Node(Node):
         self.debug.publish(float(rc.roll - RC_CENTER), 0.0, 0.0, s.now_sim)
 
     def _publish(self, rc: RcCommand):
-        if self.runner.state == S_DONE:
+        if self.runner.finished:          # план завершён — override не нужен
             return
         self.actuator.publish(rc)
 

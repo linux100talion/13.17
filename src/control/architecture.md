@@ -92,7 +92,7 @@ throttle) безусловно. Адаптер пилота (`/mavros/rc/in` →
         │                                          ▲
         ▼                                          │
    ┌─────────────── application ───────────────────┴───┐
-   │  MissionRunner (FSM, mission_pkg) · ControlStack · Arbiter │
+   │  PlanRunner+Step (план фаз, mission_pkg) · ControlStack · Arbiter │
    └───────────────────────┬───────────────────────────┘
                            │ (только доменные типы)
    ┌───────────────────── domain ──────────────────────┐
@@ -198,9 +198,12 @@ class ControlStack:
 class Arbiter:
     def resolve(self, s, autonomous) -> RcCommand: ...
 
-# mission_pkg/mission_runner.py — FSM фаз, потребитель ControlStack. Control о миссии НЕ знает.
-class MissionRunner:                                      # PREARM→ARM→CLIMB→EXCITE→LAND→DONE
-    def tick(self, s) -> RcCommand: ...                   # команды-фазы → FlightMode; EXCITE → stack.update
+# mission_pkg/plan/ — полётное задание = СПИСОК Step'ов; PlanRunner их гоняет (не FSM-класс!).
+# Step: AwaitMode/Arm/Climb/Control/Land/Hover — примитив фазы (tick → rc + NEXT/GOTO/FINISH).
+# bootstrap_plan.build_bootstrap_plan(cfg, stack, handover) = [prearm,arm,climb,control,land].
+# Новое задание = ДАННЫЕ (список шагов), а не новый класс. Control-шаг питает ControlStack.
+class PlanRunner:
+    def tick(self, s) -> RcCommand: ...                   # текущий шаг → rc; переход по статусу шага
 ```
 
 ## Поток данных (один тик)
@@ -209,7 +212,7 @@ class MissionRunner:                                      # PREARM→ARM→CLIMB
 timer 20Гц → telemetry.snapshot() → DroneState
   → perception.merge(s)   # только flow_assist: камера → flow_* (+ flow_seq++)
   → s.pilot_* ← pilot.sticks()/mode_switch()             # стики в снапшот (как телеметрия)
-  → MissionRunner.tick(s):  PREARM/ARM/CLIMB/LAND → FlightMode + простой RcCommand
+  → PlanRunner.tick(s):  шаг prearm/arm/climb/land → FlightMode + простой RcCommand
                             EXCITE                 → ControlStack.update → RcCommand
   → Arbiter.resolve(s, rc)                                # уступить пилоту, если MANUAL
   → RcOutput.publish(rc) + DebugSink.publish(...)
@@ -247,7 +250,7 @@ src/mission/                       # ament_python пакет mission_pkg (пот
   package.xml setup.py setup.cfg resource/mission_pkg
   mission_pkg/
     config.py  recipes.py
-    application/  mission_runner.py
+    plan/         step.py runner.py bootstrap_plan.py   # план фаз (bootstrap = один план)
     nodes/        bootstrap_node.py               # console_script bootstrap_arch2
   test/  test_bootstrap_fsm.py test_pilot_fsm.py
 ```
@@ -283,7 +286,14 @@ src/mission/                       # ament_python пакет mission_pkg (пот
 **Оффлайн-гейты (8, чистый python, без ROS):** `test_profile_motion` (интеграл стик-профиля
 + холд + симм. челнок), `test_bootstrap_fsm`, `test_pilot_strategies`, `test_pilot_fsm`,
 `test_flow_strategies`, `test_multiaxis_stack`, `test_handover` (switch Flow→Vins),
-`test_families` (Gz*/Dp* per-axis + DpPitchHold/DpHold).
+`test_families` (Gz*/Dp* per-axis + DpPitchHold/DpHold), `test_plan` (PlanRunner NEXT/GOTO/FINISH).
+
+**ПЛАН-СЛОЙ (переход):** захардкоженный `MissionRunner` FSM заменён на `PlanRunner` +
+`Step`-примитивы (`AwaitMode`/`Arm`/`Climb`/`Control`/`Land`/`Hover`). Полётное задание =
+**список шагов** (`bootstrap_plan.build_bootstrap_plan`), а не класс; новое задание = данные.
+Переходы NEXT/GOTO(по имени)/FINISH. bootstrap = один план. `test_plan` + переписанные
+`test_bootstrap_fsm`/`test_pilot_fsm` на `PlanRunner`. Осталось: библиотека готовых планов
+(waypoint/return-home) + Circle/GoTo-траектории (относительные, до NN1).
 
 **PROFILE-ONLY движение (переход):** метрический канал `d_*` убран — движение везде это
 **стик-профиль** `c_*` (`ProfileTrajectory`/`Shuttle`/`RcTransmitter`). Позиц-холдеры
@@ -294,7 +304,7 @@ d_*-модель монолита) снят → `test_profile_motion`. Любо�
 **Рантайм switch `Flow→Vins` — РЕАЛИЗОВАН (оффлайн-проверен).** `VinsHold` (position-hold
 по VINS, СВОЯ опора в vins-фрейме, захват в момент switch) + `VinsHandover` (application:
 детектор «VINS ready» = N odom + свежесть → ОДНОКРАТНО `stack.switch_stabilization`).
-`MissionRunner` зовёт `handover.maybe_switch` в EXCITE; пилот (`RcTransmitter`) при switch
+`Control`-шаг зовёт `handover.maybe_switch`; пилот (`RcTransmitter`) при switch
 не меняется. Флаг `--handover-vins` (flow_assist). Это первый реальный вызов `switch_*`.
 ⚠️ Sim-демо самого switch требует сценария, где VINS СХОДИТСЯ (нужно движение/параллакс;
 нейтральный flow_assist его не даёт) — механизм готов, демо-прогон отдельно.
@@ -325,5 +335,5 @@ d_*-модель монолита) снят → `test_profile_motion`. Любо�
 3. `FlightMode` (команды) — отдельный порт от `RcOutput` (RC).
 4. Все бюджеты/таймеры — в sim-времени по `/clock` (RTF-независимо).
 5. На борту пилот выхватывает управление безусловно (Arbiter + FLTMODE_CH вкл).
-6. `ControlStack` самодостаточен — работает и без `MissionRunner`.
+6. `ControlStack` самодостаточен — работает и без `PlanRunner`.
 7. Пилот — БАЗА стека; незанятая ось = сырой стик, flow-ось = velocity-assist.
