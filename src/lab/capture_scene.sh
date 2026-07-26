@@ -83,7 +83,7 @@ i=0
 while [ "$i" -lt "${#SEQ[@]}" ]; do
     cmd="${SEQ[$i]}"
     case "$cmd" in
-        arm|land|disarm|bootstrap|liftland) ;;
+        arm|land|disarm|bootstrap|liftland|bootstrap_arch2) ;;
         takeoff|hover|square)
             # опциональный числовой аргумент: если следующий токен — число, он наш
             # (takeoff=ALT, hover=SIM_SEC, square=число кругов)
@@ -92,7 +92,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
             ;;
         *)
             echo "ОШИБКА: неизвестная команда '$cmd'." >&2
-            echo "Допустимо: arm, bootstrap, liftland, takeoff [ALT], hover [SIM_SEC], square [LOOPS], land, disarm." >&2
+            echo "Допустимо: arm, bootstrap, bootstrap_arch2, liftland, takeoff [ALT], hover [SIM_SEC], square [LOOPS], land, disarm." >&2
             exit 2
             ;;
     esac

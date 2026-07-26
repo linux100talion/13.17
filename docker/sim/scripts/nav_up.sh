@@ -47,6 +47,20 @@ if [ ! -f install/setup.bash ]; then
 fi
 source install/setup.bash
 
+# 1f. control_pkg + mission_pkg (рефактор управления, ветка nn2_c3_control).
+#     ИНКРЕМЕНТАЛЬНО и ВСЕГДА: полная сборка выше идёт только при пустом install/,
+#     но install/ живёт в персистентном volume (выживает fresh-start) → новые
+#     пакеты иначе не подхватятся. colcon пропускает неизменённое (быстро),
+#     собирает новое/правленое. Домен чистый (без rclpy) — build лишь ставит модули.
+if [ -d src/control ] || [ -d src/mission ]; then
+    echo "  colcon build (control_pkg, mission_pkg) ..."
+    if colcon build --packages-select control_pkg mission_pkg 2>&1 | tail -3; then
+        source install/setup.bash
+    else
+        echo "  ⚠️ сборка control_pkg/mission_pkg не удалась (см. выше) — ARCH2 недоступен"
+    fi
+fi
+
 # 2. Байеризатор: Gazebo RGB → /dev/rawbayer (v4l2loopback).
 #    Запускается ВНЕ sim_nav.launch.py: если запустить внутри launch, его крах
 #    убивает весь launch (camera_node + VINS). Здесь он изолирован.
