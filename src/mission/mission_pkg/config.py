@@ -52,7 +52,8 @@ class BootstrapConfig:
     flow_max: float = 150.0
     flow_conf_min: float = 0.05
     flow_conf_full: float = 0.20
-    flow_osign: float = 1.0
+    flow_osign: float = -1.0         # ПОДТВЕРЖДЁН drift_check (arch2): +1 разгонял снос
+                                     # (метрика 3.47), −1 гасит (0.49). Монолит помечал «TODO».
     flow_cmd_gain: float = 0.0       # velocity-assist: стик→целевой поток (0=демпф к нулю)
     yaw_kp: float = 6.0
     yaw_ki: float = 0.0              # ВРЕДЕН (bias yaw_flow) — держим 0

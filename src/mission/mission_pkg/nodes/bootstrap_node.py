@@ -171,7 +171,7 @@ def _parse() -> tuple:
     # flow-assist (пре-VINS): osign монолит помечал «TODO tune» — оракул drift_check.
     p.add_argument('--flow-kp', dest='flow_kp', type=float, default=8.0)
     p.add_argument('--flow-ki', dest='flow_ki', type=float, default=2.0)
-    p.add_argument('--flow-osign', dest='flow_osign', type=float, default=1.0)
+    p.add_argument('--flow-osign', dest='flow_osign', type=float, default=-1.0)
     p.add_argument('--flow-cmd-gain', dest='flow_cmd_gain', type=float, default=0.0)
     p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=6.0)
     p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=1.0)
