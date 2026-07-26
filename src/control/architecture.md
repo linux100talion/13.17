@@ -22,7 +22,7 @@
 |---|---|---|
 | `GzPositionHold` | ground-truth Gazebo (СИМ) | **оракул** для тюнинга законов, sim-only |
 | `FlowDamper` + `YawHold` | камера (борт) | **ДО init VINS — наш пре-VINS демпфер (ГЛАВНОЕ)** |
-| `VinsHold` (будущий) | VINS | ПОСЛЕ init: точный hold / авто-манёвры |
+| `VinsHold` | VINS | ПОСЛЕ init: точный hold (рантайм switch — `VinsHandover`) |
 
 ```
 взлёт ─► [FlowDamper+YawHold, пилот рулит] ──VINS сошёлся──► switch_stabilization(VinsHold) ─► [точный hold / авто]
@@ -277,7 +277,15 @@ src/mission/                       # ament_python пакет mission_pkg (пот
 
 **Оффлайн-гейты (чистый python, без ROS):** `test_gz_shuttle_equiv` (закон побитово =
 монолит), `test_bootstrap_fsm`, `test_pilot_strategies`, `test_pilot_fsm`,
-`test_flow_strategies`, `test_multiaxis_stack`.
+`test_flow_strategies`, `test_multiaxis_stack`, `test_handover` (switch Flow→Vins).
+
+**Рантайм switch `Flow→Vins` — РЕАЛИЗОВАН (оффлайн-проверен).** `VinsHold` (position-hold
+по VINS, СВОЯ опора в vins-фрейме, захват в момент switch) + `VinsHandover` (application:
+детектор «VINS ready» = N odom + свежесть → ОДНОКРАТНО `stack.switch_stabilization`).
+`MissionRunner` зовёт `handover.maybe_switch` в EXCITE; пилот (`RcTransmitter`) при switch
+не меняется. Флаг `--handover-vins` (flow_assist). Это первый реальный вызов `switch_*`.
+⚠️ Sim-демо самого switch требует сценария, где VINS СХОДИТСЯ (нужно движение/параллакс;
+нейтральный flow_assist его не даёт) — механизм готов, демо-прогон отдельно.
 
 **Подтверждённые факты (drift_check в симе):**
 - `flow_osign = −1` — знак торможения флоу-демпфера. `+1` РАЗГОНЯЛ снос (метрика
@@ -293,11 +301,10 @@ src/mission/                       # ament_python пакет mission_pkg (пот
 
 **Дальше (не начато):**
 1. Добор флоу до ~0.21 (свип gains / прогон на 1280) + порт продольного looming (pitch).
-2. **Рантайм switch `Flow→Vins`** по событию «VINS ready» — `ControlStack.switch_*`
-   определён, но пока НЕ вызывается ни одним потребителем.
+2. Sim-демо switch `Flow→Vins` в сценарии со сходящимся VINS (движущийся пилот → параллакс).
 3. Excitation (`Pulse`/`Chirp`/`Translate`) — контракт `offset()` готов, реализаций нет.
 4. `control_node.py` (bare пилот+стабилизация без FSM) — не написан.
-5. Порт на боевой Orin (VinsHold-адаптер, colcon в orin-контейнере).
+5. Порт на боевой Orin (colcon в orin-контейнере; VinsHold уже на VINS-позе, не gt).
 
 ## Инварианты (не нарушать)
 

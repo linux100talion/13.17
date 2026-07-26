@@ -24,6 +24,14 @@ class DroneState:
     # --- VINS ---
     vins_odom_count: int = 0
     vins_last_sim: float = -1e9
+    # Поза VINS (свой фрейд, НЕ выровнен к миру) — для VinsHold после init. Хватает
+    # для УДЕРЖАНИЯ (держим текущую позу константной), выравнивание не нужно.
+    vins_valid: bool = False
+    vins_x: float = 0.0
+    vins_y: float = 0.0
+    vins_yaw: float = 0.0
+    vins_vx: float = 0.0
+    vins_vy: float = 0.0
 
     # --- Ground-truth Gazebo (СИМ; на Orin gt_valid=False) ---
     gt_valid: bool = False

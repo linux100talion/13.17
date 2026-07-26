@@ -16,12 +16,13 @@ S_NAME = {S_PREARM: "PREARM", S_ARM: "ARM", S_CLIMB: "CLIMB",
 
 
 class MissionRunner:
-    def __init__(self, cfg, clock, flight_mode, stack, log):
+    def __init__(self, cfg, clock, flight_mode, stack, log, handover=None):
         self.cfg = cfg
         self.clock = clock
         self.mode = flight_mode      # порт FlightMode (set_mode/arm)
         self.stack = stack           # ControlStack (фаза EXCITE)
         self.log = log
+        self.handover = handover     # опц. VinsHandover: рантайм switch Flow→Vins
         self.state = S_PREARM
         self.state_t0 = None         # ленивое базирование по первому тику с живым /clock
         self.last_cmd = -1e9         # троттлинг вызовов сервисов (~1/sim-сек)
@@ -118,6 +119,10 @@ class MissionRunner:
                     f"    gz-hold+shuttle: центр=({s.gt_x:.2f},{s.gt_y:.2f}) "
                     f"kp={cfg.gz_kp} kd={cfg.gz_kd} ki={cfg.gz_ki} "
                     f"челнок a={cfg.gz_shuttle_a} v={cfg.gz_shuttle_v} fwd={cfg.gz_shuttle_fwd}")
+            # Рантайм-передача Flow→Vins по «VINS ready» (hot-swap стабилизатора).
+            if self.handover is not None and self.handover.maybe_switch(self.stack, s):
+                self.log.info(f"    ✅ VINS сошёлся ({s.vins_odom_count} odom) → "
+                              f"стабилизация Flow→Vins (hot-swap)")
             ctrl = self.stack.update(s)                    # роль-композиция → roll/pitch/yaw
             rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
             # Триггер посадки: челнок сам завершается (motion_done); пилот-режимы

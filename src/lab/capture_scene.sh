@@ -226,6 +226,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-}" \
       -e BS_CONTROL_MODE="${BS_CONTROL_MODE:-}" -e BS_EXCITE_MAX="${BS_EXCITE_MAX:-}" \
       -e BS_PILOT="${BS_PILOT:-}" -e BS_PILOT_VEL_GAIN="${BS_PILOT_VEL_GAIN:-}" \
+      -e BS_HANDOVER_VINS="${BS_HANDOVER_VINS:-}" -e BS_VINS_MIN="${BS_VINS_MIN:-}" \
       "$NAV" bash /lab/"$cmd".sh $arg
     i=$((i+1))
 done

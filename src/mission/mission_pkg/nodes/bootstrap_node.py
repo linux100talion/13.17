@@ -23,6 +23,8 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 
 from control_pkg.application.arbiter import Arbiter
+from control_pkg.application.handover import VinsHandover
+from control_pkg.domain.control.stabilization import VinsHold
 from control_pkg.domain.rc import RC_CENTER, RcCommand
 from control_pkg.infrastructure.mavros_actuator import MavrosActuator
 from control_pkg.infrastructure.ros_clock import RosClock
@@ -89,7 +91,15 @@ class BootstrapArch2Node(Node):
 
         # домен/приложение: стек по режиму (recipes)
         stack = build_control_stack(cfg)
-        self.runner = MissionRunner(cfg, self.clock, self.actuator, stack, self.logger)
+        # рантайм switch Flow→Vins: только flow_assist + флаг (VinsHold на gz_* гейнах)
+        handover = None
+        if cfg.control_mode == 'flow_assist' and cfg.handover_vins:
+            vins = VinsHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
+                            cfg.gz_max, cfg.gz_psign, cfg.gz_rsign)
+            handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec)
+            self.logger.info(f"handover Flow→Vins ВКЛ: ready при ≥{cfg.vins_min} odom")
+        self.runner = MissionRunner(cfg, self.clock, self.actuator, stack, self.logger,
+                                    handover=handover)
 
         self._last_rc = RcCommand()
         self._arb_seized = False
@@ -176,6 +186,10 @@ def _parse() -> tuple:
     p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=6.0)
     p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=1.0)
     p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=30.0)
+    # рантайм switch Flow→Vins по «VINS ready» (только flow_assist)
+    p.add_argument('--handover-vins', dest='handover_vins', action='store_true')
+    p.add_argument('--vins-min', dest='vins_min', type=int, default=40)
+    p.add_argument('--vins-fresh-sec', dest='vins_fresh_sec', type=float, default=2.0)
     a = p.parse_args()
     pilot_kind = a.pilot
     d = vars(a)

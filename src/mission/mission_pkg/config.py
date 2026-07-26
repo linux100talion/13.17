@@ -65,3 +65,7 @@ class BootstrapConfig:
     flow_smooth: int = 1
     yaw_smooth: int = 5
     flow_hold_sec: float = 30.0      # flow_assist: сколько держать (флоу гасит снос) до land
+    # рантайм switch Flow→Vins по «VINS ready» (VinsHold юзает gz_* гейны)
+    handover_vins: bool = False
+    vins_min: int = 40               # сколько odom-сообщений считать сходимостью
+    vins_fresh_sec: float = 2.0      # свежесть потока odom для «ready»

@@ -22,6 +22,8 @@ class RosTelemetry:
         self._s = DroneState()
         self._gt_px = self._gt_py = None
         self._gt_pt = None
+        self._vins_px = self._vins_py = None
+        self._vins_pt = None
         node.create_subscription(State, '/mavros/state', self._on_state, 10)
         node.create_subscription(Float64, '/mavros/global_position/rel_alt',
                                  self._on_relalt, qos_profile_sensor_data)
@@ -38,7 +40,22 @@ class RosTelemetry:
 
     def _on_odom(self, m):
         self._s.vins_odom_count += 1
-        self._s.vins_last_sim = self._clock.now_sim()
+        t = self._clock.now_sim()
+        self._s.vins_last_sim = t
+        # Поза VINS + скорость конечной разностью (twist-фрейм неоднозначен — как gt).
+        x = m.pose.pose.position.x
+        y = m.pose.pose.position.y
+        q = m.pose.pose.orientation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        if self._vins_pt is not None and t > self._vins_pt:
+            dt = t - self._vins_pt
+            a = 0.4
+            self._s.vins_vx = (1.0 - a) * self._s.vins_vx + a * (x - self._vins_px) / dt
+            self._s.vins_vy = (1.0 - a) * self._s.vins_vy + a * (y - self._vins_py) / dt
+        self._vins_px, self._vins_py, self._vins_pt = x, y, t
+        self._s.vins_x, self._s.vins_y, self._s.vins_yaw = x, y, yaw
+        self._s.vins_valid = True
 
     def _on_rcin(self, m):
         if len(m.channels) >= 3:

@@ -78,6 +78,59 @@ class PilotPassthrough(StabilizationStrategy):
                          throttle=RC_CENTER, yaw=s.pilot_yaw)
 
 
+class VinsHold(StabilizationStrategy):
+    """Position-hold по VINS — стабилизатор ПОСЛЕ инициализации (рантайм switch Flow→Vins).
+
+    Зеркало GzPositionHold, но опора — VINS, а не gt (на борту gt нет). ⚠️ ВЛАДЕЕТ СВОЕЙ
+    опорой: захватывает vins-позу в enter() (момент switch) и держит её. ControlStack-
+    origin в gt-фрейме тут не подходит (другой фрейм + на борту =0). VINS-фрейм не
+    выровнен к миру — для УДЕРЖАНИЯ это неважно (держим текущую позу константной).
+    Пилот при switch не меняется (RcTransmitter), меняется только источник опоры.
+    """
+    axes = frozenset({"roll", "pitch"})
+
+    def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
+                 psign=1.0, rsign=1.0):
+        self.kp, self.kd, self.ki = kp, kd, ki
+        self.imax, self.max = imax, max_pwm
+        self.psign, self.rsign = psign, rsign
+        self._ox = self._oy = 0.0          # опора в VINS-фрейме (захват в enter)
+        self._ix = self._iy = 0.0
+        self._it = None
+
+    def enter(self, s: DroneState) -> None:
+        self._ox, self._oy = s.vins_x, s.vins_y   # держим позу на момент switch
+        self._ix = self._iy = 0.0
+        self._it = s.now_sim
+
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+        ex = s.vins_x - self._ox
+        ey = s.vins_y - self._oy
+        now = s.now_sim
+        if self.ki > 0 and self._it is not None and now > self._it:
+            di = now - self._it
+            self._ix += ex * di
+            self._iy += ey * di
+            cap = self.imax / self.ki
+            self._ix = clamp(self._ix, -cap, cap)
+            self._iy = clamp(self._iy, -cap, cap)
+        self._it = now
+        c = math.cos(s.vins_yaw)
+        sn = math.sin(s.vins_yaw)
+        e_fwd = ex * c + ey * sn
+        e_rgt = -ex * sn + ey * c
+        v_fwd = s.vins_vx * c + s.vins_vy * sn
+        v_rgt = -s.vins_vx * sn + s.vins_vy * c
+        i_fwd = self._ix * c + self._iy * sn
+        i_rgt = -self._ix * sn + self._iy * c
+        po = self.psign * (self.kp * e_fwd + self.kd * v_fwd + self.ki * i_fwd)
+        ro = self.rsign * (self.kp * e_rgt + self.kd * v_rgt + self.ki * i_rgt)
+        po = clamp(po, -self.max, self.max)
+        ro = clamp(ro, -self.max, self.max)
+        return RcCommand(roll=RC_CENTER + int(ro), pitch=RC_CENTER + int(po),
+                         throttle=RC_CENTER, yaw=RC_CENTER)
+
+
 def _blend(conf, conf_min, conf_full):
     """confidence (число треков) → авторитет демпфера [0..1] (плавный fade-out)."""
     return clamp((conf - conf_min) / max(1e-6, conf_full - conf_min), 0.0, 1.0)
