@@ -20,12 +20,17 @@
 
 | Стабилизатор | Опора | Когда |
 |---|---|---|
-| `GzPositionHold` | ground-truth Gazebo (СИМ) | **оракул** для тюнинга законов, sim-only |
-| `FlowDamper` + `YawHold` | камера (борт) | **ДО init VINS — наш пре-VINS демпфер (ГЛАВНОЕ)** |
+| `Gz*` (позиция) | ground-truth Gazebo (СИМ) | **оракул** для тюнинга законов, sim-only |
+| `Dp*` (демпфер) | оптический поток (борт) | **ДО init VINS — наш пре-VINS демпфер (ГЛАВНОЕ)** |
 | `VinsHold` | VINS | ПОСЛЕ init: точный hold (рантайм switch — `VinsHandover`) |
 
+Два семейства стабилизации именуются `<Источник><Ось>Hold`: **`Gz*`** держит ПОЗИЦИЮ по
+gazebo (`GzPosHold` все оси / `GzRollHold` / `GzPitchHold` / `GzYawHold`); **`Dp*`** —
+ДЕМПФЕР скорости к нулю по ОПТИЧЕСКОМУ ПОТОКУ (`DpHold` все / `DpRollHold`=flow_lateral /
+`DpPitchHold`=looming / `DpYawHold`=flow_yaw). Gz = позиция/gt (sim), Dp = скорость/поток (борт).
+
 ```
-взлёт ─► [FlowDamper+YawHold, пилот рулит] ──VINS сошёлся──► switch_stabilization(VinsHold) ─► [точный hold / авто]
+взлёт ─► [Dp*-демпфер, пилот рулит] ──VINS сошёлся──► switch_stabilization(VinsHold) ─► [точный hold / авто]
               наш пре-VINS демпфер            (рантайм hot-swap)      пилот RcTransmitter НЕ меняется
 ```
 
@@ -44,7 +49,7 @@
   нормированная скорость-команда (`c_*`, для velocity-damp). Не знает про PWM. Сюда
   садится и **пульт** (`RcTransmitter` — источник намерения).
 - **Stabilization** → намерение + обратная связь → RC **по своим осям** (`axes`).
-  `GzPositionHold`, `FlowDamper`, `YawHold`, будущий `VinsHold`.
+  `Gz*` (позиция/gt), `Dp*` (демпфер/поток), `VinsHold` (после init).
 - **Excitation** → экзогенный зонд для system-ID (pulse/chirp) с политикой на ось
   (`ADDITIVE`/`REPLACE`). Не движение — другая задача (возбудить, не долететь).
 
@@ -52,12 +57,12 @@
 
 | Режим (`recipes.build_control_stack`) | Trajectory | Stabilization (список) | Excitation |
 |---|---|---|---|
-| `shuttle` (sim system-ID) | `Shuttle` | `[GzPositionHold]` (roll+pitch) | — |
-| `assisted` (пульт+gt) | `RcTransmitter` | `[GzPositionHold]` | — |
+| `shuttle` (sim system-ID) | `Shuttle` | `[GzHold(roll+pitch)]` | — |
+| `assisted` (пульт+gt) | `RcTransmitter` | `[GzHold(roll+pitch)]` | — |
 | `manual` | `StaticSetpoint` | `[]` — всё пилоту | — |
-| **`flow_assist`** (пре-VINS, борт) | `RcTransmitter` | `[FlowDamper(roll), YawHold(yaw)]` | — |
+| **`flow_assist`** (пре-VINS, борт) | `RcTransmitter` | `[DpRollHold, DpYawHold]` | — |
 | (будущий) авто-манёвр | `Shuttle`/`Circle`/waypoint | `[VinsHold]` | — |
-| (system-ID оси) | `Static` | `[GzPositionHold]` | `Pulse`/`Chirp` |
+| (system-ID оси) | `Static` | `[GzHold]` | `Pulse`/`Chirp` |
 
 Комбинаторика разрежена (flow/gz взаимоисключающи и т.п.) — валидные тройки собирает
 `recipes.py`, а не «любая клетка легальна».
@@ -73,7 +78,7 @@
   в центре → демпф сноса к нулю;
 - **`manual` = пустой список** стабилизаторов (пилот владеет всем; `PilotPassthrough`
   стал избыточен, оставлен для совместимости);
-- **микс**: «пульт + только yaw» = `[YawHold]`; «пульт + flow(roll)» = `[FlowDamper]`.
+- **микс**: «пульт + только yaw» = `[DpYawHold]`; «пульт + flow(roll)» = `[DpRollHold]`.
 
 Плюс `Arbiter` (safety-supervisor поверх миссии): тумблер MANUAL → сырые стики (incl
 throttle) безусловно. Адаптер пилота (`/mavros/rc/in` → `RcCommand`) идентичен в симе
@@ -121,7 +126,7 @@ class DroneState:
     mode: str|None = None; armed: bool = False; rel_alt: float|None = None; rcin_throttle: int|None = None
     vins_odom_count: int = 0; vins_last_sim: float = -1e9
     gt_valid: bool = False; gt_x=gt_y=gt_yaw=0.0; gt_vx=gt_vy=0.0   # СИМ; на Orin gt_valid=False
-    flow_lateral=flow_yaw=flow_conf=0.0                            # СЫРЫЕ агрегаты (PID в домене)
+    flow_lateral=flow_longitudinal=flow_yaw=flow_conf=0.0          # СЫРЫЕ агрегаты (PID в домене)
     flow_seq: int = 0; flow_dt: float = 0.0                        # покадровая интеграция (тонкость 1)
     pilot_roll=pilot_pitch=pilot_throttle=pilot_yaw = RC_CENTER    # стики (ScriptedPilot/RosPilot)
     pilot_switch: int = 0                                          # тумблер авто/ручной (Arbiter)
@@ -162,8 +167,9 @@ class ExcitationStrategy(ABC):
     def done(self, t) -> bool: return False
 ```
 
-Стабилизаторы и их оси: `GzPositionHold`={roll,pitch}, `FlowDamper`={roll},
-`YawHold`={yaw}, `PilotPassthrough`={roll,pitch,yaw} (легаси).
+Стабилизаторы: семейство `Gz*` (позиция/gt) — `GzHold(axes)` + алиасы GzPos/Roll/Pitch/Yaw;
+семейство `Dp*` (демпфер/поток) — `DpRollHold`{roll}/`DpPitchHold`{pitch}/`DpYawHold`{yaw}/`DpHold`{все};
+`VinsHold`{roll,pitch}; `PilotPassthrough` (легаси).
 
 ## Приложение (`application/`)
 
@@ -218,7 +224,7 @@ wall-цикл в main → RcOutput.publish(тот же rc)            # свеж
 ## Две тонкости (иначе сломается)
 
 1. **Flow-PID интегрирует ПО КАДРАМ, не по тикам.** Адаптер кладёт `flow_seq`+`flow_dt`,
-   а `FlowDamper/YawHold` продвигают интегратор ТОЛЬКО при смене `flow_seq` (иначе 20-Гц
+   а `Dp*`-демпферы продвигают интегратор ТОЛЬКО при смене `flow_seq` (иначе 20-Гц
    тик накрутил бы одну ошибку на стоячем сигнале). Стратегия чистая, физика per-frame.
 2. **Точку входа (origin/yaw0/t0) владеет `ControlStack.enter()`, не стратегии.**
    Trajectory отдаёт смещение относительно входа (тело), стек — абсолютную world-уставку.
@@ -277,7 +283,8 @@ src/mission/                       # ament_python пакет mission_pkg (пот
 
 **Оффлайн-гейты (чистый python, без ROS):** `test_gz_shuttle_equiv` (закон побитово =
 монолит), `test_bootstrap_fsm`, `test_pilot_strategies`, `test_pilot_fsm`,
-`test_flow_strategies`, `test_multiaxis_stack`, `test_handover` (switch Flow→Vins).
+`test_flow_strategies`, `test_multiaxis_stack`, `test_handover` (switch Flow→Vins),
+`test_families` (Gz*/Dp* per-axis + DpPitchHold/DpHold).
 
 **Рантайм switch `Flow→Vins` — РЕАЛИЗОВАН (оффлайн-проверен).** `VinsHold` (position-hold
 по VINS, СВОЯ опора в vins-фрейме, захват в момент switch) + `VinsHandover` (application:

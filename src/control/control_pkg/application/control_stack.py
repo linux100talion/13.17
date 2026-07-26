@@ -6,8 +6,8 @@ PER-AXIS модель (срез 3): стабилизаторов может бы
   1) БАЗА = сырые стики пилота (незанятая ось → ручной наклон);
   2) каждый стабилизатор ПЕРЕЗАПИСЫВАЕТ свои оси (regulate/velocity-assist);
   3) Excitation подмешивается сверху (ADDITIVE/REPLACE).
-Так «пульт + только yaw» = [YawHold] (yaw держит, roll/pitch пилот); «пульт + flow(roll)»
-= [FlowDamper] (roll velocity-assist, pitch/yaw пилот). Manual = [] (всё пилоту).
+Так «пульт + только yaw» = [DpYawHold] (yaw держит, roll/pitch пилот); «пульт + flow(roll)»
+= [DpRollHold] (roll velocity-assist, pitch/yaw пилот). Manual = [] (всё пилоту).
 
 Владеет ТОЧКОЙ ВХОДА (origin/yaw0/t0): Trajectory отдаёт смещение относительно входа
 (тело), стек собирает абсолютную world-уставку + прокидывает скорость-команду в Setpoint.

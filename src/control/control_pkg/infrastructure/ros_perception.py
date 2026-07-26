@@ -25,7 +25,7 @@ class RosPerception:
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,
                                   smooth_n=smooth_n, yaw_smooth_n=yaw_smooth_n)
         self._omega = np.zeros(3)
-        self._lateral = self._yaw = self._conf = 0.0
+        self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
         self._dt = 0.0
         self._seq = 0
         node.create_subscription(Imu, imu_topic, self._on_imu, qos_profile_sensor_data)
@@ -44,6 +44,7 @@ class RosPerception:
         if res is None:
             return
         self._lateral = res['lateral']
+        self._longitudinal = res['longitudinal']   # looming → DpPitchHold
         self._yaw = res['yaw_flow']
         self._conf = res['conf']
         self._dt = res['dt']
@@ -52,6 +53,7 @@ class RosPerception:
     def merge(self, s):
         """Влить свежие агрегаты потока в снапшот телеметрии (как pilot_* в ноде)."""
         s.flow_lateral = self._lateral
+        s.flow_longitudinal = self._longitudinal
         s.flow_yaw = self._yaw
         s.flow_conf = self._conf
         s.flow_dt = self._dt

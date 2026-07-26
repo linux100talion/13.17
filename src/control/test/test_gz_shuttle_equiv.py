@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Числовая эквивалентность среза 1 (GzPositionHold + Shuttle + ControlStack) с
+"""Числовая эквивалентность среза 1 (GzHold + Shuttle + ControlStack) с
 монолитом src/lab/alt_hold_bootstrap.py (S_EXCITE / gz-hold + боковой/продольный челнок).
 
 ORACLE ниже — дословная копия закона монолита (строки gz-hold в _tick_logic +
@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from control_pkg.application.control_stack import ControlStack       # noqa: E402
 from control_pkg.domain.control.excitation import NoExcitation       # noqa: E402
-from control_pkg.domain.control.stabilization import GzPositionHold  # noqa: E402
+from control_pkg.domain.control.stabilization import GzHold  # noqa: E402
 from control_pkg.domain.control.trajectory import Shuttle            # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
 
@@ -119,7 +119,7 @@ def run_case(name, gains, shuttle):
     oracle = MonolithOracle(kp, kd, ki, imax, gz_max, psign, rsign,
                             sh_a, sh_v, sh_pause, sh_fwd)
     stack = ControlStack(
-        GzPositionHold(kp=kp, kd=kd, ki=ki, imax=imax, max_pwm=gz_max,
+        GzHold(kp=kp, kd=kd, ki=ki, imax=imax, max_pwm=gz_max,
                        psign=psign, rsign=rsign),
         Shuttle(amplitude=sh_a, velocity=sh_v, pause=sh_pause, forward=sh_fwd),
         NoExcitation(),

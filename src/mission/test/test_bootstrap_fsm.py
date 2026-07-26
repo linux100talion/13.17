@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(_here, "..", ".."))                           # 
 
 from control_pkg.application.control_stack import ControlStack          # noqa: E402
 from control_pkg.domain.control.excitation import NoExcitation          # noqa: E402
-from control_pkg.domain.control.stabilization import GzPositionHold     # noqa: E402
+from control_pkg.domain.control.stabilization import GzHold     # noqa: E402
 from control_pkg.domain.control.trajectory import Shuttle               # noqa: E402
 from control_pkg.domain.state import DroneState                         # noqa: E402
 from mission_pkg.application.mission_runner import (                    # noqa: E402
@@ -92,7 +92,7 @@ def main():
     cfg = BootstrapConfig()   # дефолты: alt=3, челнок a=5 v=1.5 pause=2
 
     stack = ControlStack(
-        GzPositionHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
+        GzHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
                        cfg.gz_max, cfg.gz_psign, cfg.gz_rsign),
         Shuttle(cfg.gz_shuttle_a, cfg.gz_shuttle_v, cfg.gz_shuttle_pause,
                 cfg.gz_shuttle_fwd),

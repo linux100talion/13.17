@@ -16,7 +16,7 @@ from control_pkg.application.control_stack import ControlStack       # noqa: E40
 from control_pkg.application.handover import VinsHandover            # noqa: E402
 from control_pkg.domain.control.excitation import NoExcitation       # noqa: E402
 from control_pkg.domain.control.stabilization import (               # noqa: E402
-    FlowDamper, VinsHold, YawHold)
+    DpRollHold, VinsHold, DpYawHold)
 from control_pkg.domain.control.trajectory import StaticSetpoint     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
 
@@ -33,7 +33,7 @@ def s(odom, last_sim, now, vx=0.0, vins_x=0.0):
                       vins_last_sim=last_sim, now_sim=now, vins_x=vins_x)
 
 
-stack = ControlStack([FlowDamper(), YawHold()], StaticSetpoint(), NoExcitation())
+stack = ControlStack([DpRollHold(), DpYawHold()], StaticSetpoint(), NoExcitation())
 vins = VinsHold()
 ho = VinsHandover(vins, min_count=5, fresh_sec=2.0)
 
@@ -63,7 +63,7 @@ check("после switch VinsHold регулирует (pitch≠1500 на фор
 
 # 6. Свежесть: много odom, но поток протух → НЕ ready
 ho2 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0)
-stack2 = ControlStack([FlowDamper()], StaticSetpoint(), NoExcitation())
+stack2 = ControlStack([DpRollHold()], StaticSetpoint(), NoExcitation())
 stack2.enter(s(0, 10.0, 10.0))
 check("odom есть, но stale (Δ>fresh) → не ready",
       not ho2.maybe_switch(stack2, s(odom=50, last_sim=10.0, now=15.0)))

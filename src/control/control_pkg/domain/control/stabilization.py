@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Стратегии стабилизации. Срез 1: GzPositionHold (PID по истинной позе Gazebo).
+"""Стратегии стабилизации — ДВА семейства + per-axis алиасы.
 
-Перенос закона из alt_hold_bootstrap.py (S_EXCITE / gz-hold). Ошибку и скорость из
-world переводим в тело (по gt_yaw) → offset PWM по pitch(вперёд)/roll(вправо).
-I-член интегрируется в WORLD (yaw-инвариантно), потом поворачивается в тело; знаки
-psign/rsign=+1 выверены отладкой монолита (pitch_off<0 → ускорение ВПЕРЁД).
+- **Gz\\*** — держит ПОЗИЦИЮ по ground-truth Gazebo (sim-оракул для тюнинга). Ошибку и
+  скорость из world → в тело (по gt_yaw) → PWM по pitch(вперёд)/roll(вправо); yaw —
+  курс-холд к yaw входа. `GzHold(axes=…)` база; алиасы GzPosHold/GzRollHold/GzPitchHold/
+  GzYawHold. Арифметика roll/pitch выверена монолитом (Δ=0 в test_gz_shuttle_equiv).
+- **Dp\\*** — ДЕМПФЕР: гонит СКОРОСТЬ к нулю по ОПТИЧЕСКОМУ ПОТОКУ (scale-free, боевой +
+  sim через камеру), позицию НЕ держит. Источник — flow_lateral(roll)/flow_longitudinal(
+  pitch)/flow_yaw(yaw) из FlowEstimator. Velocity-assist: цель = c_*·cmd_gain (стик).
+  Покадровая интеграция (flow_seq), conf/stale-fade. DpRollHold/DpPitchHold/DpYawHold +
+  DpHold (композит всех трёх). Законы roll/yaw — порт flow_hold/yaw_hold монолита.
+- `VinsHold` — position-hold по VINS (после init, своя опора). `PilotPassthrough` — легаси.
+
+Незанятые оси раздаёт пилоту сам ControlStack (per-axis база = сырые стики).
 """
 import math
 
@@ -14,27 +22,36 @@ from ..state import DroneState
 from .base import StabilizationStrategy
 
 
-class GzPositionHold(StabilizationStrategy):
-    axes = frozenset({"roll", "pitch"})   # yaw держит отдельная роль/центр
+# ============================ Gz* — позиция по gazebo ============================
+
+class GzHold(StabilizationStrategy):
+    """Position-hold по gt Gazebo, per-axis (axes задаёт, какие оси стек использует).
+
+    roll/pitch — PID позиции (ошибка world→тело); yaw — курс-холд к yaw входа (P по
+    heading; yaw-стик = rate → P даёт устойчивую сходимость). Незанятые оси стек
+    игнорирует, поэтому вычисляем все три, а axes лишь маркирует владение.
+    """
 
     def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
-                 psign=1.0, rsign=1.0):
+                 psign=1.0, rsign=1.0, axes=frozenset({"roll", "pitch"}),
+                 yaw_kp=80.0, yaw_sign=1.0):
         self.kp, self.kd, self.ki = kp, kd, ki
         self.imax, self.max = imax, max_pwm
         self.psign, self.rsign = psign, rsign
+        self.axes = axes
+        self.yaw_kp, self.yaw_sign = yaw_kp, yaw_sign
         self._ix = self._iy = 0.0          # интеграл ошибки позиции (world)
-        self._it = None                    # пред. sim-время для dt интеграла
+        self._it = None
+        self._yaw0 = 0.0                   # курс входа (для yaw-холда)
 
     def enter(self, s: DroneState) -> None:
-        # Реюз hold-only-каркаса: сброс интегратора при входе в фазу.
         self._ix = self._iy = 0.0
         self._it = s.now_sim
+        self._yaw0 = s.gt_yaw
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
         ex = s.gt_x - sp.x
         ey = s.gt_y - sp.y
-        # I-член: интегрируем в WORLD; anti-windup — кламп состояния так, чтобы
-        # вклад ki*i не превышал imax PWM по каждой оси.
         now = s.now_sim
         if self.ki > 0 and self._it is not None and now > self._it:
             di = now - self._it
@@ -56,21 +73,42 @@ class GzPositionHold(StabilizationStrategy):
         ro = self.rsign * (self.kp * e_rgt + self.kd * v_rgt + self.ki * i_rgt)
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
+        # yaw — курс-холд к yaw входа (P по heading-ошибке; знак пока не выверен в симе)
+        eyaw = math.atan2(math.sin(self._yaw0 - s.gt_yaw),
+                          math.cos(self._yaw0 - s.gt_yaw))
+        yo = clamp(self.yaw_sign * self.yaw_kp * eyaw, -self.max, self.max)
         return RcCommand(roll=RC_CENTER + int(ro), pitch=RC_CENTER + int(po),
-                         throttle=RC_CENTER, yaw=RC_CENTER)
+                         throttle=RC_CENTER, yaw=RC_CENTER + int(yo))
 
+
+class GzPosHold(GzHold):
+    def __init__(self, *a, **kw):
+        kw['axes'] = frozenset({"roll", "pitch", "yaw"})
+        super().__init__(*a, **kw)
+
+
+class GzRollHold(GzHold):
+    def __init__(self, *a, **kw):
+        kw['axes'] = frozenset({"roll"})
+        super().__init__(*a, **kw)
+
+
+class GzPitchHold(GzHold):
+    def __init__(self, *a, **kw):
+        kw['axes'] = frozenset({"pitch"})
+        super().__init__(*a, **kw)
+
+
+class GzYawHold(GzHold):
+    def __init__(self, *a, **kw):
+        kw['axes'] = frozenset({"yaw"})
+        super().__init__(*a, **kw)
+
+
+# ============================ прочие ============================
 
 class PilotPassthrough(StabilizationStrategy):
-    """СРЕЗ 2: полный РУЧНОЙ режим — сырые стики пилота → RC, обратной связи НЕТ.
-
-    «Стабилизация» вырождена: пилот сам в контуре (как ACRO/STABILIZE аппарата).
-    Уставку (sp) игнорирует — отслеживать нечего. throttle центр (миссия держит
-    высоту в EXCITE; при seize пилоту throttle отдаёт Arbiter). Читает pilot_* из
-    DroneState — sim (ScriptedPilot) и борт (RosPilot) одинаково.
-
-    NB: в per-axis модели (срез 3) этот класс избыточен — manual = ПУСТОЙ список
-    стабилизаторов (база стека = сырые стики). Оставлен для совместимости.
-    """
+    """Легаси: сырые стики → RC (per-axis модель делает manual = ПУСТОЙ список)."""
     axes = frozenset({"roll", "pitch", "yaw"})
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
@@ -79,14 +117,9 @@ class PilotPassthrough(StabilizationStrategy):
 
 
 class VinsHold(StabilizationStrategy):
-    """Position-hold по VINS — стабилизатор ПОСЛЕ инициализации (рантайм switch Flow→Vins).
-
-    Зеркало GzPositionHold, но опора — VINS, а не gt (на борту gt нет). ⚠️ ВЛАДЕЕТ СВОЕЙ
-    опорой: захватывает vins-позу в enter() (момент switch) и держит её. ControlStack-
-    origin в gt-фрейме тут не подходит (другой фрейм + на борту =0). VINS-фрейм не
-    выровнен к миру — для УДЕРЖАНИЯ это неважно (держим текущую позу константной).
-    Пилот при switch не меняется (RcTransmitter), меняется только источник опоры.
-    """
+    """Position-hold по VINS — после init (рантайм switch Flow→Vins). Своя опора в
+    vins-фрейме (захват в enter() на момент switch; ControlStack-origin в gt не годится,
+    на борту gt=0). VINS-фрейм не выровнен к миру — для УДЕРЖАНИЯ неважно."""
     axes = frozenset({"roll", "pitch"})
 
     def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
@@ -94,12 +127,12 @@ class VinsHold(StabilizationStrategy):
         self.kp, self.kd, self.ki = kp, kd, ki
         self.imax, self.max = imax, max_pwm
         self.psign, self.rsign = psign, rsign
-        self._ox = self._oy = 0.0          # опора в VINS-фрейме (захват в enter)
+        self._ox = self._oy = 0.0
         self._ix = self._iy = 0.0
         self._it = None
 
     def enter(self, s: DroneState) -> None:
-        self._ox, self._oy = s.vins_x, s.vins_y   # держим позу на момент switch
+        self._ox, self._oy = s.vins_x, s.vins_y
         self._ix = self._iy = 0.0
         self._it = s.now_sim
 
@@ -131,25 +164,18 @@ class VinsHold(StabilizationStrategy):
                          throttle=RC_CENTER, yaw=RC_CENTER)
 
 
+# ============================ Dp* — демпфер скорости по ОПТИЧЕСКОМУ ПОТОКУ ============================
+
 def _blend(conf, conf_min, conf_full):
     """confidence (число треков) → авторитет демпфера [0..1] (плавный fade-out)."""
     return clamp((conf - conf_min) / max(1e-6, conf_full - conf_min), 0.0, 1.0)
 
 
-class FlowDamper(StabilizationStrategy):
-    """СРЕЗ 3 (БОЕВОЙ пре-VINS): боковой демпфер сноса по оптическому потоку → ROLL.
-
-    Наш простой стабилизатор ДО инициализации VINS (нет GPS/VINS/gt). Гасит боковую
-    визуальную скорость (flow_lateral) к ЦЕЛИ. Velocity-assist: цель = c_right·cmd_gain
-    (нормир. стик пилота) → пилот рулит боком, флоу убирает снос; стик в центре → цель 0
-    → чистый демпф дрейфа. Порт закона из alt_hold_bootstrap._on_flow_image (flow_hold).
-
-    PID интегрирует ПО КАДРАМ (flow_seq), не по тикам: на стоячем сигнале 20-Гц тик не
-    должен накручивать интеграл. Между кадрами держим последний выход; протух (stale) →
-    fade в центр. Confidence (flow_conf) → плавный авторитет. Читает flow_* из DroneState
-    (наполняет RosPerception через FlowEstimator — sim и борт одинаково).
-    """
-    axes = frozenset({"roll"})
+class _FlowDamper1D(StabilizationStrategy):
+    """Общий одноосевой флоу-демпфер: гасит визуальную скорость к цели по ОДНОЙ оси.
+    Покадровая интеграция (flow_seq), conf/stale-fade. Подклассы задают: какой сигнал
+    потока читать (_signal), какую c_* брать целью (_cmd), какую ось выдавать (_axis)."""
+    _axis = "roll"
 
     def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_pwm=150.0,
                  conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=0.0, stale_sec=0.5):
@@ -163,6 +189,9 @@ class FlowDamper(StabilizationStrategy):
         self._out = 0.0
         self._last_frame_sim = -1e9
 
+    def _signal(self, s): raise NotImplementedError
+    def _cmd(self, sp): raise NotImplementedError
+
     def enter(self, s: DroneState) -> None:
         self._i = 0.0
         self._prev_err = 0.0
@@ -175,8 +204,7 @@ class FlowDamper(StabilizationStrategy):
             self._last_seq = s.flow_seq
             fdt = max(1e-3, s.flow_dt)
             blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
-            target = sp.c_right * self.cmd_gain      # velocity-assist: желаемый боковой поток
-            err = s.flow_lateral - target
+            err = self._signal(s) - self._cmd(sp) * self.cmd_gain   # velocity-assist
             self._i = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
             d = self.kd * (err - self._prev_err) / fdt
             self._prev_err = err
@@ -185,18 +213,35 @@ class FlowDamper(StabilizationStrategy):
             self._last_frame_sim = s.now_sim
         fresh = (s.now_sim - self._last_frame_sim) < self.stale
         off = int(self._out) if fresh else 0         # протух → fade в центр
-        return RcCommand(roll=RC_CENTER + off, throttle=RC_CENTER)
+        rc = RcCommand(throttle=RC_CENTER)
+        setattr(rc, self._axis, RC_CENTER + off)
+        return rc
 
 
-class YawHold(StabilizationStrategy):
-    """СРЕЗ 3 (БОЕВОЙ пре-VINS): визуальный курс/рыскание по потоку → YAW.
+class DpRollHold(_FlowDamper1D):
+    """Демпфер БОКОВОГО сноса по потоку → ROLL (был FlowDamper). Боевой пре-VINS.
+    ⚠️ osign: drift_check подтвердил −1 (config.flow_osign=-1); класс-дефолт +1 (тесты)."""
+    axes = frozenset({"roll"})
+    _axis = "roll"
 
-    Гасит визуальную yaw-скорость (flow_yaw) к ЦЕЛИ. Velocity-assist: цель =
-    c_yaw·cmd_gain (стик) → пилот рулит курсом, флоу гасит паразитное вращение; центр
-    → удержание. Победитель свипа [[yaw-hold-tuning]] — ki=0 (чистый демпф yaw-rate;
-    интеграл ВРЕДЕН, накручивает bias yaw_flow). Порт из _on_flow_image (yaw_hold).
-    Depth-independent (курс не упирается в дальнюю сцену, в отличие от roll).
-    """
+    def _signal(self, s): return s.flow_lateral
+    def _cmd(self, sp): return sp.c_right
+
+
+class DpPitchHold(_FlowDamper1D):
+    """Демпфер ПРОДОЛЬНОГО сноса по потоку (looming) → PITCH. Сигнал flow_longitudinal
+    (res['longitudinal'] FlowEstimator). ⚠️ НЕ проверен в полёте (looming менее зрел);
+    знак osign не выверен."""
+    axes = frozenset({"pitch"})
+    _axis = "pitch"
+
+    def _signal(self, s): return s.flow_longitudinal
+    def _cmd(self, sp): return sp.c_fwd
+
+
+class DpYawHold(StabilizationStrategy):
+    """Демпфер визуального рыскания по потоку → YAW (был YawHold). Победитель свипа
+    [[yaw-hold-tuning]] — ki=0 (интеграл вреден, bias yaw_flow). ∫err = курс-ошибка."""
     axes = frozenset({"yaw"})
 
     def __init__(self, kp=6.0, ki=0.0, imax=200.0, max_pwm=150.0,
@@ -222,10 +267,31 @@ class YawHold(StabilizationStrategy):
             blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
             target = sp.c_yaw * self.cmd_gain
             err = s.flow_yaw - target
-            self._head = clamp(self._head + err, -self.imax, self.imax)   # ∫err = курс-ошибка
+            self._head = clamp(self._head + err, -self.imax, self.imax)
             yu = clamp(self.kp * err + self.ki * self._head, -self.max, self.max)
             self._out = self.osign * blend * yu
             self._last_frame_sim = s.now_sim
         fresh = (s.now_sim - self._last_frame_sim) < self.stale
         off = int(self._out) if fresh else 0
         return RcCommand(yaw=RC_CENTER + off, throttle=RC_CENTER)
+
+
+class DpHold(StabilizationStrategy):
+    """Демпфер по ВСЕМ трём осям — композит DpRollHold+DpPitchHold+DpYawHold. Каждая
+    ось читает свой сигнал потока (разные единицы), поэтому композит, а не одна база."""
+    axes = frozenset({"roll", "pitch", "yaw"})
+
+    def __init__(self, roll=None, pitch=None, yaw=None):
+        self._subs = [roll or DpRollHold(), pitch or DpPitchHold(), yaw or DpYawHold()]
+
+    def enter(self, s: DroneState) -> None:
+        for x in self._subs:
+            x.enter(s)
+
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+        rc = RcCommand(throttle=RC_CENTER)
+        for x in self._subs:
+            out = x.update(s, sp, dt)
+            for ax in x.axes:
+                setattr(rc, ax, getattr(out, ax))
+        return rc

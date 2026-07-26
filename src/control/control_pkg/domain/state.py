@@ -42,8 +42,9 @@ class DroneState:
     gt_vy: float = 0.0
 
     # --- Поток (FlowEstimator): СЫРЫЕ агрегаты, PID теперь в домене ---
-    flow_lateral: float = 0.0
-    flow_yaw: float = 0.0
+    flow_lateral: float = 0.0        # боковой поток (DpRollHold)
+    flow_longitudinal: float = 0.0   # продольный/looming (DpPitchHold)
+    flow_yaw: float = 0.0            # визуальный yaw (DpYawHold)
     flow_conf: float = 0.0
     flow_seq: int = 0                      # счётчик кадров: PID интегрирует ПО КАДРАМ
     flow_dt: float = 0.0                   # интервал последнего кадра
