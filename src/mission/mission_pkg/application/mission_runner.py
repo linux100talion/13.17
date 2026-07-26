@@ -118,7 +118,7 @@ class MissionRunner:
                 self.log.info(
                     f"    gz-hold+shuttle: центр=({s.gt_x:.2f},{s.gt_y:.2f}) "
                     f"kp={cfg.gz_kp} kd={cfg.gz_kd} ki={cfg.gz_ki} "
-                    f"челнок a={cfg.gz_shuttle_a} v={cfg.gz_shuttle_v} fwd={cfg.gz_shuttle_fwd}")
+                    f"челнок level={cfg.gz_shuttle_level} leg={cfg.gz_shuttle_leg} fwd={cfg.gz_shuttle_fwd}")
             # Рантайм-передача Flow→Vins по «VINS ready» (hot-swap стабилизатора).
             if self.handover is not None and self.handover.maybe_switch(self.stack, s):
                 self.log.info(f"    ✅ VINS сошёлся ({s.vins_odom_count} odom) → "

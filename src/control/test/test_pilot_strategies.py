@@ -30,27 +30,21 @@ def approx(a, b, tol=1e-6):
     return abs(a - b) <= tol
 
 
-# --- RcTransmitter: интеграл стика ---
-rt = RcTransmitter(vel_gain=0.8, deadzone=30, full_pwm=400)
-# полный вперёд (pitch=1900 → axis=+1.0), 10 шагов по 0.1с = 1.0с
-s = DroneState(pilot_pitch=1900, pilot_roll=1500)
-for k in range(11):
-    intent = rt.intent(s, k * 0.1)
-# d_fwd ≈ vel_gain * axis * t = 0.8 * 1.0 * 1.0 = 0.8
-check("RcTransmitter интегрирует вперёд (~0.8м)", approx(intent.d_fwd, 0.8, 1e-3))
-check("RcTransmitter боковое не двинулось", approx(intent.d_right, 0.0))
-# центр → интеграл СТОИТ
-s.pilot_pitch = 1500
-d_before = intent.d_fwd
-for k in range(11, 22):
-    intent = rt.intent(s, k * 0.1)
-check("RcTransmitter центр → уставка стоит", approx(intent.d_fwd, d_before))
+# --- RcTransmitter: нормированный стик → c_* (profile-only, БЕЗ интеграла) ---
+rt = RcTransmitter(deadzone=30, full_pwm=400)
+# полный вперёд (pitch=1900 → нормировка +1.0), c_* напрямую, без накопления по t
+intent = rt.intent(DroneState(pilot_pitch=1900, pilot_roll=1500, pilot_yaw=1500), 0.5)
+check("RcTransmitter форвард-стик → c_fwd=+1.0", approx(intent.c_fwd, 1.0))
+check("RcTransmitter боковой в центре → c_right=0", approx(intent.c_right, 0.0))
+# центр → c_*=0 (не «стоит интеграл», а НЕТ команды)
+intent = rt.intent(DroneState(pilot_pitch=1500), 1.0)
+check("RcTransmitter центр → c_fwd=0", approx(intent.c_fwd, 0.0))
+# половина хода: (1700-1500-30)/(400-30) ≈ 0.459
+intent = rt.intent(DroneState(pilot_pitch=1700), 0.0)
+check("RcTransmitter полстика → c_fwd≈0.46", approx(intent.c_fwd, 170.0 / 370.0, 1e-3))
 # мёртвая зона: стик в пределах deadzone → 0
-rt2 = RcTransmitter(vel_gain=1.0, deadzone=30, full_pwm=400)
-s2 = DroneState(pilot_pitch=1520)   # +20 < deadzone 30
-for k in range(5):
-    i2 = rt2.intent(s2, k * 0.1)
-check("RcTransmitter мёртвая зона держит 0", approx(i2.d_fwd, 0.0))
+intent = rt.intent(DroneState(pilot_pitch=1520), 0.0)   # +20 < deadzone 30
+check("RcTransmitter мёртвая зона держит 0", approx(intent.c_fwd, 0.0))
 
 # --- PilotPassthrough: 1:1 ---
 pp = PilotPassthrough()

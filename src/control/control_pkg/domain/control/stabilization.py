@@ -34,24 +34,35 @@ class GzHold(StabilizationStrategy):
 
     def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
                  psign=1.0, rsign=1.0, axes=frozenset({"roll", "pitch"}),
-                 yaw_kp=80.0, yaw_sign=1.0):
+                 yaw_kp=80.0, yaw_sign=1.0, cmd_gain=0.8, yaw_cmd_gain=0.5):
         self.kp, self.kd, self.ki = kp, kd, ki
         self.imax, self.max = imax, max_pwm
         self.psign, self.rsign = psign, rsign
         self.axes = axes
         self.yaw_kp, self.yaw_sign = yaw_kp, yaw_sign
+        self.cmd_gain, self.yaw_cmd_gain = cmd_gain, yaw_cmd_gain
         self._ix = self._iy = 0.0          # интеграл ошибки позиции (world)
         self._it = None
-        self._yaw0 = 0.0                   # курс входа (для yaw-холда)
+        self._yaw0 = 0.0                   # курс входа (фрейм проекции стик-команды)
+        self._spx = self._spy = 0.0        # ИНТЕГРАЛ стик-команды → уставка (своя опора)
+        self._yawsp = 0.0                  # интеграл yaw-стика → командный курс
 
     def enter(self, s: DroneState) -> None:
         self._ix = self._iy = 0.0
         self._it = s.now_sim
         self._yaw0 = s.gt_yaw
+        self._spx, self._spy = s.gt_x, s.gt_y   # уставка стартует в опоре (gt на входе)
+        self._yawsp = s.gt_yaw
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
-        ex = s.gt_x - sp.x
-        ey = s.gt_y - sp.y
+        # стик-команду интегрируем в движущуюся уставку (в своём фрейме от опоры)
+        c0 = math.cos(self._yaw0)
+        s0 = math.sin(self._yaw0)
+        self._spx += (sp.c_fwd * c0 + sp.c_right * s0) * self.cmd_gain * dt
+        self._spy += (sp.c_fwd * s0 - sp.c_right * c0) * self.cmd_gain * dt
+        self._yawsp += sp.c_yaw * self.yaw_cmd_gain * dt
+        ex = s.gt_x - self._spx
+        ey = s.gt_y - self._spy
         now = s.now_sim
         if self.ki > 0 and self._it is not None and now > self._it:
             di = now - self._it
@@ -73,9 +84,9 @@ class GzHold(StabilizationStrategy):
         ro = self.rsign * (self.kp * e_rgt + self.kd * v_rgt + self.ki * i_rgt)
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
-        # yaw — курс-холд к yaw входа (P по heading-ошибке; знак пока не выверен в симе)
-        eyaw = math.atan2(math.sin(self._yaw0 - s.gt_yaw),
-                          math.cos(self._yaw0 - s.gt_yaw))
+        # yaw — курс-холд к КОМАНДНОМУ курсу (интеграл yaw-стика; c_yaw=0 → держит вход)
+        eyaw = math.atan2(math.sin(self._yawsp - s.gt_yaw),
+                          math.cos(self._yawsp - s.gt_yaw))
         yo = clamp(self.yaw_sign * self.yaw_kp * eyaw, -self.max, self.max)
         return RcCommand(roll=RC_CENTER + int(ro), pitch=RC_CENTER + int(po),
                          throttle=RC_CENTER, yaw=RC_CENTER + int(yo))
@@ -123,22 +134,29 @@ class VinsHold(StabilizationStrategy):
     axes = frozenset({"roll", "pitch"})
 
     def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
-                 psign=1.0, rsign=1.0):
+                 psign=1.0, rsign=1.0, cmd_gain=0.8):
         self.kp, self.kd, self.ki = kp, kd, ki
         self.imax, self.max = imax, max_pwm
         self.psign, self.rsign = psign, rsign
-        self._ox = self._oy = 0.0
+        self.cmd_gain = cmd_gain
+        self._yaw0 = 0.0                   # фрейм проекции стик-команды (vins-курс входа)
+        self._spx = self._spy = 0.0        # интеграл стик-команды → уставка (vins-опора)
         self._ix = self._iy = 0.0
         self._it = None
 
     def enter(self, s: DroneState) -> None:
-        self._ox, self._oy = s.vins_x, s.vins_y
+        self._spx, self._spy = s.vins_x, s.vins_y
+        self._yaw0 = s.vins_yaw
         self._ix = self._iy = 0.0
         self._it = s.now_sim
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
-        ex = s.vins_x - self._ox
-        ey = s.vins_y - self._oy
+        c0 = math.cos(self._yaw0)
+        s0 = math.sin(self._yaw0)
+        self._spx += (sp.c_fwd * c0 + sp.c_right * s0) * self.cmd_gain * dt
+        self._spy += (sp.c_fwd * s0 - sp.c_right * c0) * self.cmd_gain * dt
+        ex = s.vins_x - self._spx
+        ey = s.vins_y - self._spy
         now = s.now_sim
         if self.ki > 0 and self._it is not None and now > self._it:
             di = now - self._it

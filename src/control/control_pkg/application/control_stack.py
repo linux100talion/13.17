@@ -13,10 +13,8 @@ PER-AXIS модель (срез 3): стабилизаторов может бы
 (тело), стек собирает абсолютную world-уставку + прокидывает скорость-команду в Setpoint.
 Самодостаточен — работает и без MissionRunner.
 """
-import math
-
 from ..domain.rc import RC_CENTER, RcCommand
-from ..domain.setpoint import AxisPolicy, MotionIntent, Setpoint
+from ..domain.setpoint import AxisPolicy, Setpoint
 
 
 def _as_list(stab):
@@ -39,8 +37,6 @@ class ControlStack:
         self.stabs = _as_list(stabilization)   # список стабилизаторов (может быть пуст)
         self.traj = trajectory
         self.excite = excitation
-        self._ox = self._oy = 0.0
-        self._yaw0 = 0.0
         self._t0 = None
         self._prev_t = None
 
@@ -50,22 +46,12 @@ class ControlStack:
     def switch_excitation(self, e): self.excite = e
 
     def enter(self, s):
-        self._ox, self._oy = s.gt_x, s.gt_y
-        self._yaw0 = s.gt_yaw
+        # Опору держит теперь КАЖДЫЙ позиц-холдер сам (в своём фрейме) — стек лишь
+        # тактирует время траектории (t0) и раздаёт stab.enter.
         self._t0 = s.now_sim
         self._prev_t = s.now_sim
         for st in self.stabs:
             st.enter(s)
-
-    def _origin_plus(self, intent: MotionIntent) -> Setpoint:
-        # тело→world по yaw входа: fwd=(cos,sin), right=(sin,−cos). Скорость-команда
-        # (c_*) — в теле, прокидывается как есть (velocity-стабилизаторы её масштабируют).
-        c = math.cos(self._yaw0)
-        sn = math.sin(self._yaw0)
-        dx = intent.d_fwd * c + intent.d_right * sn
-        dy = intent.d_fwd * sn - intent.d_right * c
-        return Setpoint(self._ox + dx, self._oy + dy,
-                        c_fwd=intent.c_fwd, c_right=intent.c_right, c_yaw=intent.c_yaw)
 
     def update(self, s) -> RcCommand:
         if self._t0 is None:
@@ -74,7 +60,7 @@ class ControlStack:
         dt = max(0.0, s.now_sim - (self._prev_t if self._prev_t is not None else s.now_sim))
         self._prev_t = s.now_sim
         intent = self.traj.intent(s, t)
-        sp = self._origin_plus(intent)
+        sp = Setpoint(intent.c_fwd, intent.c_right, intent.c_yaw)   # стик-команда → стабилизаторам
         # БАЗА — сырые стики пилота (незанятые оси = ручной наклон). throttle держит миссия.
         rc = RcCommand(roll=s.pilot_roll, pitch=s.pilot_pitch,
                        throttle=RC_CENTER, yaw=s.pilot_yaw)

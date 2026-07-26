@@ -95,7 +95,7 @@ class BootstrapArch2Node(Node):
         handover = None
         if cfg.control_mode == 'flow_assist' and cfg.handover_vins:
             vins = VinsHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
-                            cfg.gz_max, cfg.gz_psign, cfg.gz_rsign)
+                            cfg.gz_max, cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain)
             handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec)
             self.logger.info(f"handover Flow→Vins ВКЛ: ready при ≥{cfg.vins_min} odom")
         self.runner = MissionRunner(cfg, self.clock, self.actuator, stack, self.logger,
@@ -169,11 +169,11 @@ def _parse() -> tuple:
     p.add_argument('--gz-max', dest='gz_max', type=float, default=150.0)
     p.add_argument('--gz-psign', dest='gz_psign', type=float, default=1.0)
     p.add_argument('--gz-rsign', dest='gz_rsign', type=float, default=1.0)
-    p.add_argument('--gz-shuttle-a', dest='gz_shuttle_a', type=float, default=5.0)
-    p.add_argument('--gz-shuttle-v', dest='gz_shuttle_v', type=float, default=1.5)
+    p.add_argument('--gz-cmd-gain', dest='gz_cmd_gain', type=float, default=0.8)
+    p.add_argument('--gz-shuttle-level', dest='gz_shuttle_level', type=float, default=0.3)
+    p.add_argument('--gz-shuttle-leg', dest='gz_shuttle_leg', type=float, default=3.0)
     p.add_argument('--gz-shuttle-pause', dest='gz_shuttle_pause', type=float, default=2.0)
     p.add_argument('--gz-shuttle-fwd', dest='gz_shuttle_fwd', action='store_true')
-    p.add_argument('--pilot-vel-gain', dest='pilot_vel_gain', type=float, default=0.8)
     p.add_argument('--pilot-deadzone', dest='pilot_deadzone', type=int, default=30)
     p.add_argument('--pilot-full', dest='pilot_full', type=int, default=400)
     p.add_argument('--pilot-pitch-sign', dest='pilot_pitch_sign', type=float, default=1.0)

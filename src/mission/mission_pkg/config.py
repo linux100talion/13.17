@@ -32,13 +32,14 @@ class BootstrapConfig:
     gz_max: float = 150.0
     gz_psign: float = 1.0
     gz_rsign: float = 1.0
-    # shuttle (челнок): в срезе 1 фаза EXCITE = gz-hold + челнок
-    gz_shuttle_a: float = 5.0
-    gz_shuttle_v: float = 1.5
+    # интегратор стик-команды → уставка в позиц-холдерах Gz*/Vins (setpoint-ед/с при полном стике)
+    gz_cmd_gain: float = 0.8
+    # shuttle (челнок) как стик-профиль: ±level по плечам leg сек
+    gz_shuttle_level: float = 0.3    # уровень стика [-1..1] на плече
+    gz_shuttle_leg: float = 3.0      # длительность плеча, sim-сек
     gz_shuttle_pause: float = 2.0
     gz_shuttle_fwd: bool = False
-    # пульт (срез 2): assisted — стик = скорость уставки (интеграл); manual — passthrough
-    pilot_vel_gain: float = 0.8      # м/с при полном отклонении стика (assisted)
+    # пульт (нормировка стика → c_*)
     pilot_deadzone: int = 30         # мёртвая зона вокруг центра, PWM
     pilot_full: int = 400            # полное отклонение стика от центра, PWM
     pilot_pitch_sign: float = 1.0    # знак «стик вперёд» (борт: сверить с радио)

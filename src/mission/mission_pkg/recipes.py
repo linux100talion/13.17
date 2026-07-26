@@ -21,14 +21,14 @@ CONTROL_MODES = ("shuttle", "assisted", "manual", "flow_assist")
 
 
 def _gz(cfg):
-    # горизонтальная позиция (roll+pitch), yaw — пилот (как раньше GzPositionHold)
+    # горизонтальная позиция (roll+pitch), yaw — пилот; интегрирует стик-команду сам
     return GzHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
                   cfg.gz_max, cfg.gz_psign, cfg.gz_rsign,
-                  axes=frozenset({"roll", "pitch"}))
+                  axes=frozenset({"roll", "pitch"}), cmd_gain=cfg.gz_cmd_gain)
 
 
 def _rc_tx(cfg):
-    return RcTransmitter(cfg.pilot_vel_gain, cfg.pilot_deadzone, cfg.pilot_full,
+    return RcTransmitter(cfg.pilot_deadzone, cfg.pilot_full,
                          cfg.pilot_pitch_sign, cfg.pilot_roll_sign)
 
 
@@ -48,7 +48,7 @@ def build_control_stack(cfg) -> ControlStack:
     if mode == "shuttle":
         return ControlStack(
             _gz(cfg),
-            Shuttle(cfg.gz_shuttle_a, cfg.gz_shuttle_v, cfg.gz_shuttle_pause,
+            Shuttle(cfg.gz_shuttle_level, cfg.gz_shuttle_leg, cfg.gz_shuttle_pause,
                     cfg.gz_shuttle_fwd),
             NoExcitation(),
         )

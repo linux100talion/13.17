@@ -45,9 +45,9 @@ gazebo (`GzPosHold` все оси / `GzRollHold` / `GzPitchHold` / `GzYawHold`);
 оси (roll-excite вытесняет). Недостающее измерение — **политика композиции по оси**.
 Отсюда три роли:
 
-- **Trajectory** → *намерение*: смещение уставки (`d_*`, для position-hold) и/или
-  нормированная скорость-команда (`c_*`, для velocity-damp). Не знает про PWM. Сюда
-  садится и **пульт** (`RcTransmitter` — источник намерения).
+- **Trajectory** → *намерение* как **стик-профиль** (`c_*` [-1..1], PROFILE-ONLY; метрик нет).
+  Позиц-холдер интегрирует его в уставку, демпфер берёт целью. Источник взаимозаменяем:
+  `ProfileTrajectory` (скрипт) / `Shuttle` / `RcTransmitter` (пилот) / (будущее) NN2.
 - **Stabilization** → намерение + обратная связь → RC **по своим осям** (`axes`).
   `Gz*` (позиция/gt), `Dp*` (демпфер/поток), `VinsHold` (после init).
 - **Excitation** → экзогенный зонд для system-ID (pulse/chirp) с политикой на ось
@@ -74,8 +74,8 @@ gazebo (`GzPosHold` все оси / `GzRollHold` / `GzPitchHold` / `GzYawHold`);
 СВОИ оси, excitation — сверху. Отсюда без единого `if`:
 
 - **незанятая ось → сырой стик пилота** (ручной наклон);
-- **flow-ось → velocity-assist**: стик задаёт цель (`c_*`·gain), флоу гасит к ней; стик
-  в центре → демпф сноса к нулю;
+- **Dp-ось → velocity-assist**: стик = цель скорости, флоу гасит к ней; центр → демпф к нулю;
+- **Gz/Vins-ось → интеграл**: стик = скорость уставки, холдер интегрирует → держит точку (Loiter);
 - **`manual` = пустой список** стабилизаторов (пилот владеет всем; `PilotPassthrough`
   стал избыточен, оставлен для совместимости);
 - **микс**: «пульт + только yaw» = `[DpYawHold]`; «пульт + flow(roll)» = `[DpRollHold]`.
@@ -136,12 +136,10 @@ class DroneState:
 class AxisPolicy(Enum): REGULATE=auto(); ADDITIVE=auto(); REPLACE=auto()
 @dataclass
 class MotionIntent:
-    d_fwd=d_right = 0.0          # ПОЗИЦИЯ уставки от входа, тело (position-hold Gz/Vins)
-    c_fwd=c_right=c_yaw = 0.0    # СКОРОСТЬ-команда, нормир.[-1..1] (velocity-damp Flow/Yaw)
+    c_fwd=c_right=c_yaw = 0.0    # PROFILE-ONLY: нормир. стик-уровень [-1..1], тело (единый «язык»)
 @dataclass
 class Setpoint:
-    x=y = 0.0                    # абсолютная цель в МИРЕ (ControlStack = origin + d_*)
-    c_fwd=c_right=c_yaw = 0.0    # скорость-команда, прокинутая из intent
+    c_fwd=c_right=c_yaw = 0.0    # стик-команда, прокинутая стабилизатору (Dp=цель / Gz=интеграл)
 ```
 
 ### Порты (`domain/ports.py`, Protocol)
@@ -181,10 +179,10 @@ class ControlStack:
     def switch_stabilization(self, s): self.stabs = _as_list(s)   # ГОРЯЧАЯ замена (пока не вызывается)
     def switch_trajectory(self, t): ...
     def switch_excitation(self, e): ...
-    def enter(self, s):                                   # захват origin/yaw0/t0 + stab.enter() каждому
+    def enter(self, s):                                   # t0 (время траектории) + stab.enter() каждому
         ...
     def update(self, s) -> RcCommand:
-        intent = self.traj.intent(s, t)                   # позиция d_* + скорость c_*
+        intent = self.traj.intent(s, t)                   # стик-профиль c_*
         sp = self._origin_plus(intent)                    # world-уставка + c_* passthrough
         rc = RcCommand(roll=s.pilot_roll, pitch=s.pilot_pitch,   # БАЗА = стики пилота
                        throttle=RC_CENTER, yaw=s.pilot_yaw)
@@ -226,8 +224,9 @@ wall-цикл в main → RcOutput.publish(тот же rc)            # свеж
 1. **Flow-PID интегрирует ПО КАДРАМ, не по тикам.** Адаптер кладёт `flow_seq`+`flow_dt`,
    а `Dp*`-демпферы продвигают интегратор ТОЛЬКО при смене `flow_seq` (иначе 20-Гц
    тик накрутил бы одну ошибку на стоячем сигнале). Стратегия чистая, физика per-frame.
-2. **Точку входа (origin/yaw0/t0) владеет `ControlStack.enter()`, не стратегии.**
-   Trajectory отдаёт смещение относительно входа (тело), стек — абсолютную world-уставку.
+2. **Опору владеет КАЖДЫЙ позиц-холдер сам** — интегрирует стик-профиль `c_*` от своей
+   опоры в своём фрейме (Gz в gt, Vins в vins). ControlStack лишь тактует время. Это
+   разъединяет фреймы Gz↔Vins (раньше общий origin в стеке коряво увязывал их).
 
 ## Пакеты и упаковка
 
@@ -241,8 +240,8 @@ src/control/                       # ament_python пакет control_pkg
     infrastructure/  ros_clock.py ros_telemetry.py mavros_actuator.py ros_io.py
                      ros_pilot.py ros_perception.py
     perception/      flow_estimator.py           # КАНОНИЧНАЯ копия (борт self-contained; вариант A)
-  test/              test_gz_shuttle_equiv.py test_pilot_strategies.py
-                     test_flow_strategies.py test_multiaxis_stack.py
+  test/              test_profile_motion.py test_pilot_strategies.py test_families.py
+                     test_flow_strategies.py test_multiaxis_stack.py test_handover.py
 
 src/mission/                       # ament_python пакет mission_pkg (потребитель control)
   package.xml setup.py setup.cfg resource/mission_pkg
@@ -277,14 +276,20 @@ src/mission/                       # ament_python пакет mission_pkg (пот
 
 | Срез | Что | Оффлайн | Прогон в симе |
 |---|---|---|---|
-| 1 · `shuttle` | gz-hold + челнок; ядро композиции | эквивалентность Δ=0 vs монолит (5 кейсов) + FSM | ✅ `HOLD_DONE` |
+| 1 · `shuttle` | gz-hold + челнок; ядро композиции | profile-motion + FSM (эквивалентность Δ=0 сняла profile-рефакторинг) | ✅ `HOLD_DONE` |
 | 2 · `assisted`/`manual` | пульт-как-стратегия + Arbiter | pilot-стратегии + FSM assisted/manual/seize | ✅ `HOLD_DONE` |
 | 3 · `flow_assist` | пре-VINS флоу-демпфер + per-axis стек | флоу-стратегии + per-axis композиция | ✅ (см. ниже) |
 
-**Оффлайн-гейты (чистый python, без ROS):** `test_gz_shuttle_equiv` (закон побитово =
-монолит), `test_bootstrap_fsm`, `test_pilot_strategies`, `test_pilot_fsm`,
+**Оффлайн-гейты (8, чистый python, без ROS):** `test_profile_motion` (интеграл стик-профиля
++ холд + симм. челнок), `test_bootstrap_fsm`, `test_pilot_strategies`, `test_pilot_fsm`,
 `test_flow_strategies`, `test_multiaxis_stack`, `test_handover` (switch Flow→Vins),
 `test_families` (Gz*/Dp* per-axis + DpPitchHold/DpHold).
+
+**PROFILE-ONLY движение (переход):** метрический канал `d_*` убран — движение везде это
+**стик-профиль** `c_*` (`ProfileTrajectory`/`Shuttle`/`RcTransmitter`). Позиц-холдеры
+(`Gz*`/`Vins`) интегрируют профиль в уставку от своей опоры (разъединяет фреймы Gz↔Vins);
+демпферы (`Dp*`) берут его целью скорости. Устаревший `test_gz_shuttle_equiv` (проверял
+d_*-модель монолита) снят → `test_profile_motion`. Любой профиль → любой стек.
 
 **Рантайм switch `Flow→Vins` — РЕАЛИЗОВАН (оффлайн-проверен).** `VinsHold` (position-hold
 по VINS, СВОЯ опора в vins-фрейме, захват в момент switch) + `VinsHandover` (application:

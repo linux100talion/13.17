@@ -94,7 +94,7 @@ def main():
     stack = ControlStack(
         GzHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
                        cfg.gz_max, cfg.gz_psign, cfg.gz_rsign),
-        Shuttle(cfg.gz_shuttle_a, cfg.gz_shuttle_v, cfg.gz_shuttle_pause,
+        Shuttle(cfg.gz_shuttle_level, cfg.gz_shuttle_leg, cfg.gz_shuttle_pause,
                 cfg.gz_shuttle_fwd),
         NoExcitation(),
     )

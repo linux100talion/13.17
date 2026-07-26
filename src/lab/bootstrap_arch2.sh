@@ -34,7 +34,7 @@ ARGS=()
 [ -n "${BS_CONTROL_MODE:-}" ]    && ARGS+=(--control-mode "$BS_CONTROL_MODE")
 [ -n "${BS_EXCITE_MAX:-}" ]      && ARGS+=(--excite-max-sec "$BS_EXCITE_MAX")
 [ -n "${BS_PILOT:-}" ]           && ARGS+=(--pilot "$BS_PILOT")
-[ -n "${BS_PILOT_VEL_GAIN:-}" ]  && ARGS+=(--pilot-vel-gain "$BS_PILOT_VEL_GAIN")
+[ -n "${BS_GZ_CMD_GAIN:-}" ]     && ARGS+=(--gz-cmd-gain "$BS_GZ_CMD_GAIN")
 # flow-assist (пре-VINS демпфер по потоку): гейны/знаки — реюз BS_FLOW_*/BS_YAWH_* от liftland
 [ -n "${BS_FLOW_KP:-}" ]         && ARGS+=(--flow-kp "$BS_FLOW_KP")
 [ -n "${BS_FLOW_KI:-}" ]         && ARGS+=(--flow-ki "$BS_FLOW_KI")

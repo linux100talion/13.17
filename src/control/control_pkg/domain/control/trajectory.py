@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Стратегии движения (Trajectory) — выдают НАМЕРЕНИЕ (смещение уставки, тело).
+"""Стратегии движения (Trajectory) — ПРОФИЛЬ-ГЕНЕРАТОРЫ.
 
-Срез 1:
-- StaticSetpoint — чистый холд (нулевое смещение).
-- Shuttle — челнок: сетпойнт едет const-V вдоль оси (боковой или продольный),
-  gz-hold его отслеживает (дрон летит с нужной скоростью, позиц. ОС не даёт
-  runaway). Профиль 0→−A→0 (плечо A/V сек) с паузой на −A. Малое ускорение →
-  малый крен → чистая трансляция на крейсере (калибровка масштаба s).
+PROFILE-ONLY: каждая выдаёт нормированный стик-уровень `MotionIntent(c_*)` — единый
+«язык» движения. Метрики нет. Любой профиль → любой стек (позиц-холдер интегрирует,
+демпфер берёт целью). Источник намерения взаимозаменяем: скрипт / пилот / (будущее) NN2.
+
+- StaticSetpoint — нули (держать/гасить на месте).
+- Shuttle — челнок как стик-профиль: ±level по плечам (const-стик), пауза, возврат.
+- RcTransmitter — живой пилот = живой профиль (нормир. стики /mavros/rc/in).
+- ProfileTrajectory — скриптовый профиль по sim-времени (сегменты уровень×длительность).
 """
 from ..rc import RC_CENTER
 from ..setpoint import MotionIntent
@@ -14,86 +16,95 @@ from ..state import DroneState
 from .base import TrajectoryStrategy
 
 
+def _norm_axis(pwm: int, deadzone: int, full: int) -> float:
+    """PWM-стик → нормировка [-1..1] с мёртвой зоной вокруг центра."""
+    e = pwm - RC_CENTER
+    if abs(e) < deadzone:
+        return 0.0
+    e -= deadzone * (1 if e > 0 else -1)
+    return max(-1.0, min(1.0, e / max(1.0, full - deadzone)))
+
+
 class StaticSetpoint(TrajectoryStrategy):
     def intent(self, s: DroneState, t: float) -> MotionIntent:
-        return MotionIntent(0.0, 0.0)
+        return MotionIntent()
 
 
 class Shuttle(TrajectoryStrategy):
-    def __init__(self, amplitude=5.0, velocity=1.5, pause=2.0, forward=False):
-        self.a = amplitude
-        self.v = max(0.1, velocity)
-        self.pause = pause
-        self.forward = forward   # True → продольный (looming/pitch-ID), иначе боковой
+    """Челнок как стик-профиль: −level плечо `leg` сек, пауза, +level плечо, стоп.
+    Симметрия ± → интеграл уставки возвращается к старту. forward → продольная ось."""
 
-    def _offset(self, ts: float) -> float:
-        """Смещение вдоль оси (м): 0→−A (плечо), пауза на −A, −A→0. Затем 0."""
-        tleg = self.a / self.v
-        if ts < tleg:                       # к −A
-            return -self.v * ts
-        if ts < tleg + self.pause:          # пауза на −A
-            return -self.a
-        if ts < 2.0 * tleg + self.pause:    # назад к 0
-            return -self.a + self.v * (ts - (tleg + self.pause))
-        return 0.0                          # готово
+    def __init__(self, level=0.3, leg=3.0, pause=2.0, forward=False):
+        self.level = level
+        self.leg = leg
+        self.pause = pause
+        self.forward = forward
+
+    def _cmd(self, ts: float) -> float:
+        if ts < self.leg:
+            return -self.level
+        if ts < self.leg + self.pause:
+            return 0.0
+        if ts < 2.0 * self.leg + self.pause:
+            return self.level
+        return 0.0
 
     def total(self) -> float:
-        return 2.0 * (self.a / self.v) + 2.0 * self.pause   # 2 плеча + паузы
+        return 2.0 * self.leg + self.pause
 
     def intent(self, s: DroneState, t: float) -> MotionIntent:
-        d = self._offset(t)
-        if self.forward:
-            # ПРОДОЛЬНЫЙ: −d → вперёд-первым (d идёт 0→−A→0 → d_fwd 0→+A→0).
-            return MotionIntent(d_fwd=-d, d_right=0.0)
-        # боковой: 0→−A (влево), пауза, −A→0 (вправо).
-        return MotionIntent(d_fwd=0.0, d_right=d)
+        v = self._cmd(t)
+        return MotionIntent(c_fwd=v) if self.forward else MotionIntent(c_right=v)
 
     def done(self, t: float) -> bool:
-        # +1.5 sim-сек успокоения после последовательности (как в монолите).
         return t > self.total() + 1.5
 
 
 class RcTransmitter(TrajectoryStrategy):
-    """СРЕЗ 2: реальный пульт как ИСТОЧНИК НАМЕРЕНИЯ (assisted-режим).
+    """Живой пульт как источник намерения: нормир. стики → c_*. Интеграла БОЛЬШЕ НЕТ
+    (его делает позиц-холдер). Sim (ScriptedPilot) и борт (RosPilot) — те же pilot_*."""
 
-    Стик = СКОРОСТЬ уставки (как ArduPilot Loiter): держишь вперёд → уставка едет
-    вперёд с const-V → стабилизатор (gz/vins-hold) ведёт дрон; отпустил в центр →
-    уставка стоит → дрон тормозит и висит. Интегрируем нормированный стик по dt →
-    смещение (тело). Переиспользует ВЕСЬ каркас среза 1 (ControlStack + стабилизатор):
-    единственное отличие от Shuttle — смещение приходит от ЖИВЫХ стиков, не от профиля.
-
-    Sim: стики от ScriptedPilot; боевой борт: те же поля DroneState от RosPilot
-    (/mavros/rc/in, стики двигает человек) — домен идентичен.
-    """
-
-    def __init__(self, vel_gain=0.8, deadzone=30, full_pwm=400,
-                 pitch_sign=1.0, roll_sign=1.0):
-        self.vel_gain = vel_gain      # м/с при полном отклонении стика
-        self.deadzone = deadzone      # мёртвая зона вокруг центра, PWM
-        self.full = full_pwm          # полное отклонение стика от центра, PWM
-        self.psign = pitch_sign       # знак «стик вперёд» (борт: сверить с радио)
+    def __init__(self, deadzone=30, full_pwm=400, pitch_sign=1.0, roll_sign=1.0):
+        self.deadzone = deadzone
+        self.full = full_pwm
+        self.psign = pitch_sign
         self.rsign = roll_sign
-        self._d_fwd = 0.0
-        self._d_right = 0.0
-        self._prev_t = None
-
-    def _axis(self, pwm: int) -> float:
-        """PWM-стик → нормировка [-1..1] с мёртвой зоной вокруг центра."""
-        e = pwm - RC_CENTER
-        if abs(e) < self.deadzone:
-            return 0.0
-        e -= self.deadzone * (1 if e > 0 else -1)
-        return max(-1.0, min(1.0, e / max(1.0, self.full - self.deadzone)))
 
     def intent(self, s: DroneState, t: float) -> MotionIntent:
-        dt = 0.0 if self._prev_t is None else max(0.0, t - self._prev_t)
-        self._prev_t = t
-        fwd = self.psign * self._axis(s.pilot_pitch)
-        rgt = self.rsign * self._axis(s.pilot_roll)
-        yaw = self._axis(s.pilot_yaw)
-        # ПОЗИЦИЯ (position-hold Gz/Vins): интеграл стик→смещение уставки.
-        self._d_fwd += fwd * self.vel_gain * dt
-        self._d_right += rgt * self.vel_gain * dt
-        # СКОРОСТЬ-команда (velocity-damp Flow/Yaw): нормированный стик [-1..1] как есть.
-        return MotionIntent(d_fwd=self._d_fwd, d_right=self._d_right,
-                            c_fwd=fwd, c_right=rgt, c_yaw=yaw)
+        return MotionIntent(
+            c_fwd=self.psign * _norm_axis(s.pilot_pitch, self.deadzone, self.full),
+            c_right=self.rsign * _norm_axis(s.pilot_roll, self.deadzone, self.full),
+            c_yaw=_norm_axis(s.pilot_yaw, self.deadzone, self.full))
+
+
+class ProfileTrajectory(TrajectoryStrategy):
+    """Скриптовый стик-профиль по sim-времени. segments: (t_until, roll, pitch, yaw) в
+    PWM; первый сегмент с t_until > t выигрывает, после последнего — центр. Универсальный
+    источник движения (как ScriptedPilot, но как Trajectory) — любой профиль → любой стек."""
+
+    def __init__(self, segments, deadzone=30, full_pwm=400,
+                 pitch_sign=1.0, roll_sign=1.0):
+        self.seg = segments
+        self.deadzone = deadzone
+        self.full = full_pwm
+        self.psign = pitch_sign
+        self.rsign = roll_sign
+
+    def _sticks(self, t: float):
+        for tu, r, p, y in self.seg:
+            if t < tu:
+                return r, p, y
+        return RC_CENTER, RC_CENTER, RC_CENTER
+
+    def total(self) -> float:
+        return self.seg[-1][0] if self.seg else 0.0
+
+    def intent(self, s: DroneState, t: float) -> MotionIntent:
+        r, p, y = self._sticks(t)
+        return MotionIntent(
+            c_fwd=self.psign * _norm_axis(p, self.deadzone, self.full),
+            c_right=self.rsign * _norm_axis(r, self.deadzone, self.full),
+            c_yaw=_norm_axis(y, self.deadzone, self.full))
+
+    def done(self, t: float) -> bool:
+        return t > self.total()
