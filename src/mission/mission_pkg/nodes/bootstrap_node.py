@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""bootstrap_node — точка входа среза 1 (ARCH2): gz-hold + shuttle.
+"""bootstrap_node — точка входа арх2 (composition root).
 
-Composition root: argparse → BootstrapConfig → сборка ROS-адаптеров (control_pkg) +
-MissionRunner (mission_pkg) → spin. Сам домен/приложение о ROS не знают; здесь их
-проводка. Флаги совместимы с alt_hold_bootstrap.py (подмножество, нужное срезу).
+Срез 1: control-mode=shuttle (gz-hold + челнок). Срез 2: assisted (пульт=намерение +
+gz-hold) и manual (пилот полностью). Режим выбирает recipes.build_control_stack; пульт
+— адаптер PilotInput (ScriptedPilot в симе / RosPilot на борту). Arbiter в контуре:
+тумблер MANUAL → сырые стики (safety-seize), что бы миссия ни командовала.
 
-Детерминизм override: точки СМЕНЫ значения задаёт sim-таймер (_tick, 20 Гц sim); wall-
-цикл в main лишь РЕ-публикует неизменное между тиками значение для свежести на FCU.
+Детерминизм override: точки СМЕНЫ значения задаёт sim-таймер (_tick, 20 Гц); wall-цикл
+в main лишь РЕ-публикует неизменное между тиками значение для свежести на FCU.
 
 Запуск (внутри nav-контейнера, после colcon build):
-    ros2 run mission_pkg bootstrap_arch2 --alt 3 --gz-shuttle-a 5
+    ros2 run mission_pkg bootstrap_arch2 --alt 3 --gz-shuttle-a 5           # срез 1
+    ros2 run mission_pkg bootstrap_arch2 --control-mode assisted            # срез 2 (пульт-намерение)
+    ros2 run mission_pkg bootstrap_arch2 --control-mode manual              # срез 2 (ручной)
 """
 import argparse
 import time
@@ -18,22 +21,44 @@ import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 
-from control_pkg.application.control_stack import ControlStack
-from control_pkg.domain.control.excitation import NoExcitation
-from control_pkg.domain.control.stabilization import GzPositionHold
-from control_pkg.domain.control.trajectory import Shuttle
+from control_pkg.application.arbiter import Arbiter
 from control_pkg.domain.rc import RC_CENTER, RcCommand
 from control_pkg.infrastructure.mavros_actuator import MavrosActuator
 from control_pkg.infrastructure.ros_clock import RosClock
 from control_pkg.infrastructure.ros_io import RosDebugSink, RosLogger
+from control_pkg.infrastructure.ros_pilot import RosPilot, ScriptedPilot
 from control_pkg.infrastructure.ros_telemetry import RosTelemetry
 
 from ..application.mission_runner import S_DONE, MissionRunner
 from ..config import BootstrapConfig
+from ..recipes import build_control_stack
+
+# Демо-профили стиков для ScriptedPilot (sim, без живого пульта). Кортежи
+# (t_until, roll, pitch, yaw) в PWM; pitch>центр = вперёд (наш знак psign=+1).
+ASSISTED_SCRIPT = [
+    (6.0, 1500, 1650, 1500),   # вперёд (assisted: стик=скорость → gz-hold ведёт)
+    (9.0, 1500, 1500, 1500),   # висеть
+    (15.0, 1500, 1350, 1500),  # назад (возврат)
+    (18.0, 1500, 1500, 1500),  # висеть
+    (24.0, 1650, 1500, 1500),  # вправо
+    (27.0, 1500, 1500, 1500),  # висеть
+    (33.0, 1350, 1500, 1500),  # влево (возврат)
+    (36.0, 1500, 1500, 1500),  # центр
+]
+# manual — ПОЛН. ручной без ОС (open-loop): мягкие СИММЕТРИЧНЫЕ тычки, чтобы дрон не
+# уносило (позиц. обратной связи нет, как в ALT_HOLD-translate).
+MANUAL_SCRIPT = [
+    (2.0, 1500, 1560, 1500),   # чуть вперёд
+    (4.0, 1500, 1440, 1500),   # чуть назад (тормоз)
+    (6.0, 1500, 1500, 1500),
+    (8.0, 1560, 1500, 1500),   # чуть вправо
+    (10.0, 1440, 1500, 1500),  # чуть влево
+    (12.0, 1500, 1500, 1500),
+]
 
 
 class BootstrapArch2Node(Node):
-    def __init__(self, cfg: BootstrapConfig):
+    def __init__(self, cfg: BootstrapConfig, pilot_kind: str):
         super().__init__('alt_hold_bootstrap_arch2')
         # Все бюджеты/таймеры — по sim-времени (/clock), RTF-независимо.
         self.set_parameters([Parameter('use_sim_time', Parameter.Type.BOOL, True)])
@@ -45,33 +70,45 @@ class BootstrapArch2Node(Node):
         self.actuator = MavrosActuator(self)     # RcOutput + FlightMode
         self.logger = RosLogger(self)
         self.debug = RosDebugSink(self)
+        self.pilot = self._make_pilot(cfg, pilot_kind)
+        self.arbiter = Arbiter()
 
-        # домен/приложение (проводка стратегий среза 1)
-        stack = ControlStack(
-            GzPositionHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
-                           cfg.gz_max, cfg.gz_psign, cfg.gz_rsign),
-            Shuttle(cfg.gz_shuttle_a, cfg.gz_shuttle_v, cfg.gz_shuttle_pause,
-                    cfg.gz_shuttle_fwd),
-            NoExcitation(),
-        )
+        # домен/приложение: стек по режиму (recipes)
+        stack = build_control_stack(cfg)
         self.runner = MissionRunner(cfg, self.clock, self.actuator, stack, self.logger)
 
         self._last_rc = RcCommand()
-        self.timer = self.create_timer(0.05, self._tick)   # автомат + publish (sim-время)
+        self._arb_seized = False
+        self.timer = self.create_timer(0.05, self._tick)
         self.logger.info(
-            f"alt_hold_bootstrap ARCH2: gz-hold+shuttle alt={cfg.alt}м "
-            f"a={cfg.gz_shuttle_a} v={cfg.gz_shuttle_v} fwd={cfg.gz_shuttle_fwd} (sim)")
+            f"alt_hold_bootstrap ARCH2: mode={cfg.control_mode} alt={cfg.alt}м "
+            f"pilot={pilot_kind} excite_max={cfg.excite_max_sec}s (sim)")
+
+    def _make_pilot(self, cfg, kind):
+        if kind == 'ros':
+            return RosPilot(self)
+        script = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}.get(cfg.control_mode, [])
+        return ScriptedPilot(self.clock, script)
 
     def _tick(self):
         s = self.telemetry.snapshot()
+        # пилот → в снапшот (домен читает pilot_* как телеметрию)
+        sticks = self.pilot.sticks()
+        s.pilot_roll, s.pilot_pitch = sticks.roll, sticks.pitch
+        s.pilot_throttle, s.pilot_yaw = sticks.throttle, sticks.yaw
+        s.pilot_switch = self.pilot.mode_switch()
+
         rc = self.runner.tick(s)
+        rc = self.arbiter.resolve(s, rc)          # safety-seize: MANUAL → сырые стики
+        if self.arbiter.last_manual != self._arb_seized:
+            self._arb_seized = self.arbiter.last_manual
+            self.logger.warn("ПИЛОТ ВЗЯЛ УПРАВЛЕНИЕ (MANUAL)" if self._arb_seized
+                             else "возврат в АВТО")
         self._last_rc = rc
         self._publish(rc)
-        # sim-штампованный debug (роль-стека roll_off; flow/conf=0 в срезе 1)
         self.debug.publish(float(rc.roll - RC_CENTER), 0.0, 0.0, s.now_sim)
 
     def _publish(self, rc: RcCommand):
-        # В DONE override больше не нужен (дрон сел/LAND сам).
         if self.runner.state == S_DONE:
             return
         self.actuator.publish(rc)
@@ -81,8 +118,14 @@ class BootstrapArch2Node(Node):
         return self.runner.finished
 
 
-def _parse():
+def _parse() -> tuple:
     p = argparse.ArgumentParser()
+    p.add_argument('--control-mode', dest='control_mode', default='shuttle',
+                   choices=['shuttle', 'assisted', 'manual'])
+    p.add_argument('--pilot', default='scripted', choices=['scripted', 'ros'],
+                   help='источник стиков: scripted (sim-профиль) | ros (/mavros/rc/in)')
+    p.add_argument('--excite-max-sec', dest='excite_max_sec', type=float, default=0.0,
+                   help='предел длительности EXCITE, sim-сек (0=авто для пилот-режимов)')
     p.add_argument('--alt', type=float, default=3.0)
     p.add_argument('--throttle-climb', dest='throttle_climb', type=int, default=1650)
     p.add_argument('--throttle-hold', dest='throttle_hold', type=int, default=RC_CENTER)
@@ -102,17 +145,28 @@ def _parse():
     p.add_argument('--gz-shuttle-v', dest='gz_shuttle_v', type=float, default=1.5)
     p.add_argument('--gz-shuttle-pause', dest='gz_shuttle_pause', type=float, default=2.0)
     p.add_argument('--gz-shuttle-fwd', dest='gz_shuttle_fwd', action='store_true')
+    p.add_argument('--pilot-vel-gain', dest='pilot_vel_gain', type=float, default=0.8)
+    p.add_argument('--pilot-deadzone', dest='pilot_deadzone', type=int, default=30)
+    p.add_argument('--pilot-full', dest='pilot_full', type=int, default=400)
+    p.add_argument('--pilot-pitch-sign', dest='pilot_pitch_sign', type=float, default=1.0)
+    p.add_argument('--pilot-roll-sign', dest='pilot_roll_sign', type=float, default=1.0)
     a = p.parse_args()
-    return BootstrapConfig(**vars(a))
+    pilot_kind = a.pilot
+    d = vars(a)
+    d.pop('pilot')
+    cfg = BootstrapConfig(**d)
+    # Автотриггер land для пилот-режимов: садимся после демо-профиля (+2с успокоение).
+    if cfg.excite_max_sec <= 0 and cfg.control_mode in ('assisted', 'manual') and pilot_kind == 'scripted':
+        total = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}[cfg.control_mode][-1][0]
+        cfg.excite_max_sec = total + 2.0
+    return cfg, pilot_kind
 
 
 def main():
-    cfg = _parse()
+    cfg, pilot_kind = _parse()
     rclpy.init()
-    node = BootstrapArch2Node(cfg)
+    node = BootstrapArch2Node(cfg, pilot_kind)
     try:
-        # wall-цикл (time.monotonic ~20 Гц) РЕ-публикует текущее значение для свежести
-        # override на FCU (независимо от RTF); точки смены задаёт sim-таймер _tick.
         last_pub = 0.0
         while rclpy.ok() and not node.finished:
             rclpy.spin_once(node, timeout_sec=0.02)

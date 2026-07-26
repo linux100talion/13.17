@@ -10,6 +10,11 @@ from dataclasses import dataclass
 
 @dataclass
 class BootstrapConfig:
+    # режим управления фазы EXCITE: shuttle | assisted | manual (см. recipes.py)
+    control_mode: str = "shuttle"
+    # предельная длительность EXCITE, sim-сек (0=выкл; для пилот-режимов = когда садиться,
+    # т.к. RcTransmitter/manual сами не завершаются, в отличие от челнока с motion_done)
+    excite_max_sec: float = 0.0
     # фазы
     alt: float = 3.0
     throttle_climb: int = 1650
@@ -32,3 +37,9 @@ class BootstrapConfig:
     gz_shuttle_v: float = 1.5
     gz_shuttle_pause: float = 2.0
     gz_shuttle_fwd: bool = False
+    # пульт (срез 2): assisted — стик = скорость уставки (интеграл); manual — passthrough
+    pilot_vel_gain: float = 0.8      # м/с при полном отклонении стика (assisted)
+    pilot_deadzone: int = 30         # мёртвая зона вокруг центра, PWM
+    pilot_full: int = 400            # полное отклонение стика от центра, PWM
+    pilot_pitch_sign: float = 1.0    # знак «стик вперёд» (борт: сверить с радио)
+    pilot_roll_sign: float = 1.0

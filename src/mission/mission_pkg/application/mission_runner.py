@@ -120,8 +120,13 @@ class MissionRunner:
                     f"челнок a={cfg.gz_shuttle_a} v={cfg.gz_shuttle_v} fwd={cfg.gz_shuttle_fwd}")
             ctrl = self.stack.update(s)                    # роль-композиция → roll/pitch/yaw
             rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
-            if self.stack.motion_done():
-                self.log.info("    челнок завершён — садимся")
+            # Триггер посадки: челнок сам завершается (motion_done); пилот-режимы
+            # (assisted/manual) не завершаются → садимся по excite_max_sec.
+            done = self.stack.motion_done() or self.stack.excite_done()
+            if not done and cfg.excite_max_sec > 0 and self._elapsed() > cfg.excite_max_sec:
+                done = True
+            if done:
+                self.log.info("    фаза EXCITE завершена — садимся")
                 self.result = "HOLD_DONE"
                 self._goto(S_LAND)
 

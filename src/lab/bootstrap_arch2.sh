@@ -30,6 +30,11 @@ if ! ros2 pkg list 2>/dev/null | grep -q '^mission_pkg$'; then
 fi
 
 ARGS=()
+# режим управления фазы EXCITE (срез 2): shuttle (дефолт) | assisted | manual
+[ -n "${BS_CONTROL_MODE:-}" ]    && ARGS+=(--control-mode "$BS_CONTROL_MODE")
+[ -n "${BS_EXCITE_MAX:-}" ]      && ARGS+=(--excite-max-sec "$BS_EXCITE_MAX")
+[ -n "${BS_PILOT:-}" ]           && ARGS+=(--pilot "$BS_PILOT")
+[ -n "${BS_PILOT_VEL_GAIN:-}" ]  && ARGS+=(--pilot-vel-gain "$BS_PILOT_VEL_GAIN")
 [ -n "${BS_ALT:-}" ]              && ARGS+=(--alt "$BS_ALT")
 [ -n "${BS_GZ_KP:-}" ]           && ARGS+=(--gz-kp "$BS_GZ_KP")
 [ -n "${BS_GZ_KD:-}" ]           && ARGS+=(--gz-kd "$BS_GZ_KD")

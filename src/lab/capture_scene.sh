@@ -224,6 +224,8 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_MODE_BUDGET="${BS_MODE_BUDGET:-}" -e BS_ARM_BUDGET="${BS_ARM_BUDGET:-}" \
       -e BS_CLIMB_BUDGET="${BS_CLIMB_BUDGET:-}" -e BS_LAND_BUDGET="${BS_LAND_BUDGET:-}" \
       -e BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-}" \
+      -e BS_CONTROL_MODE="${BS_CONTROL_MODE:-}" -e BS_EXCITE_MAX="${BS_EXCITE_MAX:-}" \
+      -e BS_PILOT="${BS_PILOT:-}" -e BS_PILOT_VEL_GAIN="${BS_PILOT_VEL_GAIN:-}" \
       "$NAV" bash /lab/"$cmd".sh $arg
     i=$((i+1))
 done

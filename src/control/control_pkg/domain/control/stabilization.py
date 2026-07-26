@@ -58,3 +58,18 @@ class GzPositionHold(StabilizationStrategy):
         ro = clamp(ro, -self.max, self.max)
         return RcCommand(roll=RC_CENTER + int(ro), pitch=RC_CENTER + int(po),
                          throttle=RC_CENTER, yaw=RC_CENTER)
+
+
+class PilotPassthrough(StabilizationStrategy):
+    """СРЕЗ 2: полный РУЧНОЙ режим — сырые стики пилота → RC, обратной связи НЕТ.
+
+    «Стабилизация» вырождена: пилот сам в контуре (как ACRO/STABILIZE аппарата).
+    Уставку (sp) игнорирует — отслеживать нечего. throttle центр (миссия держит
+    высоту в EXCITE; при seize пилоту throttle отдаёт Arbiter). Читает pilot_* из
+    DroneState — sim (ScriptedPilot) и борт (RosPilot) одинаково.
+    """
+    axes = frozenset({"roll", "pitch", "yaw"})
+
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+        return RcCommand(roll=s.pilot_roll, pitch=s.pilot_pitch,
+                         throttle=RC_CENTER, yaw=s.pilot_yaw)

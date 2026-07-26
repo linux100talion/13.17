@@ -311,7 +311,15 @@ src/mission/                     # ament_python пакет mission_pkg (рядо
   проходит PREARM→…→DONE на фейках-портах. Осталось: colcon-интеграция (mounts в
   `docker/sim/docker-compose.yml` + сборка `control_pkg`/`mission_pkg`) и АТОМАРНЫЙ
   прогон в симе (`ros2 run mission_pkg bootstrap_arch2`) со сверкой по метрике.
-- Срез 2 (пульт-как-стратегия), срез 3 (excitation) — далее.
+- **Срез 2 (пульт-как-стратегия): КОД ГОТОВ, оффлайн-гейты зелёные.** Добавлены:
+  `RcTransmitter` (trajectory: стик=скорость уставки, интеграл → assisted-режим),
+  `PilotPassthrough` (stabilization: сырые стики → RC, manual), `Arbiter`
+  (application: safety-seize по тумблеру), порт-адаптеры `RosPilot`
+  (/mavros/rc/in — борт) и `ScriptedPilot` (профиль стиков — sim без живого пульта),
+  pilot-поля в `DroneState`, `recipes.build_control_stack` (shuttle|assisted|manual).
+  Нода: `--control-mode`, `--pilot`, Arbiter в контуре тика. Тесты: pilot-стратегии
+  (RcTransmitter/PilotPassthrough/Arbiter) + FSM-smoke assisted/manual/seize. Осталось:
+  атомарный прогон в симе (`--control-mode assisted`). Срез 3 (excitation) — далее.
 
 - **Гранулярность:** один модуль на роль (все стратегии стабилизации в одном файле),
   а не файл-на-стратегию — это код, который мутирует; дробить в 15 крошек вредно.

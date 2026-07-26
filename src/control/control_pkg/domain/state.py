@@ -10,6 +10,8 @@ ControlStack, MissionRunner) читает только этот объект —
 """
 from dataclasses import dataclass
 
+from .rc import RC_CENTER
+
 
 @dataclass
 class DroneState:
@@ -37,6 +39,15 @@ class DroneState:
     flow_conf: float = 0.0
     flow_seq: int = 0                      # счётчик кадров: PID интегрирует ПО КАДРАМ
     flow_dt: float = 0.0                   # интервал последнего кадра
+
+    # --- Пилот (пульт): сырой PWM стиков + тумблер режима ---
+    # Адаптер PilotInput (ScriptedPilot в симе / RosPilot на борту) наполняет каждый
+    # тик. Стратегии RcTransmitter/PilotPassthrough и Arbiter читают ОТСЮДА (как flow).
+    pilot_roll: int = RC_CENTER
+    pilot_pitch: int = RC_CENTER
+    pilot_throttle: int = RC_CENTER
+    pilot_yaw: int = RC_CENTER
+    pilot_switch: int = 0                  # тумблер авто(0)/ручной(1) — для Arbiter
 
     # --- время ---
     now_sim: float = 0.0                   # проставляет адаптер из Clock (sim-время по /clock)
