@@ -67,6 +67,29 @@ gazebo (`GzPosHold` все оси / `GzRollHold` / `GzPitchHold` / `GzYawHold`);
 Комбинаторика разрежена (flow/gz взаимоисключающи и т.п.) — валидные тройки собирает
 `recipes.py`, а не «любая клетка легальна».
 
+### Ортогональный путь: стабилизатор × миссия (BS_STAB / BS_MISSION)
+
+`control_mode` — ЛЕГАСИ-ярлык: он слепляет в одно слово ДВЕ роли (стабилизатор +
+траекторию). Рекомендуемый путь разносит их на две независимые ручки:
+
+- **`BS_STAB`** → `recipes.build_stabilizers(cfg, spec)` — стабилизатор ПО ИМЕНИ, с
+  `+`-склейкой: `GzPosHold`, `GzRollHold`, `DpHold`, `DpRollHold+DpYawHold`, `VinsHold`,
+  `manual` (`[]`). Так «пульт + только yaw» = `DpYawHold`, «пульт + flow(roll)» =
+  `DpRollHold`, боевой пре-VINS = `DpRollHold+DpYawHold`.
+- **`BS_MISSION`** → `plan/mission_plan.compile_mission` — плейлист **профиль-токенов**
+  как ДАННЫЕ: `Mission1` (реестр `MISSIONS`) или инлайн `climb3,mv_fwd2,mv_bkwd4,landing3`.
+  Компилится в шаги PlanRunner `prearm→arm→<токены>→land`; каждый `mv_*`/`hover` = свой
+  `Control`-сегмент со СВЕЖИМ `ControlStack(build_stabilizers(spec), ConstProfile)`.
+
+Грамматика токена = глагол+число (`climb`=метры; `mv_*`/`hover`=секунды; уровень стика —
+глобальный `cfg.mv_level`): `climb<h>`, `mv_fwd/bkwd/left/right/cw/ccw<t>`, `hover<t>`,
+`land|landing<x>`. Один стабилизатор-spec на всё задание, любая траектория-профиль на
+любой стек — то самое «везде только профили, любой профиль → любой стек».
+
+Так `bootstrap` — просто одна из `MISSIONS` (`climb→hover→land`), а `Mission1` из диалога
+= взлёт 3м → вперёд 2с → назад 4с → посадка. Легаси-`build_control_stack` оставлен для
+валидированных прогонов (shuttle/assisted/flow_assist); профиль-миссии его не трогают.
+
 ## Пульт и per-axis композиция (центральная цель)
 
 Пульт — не «режим сбоку», а **источник намерения** + **подложка стека**. `ControlStack`
@@ -201,7 +224,9 @@ class Arbiter:
 # mission_pkg/plan/ — полётное задание = СПИСОК Step'ов; PlanRunner их гоняет (не FSM-класс!).
 # Step: AwaitMode/Arm/Climb/Control/Land/Hover — примитив фазы (tick → rc + NEXT/GOTO/FINISH).
 # bootstrap_plan.build_bootstrap_plan(cfg, stack, handover) = [prearm,arm,climb,control,land].
-# Новое задание = ДАННЫЕ (список шагов), а не новый класс. Control-шаг питает ControlStack.
+# mission_plan.compile_mission(cfg, tokens, stab_spec, handover) — плейлист профиль-токенов
+#   (BS_MISSION) → шаги; стабилизатор ортогонален (BS_STAB). MISSIONS — реестр заданий.
+# Новое задание = ДАННЫЕ (список шагов/токенов), а не новый класс. Control-шаг питает ControlStack.
 class PlanRunner:
     def tick(self, s) -> RcCommand: ...                   # текущий шаг → rc; переход по статусу шага
 ```
@@ -283,17 +308,25 @@ src/mission/                       # ament_python пакет mission_pkg (пот
 | 2 · `assisted`/`manual` | пульт-как-стратегия + Arbiter | pilot-стратегии + FSM assisted/manual/seize | ✅ `HOLD_DONE` |
 | 3 · `flow_assist` | пре-VINS флоу-демпфер + per-axis стек | флоу-стратегии + per-axis композиция | ✅ (см. ниже) |
 
-**Оффлайн-гейты (8, чистый python, без ROS):** `test_profile_motion` (интеграл стик-профиля
+**Оффлайн-гейты (10, чистый python, без ROS):** `test_profile_motion` (интеграл стик-профиля
 + холд + симм. челнок), `test_bootstrap_fsm`, `test_pilot_strategies`, `test_pilot_fsm`,
 `test_flow_strategies`, `test_multiaxis_stack`, `test_handover` (switch Flow→Vins),
-`test_families` (Gz*/Dp* per-axis + DpPitchHold/DpHold), `test_plan` (PlanRunner NEXT/GOTO/FINISH).
+`test_families` (Gz*/Dp* per-axis + DpPitchHold/DpHold), `test_plan` (PlanRunner NEXT/GOTO/FINISH),
+`test_mission_plan` (реестр `build_stabilizers` + '+'-склейка + токен-грамматика + прогон Mission1).
 
 **ПЛАН-СЛОЙ (переход):** захардкоженный `MissionRunner` FSM заменён на `PlanRunner` +
 `Step`-примитивы (`AwaitMode`/`Arm`/`Climb`/`Control`/`Land`/`Hover`). Полётное задание =
 **список шагов** (`bootstrap_plan.build_bootstrap_plan`), а не класс; новое задание = данные.
 Переходы NEXT/GOTO(по имени)/FINISH. bootstrap = один план. `test_plan` + переписанные
-`test_bootstrap_fsm`/`test_pilot_fsm` на `PlanRunner`. Осталось: библиотека готовых планов
-(waypoint/return-home) + Circle/GoTo-траектории (относительные, до NN1).
+`test_bootstrap_fsm`/`test_pilot_fsm` на `PlanRunner`.
+
+**Ортогональный stab×mission — РЕАЛИЗОВАН (оффлайн-проверен).** Полётное задание как
+ДАННЫЕ: `BS_MISSION` (плейлист профиль-токенов `climb3,mv_fwd2,mv_bkwd4,landing3` или имя
+из `MISSIONS`) × `BS_STAB` (стабилизатор по имени, `+`-склейка). `compile_mission` строит
+шаги PlanRunner, каждый `mv_*`/`hover` — `Control`-сегмент со свежим стеком из
+`build_stabilizers(spec)` + `ConstProfile`. Разнял две роли, слитые в `control_mode` (тот
+оставлен как легаси-ярлык). `test_mission_plan`. Осталось: библиотека готовых заданий
+(waypoint/return-home) + Circle/GoTo-траектории (относительные, до NN1) + sim-прогон.
 
 **PROFILE-ONLY движение (переход):** метрический канал `d_*` убран — движение везде это
 **стик-профиль** `c_*` (`ProfileTrajectory`/`Shuttle`/`RcTransmitter`). Позиц-холдеры
@@ -322,6 +355,8 @@ d_*-модель монолита) снят → `test_profile_motion`. Любо�
   (монолит fx=640 на 960-кадрах, у нас честный fx=W/2) / недобора гейнов, НЕ архитектуры.
 
 **Дальше (не начато):**
+0. Sim-прогон профиль-миссии (`BS_STAB=GzPosHold BS_MISSION=Mission1`) — врезка готова,
+   валидация в симе отдельным атомарным прогоном.
 1. Добор флоу до ~0.21 (свип gains / прогон на 1280) + порт продольного looming (pitch).
 2. Sim-демо switch `Flow→Vins` в сценарии со сходящимся VINS (движущийся пилот → параллакс).
 3. Excitation (`Pulse`/`Chirp`/`Translate`) — контракт `offset()` готов, реализаций нет.

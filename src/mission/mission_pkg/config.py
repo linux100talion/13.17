@@ -10,8 +10,16 @@ from dataclasses import dataclass
 
 @dataclass
 class BootstrapConfig:
-    # режим управления фазы EXCITE: shuttle | assisted | manual (см. recipes.py)
+    # режим управления фазы EXCITE: shuttle | assisted | manual (см. recipes.py).
+    # ЛЕГАСИ-ярлык: слепляет стабилизатор+траекторию. Новый ортогональный путь — stab+mission.
     control_mode: str = "shuttle"
+    # ОРТОГОНАЛЬНЫЙ путь (профиль-миссии): stab = стабилизатор(ы) '+'-склейкой
+    # (GzPosHold|DpRollHold+DpYawHold|…, см. recipes.build_stabilizers), mission = плейлист
+    # профиль-токенов (имя из MISSIONS или 'climb3,mv_fwd2,…', см. plan/mission_plan.py).
+    # Пусто → идём легаси-путём по control_mode. Заданный mission → игнор control_mode.
+    stab: str = ""
+    mission: str = ""
+    mv_level: float = 0.3            # глобальный уровень стика для профиль-миссий (mv_*), [-1..1]
     # предельная длительность EXCITE, sim-сек (0=выкл; для пилот-режимов = когда садиться,
     # т.к. RcTransmitter/manual сами не завершаются, в отличие от челнока с motion_done)
     excite_max_sec: float = 0.0

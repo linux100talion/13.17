@@ -9,6 +9,7 @@ PROFILE-ONLY: каждая выдаёт нормированный стик-ур
 - Shuttle — челнок как стик-профиль: ±level по плечам (const-стик), пауза, возврат.
 - RcTransmitter — живой пилот = живой профиль (нормир. стики /mavros/rc/in).
 - ProfileTrajectory — скриптовый профиль по sim-времени (сегменты уровень×длительность).
+- ConstProfile — постоянная стик-команда c_* на dur сек (атом профиль-миссии mv_*/hover).
 """
 from ..rc import RC_CENTER
 from ..setpoint import MotionIntent
@@ -108,3 +109,23 @@ class ProfileTrajectory(TrajectoryStrategy):
 
     def done(self, t: float) -> bool:
         return t > self.total()
+
+
+class ConstProfile(TrajectoryStrategy):
+    """Постоянная стик-команда c_* в течение dur sim-сек, затем done. Атом профиль-миссии:
+    один mv_*/hover = один Control-сегмент. Прямые НОРМИРОВАННЫЕ единицы (без PWM-round-
+    trip): mv_fwd → c_fwd=+level, hover → нули (стабилизатор гасит снос/держит позицию)."""
+
+    def __init__(self, dur: float, c_fwd: float = 0.0, c_right: float = 0.0,
+                 c_yaw: float = 0.0):
+        self.dur = dur
+        self._intent = MotionIntent(c_fwd=c_fwd, c_right=c_right, c_yaw=c_yaw)
+
+    def intent(self, s: DroneState, t: float) -> MotionIntent:
+        return self._intent
+
+    def total(self) -> float:
+        return self.dur
+
+    def done(self, t: float) -> bool:
+        return t > self.dur

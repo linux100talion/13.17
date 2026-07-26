@@ -11,6 +11,12 @@
 # Запуск внутри nav:  docker exec p1317_nav bash /lab/bootstrap_arch2.sh
 # В секвенсоре:       bash src/lab/capture_scene.sh 960x540 bootstrap_arch2
 #
+# ОРТОГОНАЛЬНЫЙ путь (профиль-миссии) — рекомендуемый:
+#   BS_STAB     — стабилизатор(ы): GzPosHold | DpRollHold+DpYawHold | DpHold | VinsHold | manual
+#   BS_MISSION  — плейлист: Mission1 | square | bootstrap | 'climb3,mv_fwd2,mv_bkwd4,landing3'
+#   BS_MV_LEVEL — уровень стика mv_* сегментов (0.3)
+#   Пример: BS_STAB=GzPosHold BS_MISSION="climb3,mv_fwd2,mv_bkwd4,landing3" bash /lab/bootstrap_arch2.sh
+#
 # Параметры через env (подмножество BS_*, совместимое с liftland.sh):
 #   BS_ALT (3)                  — целевая высота, м
 #   BS_GZ_KP/KD/KI/IMAX/MAX     — гейны gz-hold (дефолты ноды 40/120/8/100/150)
@@ -30,7 +36,15 @@ if ! ros2 pkg list 2>/dev/null | grep -q '^mission_pkg$'; then
 fi
 
 ARGS=()
-# режим управления фазы EXCITE (срез 2): shuttle (дефолт) | assisted | manual
+# ОРТОГОНАЛЬНЫЙ путь профиль-миссий: стабилизатор (BS_STAB) × плейлист (BS_MISSION).
+#   BS_STAB    — GzPosHold | DpRollHold+DpYawHold | DpHold | VinsHold | manual ('' → GzPosHold)
+#   BS_MISSION — имя из MISSIONS (Mission1/square/bootstrap) ИЛИ 'climb3,mv_fwd2,mv_bkwd4,landing3'
+#   BS_MV_LEVEL— глобальный уровень стика mv_* сегментов (дефолт 0.3)
+# Задан BS_MISSION → BS_CONTROL_MODE игнорируется (это легаси-ярлык).
+[ -n "${BS_STAB:-}" ]            && ARGS+=(--stab "$BS_STAB")
+[ -n "${BS_MISSION:-}" ]         && ARGS+=(--mission "$BS_MISSION")
+[ -n "${BS_MV_LEVEL:-}" ]        && ARGS+=(--mv-level "$BS_MV_LEVEL")
+# режим управления фазы EXCITE (легаси, срез 2): shuttle (дефолт) | assisted | manual
 [ -n "${BS_CONTROL_MODE:-}" ]    && ARGS+=(--control-mode "$BS_CONTROL_MODE")
 [ -n "${BS_EXCITE_MAX:-}" ]      && ARGS+=(--excite-max-sec "$BS_EXCITE_MAX")
 [ -n "${BS_PILOT:-}" ]           && ARGS+=(--pilot "$BS_PILOT")

@@ -35,6 +35,7 @@ from control_pkg.infrastructure.ros_telemetry import RosTelemetry
 
 from ..config import BootstrapConfig
 from ..plan.bootstrap_plan import build_bootstrap_plan
+from ..plan.mission_plan import compile_mission, resolve_mission
 from ..plan.runner import PlanRunner
 from ..recipes import build_control_stack
 
@@ -82,24 +83,36 @@ class BootstrapArch2Node(Node):
         self.debug = RosDebugSink(self)
         self.pilot = self._make_pilot(cfg, pilot_kind)
         self.arbiter = Arbiter()
-        # Зрение нужно только флоу-режиму (камера+IMU → FlowEstimator → flow_*).
+
+        # Путь: заданный mission → ОРТОГОНАЛЬНЫЙ (stab+mission); иначе ЛЕГАСИ (control_mode).
+        use_mission = bool(cfg.mission)
+        stab_spec = cfg.stab or ("GzPosHold" if use_mission else "")
+        # Зрение нужно, если стабилизатор — флоу-демпфер (Dp*) или легаси flow_assist.
+        need_flow = (cfg.control_mode == 'flow_assist') or (use_mission and 'Dp' in stab_spec)
         self.perception = None
-        if cfg.control_mode == 'flow_assist':
+        if need_flow:
             w = float(os.environ.get('CAMERA_W', 1280))
             h = float(os.environ.get('CAMERA_H', 720))
             self.perception = RosPerception(self, w, h, FLOW_R, FLOW_ROTSIGN,
                                             smooth_n=cfg.flow_smooth, yaw_smooth_n=cfg.yaw_smooth)
 
-        # домен/приложение: стек по режиму (recipes)
-        stack = build_control_stack(cfg)
-        # рантайм switch Flow→Vins: только flow_assist + флаг (VinsHold на gz_* гейнах)
+        # рантайм switch Flow→Vins: флаг + флоу-стабилизатор (VinsHold на gz_* гейнах)
         handover = None
-        if cfg.control_mode == 'flow_assist' and cfg.handover_vins:
+        if cfg.handover_vins and (cfg.control_mode == 'flow_assist' or
+                                  (use_mission and 'Dp' in stab_spec)):
             vins = VinsHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
                             cfg.gz_max, cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain)
             handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec)
             self.logger.info(f"handover Flow→Vins ВКЛ: ready при ≥{cfg.vins_min} odom")
-        plan = build_bootstrap_plan(cfg, stack, handover)
+
+        # домен/приложение: план по выбранному пути
+        if use_mission:
+            tokens = resolve_mission(cfg, cfg.mission)
+            plan = compile_mission(cfg, tokens, stab_spec, handover)
+            self.logger.info(f"MISSION={cfg.mission} stab={stab_spec} "
+                             f"level={cfg.mv_level} токены={tokens}")
+        else:
+            plan = build_bootstrap_plan(cfg, build_control_stack(cfg), handover)
         self.runner = PlanRunner(plan, self.clock, self.actuator, self.logger)
 
         self._last_rc = RcCommand()
@@ -150,7 +163,17 @@ class BootstrapArch2Node(Node):
 def _parse() -> tuple:
     p = argparse.ArgumentParser()
     p.add_argument('--control-mode', dest='control_mode', default='shuttle',
-                   choices=['shuttle', 'assisted', 'manual', 'flow_assist'])
+                   choices=['shuttle', 'assisted', 'manual', 'flow_assist'],
+                   help='ЛЕГАСИ-ярлык (стабилизатор+траектория). Игнор при заданном --mission')
+    # ОРТОГОНАЛЬНЫЙ путь профиль-миссий (см. plan/mission_plan.py, recipes.build_stabilizers)
+    p.add_argument('--stab', default='',
+                   help="стабилизатор(ы): GzPosHold|DpRollHold+DpYawHold|DpHold|VinsHold|manual "
+                        "('' → GzPosHold при --mission)")
+    p.add_argument('--mission', default='',
+                   help="плейлист профилей: имя из MISSIONS или 'climb3,mv_fwd2,mv_bkwd4,landing3' "
+                        "('' → легаси bootstrap по --control-mode)")
+    p.add_argument('--mv-level', dest='mv_level', type=float, default=0.3,
+                   help='глобальный уровень стика для mv_* профиль-сегментов [-1..1]')
     p.add_argument('--pilot', default='scripted', choices=['scripted', 'ros'],
                    help='источник стиков: scripted (sim-профиль) | ros (/mavros/rc/in)')
     p.add_argument('--excite-max-sec', dest='excite_max_sec', type=float, default=0.0,
@@ -197,7 +220,8 @@ def _parse() -> tuple:
     d.pop('pilot')
     cfg = BootstrapConfig(**d)
     # Автотриггер land для пилот-режимов: садимся после демо-профиля (+2с успокоение).
-    if cfg.excite_max_sec <= 0 and pilot_kind == 'scripted':
+    # Профиль-миссия (--mission) сама секвенсит land — автотриггер не нужен.
+    if not cfg.mission and cfg.excite_max_sec <= 0 and pilot_kind == 'scripted':
         if cfg.control_mode == 'flow_assist':
             cfg.excite_max_sec = cfg.flow_hold_sec        # держим, флоу гасит снос
         elif cfg.control_mode in ('assisted', 'manual'):
