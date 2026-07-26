@@ -325,8 +325,11 @@ src/mission/                       # ament_python пакет mission_pkg (пот
 из `MISSIONS`) × `BS_STAB` (стабилизатор по имени, `+`-склейка). `compile_mission` строит
 шаги PlanRunner, каждый `mv_*`/`hover` — `Control`-сегмент со свежим стеком из
 `build_stabilizers(spec)` + `ConstProfile`. Разнял две роли, слитые в `control_mode` (тот
-оставлен как легаси-ярлык). `test_mission_plan`. Осталось: библиотека готовых заданий
-(waypoint/return-home) + Circle/GoTo-траектории (относительные, до NN1) + sim-прогон.
+оставлен как легаси-ярлык). `test_mission_plan`. **Подтверждён в симе** (`GzPosHold` ×
+`climb3,mv_fwd2,mv_bkwd4,landing3`): план отсеквенировался → `MISSION_DONE`, каждый
+`mv_*` сам завершился по длительности токена, `GzPosHold` проинтегрировал профиль
+(смещ за окно ≈0.1–0.2м — ушёл вперёд и вернулся). Осталось: библиотека готовых заданий
+(waypoint/return-home) + Circle/GoTo-траектории (относительные, до NN1).
 
 **PROFILE-ONLY движение (переход):** метрический канал `d_*` убран — движение везде это
 **стик-профиль** `c_*` (`ProfileTrajectory`/`Shuttle`/`RcTransmitter`). Позиц-холдеры
@@ -355,8 +358,6 @@ d_*-модель монолита) снят → `test_profile_motion`. Любо�
   (монолит fx=640 на 960-кадрах, у нас честный fx=W/2) / недобора гейнов, НЕ архитектуры.
 
 **Дальше (не начато):**
-0. Sim-прогон профиль-миссии (`BS_STAB=GzPosHold BS_MISSION=Mission1`) — врезка готова,
-   валидация в симе отдельным атомарным прогоном.
 1. Добор флоу до ~0.21 (свип gains / прогон на 1280) + порт продольного looming (pitch).
 2. Sim-демо switch `Flow→Vins` в сценарии со сходящимся VINS (движущийся пилот → параллакс).
 3. Excitation (`Pulse`/`Chirp`/`Translate`) — контракт `offset()` готов, реализаций нет.
