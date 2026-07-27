@@ -10,6 +10,7 @@
   pitch)/flow_yaw(yaw) из FlowEstimator. Velocity-assist: цель = c_*·cmd_gain (стик).
   Покадровая интеграция (flow_seq), conf/stale-fade. DpRollHold/DpPitchHold/DpYawHold +
   DpHold (композит всех трёх). Законы roll/yaw — порт flow_hold/yaw_hold монолита.
+  `DpPitchBack` — ЗОНД: та же команда, но выпрямленная назад (проверка канала, не holds).
 - `VinsHold` — position-hold по VINS (после init, своя опора). `PilotPassthrough` — легаси.
 
 Незанятые оси раздаёт пилоту сам ControlStack (per-axis база = сырые стики).
@@ -255,6 +256,22 @@ class DpPitchHold(_FlowDamper1D):
 
     def _signal(self, s): return s.flow_longitudinal
     def _cmd(self, sp): return sp.c_fwd
+
+
+class DpPitchBack(DpPitchHold):
+    """ЗОНД (не стабилизатор): расчёт DpPitchHold как есть, но выход ВЫПРЯМЛЕН НАЗАД
+    (u = −|u|). Такт и амплитуда — демпферные (пересчёт по кадру, до max_pwm), знак
+    всегда один. Отвечает на вопрос «доезжает ли рваная покадровая команда до борта и
+    тащит ли она дрон в заданную сторону» отдельно от вопроса «верен ли знак сигнала»:
+    направление тут задано руками, борт обязан поехать назад. Roll/yaw в таком прогоне
+    держит gz-опора, так что продольная ось — единственная свободная."""
+
+    is_probe = True        # НЕ удержание: план не ставит зонд на набор/посадку (_hold_stack)
+
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+        rc = super().update(s, sp, dt)
+        rc.pitch = RC_CENTER - abs(rc.pitch - RC_CENTER)
+        return rc
 
 
 class DpYawHold(StabilizationStrategy):

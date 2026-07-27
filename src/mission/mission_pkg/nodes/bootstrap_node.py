@@ -88,7 +88,10 @@ class BootstrapArch2Node(Node):
         use_mission = bool(cfg.mission)
         stab_spec = cfg.stab or ("GzPosHold" if use_mission else "")
         # Зрение нужно, если стабилизатор — флоу-демпфер (Dp*) или легаси flow_assist.
-        need_flow = (cfg.control_mode == 'flow_assist') or (use_mission and 'Dp' in stab_spec)
+        # flow_observe — зрение БЕЗ демпфера: сигнал пишется в /flow_dbg*, но управление
+        # не трогает (замер перцепта при заданном движении).
+        need_flow = (cfg.control_mode == 'flow_assist') or cfg.flow_observe or \
+                    (use_mission and 'Dp' in stab_spec)
         self.perception = None
         if need_flow:
             w = float(os.environ.get('CAMERA_W', 1280))
@@ -227,6 +230,8 @@ def _parse() -> tuple:
     p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=_D.yaw_cmd_gain)
     p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=_D.yaw_smooth)
     p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=_D.flow_hold_sec)
+    p.add_argument('--flow-observe', dest='flow_observe', action='store_true',
+                   help='поднять зрение без демпфера: писать /flow_dbg* для замера перцепта')
     # рантайм switch Flow→Vins по «VINS ready» (только flow_assist)
     p.add_argument('--handover-vins', dest='handover_vins', action='store_true')
     p.add_argument('--vins-min', dest='vins_min', type=int, default=40)

@@ -21,7 +21,7 @@
 from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.excitation import NoExcitation
 from control_pkg.domain.control.stabilization import (
-    DpHold, DpPitchHold, DpRollHold, DpYawHold, GzHold, GzPitchHold,
+    DpHold, DpPitchBack, DpPitchHold, DpRollHold, DpYawHold, GzHold, GzPitchHold,
     GzPosHold, GzRollHold, GzYawHold, VinsHold)
 from control_pkg.domain.control.trajectory import RcTransmitter, Shuttle
 
@@ -41,9 +41,9 @@ def _dp_roll(cfg):
                       cfg.roll_conf_min, cfg.roll_conf_full, cfg.roll_osign, cfg.roll_cmd_gain)
 
 
-def _dp_pitch(cfg):
-    return DpPitchHold(cfg.pitch_kp, cfg.pitch_ki, cfg.pitch_kd, cfg.pitch_imax, cfg.pitch_max,
-                       cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign, cfg.pitch_cmd_gain)
+def _dp_pitch(cfg, klass=DpPitchHold):
+    return klass(cfg.pitch_kp, cfg.pitch_ki, cfg.pitch_kd, cfg.pitch_imax, cfg.pitch_max,
+                 cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign, cfg.pitch_cmd_gain)
 
 
 def _dp_yaw(cfg):
@@ -65,6 +65,8 @@ _STAB = {
     "DpHold":      lambda cfg: DpHold(_dp_roll(cfg), _dp_pitch(cfg), _dp_yaw(cfg)),
     "DpRollHold":  _dp_roll,
     "DpPitchHold": _dp_pitch,
+    # ЗОНД канала: команда демпфера по такту/амплитуде, но выпрямлена назад (u=−|u|)
+    "DpPitchBack": lambda cfg: _dp_pitch(cfg, DpPitchBack),
     "DpYawHold":   _dp_yaw,
     "VinsHold":    _vins,
     "manual":      lambda cfg: None,

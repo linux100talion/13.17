@@ -105,8 +105,12 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
                        wait_gt=wait_gt, result="MISSION_DONE")
 
     def _hold_stack():
-        # стабилизаторы держат ГОРИЗОНТ на месте (StaticSetpoint) — для набора/сброса
-        return ControlStack(build_stabilizers(cfg, stab_spec), StaticSetpoint(), NoExcitation())
+        # стабилизаторы держат ГОРИЗОНТ на месте (StaticSetpoint) — для набора/сброса.
+        # ЗОНДЫ (is_probe: DpPitchBack и т.п.) сюда НЕ идут: они не удерживают, а гонят
+        # ось в заданную сторону — на наборе/посадке это увезло бы дрон до начала опыта.
+        hold = [st for st in build_stabilizers(cfg, stab_spec)
+                if not getattr(st, 'is_probe', False)]
+        return ControlStack(hold, StaticSetpoint(), NoExcitation())
 
     for i, tok in enumerate(tokens):
         verb, num = _parse(tok)

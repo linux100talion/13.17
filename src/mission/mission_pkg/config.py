@@ -100,6 +100,10 @@ class BootstrapConfig:
     yaw_cmd_gain: float = 10.0
     yaw_smooth: int = 5              # победитель свипа [[yaw-hold-tuning]]
     flow_hold_sec: float = 30.0      # flow_assist: сколько держать (флоу гасит снос) до land
+    flow_observe: bool = False       # ТОЛЬКО НАБЛЮДЕНИЕ: поднять зрение и писать /flow_dbg*,
+                                     # когда демпфера в стеке НЕТ (Gz*/manual). Нужно, чтобы
+                                     # мерить сигнал потока при ЗАДАННОМ движении (калибровка:
+                                     # знаем истинную скорость → видим, что читает перцепт).
     # рантайм switch Flow→Vins по «VINS ready» (VinsHold юзает gz_* гейны)
     handover_vins: bool = False
     vins_min: int = 40               # сколько odom-сообщений считать сходимостью
