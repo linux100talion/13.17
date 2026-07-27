@@ -28,11 +28,13 @@ def _goto(rc, name, result=""): return StepResult(rc, GOTO, goto=name, result=re
 def _finish(rc, result=""): return StepResult(rc, FINISH, result=result)
 
 
-def _overlay_stack(step, s, rc) -> None:
+def _overlay_stack(step, ctx, s, rc) -> None:
     """Наложить roll/pitch/yaw от ControlStack ПОВЕРХ rc (throttle НЕ трогаем) — так набор
     (Climb) и сброс (Land) тоже стабилизируются горизонтально, а не летят с центр-стиками.
     Ленивый enter с wait_gt (gz-опоре нужна истинная поза). step имеет .stack/.wait_gt/
-    ._entered_stack. stack=None → шаг горизонтально НЕ стабилизируется (легаси-поведение)."""
+    ._entered_stack. stack=None → шаг горизонтально НЕ стабилизируется (легаси-поведение).
+    Активацию ЛОГИРУЕМ (как Control): иначе по логу прогона climb/land выглядят «без
+    стабилизатора», хотя стек там живой — на этом уже один раз построили ложный диагноз."""
     if step.stack is None:
         return
     if not step._entered_stack:
@@ -40,6 +42,7 @@ def _overlay_stack(step, s, rc) -> None:
             return                       # ждём истинную позу (gz-опора) перед активацией
         step.stack.enter(s)
         step._entered_stack = True
+        ctx.log.info(f"    {step.name}: стек активирован")
     ctrl = step.stack.update(s)
     rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
 
@@ -118,7 +121,7 @@ class Climb(Step):
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=self.throttle)
         ctx.keep_mode(s, self.keep)
-        _overlay_stack(self, s, rc)   # набор стабилизирован: горизонт держит стек с отрыва
+        _overlay_stack(self, ctx, s, rc)   # набор стабилизирован: горизонт держит стек с отрыва
         if s.rel_alt is not None and s.rel_alt >= self.alt:
             ctx.log.info(f"    набрали {s.rel_alt:.1f}м (цель {self.alt}м)")
             return _next(rc)
@@ -195,7 +198,7 @@ class Land(Step):
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=self.throttle)
         ctx.try_cmd(lambda: ctx.mode.set_mode("LAND"))
-        _overlay_stack(self, s, rc)   # сброс стабилизирован: горизонт держит стек до касания
+        _overlay_stack(self, ctx, s, rc)   # сброс стабилизирован: горизонт держит стек до касания
         # касание по ФАКТУ: баро ИЛИ истинная высота (ловит посадку за краем сцены)
         touched = (s.rel_alt is not None and s.rel_alt <= self.ground_z) or \
                   (s.gt_valid and s.gt_z <= self.ground_z)
