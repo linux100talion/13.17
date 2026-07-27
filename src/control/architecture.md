@@ -92,16 +92,22 @@ gazebo (`GzPosHold` все оси / `GzRollHold` / `GzPitchHold` / `GzYawHold`);
 
 ## Пульт и per-axis композиция (центральная цель)
 
-Пульт — не «режим сбоку», а **источник намерения** + **подложка стека**. `ControlStack`
-композит по осям: **база = сырые стики пилота**, каждый стабилизатор перезаписывает
-СВОИ оси, excitation — сверху. Отсюда без единого `if`:
+Пульт — не «режим сбоку», а **источник намерения = Trajectory**. `ControlStack`
+композит по осям: **база = намерение траектории (оператор), `c_*`→PWM**, каждый
+стабилизатор перезаписывает СВОИ оси, excitation — сверху. Отсюда без единого `if`:
 
-- **незанятая ось → сырой стик пилота** (ручной наклон);
+- **незанятая ось → намерение траектории открытым контуром** (наклон оператора). Оператор
+  взаимозаменяем: скрипт (`ConstProfile`/`Shuttle`) / живой пульт (`RcTransmitter` читает
+  `s.pilot_*`) / (будущее) NN2 — profile-only до конца, единый «язык» `c_*`;
 - **Dp-ось → velocity-assist**: стик = цель скорости, флоу гасит к ней; центр → демпф к нулю;
 - **Gz/Vins-ось → интеграл**: стик = скорость уставки, холдер интегрирует → держит точку (Loiter);
-- **`manual` = пустой список** стабилизаторов (пилот владеет всем; `PilotPassthrough`
-  стал избыточен, оставлен для совместимости);
-- **микс**: «пульт + только yaw» = `[DpYawHold]`; «пульт + flow(roll)» = `[DpRollHold]`.
+- **`manual` = пустой список** стабилизаторов + `RcTransmitter` (оператор владеет всем);
+- **микс**: «оператор + только yaw» = `[DpYawHold]`; боевой пре-VINS = `[DpRollHold,DpYawHold]`
+  (pitch = оператор открытым контуром).
+
+Живой пилот входит ТОЛЬКО как `Trajectory` (`RcTransmitter`), не как отдельная база стека —
+поэтому «профиль» и «оператор» суть одно. `s.pilot_*` в снапшоте читает лишь `RcTransmitter`
+(и `Arbiter` для safety-seize).
 
 Плюс `Arbiter` (safety-supervisor поверх миссии): тумблер MANUAL → сырые стики (incl
 throttle) безусловно. Адаптер пилота (`/mavros/rc/in` → `RcCommand`) идентичен в симе
@@ -207,8 +213,9 @@ class ControlStack:
     def update(self, s) -> RcCommand:
         intent = self.traj.intent(s, t)                   # стик-профиль c_*
         sp = self._origin_plus(intent)                    # world-уставка + c_* passthrough
-        rc = RcCommand(roll=s.pilot_roll, pitch=s.pilot_pitch,   # БАЗА = стики пилота
-                       throttle=RC_CENTER, yaw=s.pilot_yaw)
+        rc = RcCommand(roll=_cmd_to_pwm(intent.c_right),         # БАЗА = намерение траектории
+                       pitch=_cmd_to_pwm(intent.c_fwd),          # (оператор), c_*→PWM
+                       throttle=RC_CENTER, yaw=_cmd_to_pwm(intent.c_yaw))
         for st in self.stabs:                             # каждый перезаписывает СВОИ оси
             out = st.update(s, sp, dt)
             for ax in st.axes: setattr(rc, ax, getattr(out, ax))

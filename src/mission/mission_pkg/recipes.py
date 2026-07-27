@@ -23,7 +23,7 @@ from control_pkg.domain.control.excitation import NoExcitation
 from control_pkg.domain.control.stabilization import (
     DpHold, DpPitchHold, DpRollHold, DpYawHold, GzHold, GzPitchHold,
     GzPosHold, GzRollHold, GzYawHold, VinsHold)
-from control_pkg.domain.control.trajectory import RcTransmitter, Shuttle, StaticSetpoint
+from control_pkg.domain.control.trajectory import RcTransmitter, Shuttle
 
 CONTROL_MODES = ("shuttle", "assisted", "manual", "flow_assist")
 
@@ -109,7 +109,7 @@ def build_control_stack(cfg) -> ControlStack:
     if mode == "assisted":
         return ControlStack(_gz(cfg), _rc_tx(cfg), NoExcitation())
     if mode == "manual":
-        return ControlStack([], StaticSetpoint(), NoExcitation())   # всё пилоту
+        return ControlStack([], _rc_tx(cfg), NoExcitation())   # всё оператору (пульт=траектория)
     if mode == "flow_assist":
         roll = DpRollHold(cfg.flow_kp, cfg.flow_ki, cfg.flow_kd, cfg.flow_imax,
                           cfg.flow_max, cfg.flow_conf_min, cfg.flow_conf_full,

@@ -3,18 +3,30 @@
 
 PER-AXIS модель (срез 3): стабилизаторов может быть НЕСКОЛЬКО, каждый владеет своими
 осями (`axes`). Композиция:
-  1) БАЗА = сырые стики пилота (незанятая ось → ручной наклон);
+  1) БАЗА = НАМЕРЕНИЕ ТРАЕКТОРИИ (оператор): c_*→PWM, незанятая ось = открытый контур
+     (сырой стик оператора). Оператор взаимозаменяем: скрипт (ConstProfile/Shuttle) /
+     живой пульт (RcTransmitter читает s.pilot_*) / (будущее) NN2 — profile-only до конца;
   2) каждый стабилизатор ПЕРЕЗАПИСЫВАЕТ свои оси (regulate/velocity-assist);
   3) Excitation подмешивается сверху (ADDITIVE/REPLACE).
-Так «пульт + только yaw» = [DpYawHold] (yaw держит, roll/pitch пилот); «пульт + flow(roll)»
-= [DpRollHold] (roll velocity-assist, pitch/yaw пилот). Manual = [] (всё пилоту).
+Так «пульт + только yaw» = [DpYawHold] (yaw держит, roll/pitch = профиль-оператор); боевой
+пре-VINS = [DpRollHold,DpYawHold] (roll/yaw демпфер, pitch = оператор). Manual = [] (всё
+оператору через RcTransmitter). Живой пилот входит ТОЛЬКО как Trajectory (RcTransmitter),
+не как отдельная база — единый «язык» намерения c_*.
 
 Владеет ТОЧКОЙ ВХОДА (origin/yaw0/t0): Trajectory отдаёт смещение относительно входа
 (тело), стек собирает абсолютную world-уставку + прокидывает скорость-команду в Setpoint.
 Самодостаточен — работает и без MissionRunner.
 """
-from ..domain.rc import RC_CENTER, RcCommand
+from ..domain.rc import RC_CENTER, RcCommand, clamp
 from ..domain.setpoint import AxisPolicy, Setpoint
+
+_STICK_SPAN = 400   # PWM от центра при полном стике (c=±1) — конвенция pilot_full
+
+
+def _cmd_to_pwm(c: float) -> int:
+    """Намерение оператора c_* [-1..1] → PWM открытого контура (наклон стика)."""
+    return int(clamp(RC_CENTER + c * _STICK_SPAN,
+                     RC_CENTER - _STICK_SPAN, RC_CENTER + _STICK_SPAN))
 
 
 def _as_list(stab):
@@ -61,9 +73,11 @@ class ControlStack:
         self._prev_t = s.now_sim
         intent = self.traj.intent(s, t)
         sp = Setpoint(intent.c_fwd, intent.c_right, intent.c_yaw)   # стик-команда → стабилизаторам
-        # БАЗА — сырые стики пилота (незанятые оси = ручной наклон). throttle держит миссия.
-        rc = RcCommand(roll=s.pilot_roll, pitch=s.pilot_pitch,
-                       throttle=RC_CENTER, yaw=s.pilot_yaw)
+        # БАЗА — намерение траектории (оператор): c_*→PWM. Незанятая ось = открытый контур
+        # (наклон оператора). throttle держит миссия. Живой пилот входит через RcTransmitter.
+        rc = RcCommand(roll=_cmd_to_pwm(intent.c_right),
+                       pitch=_cmd_to_pwm(intent.c_fwd),
+                       throttle=RC_CENTER, yaw=_cmd_to_pwm(intent.c_yaw))
         # каждый стабилизатор перезаписывает СВОИ оси
         for st in self.stabs:
             out = st.update(s, sp, dt)

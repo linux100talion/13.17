@@ -17,7 +17,7 @@ from control_pkg.application.control_stack import ControlStack       # noqa: E40
 from control_pkg.domain.control.excitation import NoExcitation       # noqa: E402
 from control_pkg.domain.control.stabilization import (               # noqa: E402
     DpHold, DpPitchHold, GzPitchHold, GzPosHold, GzRollHold, GzYawHold)
-from control_pkg.domain.control.trajectory import StaticSetpoint     # noqa: E402
+from control_pkg.domain.control.trajectory import ConstProfile, StaticSetpoint     # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
 
@@ -41,16 +41,15 @@ gy.enter(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.05))
 rc = gy.update(DroneState(gt_valid=True, gt_yaw=0.2, now_sim=0.10), Setpoint(), 0.05)
 check("GzYawHold: увод курса → yaw корректирует (≠1500)", rc.yaw != 1500)
 
-# --- per-axis: GzRollHold в стеке держит roll, pitch/yaw = пилот ---
-stack = ControlStack([GzRollHold()], StaticSetpoint(), NoExcitation())
-s0 = DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.0, now_sim=0.05,
-                pilot_pitch=1580, pilot_yaw=1450)
+# --- per-axis: GzRollHold в стеке держит roll, pitch/yaw = профиль-оператор ---
+# оператор ConstProfile: c_fwd=0.2→pitch 1580, c_yaw=-0.125→yaw 1450 (незанятые оси)
+stack = ControlStack([GzRollHold()], ConstProfile(10, c_fwd=0.2, c_yaw=-0.125), NoExcitation())
+s0 = DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.0, now_sim=0.05)
 stack.enter(s0)
-rc = stack.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=1.0, gt_yaw=0.0, now_sim=0.10,
-                             pilot_pitch=1580, pilot_yaw=1450))
+rc = stack.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=1.0, gt_yaw=0.0, now_sim=0.10))
 check("GzRollHold в стеке: roll держит позицию (≠1500)", rc.roll != 1500)
-check("GzRollHold в стеке: pitch НЕЗАНЯТ → стик пилота (1580)", rc.pitch == 1580)
-check("GzRollHold в стеке: yaw НЕЗАНЯТ → стик пилота (1450)", rc.yaw == 1450)
+check("GzRollHold в стеке: pitch НЕЗАНЯТ → профиль-оператор (1580)", rc.pitch == 1580)
+check("GzRollHold в стеке: yaw НЕЗАНЯТ → профиль-оператор (1450)", rc.yaw == 1450)
 
 # --- DpPitchHold: демпф продольного потока → pitch ---
 dp = DpPitchHold()  # kp8 ki2 → как DpRollHold, но сигнал flow_longitudinal
