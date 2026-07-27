@@ -148,7 +148,7 @@ class BootstrapArch2Node(Node):
                              else "возврат в АВТО")
         self._last_rc = rc
         self._publish(rc)
-        self.debug.publish(float(rc.roll - RC_CENTER), 0.0, 0.0, s.now_sim)
+        self.debug.publish_axes(s, rc)   # флоу-дамп в bag: /flow_dbg + /flow_dbg2 (sim-штамп)
 
     def _publish(self, rc: RcCommand):
         if self.runner.finished:          # план завершён — override не нужен
@@ -210,6 +210,12 @@ def _parse() -> tuple:
     p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=6.0)
     p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=1.0)
     p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=30.0)
+    # сглаживание перцепта (медиана по N кадрам): свип качества сигнала roll/yaw
+    p.add_argument('--flow-smooth', dest='flow_smooth', type=int, default=1)
+    p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=5)
+    # velocity-assist рыскания: демпфер ПРОПУСКАЕТ намерение профиля как feedforward
+    # (target flow_yaw = c_yaw·cmd_gain), гасит только отклонение. 0 → гасит команду в ноль.
+    p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=0.0)
     # рантайм switch Flow→Vins по «VINS ready» (только flow_assist)
     p.add_argument('--handover-vins', dest='handover_vins', action='store_true')
     p.add_argument('--vins-min', dest='vins_min', type=int, default=40)

@@ -196,7 +196,7 @@ class _FlowDamper1D(StabilizationStrategy):
     _axis = "roll"
 
     def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_pwm=150.0,
-                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=0.0, stale_sec=0.5):
+                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5):
         self.kp, self.ki, self.kd = kp, ki, kd
         self.imax, self.max = imax, max_pwm
         self.conf_min, self.conf_full = conf_min, conf_full
@@ -263,7 +263,7 @@ class DpYawHold(StabilizationStrategy):
     axes = frozenset({"yaw"})
 
     def __init__(self, kp=6.0, ki=0.0, imax=200.0, max_pwm=150.0,
-                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=0.0, stale_sec=0.5):
+                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5):
         self.kp, self.ki = kp, ki
         self.imax, self.max = imax, max_pwm
         self.conf_min, self.conf_full = conf_min, conf_full

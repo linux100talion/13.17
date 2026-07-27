@@ -63,13 +63,17 @@ class BootstrapConfig:
     flow_conf_full: float = 0.20
     flow_osign: float = -1.0         # ПОДТВЕРЖДЁН drift_check (arch2): +1 разгонял снос
                                      # (метрика 3.47), −1 гасит (0.49). Монолит помечал «TODO».
-    flow_cmd_gain: float = 0.0       # velocity-assist: стик→целевой поток (0=демпф к нулю)
+    # velocity-assist ПО УМОЛЧАНИЮ: демпфер ПРОПУСКАЕТ намерение (стик=цель скорости),
+    # гасит только ОТКЛОНЕНИЕ от неё, а не саму команду. cmd_gain: стик[-1..1]→целевой
+    # поток (px/кадр); полный стик ≈ 10 px/кадр (шум ~2). c_*=0 → цель 0 → удержание/демпф
+    # к нулю (hover как раньше). ⚠️ масштаб — первая оценка, калибруется в симе (flow_yaw↔gt).
+    flow_cmd_gain: float = 10.0
     yaw_kp: float = 6.0
     yaw_ki: float = 0.0              # ВРЕДЕН (bias yaw_flow) — держим 0
     yaw_imax: float = 200.0
     yaw_max: float = 150.0
     yaw_osign: float = 1.0
-    yaw_cmd_gain: float = 0.0
+    yaw_cmd_gain: float = 10.0        # velocity-assist yaw: стик=целевая скорость рыскания (пропуск намерения)
     # сглаживание FlowEstimator (перцепт): медиана по N кадрам. yaw sm=5 — победитель.
     flow_smooth: int = 1
     yaw_smooth: int = 5

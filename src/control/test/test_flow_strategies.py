@@ -29,7 +29,7 @@ def st(seq, lat=0.0, yaw=0.0, conf=0.5, dt=0.05, now=0.05):
 
 
 # --- DpRollHold: активный демпф ---
-fd = DpRollHold()  # kp8 ki2 kd0 imax120 max150 conf[.05,.2] osign1 cmd_gain0
+fd = DpRollHold()  # kp8 ki2 kd0 imax120 max150 conf[.05,.2] osign1 cmd_gain10 (c_right=0→цель 0)
 fd.enter(st(-1))
 rc = fd.update(st(1, lat=5.0, now=0.05), Setpoint(), 0.05)
 # blend=1, err=5, i=2*5*0.05=0.5, u=8*5+0.5=40.5 → roll=1540
