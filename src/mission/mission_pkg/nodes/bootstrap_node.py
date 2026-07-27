@@ -94,7 +94,9 @@ class BootstrapArch2Node(Node):
             w = float(os.environ.get('CAMERA_W', 1280))
             h = float(os.environ.get('CAMERA_H', 720))
             self.perception = RosPerception(self, w, h, FLOW_R, FLOW_ROTSIGN,
-                                            smooth_n=cfg.flow_smooth, yaw_smooth_n=cfg.yaw_smooth)
+                                            roll_smooth_n=cfg.roll_smooth,
+                                            pitch_smooth_n=cfg.pitch_smooth,
+                                            yaw_smooth_n=cfg.yaw_smooth)
 
         # рантайм switch Flow→Vins: флаг + флоу-стабилизатор (VinsHold на gz_* гейнах)
         handover = None
@@ -161,6 +163,7 @@ class BootstrapArch2Node(Node):
 
 
 def _parse() -> tuple:
+    _D = BootstrapConfig()          # источник дефолтов для осевых гейнов (см. ниже)
     p = argparse.ArgumentParser()
     p.add_argument('--control-mode', dest='control_mode', default='shuttle',
                    choices=['shuttle', 'assisted', 'manual', 'flow_assist'],
@@ -202,20 +205,28 @@ def _parse() -> tuple:
     p.add_argument('--pilot-full', dest='pilot_full', type=int, default=400)
     p.add_argument('--pilot-pitch-sign', dest='pilot_pitch_sign', type=float, default=1.0)
     p.add_argument('--pilot-roll-sign', dest='pilot_roll_sign', type=float, default=1.0)
-    # flow-assist (пре-VINS): osign монолит помечал «TODO tune» — оракул drift_check.
-    p.add_argument('--flow-kp', dest='flow_kp', type=float, default=8.0)
-    p.add_argument('--flow-ki', dest='flow_ki', type=float, default=2.0)
-    p.add_argument('--flow-osign', dest='flow_osign', type=float, default=-1.0)
-    p.add_argument('--flow-cmd-gain', dest='flow_cmd_gain', type=float, default=10.0)
-    p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=6.0)
-    p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=1.0)
-    p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=30.0)
-    # сглаживание перцепта (медиана по N кадрам): свип качества сигнала roll/yaw
-    p.add_argument('--flow-smooth', dest='flow_smooth', type=int, default=1)
-    p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=5)
-    # velocity-assist рыскания: демпфер ПРОПУСКАЕТ намерение профиля как feedforward
-    # (target flow_yaw = c_yaw·cmd_gain), гасит только отклонение. 0 → гасит команду в ноль.
-    p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=10.0)
+    # ---- демпфер по потоку (пре-VINS): ТРИ ОСИ, у каждой свой полный набор ----
+    # Дефолты берём из BootstrapConfig (_D), а не хардкодом: parse_args всегда кладёт
+    # свой default в d → BootstrapConfig(**d), т.е. хардкод здесь МОЛЧА перекрыл бы
+    # дефолт датакласса (именно так velocity-assist один раз остался выключенным).
+    p.add_argument('--roll-kp', dest='roll_kp', type=float, default=_D.roll_kp)
+    p.add_argument('--roll-ki', dest='roll_ki', type=float, default=_D.roll_ki)
+    p.add_argument('--roll-kd', dest='roll_kd', type=float, default=_D.roll_kd)
+    p.add_argument('--roll-osign', dest='roll_osign', type=float, default=_D.roll_osign)
+    p.add_argument('--roll-cmd-gain', dest='roll_cmd_gain', type=float, default=_D.roll_cmd_gain)
+    p.add_argument('--roll-smooth', dest='roll_smooth', type=int, default=_D.roll_smooth)
+    p.add_argument('--pitch-kp', dest='pitch_kp', type=float, default=_D.pitch_kp)
+    p.add_argument('--pitch-ki', dest='pitch_ki', type=float, default=_D.pitch_ki)
+    p.add_argument('--pitch-kd', dest='pitch_kd', type=float, default=_D.pitch_kd)
+    p.add_argument('--pitch-osign', dest='pitch_osign', type=float, default=_D.pitch_osign)
+    p.add_argument('--pitch-cmd-gain', dest='pitch_cmd_gain', type=float, default=_D.pitch_cmd_gain)
+    p.add_argument('--pitch-smooth', dest='pitch_smooth', type=int, default=_D.pitch_smooth)
+    p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=_D.yaw_kp)
+    p.add_argument('--yaw-ki', dest='yaw_ki', type=float, default=_D.yaw_ki)
+    p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=_D.yaw_osign)
+    p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=_D.yaw_cmd_gain)
+    p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=_D.yaw_smooth)
+    p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=_D.flow_hold_sec)
     # рантайм switch Flow→Vins по «VINS ready» (только flow_assist)
     p.add_argument('--handover-vins', dest='handover_vins', action='store_true')
     p.add_argument('--vins-min', dest='vins_min', type=int, default=40)

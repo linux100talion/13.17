@@ -16,14 +16,15 @@ from ..perception.flow_estimator import FlowEstimator
 
 class RosPerception:
     def __init__(self, node, cam_w, cam_h, R_cam_imu, rotflow_sign=1.0,
-                 smooth_n=1, yaw_smooth_n=5,
+                 roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=5,
                  image_topic='/image_mono', imu_topic='/gz_imu/data_flu'):
         from rclpy.qos import qos_profile_sensor_data
         from sensor_msgs.msg import Image, Imu
         fx = fy = cam_w / 2.0          # pinhole 90° hfov
         cx, cy = cam_w / 2.0, cam_h / 2.0
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,
-                                  smooth_n=smooth_n, yaw_smooth_n=yaw_smooth_n)
+                                  roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
+                                  yaw_smooth_n=yaw_smooth_n)
         self._omega = np.zeros(3)
         self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
         self._dt = 0.0

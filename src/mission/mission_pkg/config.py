@@ -52,31 +52,53 @@ class BootstrapConfig:
     pilot_full: int = 400            # полное отклонение стика от центра, PWM
     pilot_pitch_sign: float = 1.0    # знак «стик вперёд» (борт: сверить с радио)
     pilot_roll_sign: float = 1.0
-    # flow-assist (срез 3, БОЕВОЙ пре-VINS): демпфер сноса по оптическому потоку.
-    # Дефолты — победители монолита (flow_hold + yaw_hold [[yaw-hold-tuning]]: yaw ki=0).
-    flow_kp: float = 8.0
-    flow_ki: float = 2.0
-    flow_kd: float = 0.0
-    flow_imax: float = 120.0
-    flow_max: float = 150.0
-    flow_conf_min: float = 0.05
-    flow_conf_full: float = 0.20
-    flow_osign: float = -1.0         # ПОДТВЕРЖДЁН drift_check (arch2): +1 разгонял снос
+    # ==== ДЕМПФЕР ПО ПОТОКУ (срез 3, БОЕВОЙ пре-VINS) — ТРИ НЕЗАВИСИМЫЕ ОСИ ====
+    # Есть roll, pitch и yaw. Точка. У каждой оси СВОЙ полный набор — ничего не
+    # шарится, дублирование НАМЕРЕННОЕ: тюнинг у осей разный (yaw ki=0 — интегратор
+    # вреден, bias yaw_flow [[yaw-hold-tuning]]; roll ki=2 — победитель монолита),
+    # и общий префикс «flow_» это только маскировал. Хочешь тронуть pitch — правь
+    # pitch_*, roll не поедет.
+    # cmd_gain (velocity-assist, у всех трёх): демпфер ПРОПУСКАЕТ намерение
+    # (стик = цель скорости) и гасит только ОТКЛОНЕНИЕ от неё, а не саму команду.
+    # Стик[-1..1] → целевой поток, px/кадр; полный стик ≈ 10 px/кадр (шум ~2).
+    # c_*=0 → цель 0 → чистое удержание (hover как раньше).
+    # ⚠️ масштаб 10 — первая оценка, калибруется в симе (flow_* ↔ gt-скорость).
+    # smooth — медиана перцепта по N кадрам (FlowEstimator), тоже per-axis.
+    # --- roll: боковой снос, сигнал flow_lateral → стик roll ---
+    roll_kp: float = 8.0
+    roll_ki: float = 2.0
+    roll_kd: float = 0.0
+    roll_imax: float = 120.0
+    roll_max: float = 150.0
+    roll_conf_min: float = 0.05
+    roll_conf_full: float = 0.20
+    roll_osign: float = -1.0         # ПОДТВЕРЖДЁН drift_check (arch2): +1 разгонял снос
                                      # (метрика 3.47), −1 гасит (0.49). Монолит помечал «TODO».
-    # velocity-assist ПО УМОЛЧАНИЮ: демпфер ПРОПУСКАЕТ намерение (стик=цель скорости),
-    # гасит только ОТКЛОНЕНИЕ от неё, а не саму команду. cmd_gain: стик[-1..1]→целевой
-    # поток (px/кадр); полный стик ≈ 10 px/кадр (шум ~2). c_*=0 → цель 0 → удержание/демпф
-    # к нулю (hover как раньше). ⚠️ масштаб — первая оценка, калибруется в симе (flow_yaw↔gt).
-    flow_cmd_gain: float = 10.0
+    roll_cmd_gain: float = 10.0
+    roll_smooth: int = 1
+    # --- pitch: продольный снос, сигнал flow_longitudinal → стик pitch ---
+    # ⚠️ ОТДЕЛЬНО НЕ КАЛИБРОВАН: дефолты скопированы с roll (looming менее зрел,
+    # в полёте ось не проверена). Свой набор — чтобы калибровать, не трогая roll.
+    pitch_kp: float = 8.0
+    pitch_ki: float = 2.0
+    pitch_kd: float = 0.0
+    pitch_imax: float = 120.0
+    pitch_max: float = 150.0
+    pitch_conf_min: float = 0.05
+    pitch_conf_full: float = 0.20
+    pitch_osign: float = -1.0
+    pitch_cmd_gain: float = 10.0
+    pitch_smooth: int = 1
+    # --- yaw: визуальный курс, сигнал flow_yaw → стик yaw (kd нет: DpYawHold — PI) ---
     yaw_kp: float = 6.0
     yaw_ki: float = 0.0              # ВРЕДЕН (bias yaw_flow) — держим 0
     yaw_imax: float = 200.0
     yaw_max: float = 150.0
+    yaw_conf_min: float = 0.05
+    yaw_conf_full: float = 0.20
     yaw_osign: float = 1.0
-    yaw_cmd_gain: float = 10.0        # velocity-assist yaw: стик=целевая скорость рыскания (пропуск намерения)
-    # сглаживание FlowEstimator (перцепт): медиана по N кадрам. yaw sm=5 — победитель.
-    flow_smooth: int = 1
-    yaw_smooth: int = 5
+    yaw_cmd_gain: float = 10.0
+    yaw_smooth: int = 5              # победитель свипа [[yaw-hold-tuning]]
     flow_hold_sec: float = 30.0      # flow_assist: сколько держать (флоу гасит снос) до land
     # рантайм switch Flow→Vins по «VINS ready» (VinsHold юзает gz_* гейны)
     handover_vins: bool = False

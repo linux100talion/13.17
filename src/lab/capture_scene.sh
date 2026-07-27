@@ -228,6 +228,14 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_PILOT="${BS_PILOT:-}" -e BS_PILOT_VEL_GAIN="${BS_PILOT_VEL_GAIN:-}" \
       -e BS_HANDOVER_VINS="${BS_HANDOVER_VINS:-}" -e BS_VINS_MIN="${BS_VINS_MIN:-}" \
       -e BS_STAB="${BS_STAB:-}" -e BS_MISSION="${BS_MISSION:-}" -e BS_MV_LEVEL="${BS_MV_LEVEL:-}" \
+      -e BS_ROLL_KP="${BS_ROLL_KP:-}" -e BS_ROLL_KI="${BS_ROLL_KI:-}" -e BS_ROLL_KD="${BS_ROLL_KD:-}" \
+      -e BS_ROLL_OSIGN="${BS_ROLL_OSIGN:-}" -e BS_ROLL_CMD_GAIN="${BS_ROLL_CMD_GAIN:-}" \
+      -e BS_ROLL_SMOOTH="${BS_ROLL_SMOOTH:-}" \
+      -e BS_PITCH_KP="${BS_PITCH_KP:-}" -e BS_PITCH_KI="${BS_PITCH_KI:-}" -e BS_PITCH_KD="${BS_PITCH_KD:-}" \
+      -e BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-}" -e BS_PITCH_CMD_GAIN="${BS_PITCH_CMD_GAIN:-}" \
+      -e BS_PITCH_SMOOTH="${BS_PITCH_SMOOTH:-}" \
+      -e BS_YAW_KP="${BS_YAW_KP:-}" -e BS_YAW_KI="${BS_YAW_KI:-}" -e BS_YAW_OSIGN="${BS_YAW_OSIGN:-}" \
+      -e BS_YAW_CMD_GAIN="${BS_YAW_CMD_GAIN:-}" -e BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-}" \
       "$NAV" bash /lab/"$cmd".sh $arg
     i=$((i+1))
 done

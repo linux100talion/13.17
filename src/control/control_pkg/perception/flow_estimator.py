@@ -28,20 +28,23 @@ except ImportError:
 
 class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
-                 smooth_n=1, yaw_smooth_n=1):
+                 roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
         self.R = np.asarray(R_cam_imu, dtype=np.float64).reshape(3, 3)
         self.rotflow_sign = float(rotflow_sign)
         self.max_feats = max_feats
-        # ВРЕМЕННОЕ СГЛАЖИВАНИЕ lateral: медиана по N кадрам. Шум потока БЕЛЫЙ
-        # (автокорр≈0, см. flow_calib) → усреднение по N режет пол как √N, а сигнал
-        # (боковая скорость) на низкой частоте почти не смазывается. Лаг ~N/2 кадров
-        # мал и петля к нему нечувствительна (τ-развёртка в flow_loop_sim). 1 = выкл.
-        self.smooth_n = max(1, int(smooth_n))
+        # ВРЕМЕННОЕ СГЛАЖИВАНИЕ: медиана по N кадрам, СВОЁ N на КАЖДУЮ ось (roll=lateral,
+        # pitch=longitudinal, yaw). Шум потока БЕЛЫЙ (автокорр≈0, см. flow_calib) →
+        # усреднение по N режет пол как √N, а сигнал (скорость) на низкой частоте почти
+        # не смазывается. Лаг ~N/2 кадров мал и петля к нему нечувствительна (τ-развёртка
+        # в flow_loop_sim). 1 = выкл.
+        self.roll_smooth_n = max(1, int(roll_smooth_n))
         self._lat_buf = []
-        self.yaw_smooth_n = max(1, int(yaw_smooth_n))   # сглаживание визуального yaw
+        self.pitch_smooth_n = max(1, int(pitch_smooth_n))
+        self._lon_buf = []
+        self.yaw_smooth_n = max(1, int(yaw_smooth_n))
         self._yaw_buf = []
         self.prev_gray = None
         self.prev_pts = None
@@ -88,9 +91,9 @@ class FlowEstimator:
                 lateral_raw = float(np.median(tr[:, 0]))        # v0: прокси бокового сноса
                 # временное сглаживание (медиана по N кадрам) — режет белый шум ~√N
                 self._lat_buf.append(lateral_raw)
-                if len(self._lat_buf) > self.smooth_n:
+                if len(self._lat_buf) > self.roll_smooth_n:
                     self._lat_buf.pop(0)
-                lateral = float(np.median(self._lat_buf)) if self.smooth_n > 1 else lateral_raw
+                lateral = float(np.median(self._lat_buf)) if self.roll_smooth_n > 1 else lateral_raw
                 # --- ВИЗУАЛЬНЫЙ YAW (фаза 2): derotate ТОЛЬКО roll+pitch (гиро x,y —
                 # гравитация-референс, НЕ дрейфуют), yaw гиро НЕ вычитаем → остаток =
                 # yaw-вращение + трансляция. В ДАЛЬНЕЙ сцене трансляция ≈0 (тот самый
@@ -106,7 +109,12 @@ class FlowEstimator:
                 # --- ПРОДОЛЬНАЯ ось (phase2, looming): два кандидата сигнала из tr.
                 # longitudinal = медиана ВЕРТИКАЛЬНОГО остатка (для down-tilt камеры ∝
                 # продольной скорости; прямой аналог lateral по оси Y).
-                longitudinal = float(np.median(tr[:, 1]))
+                longitudinal_raw = float(np.median(tr[:, 1]))
+                self._lon_buf.append(longitudinal_raw)          # сглаживание — как у roll
+                if len(self._lon_buf) > self.pitch_smooth_n:
+                    self._lon_buf.pop(0)
+                longitudinal = (float(np.median(self._lon_buf)) if self.pitch_smooth_n > 1
+                                else longitudinal_raw)
                 # divergence = расширение поля из АФФИННОГО фита tr ~ [1, xn, yn]:
                 # ∂u/∂xn + ∂v/∂yn ∝ Tz/Z (looming — движение вдоль оптической оси).
                 xn = (p0[:, 0] - self.cx) / self.fx
@@ -117,7 +125,8 @@ class FlowEstimator:
                 divergence = float(cu[1] + cv[2])
                 out = dict(
                     lateral=lateral, lateral_raw=lateral_raw, yaw_flow=yaw_flow,
-                    longitudinal=longitudinal, divergence=divergence, n=n, dt=dt,
+                    longitudinal=longitudinal, longitudinal_raw=longitudinal_raw,
+                    divergence=divergence, n=n, dt=dt,
                     conf=float(n) / float(self.max_feats),
                     # --- диагностика для flow_derotation_check ---
                     resid_rms=float(np.sqrt(np.mean(np.sum(tr ** 2, axis=1)))),

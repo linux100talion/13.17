@@ -37,18 +37,18 @@ def _gz_alias(klass, cfg):
 
 
 def _dp_roll(cfg):
-    return DpRollHold(cfg.flow_kp, cfg.flow_ki, cfg.flow_kd, cfg.flow_imax, cfg.flow_max,
-                      cfg.flow_conf_min, cfg.flow_conf_full, cfg.flow_osign, cfg.flow_cmd_gain)
+    return DpRollHold(cfg.roll_kp, cfg.roll_ki, cfg.roll_kd, cfg.roll_imax, cfg.roll_max,
+                      cfg.roll_conf_min, cfg.roll_conf_full, cfg.roll_osign, cfg.roll_cmd_gain)
 
 
 def _dp_pitch(cfg):
-    return DpPitchHold(cfg.flow_kp, cfg.flow_ki, cfg.flow_kd, cfg.flow_imax, cfg.flow_max,
-                       cfg.flow_conf_min, cfg.flow_conf_full, cfg.flow_osign, cfg.flow_cmd_gain)
+    return DpPitchHold(cfg.pitch_kp, cfg.pitch_ki, cfg.pitch_kd, cfg.pitch_imax, cfg.pitch_max,
+                       cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign, cfg.pitch_cmd_gain)
 
 
 def _dp_yaw(cfg):
     return DpYawHold(cfg.yaw_kp, cfg.yaw_ki, cfg.yaw_imax, cfg.yaw_max,
-                     cfg.flow_conf_min, cfg.flow_conf_full, cfg.yaw_osign, cfg.yaw_cmd_gain)
+                     cfg.yaw_conf_min, cfg.yaw_conf_full, cfg.yaw_osign, cfg.yaw_cmd_gain)
 
 
 def _vins(cfg):
@@ -111,12 +111,7 @@ def build_control_stack(cfg) -> ControlStack:
     if mode == "manual":
         return ControlStack([], _rc_tx(cfg), NoExcitation())   # всё оператору (пульт=траектория)
     if mode == "flow_assist":
-        roll = DpRollHold(cfg.flow_kp, cfg.flow_ki, cfg.flow_kd, cfg.flow_imax,
-                          cfg.flow_max, cfg.flow_conf_min, cfg.flow_conf_full,
-                          cfg.flow_osign, cfg.flow_cmd_gain)
-        yaw = DpYawHold(cfg.yaw_kp, cfg.yaw_ki, cfg.yaw_imax, cfg.yaw_max,
-                        cfg.flow_conf_min, cfg.flow_conf_full, cfg.yaw_osign, cfg.yaw_cmd_gain)
-        return ControlStack([roll, yaw], _rc_tx(cfg), NoExcitation())
+        return ControlStack([_dp_roll(cfg), _dp_yaw(cfg)], _rc_tx(cfg), NoExcitation())
     if mode == "shuttle":
         return ControlStack(
             _gz(cfg),
