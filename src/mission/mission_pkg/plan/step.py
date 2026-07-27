@@ -175,7 +175,10 @@ class Control(Step):
 
 
 class Land(Step):
-    """Посадка: режим LAND, ждём касание (rel_alt<=ground_z) или дизарм. Бюджет → выходим."""
+    """Посадка: режим LAND, ждём касание ПО ФАКТУ. Касание = баро rel_alt<=ground_z ИЛИ
+    истинная высота gt_z<=ground_z (сим-оракул: ловит посадку ГДЕ УГОДНО, в т.ч. за краем
+    сцены, когда баро врёт/лагает) ИЛИ дизарм после LAND. Бюджет — лишь бэкстоп (в sim-сек):
+    при рабочем детекте не достигается, поэтому держим его вменяемым, а не 180."""
 
     def __init__(self, name, throttle, ground_z, budget, stack=None, wait_gt=False):
         self.name = name
@@ -193,7 +196,9 @@ class Land(Step):
         rc = RcCommand(throttle=self.throttle)
         ctx.try_cmd(lambda: ctx.mode.set_mode("LAND"))
         _overlay_stack(self, s, rc)   # сброс стабилизирован: горизонт держит стек до касания
-        touched = (s.rel_alt is not None and s.rel_alt <= self.ground_z)
+        # касание по ФАКТУ: баро ИЛИ истинная высота (ловит посадку за краем сцены)
+        touched = (s.rel_alt is not None and s.rel_alt <= self.ground_z) or \
+                  (s.gt_valid and s.gt_z <= self.ground_z)
         # Land — эпилог: НЕ перетирает исход миссии (HOLD_DONE/CLIMB_FAIL…) своей меткой.
         if touched or (s.mode == "LAND" and not s.armed and ctx.elapsed() > 3):
             ctx.log.info(f"    касание (rel_alt={s.rel_alt}, armed={s.armed})")

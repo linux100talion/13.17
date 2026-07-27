@@ -185,7 +185,7 @@ def _parse() -> tuple:
     p.add_argument('--mode-budget', dest='mode_budget', type=float, default=40.0)
     p.add_argument('--arm-budget', dest='arm_budget', type=float, default=40.0)
     p.add_argument('--climb-budget', dest='climb_budget', type=float, default=60.0)
-    p.add_argument('--land-budget', dest='land_budget', type=float, default=120.0)
+    p.add_argument('--land-budget', dest='land_budget', type=float, default=45.0)
     p.add_argument('--gz-kp', dest='gz_kp', type=float, default=40.0)
     p.add_argument('--gz-kd', dest='gz_kd', type=float, default=120.0)
     p.add_argument('--gz-ki', dest='gz_ki', type=float, default=8.0)

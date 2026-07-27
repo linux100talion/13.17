@@ -64,6 +64,7 @@ class RosTelemetry:
     def _on_gt(self, m):
         x = m.pose.pose.position.x
         y = m.pose.pose.position.y
+        z = m.pose.pose.position.z
         q = m.pose.pose.orientation
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
@@ -75,6 +76,7 @@ class RosTelemetry:
             self._s.gt_vy = (1.0 - a) * self._s.gt_vy + a * (y - self._gt_py) / dt
         self._gt_px, self._gt_py, self._gt_pt = x, y, t
         self._s.gt_x, self._s.gt_y, self._s.gt_yaw = x, y, yaw
+        self._s.gt_z = z
         self._s.gt_valid = True
 
     def snapshot(self) -> DroneState:

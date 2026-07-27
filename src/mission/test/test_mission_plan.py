@@ -24,6 +24,7 @@ from mission_pkg.config import BootstrapConfig                         # noqa: E
 from mission_pkg.plan.mission_plan import (                            # noqa: E402
     _parse, compile_mission, resolve_mission)
 from mission_pkg.plan.runner import PlanRunner                         # noqa: E402
+from mission_pkg.plan.step import FINISH, RUN, Land                    # noqa: E402
 from mission_pkg.recipes import build_stabilizers                     # noqa: E402
 
 
@@ -164,6 +165,24 @@ def main():
     st2 = compile_mission(cfg, toks, "GzPosHold")   # приняв уже-список — как из ноды
     checks.append(("compile: принимает уже-резолвленный список",
                    [x.name for x in st2] == names))
+
+    # 8. Land: касание ловится по ФАКТУ (gt_z), даже когда баро rel_alt врёт ---------
+    class _Ctx:
+        class _M:
+            def set_mode(self, m): pass
+        class _L:
+            def info(self, m): pass
+            def warn(self, m): pass
+        mode = _M(); log = _L()
+        def try_cmd(self, fn): fn()
+        def elapsed(self): return 0.0
+    land = Land("land", 1500, 0.3, 45.0)   # ground_z=0.3, budget=45
+    land.enter(_Ctx(), None)
+    r_air = land.tick(_Ctx(), DroneState(rel_alt=5.0, gt_valid=True, gt_z=5.0, now_sim=1.0))
+    r_touch = land.tick(_Ctx(), DroneState(rel_alt=5.0, gt_valid=True, gt_z=0.2, now_sim=1.1))
+    checks.append(("land: в воздухе (баро+gt высоко) → RUN", r_air.status == RUN))
+    checks.append(("land: gt_z<порог при завышенном баро → FINISH (касание по факту)",
+                   r_touch.status == FINISH))
 
     print("Оффлайн-гейт stab×mission:")
     ok_all = True

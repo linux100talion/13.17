@@ -31,7 +31,7 @@ class BootstrapConfig:
     mode_budget: float = 40.0
     arm_budget: float = 40.0
     climb_budget: float = 60.0
-    land_budget: float = 120.0
+    land_budget: float = 45.0        # бэкстоп (sim-сек): касание ловит детект (баро/gt_z), не бюджет
     # gz-hold (PID по истинной позе Gazebo)
     gz_kp: float = 40.0
     gz_kd: float = 120.0

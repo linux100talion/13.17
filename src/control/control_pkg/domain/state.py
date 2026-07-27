@@ -37,6 +37,7 @@ class DroneState:
     gt_valid: bool = False
     gt_x: float = 0.0
     gt_y: float = 0.0
+    gt_z: float = 0.0                      # истинная высота (детект касания на посадке)
     gt_yaw: float = 0.0
     gt_vx: float = 0.0                     # world-скорость (конечная разность в адаптере)
     gt_vy: float = 0.0
