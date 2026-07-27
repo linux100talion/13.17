@@ -10,6 +10,8 @@ PROFILE-ONLY: каждая выдаёт нормированный стик-ур
 - RcTransmitter — живой пилот = живой профиль (нормир. стики /mavros/rc/in).
 - ProfileTrajectory — скриптовый профиль по sim-времени (сегменты уровень×длительность).
 - ConstProfile — постоянная стик-команда c_* на dur сек (атом профиль-миссии mv_*/hover).
+- StationKeep — оператор-манёвр «выдвинуться и вернуться» (+τ/−2τ/+τ): на незанятой оси
+  открытым контуром дрон осциллирует У ТОЧКИ (скорость/позиция возвращаются), не уносит.
 """
 from ..rc import RC_CENTER
 from ..setpoint import MotionIntent
@@ -129,3 +131,46 @@ class ConstProfile(TrajectoryStrategy):
 
     def done(self, t: float) -> bool:
         return t > self.dur
+
+
+class StationKeep(TrajectoryStrategy):
+    """Оператор-манёвр «выдвинуться и вернуться» (station-keeping) как стик-профиль.
+
+    Профиль УСКОРЕНИЯ +level·τ / −level·2τ / +level·τ (translate, длит. 4τ). На незанятой
+    оси стик = наклон = ускорение (ALT_HOLD, двойной интегратор), поэтому такой знак-профиль
+    возвращает И скорость, И позицию к нулю за цикл → дрон осциллирует У ТОЧКИ (открытый
+    контур, но ОГРАНИЧЕН), в отличие от постоянного наклона mv_* (уносит ~v·τ за цикл).
+    Ось: 'fwd'(→pitch) | 'right'(→roll) | 'yaw'. level<0 → первый импульс в обратную сторону.
+    Порт station-keeping EXCITE монолита (см. src/lab bootstrap.sh)."""
+
+    def __init__(self, level: float = 0.3, tau: float = 3.0, axis: str = "fwd",
+                 cycles: int = 1):
+        self.level = level
+        self.tau = tau
+        self.axis = axis
+        self.cycles = cycles
+
+    def _cmd(self, t: float) -> float:
+        period = 4.0 * self.tau
+        if t >= period * self.cycles:
+            return 0.0
+        p = t % period
+        if p < self.tau:
+            return self.level                      # +a: разгон
+        if p < 3.0 * self.tau:
+            return -self.level                     # −a: тормоз + обратный ход
+        return self.level                          # +a: гашение скорости к 0
+
+    def total(self) -> float:
+        return 4.0 * self.tau * self.cycles
+
+    def intent(self, s: DroneState, t: float) -> MotionIntent:
+        v = self._cmd(t)
+        if self.axis == "right":
+            return MotionIntent(c_right=v)
+        if self.axis == "yaw":
+            return MotionIntent(c_yaw=v)
+        return MotionIntent(c_fwd=v)
+
+    def done(self, t: float) -> bool:
+        return t > self.total()

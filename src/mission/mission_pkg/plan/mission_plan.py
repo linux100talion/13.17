@@ -11,9 +11,11 @@ ControlStack(build_stabilizers(spec) + профиль-сегмент): один 
 Грамматика токена: глагол+число (climb=метры, mv/hover=секунды; уровень стика —
 глобальный cfg.mv_level):
   climb<h>              — набор высоты h метров (Step Climb; абортит на 'land')
-  mv_fwd/bkwd<t>        — продольный стик ±level на t sim-сек
+  mv_fwd/bkwd<t>        — продольный стик ±level на t sim-сек (ПОСТОЯННЫЙ наклон — уносит!)
   mv_right/left<t>      — боковой стик ±level
   mv_cw/ccw<t>          — yaw-стик ±level
+  sk_fwd/bkwd<τ>        — station-keeping оператор на pitch: +τ/−2τ/+τ, дрон У ТОЧКИ (не уносит)
+  sk_right/left<τ>      — то же на roll
   hover<t>              — держать t сек (стик центр; стабилизатор гасит снос/держит)
   land | landing<x>     — посадка (Step Land; число игнорируется)
 
@@ -24,7 +26,7 @@ import re
 
 from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.excitation import NoExcitation
-from control_pkg.domain.control.trajectory import ConstProfile, StaticSetpoint
+from control_pkg.domain.control.trajectory import ConstProfile, StationKeep, StaticSetpoint
 from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
@@ -37,6 +39,12 @@ _MV = {
     "mv_fwd":   (1.0, 0.0, 0.0), "mv_bkwd": (-1.0, 0.0, 0.0),
     "mv_right": (0.0, 1.0, 0.0), "mv_left":  (0.0, -1.0, 0.0),
     "mv_cw":    (0.0, 0.0, 1.0), "mv_ccw":   (0.0, 0.0, -1.0),
+}
+
+# station-keeping оператор → (ось, знак первого импульса): +τ/−2τ/+τ, возврат к точке
+_SK = {
+    "sk_fwd":  ("fwd", 1.0), "sk_bkwd": ("fwd", -1.0),
+    "sk_right": ("right", 1.0), "sk_left": ("right", -1.0),
 }
 
 
@@ -61,6 +69,8 @@ MISSIONS = {
     "Mission1": ["climb3", "mv_fwd2", "mv_bkwd4", "landing3"],
     # квадрат стик-профилем (уровень cfg.mv_level, 3с на сторону)
     "square":   ["climb3", "mv_fwd3", "mv_right3", "mv_bkwd3", "mv_left3", "land"],
+    # боевой station-keeping: оператор гоняет pitch +τ/−2τ/+τ (у точки), флоу демпфит roll/yaw
+    "sk_demo":  ["climb3", "sk_fwd3", "sk_fwd3", "land"],
     # bootstrap как профиль-миссия: взлёт → висеть (стабилизатор держит) → посадка
     "bootstrap": lambda cfg: [f"climb{cfg.alt:g}",
                               f"hover{max(1.0, cfg.flow_hold_sec):g}", "land"],
@@ -113,6 +123,12 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
             steps.append(_control(f"{verb}_{i}",
                                   ConstProfile(num, c_fwd=fx * lvl, c_right=rx * lvl,
                                                c_yaw=yx * lvl)))
+        elif verb in _SK:
+            if num is None:
+                raise ValueError(f"{verb} требует τ(сек): {tok!r}")
+            ax, sgn = _SK[verb]
+            steps.append(_control(f"{verb}_{i}",
+                                  StationKeep(level=sgn * lvl, tau=num, axis=ax)))
         elif verb == "hover":
             if num is None:
                 raise ValueError(f"hover требует длительность(сек): {tok!r}")
@@ -121,8 +137,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
             steps.append(Land("land", hold, cfg.ground_z, cfg.land_budget,
                               stack=_hold_stack(), wait_gt=wait_gt))
         else:
-            raise ValueError(f"неизвестный глагол миссии {verb!r} (токен {tok!r}); "
-                             f"допустимо: climb, {', '.join(_MV)}, hover, land")
+            raise ValueError(f"неизвестный глагол миссии {verb!r} (токен {tok!r}); допустимо: "
+                             f"climb, {', '.join(_MV)}, {', '.join(_SK)}, hover, land")
 
     # гарантируем посадочный шаг 'land' (Climb абортит на него; и эпилог, если не задан)
     if not any(st.name == "land" for st in steps):

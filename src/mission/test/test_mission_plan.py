@@ -184,6 +184,24 @@ def main():
     checks.append(("land: gt_z<порог при завышенном баро → FINISH (касание по факту)",
                    r_touch.status == FINISH))
 
+    # 9. StationKeep: профиль ускорения +τ/−2τ/+τ возвращает скорость И позицию к нулю ---
+    from control_pkg.domain.control.trajectory import StationKeep     # noqa: E402
+    sk = StationKeep(level=0.5, tau=2.0, axis="fwd")
+    dt, v, x, t = 0.005, 0.0, 0.0, 0.0
+    peak = 0.0
+    while t < sk.total():
+        a = sk.intent(None, t).c_fwd      # стик = ускорение (открытый контур)
+        v += a * dt; x += v * dt; t += dt
+        peak = max(peak, abs(x))
+    checks.append(("station-keep: скорость вернулась к нулю (|v|<0.01)", abs(v) < 0.01))
+    checks.append(("station-keep: позиция вернулась к старту (|x|<0.05)", abs(x) < 0.05))
+    checks.append(("station-keep: экскурсия ограничена (peak>0, вернулся)", peak > 0.1))
+    # компиляция sk-токена → Control-сегмент со StationKeep
+    sk_steps = compile_mission(cfg, "climb3,sk_fwd3,land", "DpRollHold+DpYawHold")
+    sk_seg = next(st for st in sk_steps if st.name.startswith("sk_fwd"))
+    checks.append(("compile: sk_fwd → Control со StationKeep",
+                   type(sk_seg.stack.traj).__name__ == "StationKeep"))
+
     print("Оффлайн-гейт stab×mission:")
     ok_all = True
     for name, ok in checks:
