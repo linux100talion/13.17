@@ -28,6 +28,22 @@ def _goto(rc, name, result=""): return StepResult(rc, GOTO, goto=name, result=re
 def _finish(rc, result=""): return StepResult(rc, FINISH, result=result)
 
 
+def _overlay_stack(step, s, rc) -> None:
+    """Наложить roll/pitch/yaw от ControlStack ПОВЕРХ rc (throttle НЕ трогаем) — так набор
+    (Climb) и сброс (Land) тоже стабилизируются горизонтально, а не летят с центр-стиками.
+    Ленивый enter с wait_gt (gz-опоре нужна истинная поза). step имеет .stack/.wait_gt/
+    ._entered_stack. stack=None → шаг горизонтально НЕ стабилизируется (легаси-поведение)."""
+    if step.stack is None:
+        return
+    if not step._entered_stack:
+        if step.wait_gt and not s.gt_valid:
+            return                       # ждём истинную позу (gz-опора) перед активацией
+        step.stack.enter(s)
+        step._entered_stack = True
+    ctrl = step.stack.update(s)
+    rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
+
+
 class Step:
     name = "step"
 
@@ -84,17 +100,25 @@ class Climb(Step):
     """Набор высоты до alt по баро. Бюджет вышел: если оторвались (>0.5м) — дальше как
     есть; иначе аборт → прыжок на посадочный шаг (RC override не принят / не взлетели)."""
 
-    def __init__(self, name, alt, throttle, budget, land_step="land", keep="ALT_HOLD"):
+    def __init__(self, name, alt, throttle, budget, land_step="land", keep="ALT_HOLD",
+                 stack=None, wait_gt=False):
         self.name = name
         self.alt = alt
         self.throttle = throttle
         self.budget = budget
         self.land_step = land_step
         self.keep = keep
+        self.stack = stack            # ControlStack (StaticSetpoint+стабилизаторы) — держит горизонт
+        self.wait_gt = wait_gt
+        self._entered_stack = False
+
+    def enter(self, ctx, s) -> None:
+        self._entered_stack = False
 
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=self.throttle)
         ctx.keep_mode(s, self.keep)
+        _overlay_stack(self, s, rc)   # набор стабилизирован: горизонт держит стек с отрыва
         if s.rel_alt is not None and s.rel_alt >= self.alt:
             ctx.log.info(f"    набрали {s.rel_alt:.1f}м (цель {self.alt}м)")
             return _next(rc)
@@ -153,15 +177,22 @@ class Control(Step):
 class Land(Step):
     """Посадка: режим LAND, ждём касание (rel_alt<=ground_z) или дизарм. Бюджет → выходим."""
 
-    def __init__(self, name, throttle, ground_z, budget):
+    def __init__(self, name, throttle, ground_z, budget, stack=None, wait_gt=False):
         self.name = name
         self.throttle = throttle
         self.ground_z = ground_z
         self.budget = budget
+        self.stack = stack            # держит горизонт на сбросе (на борту пре-VINS у LAND нет position-hold)
+        self.wait_gt = wait_gt
+        self._entered_stack = False
+
+    def enter(self, ctx, s) -> None:
+        self._entered_stack = False
 
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=self.throttle)
         ctx.try_cmd(lambda: ctx.mode.set_mode("LAND"))
+        _overlay_stack(self, s, rc)   # сброс стабилизирован: горизонт держит стек до касания
         touched = (s.rel_alt is not None and s.rel_alt <= self.ground_z)
         # Land — эпилог: НЕ перетирает исход миссии (HOLD_DONE/CLIMB_FAIL…) своей меткой.
         if touched or (s.mode == "LAND" and not s.armed and ctx.elapsed() > 3):

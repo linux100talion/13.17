@@ -24,7 +24,7 @@ import re
 
 from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.excitation import NoExcitation
-from control_pkg.domain.control.trajectory import ConstProfile
+from control_pkg.domain.control.trajectory import ConstProfile, StaticSetpoint
 from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
@@ -94,13 +94,18 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
         return Control(name, stack, hold, keep=keep, handover=handover,
                        wait_gt=wait_gt, result="MISSION_DONE")
 
+    def _hold_stack():
+        # стабилизаторы держат ГОРИЗОНТ на месте (StaticSetpoint) — для набора/сброса
+        return ControlStack(build_stabilizers(cfg, stab_spec), StaticSetpoint(), NoExcitation())
+
     for i, tok in enumerate(tokens):
         verb, num = _parse(tok)
         if verb == "climb":
             if num is None:
                 raise ValueError(f"climb требует высоту(м): {tok!r}")
             steps.append(Climb(f"climb{i}", num, cfg.throttle_climb, cfg.climb_budget,
-                               land_step="land", keep=keep))
+                               land_step="land", keep=keep,
+                               stack=_hold_stack(), wait_gt=wait_gt))
         elif verb in _MV:
             if num is None:
                 raise ValueError(f"{verb} требует длительность(сек): {tok!r}")
@@ -113,12 +118,14 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
                 raise ValueError(f"hover требует длительность(сек): {tok!r}")
             steps.append(_control(f"hover_{i}", ConstProfile(num)))
         elif verb in ("land", "landing"):
-            steps.append(Land("land", hold, cfg.ground_z, cfg.land_budget))
+            steps.append(Land("land", hold, cfg.ground_z, cfg.land_budget,
+                              stack=_hold_stack(), wait_gt=wait_gt))
         else:
             raise ValueError(f"неизвестный глагол миссии {verb!r} (токен {tok!r}); "
                              f"допустимо: climb, {', '.join(_MV)}, hover, land")
 
     # гарантируем посадочный шаг 'land' (Climb абортит на него; и эпилог, если не задан)
     if not any(st.name == "land" for st in steps):
-        steps.append(Land("land", hold, cfg.ground_z, cfg.land_budget))
+        steps.append(Land("land", hold, cfg.ground_z, cfg.land_budget,
+                          stack=_hold_stack(), wait_gt=wait_gt))
     return steps

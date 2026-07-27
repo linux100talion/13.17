@@ -125,6 +125,15 @@ def main():
     checks.append(("compile: 2 mv-сегмента", sum(n.startswith("mv_") for n in names) == 2))
     checks.append(("compile: последний шаг land", names[-1] == "land"))
     checks.append(("compile: имена уникальны", len(names) == len(set(names))))
+    # набор и сброс теперь стабилизированы: у Climb/Land есть hold-стек со стабилизаторами
+    climb_st = next(st for st in steps if st.name.startswith("climb"))
+    land_st = next(st for st in steps if st.name == "land")
+    checks.append(("compile: Climb несёт hold-стек (набор стабилизирован)",
+                   climb_st.stack is not None and len(climb_st.stack.stabs) >= 1))
+    checks.append(("compile: Land несёт hold-стек (сброс стабилизирован)",
+                   land_st.stack is not None and len(land_st.stack.stabs) >= 1))
+    checks.append(("compile: hold-стек держит на месте (StaticSetpoint, c_*=0)",
+                   climb_st.stack.traj.intent(None, 0.0).c_fwd == 0.0))
 
     # 4. прогон Mission1 (GzPosHold) ------------------------------------------
     r, seen, off, w, it = run_plan(cfg, compile_mission(cfg, "Mission1", "GzPosHold"))
