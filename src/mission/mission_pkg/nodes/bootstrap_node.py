@@ -206,7 +206,7 @@ def _parse() -> tuple:
     p.add_argument('--flow-kp', dest='flow_kp', type=float, default=8.0)
     p.add_argument('--flow-ki', dest='flow_ki', type=float, default=2.0)
     p.add_argument('--flow-osign', dest='flow_osign', type=float, default=-1.0)
-    p.add_argument('--flow-cmd-gain', dest='flow_cmd_gain', type=float, default=0.0)
+    p.add_argument('--flow-cmd-gain', dest='flow_cmd_gain', type=float, default=10.0)
     p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=6.0)
     p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=1.0)
     p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=30.0)
@@ -215,7 +215,7 @@ def _parse() -> tuple:
     p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=5)
     # velocity-assist рыскания: демпфер ПРОПУСКАЕТ намерение профиля как feedforward
     # (target flow_yaw = c_yaw·cmd_gain), гасит только отклонение. 0 → гасит команду в ноль.
-    p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=0.0)
+    p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=10.0)
     # рантайм switch Flow→Vins по «VINS ready» (только flow_assist)
     p.add_argument('--handover-vins', dest='handover_vins', action='store_true')
     p.add_argument('--vins-min', dest='vins_min', type=int, default=40)
