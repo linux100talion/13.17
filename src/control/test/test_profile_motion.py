@@ -34,7 +34,9 @@ def gt(x=0.0, y=0.0, now=0.0):
 
 
 # --- 1. Постоянный форвард-профиль → уставка едет → pitch монотонно уходит от центра ---
-stack = ControlStack([GzHold()], ProfileTrajectory([(100.0, 1500, 1900, 1500)]),
+# Сегмент 1100 = стик ОТ СЕБЯ = вперёд (RC2: ниже центра = нос вниз). Ответ GzHold тоже
+# ниже центра — он догоняет уезжающую вперёд уставку.
+stack = ControlStack([GzHold()], ProfileTrajectory([(100.0, 1500, 1100, 1500)]),
                      NoExcitation())
 stack.enter(gt(now=0.0))
 pitches = []
@@ -42,7 +44,7 @@ for k in range(1, 6):
     rc = stack.update(gt(now=k * 0.1))    # дрон стоит в опоре, уставка уезжает вперёд
     pitches.append(rc.pitch)
 mono = all(pitches[i] < pitches[i - 1] for i in range(1, len(pitches)))
-check("постоянный форвард-профиль → pitch уходит от центра", pitches[-1] != 1500)
+check("постоянный форвард-профиль → pitch уходит от центра ВНИЗ", pitches[-1] < 1500)
 check("отклик растёт монотонно (уставка интегрируется)", mono)
 
 # --- 2. Нулевой профиль + дрон в опоре → держит (центр) ---

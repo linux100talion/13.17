@@ -22,6 +22,15 @@ from ..domain.setpoint import AxisPolicy, Setpoint
 
 _STICK_SPAN = 400   # PWM от центра при полном стике (c=±1) — конвенция pilot_full
 
+# Знак продольного канала на ПРОВОДЕ. Домен говорит «c_fwd=+1 = лететь ВПЕРЁД», ArduPilot
+# на RC2 говорит «PWM выше центра = стик на себя = нос ВВЕРХ = лететь НАЗАД». Значит
+# намерение «вперёд» обязано уехать НИЖЕ центра. Здесь единственное место перевода
+# намерения в провод, поэтому знак живёт здесь, а не размазан по стратегиям.
+# Измерено (bag gzprobe_run4/nostab_run5): roll +0.060 °/PWM corr +0.97 — то есть
+# c_right=+1 → PWM 1900 → крен вправо, знак верен; pitch шёл через ту же формулу и давал
+# −0.037 °/PWM corr −0.58, то есть противоположно намерению. См. src/control/ToDo.md, факт 1.
+_PITCH_RC_SIGN = -1.0
+
 
 def _cmd_to_pwm(c: float) -> int:
     """Намерение оператора c_* [-1..1] → PWM открытого контура (наклон стика)."""
@@ -76,8 +85,10 @@ class ControlStack:
         # БАЗА — намерение траектории (оператор): c_*→PWM. Незанятая ось = открытый контур
         # (наклон оператора). throttle держит миссия. Живой пилот входит через RcTransmitter.
         rc = RcCommand(roll=_cmd_to_pwm(intent.c_right),
-                       pitch=_cmd_to_pwm(intent.c_fwd),
+                       pitch=_cmd_to_pwm(_PITCH_RC_SIGN * intent.c_fwd),
                        throttle=RC_CENTER, yaw=_cmd_to_pwm(intent.c_yaw))
+        # ⚠️ Стабилизаторы (Gz*/Dp*) пишут PWM НАПРЯМУЮ, минуя этот перевод: их знаки
+        # (gz_psign, pitch_osign) заданы уже в проводной конвенции и здесь не участвуют.
         # каждый стабилизатор перезаписывает СВОИ оси
         for st in self.stabs:
             out = st.update(s, sp, dt)

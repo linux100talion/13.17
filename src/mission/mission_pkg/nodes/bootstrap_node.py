@@ -206,7 +206,8 @@ def _parse() -> tuple:
     p.add_argument('--gz-shuttle-fwd', dest='gz_shuttle_fwd', action='store_true')
     p.add_argument('--pilot-deadzone', dest='pilot_deadzone', type=int, default=30)
     p.add_argument('--pilot-full', dest='pilot_full', type=int, default=400)
-    p.add_argument('--pilot-pitch-sign', dest='pilot_pitch_sign', type=float, default=1.0)
+    p.add_argument('--pilot-pitch-sign', dest='pilot_pitch_sign', type=float,
+                   default=_D.pilot_pitch_sign)
     p.add_argument('--pilot-roll-sign', dest='pilot_roll_sign', type=float, default=1.0)
     # ---- демпфер по потоку (пре-VINS): ТРИ ОСИ, у каждой свой полный набор ----
     # Дефолты берём из BootstrapConfig (_D), а не хардкодом: parse_args всегда кладёт

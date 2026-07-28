@@ -67,7 +67,11 @@ class RcTransmitter(TrajectoryStrategy):
     """Живой пульт как источник намерения: нормир. стики → c_*. Интеграла БОЛЬШЕ НЕТ
     (его делает позиц-холдер). Sim (ScriptedPilot) и борт (RosPilot) — те же pilot_*."""
 
-    def __init__(self, deadzone=30, full_pwm=400, pitch_sign=1.0, roll_sign=1.0):
+    # pitch_sign=-1: на входе СЫРОЙ PWM пульта (RC2: выше центра = стик на себя = назад),
+    # на выходе НАМЕРЕНИЕ (c_fwd=+1 = вперёд) — значит здесь знак переворачивается. Вместе
+    # с _PITCH_RC_SIGN в ControlStack это даёт сквозной pass-through пульта: куда пилот
+    # двинул стик, туда борт и полетит. Оба знака менять только парой.
+    def __init__(self, deadzone=30, full_pwm=400, pitch_sign=-1.0, roll_sign=1.0):
         self.deadzone = deadzone
         self.full = full_pwm
         self.psign = pitch_sign
@@ -86,7 +90,7 @@ class ProfileTrajectory(TrajectoryStrategy):
     источник движения (как ScriptedPilot, но как Trajectory) — любой профиль → любой стек."""
 
     def __init__(self, segments, deadzone=30, full_pwm=400,
-                 pitch_sign=1.0, roll_sign=1.0):
+                 pitch_sign=-1.0, roll_sign=1.0):   # сегменты в PWM → см. RcTransmitter
         self.seg = segments
         self.deadzone = deadzone
         self.full = full_pwm

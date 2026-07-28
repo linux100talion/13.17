@@ -42,13 +42,13 @@ rc = gy.update(DroneState(gt_valid=True, gt_yaw=0.2, now_sim=0.10), Setpoint(), 
 check("GzYawHold: увод курса → yaw корректирует (≠1500)", rc.yaw != 1500)
 
 # --- per-axis: GzRollHold в стеке держит roll, pitch/yaw = профиль-оператор ---
-# оператор ConstProfile: c_fwd=0.2→pitch 1580, c_yaw=-0.125→yaw 1450 (незанятые оси)
+# оператор ConstProfile: c_fwd=0.2→pitch 1420 (вперёд = ниже центра), c_yaw=-0.125→yaw 1450
 stack = ControlStack([GzRollHold()], ConstProfile(10, c_fwd=0.2, c_yaw=-0.125), NoExcitation())
 s0 = DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.0, now_sim=0.05)
 stack.enter(s0)
 rc = stack.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=1.0, gt_yaw=0.0, now_sim=0.10))
 check("GzRollHold в стеке: roll держит позицию (≠1500)", rc.roll != 1500)
-check("GzRollHold в стеке: pitch НЕЗАНЯТ → профиль-оператор (1580)", rc.pitch == 1580)
+check("GzRollHold в стеке: pitch НЕЗАНЯТ → профиль-оператор (1420)", rc.pitch == 1420)
 check("GzRollHold в стеке: yaw НЕЗАНЯТ → профиль-оператор (1450)", rc.yaw == 1450)
 
 # --- DpPitchHold: демпф продольного потока → pitch ---

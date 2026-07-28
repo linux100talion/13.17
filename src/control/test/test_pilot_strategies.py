@@ -31,17 +31,22 @@ def approx(a, b, tol=1e-6):
 
 
 # --- RcTransmitter: нормированный стик → c_* (profile-only, БЕЗ интеграла) ---
+# Знак: вход СЫРОЙ PWM пульта (RC2 выше центра = стик на себя = НАЗАД), выход НАМЕРЕНИЕ
+# (c_fwd=+1 = вперёд) → psign=−1. Парный знак в ControlStack даёт сквозной pass-through.
 rt = RcTransmitter(deadzone=30, full_pwm=400)
-# полный вперёд (pitch=1900 → нормировка +1.0), c_* напрямую, без накопления по t
+# стик полностью НА СЕБЯ (pitch=1900 → нормировка +1.0) = намерение НАЗАД
 intent = rt.intent(DroneState(pilot_pitch=1900, pilot_roll=1500, pilot_yaw=1500), 0.5)
-check("RcTransmitter форвард-стик → c_fwd=+1.0", approx(intent.c_fwd, 1.0))
+check("RcTransmitter стик на себя (1900) → c_fwd=−1.0 (назад)", approx(intent.c_fwd, -1.0))
+# стик ОТ СЕБЯ (pitch=1100) = намерение ВПЕРЁД
+intent = rt.intent(DroneState(pilot_pitch=1100), 0.5)
+check("RcTransmitter стик от себя (1100) → c_fwd=+1.0 (вперёд)", approx(intent.c_fwd, 1.0))
 check("RcTransmitter боковой в центре → c_right=0", approx(intent.c_right, 0.0))
 # центр → c_*=0 (не «стоит интеграл», а НЕТ команды)
 intent = rt.intent(DroneState(pilot_pitch=1500), 1.0)
 check("RcTransmitter центр → c_fwd=0", approx(intent.c_fwd, 0.0))
-# половина хода: (1700-1500-30)/(400-30) ≈ 0.459
+# половина хода: -(1700-1500-30)/(400-30) ≈ -0.459
 intent = rt.intent(DroneState(pilot_pitch=1700), 0.0)
-check("RcTransmitter полстика → c_fwd≈0.46", approx(intent.c_fwd, 170.0 / 370.0, 1e-3))
+check("RcTransmitter полстика на себя → c_fwd≈−0.46", approx(intent.c_fwd, -170.0 / 370.0, 1e-3))
 # мёртвая зона: стик в пределах deadzone → 0
 intent = rt.intent(DroneState(pilot_pitch=1520), 0.0)   # +20 < deadzone 30
 check("RcTransmitter мёртвая зона держит 0", approx(intent.c_fwd, 0.0))

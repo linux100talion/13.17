@@ -50,7 +50,8 @@ class BootstrapConfig:
     # пульт (нормировка стика → c_*)
     pilot_deadzone: int = 30         # мёртвая зона вокруг центра, PWM
     pilot_full: int = 400            # полное отклонение стика от центра, PWM
-    pilot_pitch_sign: float = 1.0    # знак «стик вперёд» (борт: сверить с радио)
+    pilot_pitch_sign: float = -1.0   # сырой PWM пульта → намерение; парный к _PITCH_RC_SIGN
+                                     # в ControlStack, вместе = pass-through (борт: сверить с радио)
     pilot_roll_sign: float = 1.0
     # ==== ДЕМПФЕР ПО ПОТОКУ (срез 3, БОЕВОЙ пре-VINS) — ТРИ НЕЗАВИСИМЫЕ ОСИ ====
     # Есть roll, pitch и yaw. Точка. У каждой оси СВОЙ полный набор — ничего не
@@ -86,7 +87,8 @@ class BootstrapConfig:
     pitch_max: float = 150.0
     pitch_conf_min: float = 0.05
     pitch_conf_full: float = 0.20
-    pitch_osign: float = -1.0
+    pitch_osign: float = -1.0        # ⚠️ НЕ ПРОВЕРЕН: демпфер пишет PWM мимо _PITCH_RC_SIGN,
+                                     # знак выводится из знака flow_longitudinal (замер C1)
     pitch_cmd_gain: float = 10.0
     pitch_smooth: int = 1
     # --- yaw: визуальный курс, сигнал flow_yaw → стик yaw (kd нет: DpYawHold — PI) ---
