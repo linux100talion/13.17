@@ -28,6 +28,7 @@ from rclpy.serialization import deserialize_message
 from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
 
 OUT = os.environ.get("SERIES_DIR", "/root/sim_ws/output")
+TFIX = float(os.environ.get("TFIX", 20))   # отметка сравнения, сек от отрыва
 D = np.degrees(1)
 
 
@@ -82,10 +83,11 @@ def metrics(bag):
     # рампа: истина − оценка AHRS, наклон по времени. ⚠️ ПО ОБЕИМ ОСЯМ: помеха свободно
     # перетекает между креном и тангажом, и судить по одной оси — значит объявлять победу
     # там, где просто перетекло (так вышло с A4d: тангаж −9×, крен без изменений, путь тот же).
-    ramp_p = float(np.polyfit(t_a - t_a[0],
-                              (od[air, 4] - np.interp(t_a, ah[:, 0], ah[:, 2])) * D, 1)[0])
-    ramp_r = float(np.polyfit(t_a - t_a[0],
-                              (od[air, 7] - np.interp(t_a, ah[:, 0], ah[:, 3])) * D, 1)[0])
+    tt = t_a - t_a[0]
+    dp_series = (od[air, 4] - np.interp(t_a, ah[:, 0], ah[:, 2])) * D
+    dr_series = (od[air, 7] - np.interp(t_a, ah[:, 0], ah[:, 3])) * D
+    ramp_p = float(np.polyfit(tt, dp_series, 1)[0])
+    ramp_r = float(np.polyfit(tt, dr_series, 1)[0])
     ramp = ramp_p
     t_lift = t_a[0]
     # DC ошибки гироскопа: отдельно НА ЗЕМЛЕ ДО ОТРЫВА и в воздухе.
@@ -100,6 +102,26 @@ def metrics(bag):
         tr = np.interp(ti, od[:, 0], od[:, 6])
         m = (z > 1.0) if phase == "air" else ((z < 0.30) & (ti < t_lift))
         return float(((arr[m, 1] - tr[m]) * D).mean()) if m.sum() > 30 else float("nan")
+    # ЧАСТОТА ТЕЛЕМЕТРИИ IMU, sim-Гц. ⚠️ Это НЕ вход оценщика: EKF ест IMU напрямую от
+    # Gazebo по JSON в lockstep (физика 250 Гц), а сюда приходит то, что FCU ОТДАЁТ.
+    # Держим в сводке потому, что величина ухода с ней коррелирует (факт 2e, corr −0.956) —
+    # как ИНДИКАТОР загрузки бокса, а не как причина. Без неё нельзя понять, сравнимы ли
+    # два прогона вообще.
+    def hz(arr):
+        if len(arr) < 50:
+            return float("nan")
+        m = (arr[:, 0] >= t_a[0]) & (arr[:, 0] <= t_a[-1])
+        return float((m.sum() - 1) / (arr[m, 0][-1] - arr[m, 0][0])) if m.sum() > 20 else float("nan")
+    # Δугол на ФИКСИРОВАННОЙ отметке TFIX от отрыва. Главный способ сравнивать прогоны:
+    # метрика «рампа» (наклон фита по всему полёту) негодна, потому что кривая ухода
+    # насыщается, а прогоны длятся по-разному — длинное окно даёт заниженный наклон
+    # (факт 2e: разброс 46% по рампе против 28% по Δуглу на общей отметке).
+    dpf = drf = pathf = float("nan")
+    if tt[-1] >= TFIX:
+        k = int(np.searchsorted(tt, TFIX))
+        dpf = float(dp_series[k] - dp_series[0])
+        drf = float(dr_series[k] - dr_series[0])
+        pathf = float(np.hypot(od[air, 1][k] - od[air, 1][0], od[air, 2][k] - od[air, 2][0]))
     # скорость и курс сноса в конце
     x, y = od[air, 1], od[air, 2]
     vx, vy = np.gradient(x, t_a), np.gradient(y, t_a)
@@ -112,7 +134,8 @@ def metrics(bag):
     gi = np.nonzero((od[:, 3] < 0.30) & (od[:, 0] < t_lift))[0]
     p0 = float(od[gi[len(gi) * 2 // 3:], 4].mean() * D) if len(gi) > 30 else float("nan")
     return dict(bag=bag, sec=float(t_a[-1] - t_a[0]), ramp=ramp,
-                ramp_r=ramp_r, ramp_p=ramp_p,
+                ramp_r=ramp_r, ramp_p=ramp_p, hz_ah=hz(ah), hz_rw=hz(rw),
+                dp_f=dpf, dr_f=drf, path_f=pathf,
                 ahrs=dc(ah, "air"), gnd=dc(ah, "gnd"), raw=dc(rw, "air"),
                 v=v_end, course=course, path=path, p0=p0)
 
@@ -122,18 +145,27 @@ if not rows:
     print("нет пригодных bag'ов")
     raise SystemExit(1)
 
-print(f"{'прогон':<16}{'с':>6}{'рампа КРЕН':>12}{'рампа ТАНГАЖ':>14}"
-      f"{'ЗЕМЛЯ':>9}{'ВОЗДУХ':>9}{'ПУТЬ':>9}{'v_кон':>9}")
+print(f"НА ОБЩЕЙ ОТМЕТКЕ t = {TFIX:.0f} с от отрыва (главное сравнение):")
+print(f"{'прогон':<16}{'полёт':>7}{'Гц AHRS':>9}{'Гц сыр':>8}"
+      f"{'Δкрен':>9}{'Δтангаж':>10}{'путь':>9}")
 for r in rows:
-    print(f"{r['bag'].replace('_bag', ''):<16}{r['sec']:>6.1f}{r['ramp_r']:>10.3f}°/с"
-          f"{r['ramp_p']:>12.3f}°/с{r['gnd']:>7.3f}°/с{r['ahrs']:>7.3f}°/с"
-          f"{r['path']:>8.1f}м{r['v']:>7.2f}м/с")
+    print(f"{r['bag'].replace('_bag', ''):<16}{r['sec']:>6.1f}с{r['hz_ah']:>9.1f}{r['hz_rw']:>8.1f}"
+          f"{r['dr_f']:>8.2f}°{r['dp_f']:>9.2f}°{r['path_f']:>8.1f}м")
+print(f"\nпо всему полёту (окна РАЗНЫЕ, для сравнения прогонов не годится):")
+print(f"{'прогон':<16}{'рампа КРЕН':>12}{'рампа ТАНГАЖ':>14}{'ВОЗДУХ':>9}{'ПУТЬ':>9}{'v_кон':>9}")
+for r in rows:
+    print(f"{r['bag'].replace('_bag', ''):<16}{r['ramp_r']:>10.3f}°/с{r['ramp_p']:>12.3f}°/с"
+          f"{r['ahrs']:>7.3f}°/с{r['path']:>8.1f}м{r['v']:>7.2f}м/с")
 print("  ПУТЬ — главная метрика: одна ось может «улучшиться», пока уход утёк в другую.")
+print("  Гц — телеметрия, НЕ вход EKF (тот ест IMU от Gazebo в lockstep). Индикатор загрузки.")
 print("  ЗЕМЛЯ/ВОЗДУХ = ошибка гироскопа у AHRS до отрыва и в полёте (по тангажу).")
 
 print(f"\n{'метрика':<14}{'среднее':>10}{'СКО':>9}{'разброс':>10}{'вердикт':>28}")
-for key, lbl, unit in (("path", "ПУТЬ", "м"), ("v", "v конечная", "м/с"),
-                       ("ramp_r", "рампа крен", "°/с"), ("ramp_p", "рампа тангаж", "°/с")):
+for key, lbl, unit in (("dp_f", f"Δтангаж@{TFIX:.0f}с", "°"), ("dr_f", f"Δкрен@{TFIX:.0f}с", "°"),
+                       ("path_f", f"путь@{TFIX:.0f}с", "м"), ("path", "путь весь", "м"),
+                       ("v", "v конечная", "м/с"),
+                       ("ramp_r", "рампа крен", "°/с"), ("ramp_p", "рампа тангаж", "°/с"),
+                       ("hz_ah", "частота IMU", "Гц")):
     a = np.array([r[key] for r in rows], dtype=float)
     a = a[~np.isnan(a)]
     if len(a) < 2:
