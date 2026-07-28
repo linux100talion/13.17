@@ -44,6 +44,13 @@ ARGS=()
 [ -n "${BS_STAB:-}" ]            && ARGS+=(--stab "$BS_STAB")
 [ -n "${BS_MISSION:-}" ]         && ARGS+=(--mission "$BS_MISSION")
 [ -n "${BS_MV_LEVEL:-}" ]        && ARGS+=(--mv-level "$BS_MV_LEVEL")
+# ПРЕДЕЛ СКОРОСТИ ИЗМЕНЕНИЯ команды, PWM/сек. Борт выходит на угол за τ=0.27с (замер по
+# ступеням A1/A2); команда шириной в кадр даёт 11% угла, при 100 PWM/с полный ход за 1.5с
+# ≈ 5.5τ → 99.6%. Без этого выход PID шёл в провод как есть и знак менялся раньше, чем
+# угол устанавливался (факт 3 в src/control/ToDo.md).
+[ -n "${BS_SLEW:-}" ]            && ARGS+=(--slew "$BS_SLEW")
+[ -n "${BS_ROLL_IMAX:-}" ]       && ARGS+=(--roll-imax "$BS_ROLL_IMAX")
+[ -n "${BS_PITCH_IMAX:-}" ]      && ARGS+=(--pitch-imax "$BS_PITCH_IMAX")
 # режим управления фазы EXCITE (легаси, срез 2): shuttle (дефолт) | assisted | manual
 [ -n "${BS_CONTROL_MODE:-}" ]    && ARGS+=(--control-mode "$BS_CONTROL_MODE")
 [ -n "${BS_EXCITE_MAX:-}" ]      && ARGS+=(--excite-max-sec "$BS_EXCITE_MAX")

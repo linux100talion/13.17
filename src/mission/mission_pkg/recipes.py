@@ -109,16 +109,17 @@ def _rc_tx(cfg):
 def build_control_stack(cfg) -> ControlStack:
     mode = cfg.control_mode
     if mode == "assisted":
-        return ControlStack(_gz(cfg), _rc_tx(cfg), NoExcitation())
+        return ControlStack(_gz(cfg), _rc_tx(cfg), NoExcitation(), slew=cfg.slew)
     if mode == "manual":
-        return ControlStack([], _rc_tx(cfg), NoExcitation())   # всё оператору (пульт=траектория)
+        return ControlStack([], _rc_tx(cfg), NoExcitation(), slew=cfg.slew)  # всё оператору
     if mode == "flow_assist":
-        return ControlStack([_dp_roll(cfg), _dp_yaw(cfg)], _rc_tx(cfg), NoExcitation())
+        return ControlStack([_dp_roll(cfg), _dp_yaw(cfg)], _rc_tx(cfg), NoExcitation(),
+                            slew=cfg.slew)
     if mode == "shuttle":
         return ControlStack(
             _gz(cfg),
             Shuttle(cfg.gz_shuttle_level, cfg.gz_shuttle_leg, cfg.gz_shuttle_pause,
                     cfg.gz_shuttle_fwd),
-            NoExcitation(),
+            NoExcitation(), slew=cfg.slew,
         )
     raise ValueError(f"неизвестный control_mode={mode!r}; допустимо: {CONTROL_MODES}")

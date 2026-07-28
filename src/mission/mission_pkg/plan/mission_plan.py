@@ -100,7 +100,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
     ]
 
     def _control(name, prof):
-        stack = ControlStack(build_stabilizers(cfg, stab_spec), prof, NoExcitation())
+        stack = ControlStack(build_stabilizers(cfg, stab_spec), prof, NoExcitation(),
+                             slew=cfg.slew)
         return Control(name, stack, hold, keep=keep, handover=handover,
                        wait_gt=wait_gt, result="MISSION_DONE")
 
@@ -110,7 +111,7 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
         # ось в заданную сторону — на наборе/посадке это увезло бы дрон до начала опыта.
         hold = [st for st in build_stabilizers(cfg, stab_spec)
                 if not getattr(st, 'is_probe', False)]
-        return ControlStack(hold, StaticSetpoint(), NoExcitation())
+        return ControlStack(hold, StaticSetpoint(), NoExcitation(), slew=cfg.slew)
 
     for i, tok in enumerate(tokens):
         verb, num = _parse(tok)

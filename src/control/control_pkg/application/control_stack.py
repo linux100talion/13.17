@@ -54,10 +54,35 @@ def _compose(rc: RcCommand, axis: str, off: int, policy: AxisPolicy) -> RcComman
 
 
 class ControlStack:
-    def __init__(self, stabilization, trajectory, excitation):
+    """slew: ограничение СКОРОСТИ ИЗМЕНЕНИЯ выхода, PWM/сек (0 = выключено).
+
+    Зачем. `OverrideRCIn` — это положение стика, то есть ЗАКАЗАННЫЙ УГОЛ, и борт выходит
+    на него не мгновенно: измерено `τ = 0.27 ± 0.03 с` (шесть ступеней в A1/A2). Команда,
+    удержанная время W, материализуется на `1 − e^(−W/τ)`:
+
+        W = 33 мс (один кадр — так демпфер и командовал) →  11%
+        W = 0.62 с                                       →  90%
+        W = 1.5 с (полный ход при slew=100)              →  99.6%
+
+    Прежний выход PID шёл в провод как есть: пересчёт каждый кадр, знак менялся раньше,
+    чем угол успевал установиться (`+57, +131, −150, +144` PWM со средним ≈ 0). Борт
+    отрабатывал огибающую, а не значения — факт 3 в src/control/ToDo.md.
+
+    Величина: помеха растёт на 0.06 м/с³ = 5 PWM/с, так что 100 PWM/с даёт двадцатикратный
+    запас на отслеживание. Побочно давит шум: остаточные 33 PWM на 30 Гц требовали бы
+    ~1000 PWM/с, ограничитель режет их вдесятеро. Одна ручка чинит и реализуемость, и чаттер.
+
+    Ставится ЗДЕСЬ, а не в стратегиях: это единственная точка, где формируется финальный
+    PWM (тут же живёт `_PITCH_RC_SIGN`), и ограничение достаётся всем стабилизаторам разом.
+    Throttle НЕ ограничивается — им управляет миссия, а не контур.
+    """
+
+    def __init__(self, stabilization, trajectory, excitation, slew=0.0):
         self.stabs = _as_list(stabilization)   # список стабилизаторов (может быть пуст)
         self.traj = trajectory
         self.excite = excitation
+        self.slew = float(slew)
+        self._prev_rc = None                   # предыдущий выход, для ограничения скорости
         self._t0 = None
         self._prev_t = None
 
@@ -71,6 +96,7 @@ class ControlStack:
         # тактирует время траектории (t0) и раздаёт stab.enter.
         self._t0 = s.now_sim
         self._prev_t = s.now_sim
+        self._prev_rc = None        # вход в сегмент = разрешаем стартовать с любого значения
         for st in self.stabs:
             st.enter(s)
 
@@ -96,6 +122,19 @@ class ControlStack:
                 setattr(rc, ax, getattr(out, ax))
         for axis, (off, pol) in self.excite.offset(s, t).items():
             rc = _compose(rc, axis, off, pol)
+        return self._limit(rc, dt)
+
+    def _limit(self, rc: RcCommand, dt: float) -> RcCommand:
+        """Ограничить скорость изменения roll/pitch/yaw (см. docstring класса)."""
+        if self.slew <= 0 or dt <= 0:
+            self._prev_rc = rc
+            return rc
+        if self._prev_rc is not None:
+            step = self.slew * dt
+            for ax in ("roll", "pitch", "yaw"):
+                prev = getattr(self._prev_rc, ax)
+                setattr(rc, ax, int(clamp(getattr(rc, ax), prev - step, prev + step)))
+        self._prev_rc = rc
         return rc
 
     def motion_done(self) -> bool:

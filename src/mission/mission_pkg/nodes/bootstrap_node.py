@@ -204,6 +204,10 @@ def _parse() -> tuple:
     p.add_argument('--gz-shuttle-leg', dest='gz_shuttle_leg', type=float, default=3.0)
     p.add_argument('--gz-shuttle-pause', dest='gz_shuttle_pause', type=float, default=2.0)
     p.add_argument('--gz-shuttle-fwd', dest='gz_shuttle_fwd', action='store_true')
+    p.add_argument('--slew', dest='slew', type=float, default=_D.slew,
+                   help='предел скорости изменения выхода, PWM/сек (0=выкл); τ борта 0.27с')
+    p.add_argument('--roll-imax', dest='roll_imax', type=float, default=_D.roll_imax)
+    p.add_argument('--pitch-imax', dest='pitch_imax', type=float, default=_D.pitch_imax)
     p.add_argument('--pilot-deadzone', dest='pilot_deadzone', type=int, default=30)
     p.add_argument('--pilot-full', dest='pilot_full', type=int, default=400)
     p.add_argument('--pilot-pitch-sign', dest='pilot_pitch_sign', type=float,

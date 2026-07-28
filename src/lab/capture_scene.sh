@@ -235,6 +235,8 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-}" -e BS_PITCH_CMD_GAIN="${BS_PITCH_CMD_GAIN:-}" \
       -e BS_PITCH_SMOOTH="${BS_PITCH_SMOOTH:-}" \
       -e BS_FLOW_OBS="${BS_FLOW_OBS:-}" \
+      -e BS_SLEW="${BS_SLEW:-}" \
+      -e BS_ROLL_IMAX="${BS_ROLL_IMAX:-}" -e BS_PITCH_IMAX="${BS_PITCH_IMAX:-}" \
       -e BS_YAW_KP="${BS_YAW_KP:-}" -e BS_YAW_KI="${BS_YAW_KI:-}" -e BS_YAW_OSIGN="${BS_YAW_OSIGN:-}" \
       -e BS_YAW_CMD_GAIN="${BS_YAW_CMD_GAIN:-}" -e BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-}" \
       "$NAV" bash /lab/"$cmd".sh $arg
