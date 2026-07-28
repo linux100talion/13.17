@@ -35,6 +35,7 @@ from sensor_msgs.msg import Imu
 BAG = os.environ.get('CC_BAG', '/root/sim_ws/output/scene_bag')
 MIN_PWM = float(os.environ.get('CC_MIN_PWM', 20))
 MIN_SEC = float(os.environ.get('CC_MIN_SEC', 1.0))
+IMPACT_A = float(os.environ.get('CC_IMPACT_A', 30))   # м/с²: порог удара (полёт даёт ~2)
 G = 9.80665
 
 
@@ -100,6 +101,22 @@ def segments(cmd):
     return out
 
 
+def impact_time(od):
+    """Момент первого УДАРА (или None). Столкновение в gz даёт скачок ускорения на
+    два порядка выше лётного: борт при полном стике даёт ~2 м/с², удар — 100+.
+
+    Нужно потому, что после удара команда продолжает подаваться в лежащий на боку
+    дрон, и разбор молча выдаёт правдоподобное на вид число (в A2 второй сегмент дал
+    «k = +0.47 °/PWM» при тангаже 71° — это лежащий на земле борт, а не канал).
+    """
+    if len(od) < 10:
+        return None
+    t, x, y = od[:, 0], od[:, 1], od[:, 2]
+    a = np.hypot(np.gradient(np.gradient(x, t), t), np.gradient(np.gradient(y, t), t))
+    hit = np.nonzero(a > IMPACT_A)[0]
+    return float(t[hit[0]]) if len(hit) else None
+
+
 def body_vel(od, t0, t1):
     """Скорость в теле ИЗ ПОЗИЦИИ (фрейм twist неоднозначен, фрейм позиции — нет)."""
     m = (od[:, 0] >= t0) & (od[:, 0] <= t1)
@@ -110,7 +127,7 @@ def body_vel(od, t0, t1):
     return t, vx * np.cos(yaw) + vy * np.sin(yaw), -vx * np.sin(yaw) + vy * np.cos(yaw)
 
 
-def report_axis(name, cmd, od, ang_col, vel_idx):
+def report_axis(name, cmd, od, ang_col, vel_idx, t_hit=None):
     segs = segments(cmd)
     if not segs:
         print(f"\n{name}: сегментов с |командой| ≥ {MIN_PWM:.0f} PWM нет")
@@ -119,6 +136,10 @@ def report_axis(name, cmd, od, ang_col, vel_idx):
     print(f"  {'t0..t1 sim':>18} {'команда':>9} {'угол':>9} {'k':>11} "
           f"{'a':>10} {'a₁':>13} {'путь':>9}")
     for t0, t1, c in segs:
+        if t_hit is not None and t1 > t_hit:
+            when = 'ПОСЛЕ УДАРА' if t0 >= t_hit else f'оборван ударом t={t_hit:.1f}'
+            print(f"  {t0:9.1f}..{t1:7.1f} {c:+8.0f}  ❌ НЕВАЛИДЕН — {when}")
+            continue
         m = (od[:, 0] >= t0) & (od[:, 0] <= t1)
         if m.sum() < 5:
             continue
@@ -189,8 +210,12 @@ def main():
           f"высота max {od[:, 3].max():.2f} м")
     # ⚠️ Знак тангажа в ЭТОЙ одометрии: >0 = НОС ВНИЗ (подтверждено прогоном A1 —
     # команда +150 PWM дала угол −12.3° и движение НАЗАД, а назад летят носом вверх).
-    report_axis("ПРОДОЛЬНЫЙ канал (pitch)", cmd_p, od, 5, 1)
-    report_axis("БОКОВОЙ канал (roll)", cmd_r, od, 4, 2)
+    t_hit = impact_time(od)
+    if t_hit is not None:
+        print(f"  ⚠️ УДАР в t={t_hit:.2f} sim (|a| > {IMPACT_A:.0f} м/с²) — "
+              f"всё, что после, невалидно")
+    report_axis("ПРОДОЛЬНЫЙ канал (pitch)", cmd_p, od, 5, 1, t_hit)
+    report_axis("БОКОВОЙ канал (roll)", cmd_r, od, 4, 2, t_hit)
     report_bias(od, imu, cmd_r, cmd_p, segments(cmd_p))
 
 

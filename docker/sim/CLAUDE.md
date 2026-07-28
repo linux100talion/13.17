@@ -224,6 +224,30 @@ cp -r docker/sim/output/scene_bag docker/sim/bags/roll_excite_$(date +%Y%m%d)
 ```
 `docker/sim/bags/` — в `.gitignore` (бэги крупные, вне git).
 
+## Пустая площадка — `src/lab/scene_objects.py`
+
+Переключает мир между «полной сценой» и «чистой площадкой»: убирает ВСЕ объекты,
+стоящие на земле (`mili_map` — стены/дома/техника/солдаты, `oak_tree_*`,
+`pine_tree_*`, `fire_*`). Земля `grass_plane` с текстурой, дрон `iris_cam`, свет,
+физика и system-плагины остаются. Нужно для калибровочных/контрольных прогонов:
+нечего задеть при runaway, поток от чистой земли; для VINS/NN сцена возвращается.
+
+```bash
+make scene-clear     # убрать объекты с земли   (= python3 ../../src/lab/scene_objects.py clear)
+make scene-restore   # вернуть всё обратно
+make scene-status    # что на сцене / что убрано
+```
+
+Правит `worlds/mili_fortress.sdf` (bind mount rw). Блок `<include>` не удаляется,
+а оборачивается в комментарий-маркер `SCENE-CLEAR` → `restore` возвращает объект
+на место с исходной позой (round-trip байт-в-байт), diff читаемый. Обе операции
+идемпотентны, результат проверяется на валидность XML перед записью.
+
+Стек скрипт НЕ трогает (дисциплина прогона): Gazebo читает SDF при старте, значит
+изменение применяется на следующем `make restart-all && make wait` или очередном
+`capture_scene.sh`. Опции: `--world PATH` (другой SDF), `--keep MODEL` (не убирать
+эту модель), `-n` (dry-run).
+
 ## EEPROM SITL (персистентная accel-калибровка)
 
 **Зачем.** На свежем SITL ArduCopter режет арм обязательной проверкой

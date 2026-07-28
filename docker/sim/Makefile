@@ -43,7 +43,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm fly vins-watch sitl-cal capture-frames capture-scene clean
+.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
 
 # Дефолтная последовательность команд для `make capture-scene` (без разрешения →
 # restart-all). Переопределяется: make capture-scene CSARGS="640x480 arm takeoff 5 hover 2 land"
@@ -154,6 +154,15 @@ capture-frames:  ## снять N кадров из Gazebo мира → worlds/pr
 
 capture-scene:   ## секвенсор: рестарт→[WxH]→команды→запись→кадры→Google Drive (CSARGS=...)
 	bash ../../src/lab/capture_scene.sh $(CSARGS)
+
+scene-clear:     ## убрать со сцены объекты на земле (крепость/деревья/огонь); земля и дрон остаются
+	python3 ../../src/lab/scene_objects.py clear
+
+scene-restore:   ## вернуть убранные объекты на сцену
+	python3 ../../src/lab/scene_objects.py restore
+
+scene-status:    ## что сейчас на сцене и что убрано
+	python3 ../../src/lab/scene_objects.py status
 
 clean: down      ## down + удалить образы и тома стека
 	$(DC) down --rmi local --volumes
