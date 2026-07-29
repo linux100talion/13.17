@@ -142,12 +142,14 @@
       <pose>-11.57 40.97 0 0 0 0.487</pose>
       <uri>model://oak_tree</uri>
     </include>
+    <!-- SCENE-CLEAR oak_tree_7 (oak_tree) — вернуть: scene_objects.py restore
     <include>
       <name>oak_tree_7</name>
       <static>true</static>
       <pose>-6.82 16.09 0 0 0 4.656</pose>
       <uri>model://oak_tree</uri>
     </include>
+    -->
     <include>
       <name>oak_tree_8</name>
       <static>true</static>
@@ -264,12 +266,14 @@
       <pose>-24.49 -52.72 0 0 0 0.173</pose>
       <uri>model://pine_tree</uri>
     </include>
+    <!-- SCENE-CLEAR pine_tree_19 (pine_tree) — вернуть: scene_objects.py restore
     <include>
       <name>pine_tree_19</name>
       <static>true</static>
       <pose>-1.02 -19.81 0 0 0 0.879</pose>
       <uri>model://pine_tree</uri>
     </include>
+    -->
     <include>
       <name>pine_tree_20</name>
       <static>true</static>

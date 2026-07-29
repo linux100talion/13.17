@@ -155,8 +155,8 @@ capture-frames:  ## снять N кадров из Gazebo мира → worlds/pr
 capture-scene:   ## секвенсор: рестарт→[WxH]→команды→запись→кадры→Google Drive (CSARGS=...)
 	bash ../../src/lab/capture_scene.sh $(CSARGS)
 
-scene-clear:     ## убрать со сцены объекты на земле (крепость/деревья/огонь); земля и дрон остаются
-	python3 ../../src/lab/scene_objects.py clear
+scene-clear:     ## убрать объекты с земли; R=50 — только ближе 50 м от спавна (дальний план оставить)
+	python3 ../../src/lab/scene_objects.py clear $(if $(R),--radius $(R))
 
 scene-restore:   ## вернуть убранные объекты на сцену
 	python3 ../../src/lab/scene_objects.py restore

@@ -11,12 +11,14 @@
       <pose>30 60 0 0 0 1.5708</pose>
       <uri>model://digital_wall</uri>
     </include>
+    <!-- SCENE-CLEAR digital_wall_2 (digital_wall) — вернуть: scene_objects.py restore
     <include>
       <static>true</static>
       <name>digital_wall_2</name>
       <pose>20 20 0 0 0 1.5708</pose>
       <uri>model://digital_wall</uri>
     </include>
+    -->
     <include>
       <static>true</static>
       <name>digital_wall_3</name>
