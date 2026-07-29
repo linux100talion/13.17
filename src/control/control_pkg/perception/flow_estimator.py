@@ -72,6 +72,17 @@ class FlowEstimator:
         self._yaw_buf = []
         self.prev_gray = None
         self.prev_stamp = None
+        # --- ДВА НАБОРА ТОЧЕК на одном кадре, у каждого своя работа ---
+        # vel_pts — СВЕЖИЙ детект на каждом кадре: канал СКОРОСТИ (roll/yaw) считает
+        #   медиану межкадрового сдвига, и идентичность точек ему не нужна вовсе.
+        # kf_ref/kf_cur — ДОЛГОЖИВУЩИЙ набор: канал ПОЛОЖЕНИЯ (pitch), там идентичность
+        #   и есть весь смысл.
+        # Почему врозь. Когда опора забрала себе единственный набор, крен поехал: набор
+        # стареет и смещается к дальним объектам, у которых боковой поток слабее, а
+        # kp=16 подобран под свежие точки. Замер по 8-секундному окну висения — снос
+        # вбок 1.4 м (G1, свежие точки) против 12.8 и 13.8 м (H1/H2, состарившиеся).
+        # Цена разделения — второй вызов КЛТ на кадр; детект по-прежнему один.
+        self.vel_pts = None
         # --- ОПОРА (keyframe): точки живут, пока их видно ---
         # kf_ref[i] — где точка была в ОПОРНОМ кадре, kf_cur[i] — где она сейчас.
         # Массивы строго 1:1: потерянная КЛТ точка вычёркивается из обоих.
@@ -175,22 +186,28 @@ class FlowEstimator:
         """gray: uint8 HxW; stamp: сек; omega_imu: ω в FLU (rad/s);
         pitch: тангаж борта, рад (>0 = нос ВНИЗ) — для компенсации наклона. → dict|None."""
         out = None
-        if self.prev_gray is not None and self.kf_cur is not None and len(self.kf_cur) > 0:
+        if self.prev_gray is not None and self.vel_pts is not None and len(self.vel_pts) > 0:
             dt = max(1e-3, stamp - self.prev_stamp)
-            prev_pts = self.kf_cur.reshape(-1, 1, 2).astype(np.float32)
-            nxt, st, _ = cv2.calcOpticalFlowPyrLK(self.prev_gray, gray,
-                                                  prev_pts, None, **self._lk)
+            # --- НАБОР СКОРОСТИ: свежие точки предыдущего кадра → текущий ---
+            vp = self.vel_pts.reshape(-1, 1, 2).astype(np.float32)
+            nxt, st, _ = cv2.calcOpticalFlowPyrLK(self.prev_gray, gray, vp, None, **self._lk)
             st = st.reshape(-1).astype(bool)
-            # обратная проверка: точка обязана вернуться в себя (отсев переприлипших)
-            back, st2, _ = cv2.calcOpticalFlowPyrLK(gray, self.prev_gray, nxt, None, **self._lk)
-            st = st & st2.reshape(-1).astype(bool)
-            st &= np.linalg.norm(back.reshape(-1, 2) - prev_pts.reshape(-1, 2), axis=1) < 1.0
-            p0 = prev_pts.reshape(-1, 2)[st]
+            p0 = vp.reshape(-1, 2)[st]
             p1 = nxt.reshape(-1, 2)[st]
-            # опора: выжившие точки — и в текущем наборе, и в опорном, строго 1:1
-            self.kf_ref = self.kf_ref[st]
-            self.kf_cur = p1.copy()
-            self.kf_age += 1
+            # --- НАБОР ОПОРЫ: свой КЛТ с обратной проверкой (отсев переприлипших) ---
+            if self.kf_cur is not None and len(self.kf_cur) > 0:
+                kp_prev = self.kf_cur.reshape(-1, 1, 2).astype(np.float32)
+                knx, kst, _ = cv2.calcOpticalFlowPyrLK(self.prev_gray, gray, kp_prev,
+                                                       None, **self._lk)
+                kback, kst2, _ = cv2.calcOpticalFlowPyrLK(gray, self.prev_gray, knx,
+                                                          None, **self._lk)
+                kok = kst.reshape(-1).astype(bool) & kst2.reshape(-1).astype(bool)
+                kok &= np.linalg.norm(kback.reshape(-1, 2) - kp_prev.reshape(-1, 2),
+                                      axis=1) < 1.0
+                # опора: выжившие точки — и в текущем наборе, и в опорном, строго 1:1
+                self.kf_ref = self.kf_ref[kok]
+                self.kf_cur = knx.reshape(-1, 2)[kok].copy()
+                self.kf_age += 1
             n = len(p0)
             if n >= 8:
                 flow = p1 - p0                                  # измеренный поток (px/кадр)
@@ -263,12 +280,10 @@ class FlowEstimator:
                     lateral=lateral, lateral_raw=lateral_raw, yaw_flow=yaw_flow,
                     longitudinal=longitudinal, longitudinal_raw=longitudinal_raw,
                     divergence=divergence, n=n, dt=dt,
-                    # conf = какая доля опоры ещё видна. Раньше делили на max_feats,
-                    # и при переоткрытии каждый кадр это было «сколько углов нашлось».
-                    # С удержанием осмысленнее «сколько из посеянного живо»: 1.0 на
-                    # посеве, к порогу пересева ~0.25 — блендер (conf_full=0.20) не
-                    # душит выход в здоровом удержании.
-                    conf=float(n) / float(max(1, self.kf_n0)),
+                    # conf считается по набору СКОРОСТИ (n из свежего детекта) — как и
+                    # было исходно. Здоровье опоры отдельно, в kf_n/kf_age: мерить их
+                    # одним числом нельзя, наборы живут по-разному.
+                    conf=float(n) / float(self.max_feats),
                     # --- опора: положение относительно опорного кадра ---
                     kf_dx=kf_dx, kf_dy=kf_dy, kf_logs=kf_logs, kf_rot=kf_rot,
                     kf_n=len(self.kf_ref) if self.kf_ref is not None else 0,
@@ -279,10 +294,13 @@ class FlowEstimator:
                     meas_rms=float(np.sqrt(np.mean(np.sum(flow ** 2, axis=1)))),
                     omega_norm=float(np.linalg.norm(omega_imu)),
                 )
-        # Пересев — ТОЛЬКО когда точек не осталось (или попросили сбросить опору).
-        # Раньше здесь стоял безусловный _detect() на каждом кадре: фича жила один
-        # кадр, и вместе с ней терялось положение. Замер (keyframe_track.py по G1):
-        # медиана жизни точки 284 кадра = 9.4 с, 97% доживают до 20 кадров.
+        # Набор СКОРОСТИ переоткрывается каждый кадр — ему так и надо (см. выше).
+        self.vel_pts = self._detect(gray)
+        if self.vel_pts is not None:
+            self.vel_pts = self.vel_pts.reshape(-1, 2)
+        # Опора пересевается ТОЛЬКО когда точек не осталось (или попросили сбросить):
+        # фича живёт медиану 284 кадра = 9.4 с при 30 Гц (замер keyframe_track.py по G1),
+        # и в этих кадрах лежит положение, которого нет в межкадровом сдвиге.
         if (self._kf_pending or self.kf_cur is None
                 or len(self.kf_cur) < self.kf_min_pts):
             if not self._kf_pending and self.kf_cur is not None:
