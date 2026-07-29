@@ -33,7 +33,7 @@ from rosbag2_py import (ConverterOptions, SequentialReader, SequentialWriter,
 # Телеметрия, на которой стоит весь разбор. Всё остальное (кадры) — за борт.
 KEEP = {
     '/flow_dbg', '/flow_dbg2', '/flow_dbg3', '/flow_dbg4',
-    '/mavros/global_position/rel_alt',
+    '/mavros/global_position/rel_alt', '/gz_imu/data_flu',
     '/model/iris_cam/odometry',
     '/mavros/imu/data', '/mavros/imu/data_raw',
     '/mavros/local_position/pose', '/mavros/global_position/rel_alt',
