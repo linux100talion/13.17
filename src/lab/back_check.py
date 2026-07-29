@@ -66,7 +66,11 @@ x, y, z, roll, pitch, yaw = od[:, 1], od[:, 2], od[:, 3], od[:, 4], od[:, 5], od
 vx = np.gradient(x, t)
 vy = np.gradient(y, t)
 v_fwd = vx * np.cos(yaw) + vy * np.sin(yaw)
-v_right = -vx * np.sin(yaw) + vy * np.cos(yaw)
+# ⚠️ Тело в ROS — FLU, поэтому эта проекция даёт ось ВЛЕВО, а не вправо. Весь день
+# она была подписана как v_right, и на этом построен неверный вывод о знаке крена
+# (см. config.roll_osign). Имя v_left — чтобы не наступить снова.
+v_left = -vx * np.sin(yaw) + vy * np.cos(yaw)
+v_right = -v_left
 
 
 def at(series_t, series_v, tq):

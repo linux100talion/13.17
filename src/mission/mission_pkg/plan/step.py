@@ -8,6 +8,8 @@
 Step зависит только от портов через `ctx` (PlanRunner): ctx.mode (FlightMode), ctx.log,
 ctx.elapsed()/try_cmd()/keep_mode() — ни строчки rclpy.
 """
+import math
+
 from control_pkg.domain.rc import RC_CENTER, RcCommand
 
 # статусы результата шага
@@ -141,6 +143,10 @@ class Control(Step):
     wait_gt — ждать истинную позу перед активацией стека (gz-режимы; на борту/флоу — нет).
     Завершается по traj.done / excite.done / max_sec."""
 
+    # ГЕОЗАБОР задаётся планом (compile_mission); 0 = выкл. Проверяется по ИСТИННОЙ позе,
+    # то есть это стендовая страховка, а не бортовая функция: на борту gt нет.
+    fence = 0.0
+
     def __init__(self, name, stack, throttle, keep="ALT_HOLD", handover=None,
                  max_sec=0.0, wait_gt=False, result="HOLD_DONE"):
         self.name = name
@@ -166,6 +172,11 @@ class Control(Step):
             self._entered_stack = True
             ctx.reset_keyframe()         # начало сегмента = точка удержания
             ctx.log.info(f"    {self.name}: стек активирован")
+        if self.fence > 0 and s.gt_valid:
+            d = math.hypot(s.gt_x, s.gt_y)
+            if d > self.fence:
+                ctx.log.warn(f"    ⛔ ГЕОЗАБОР: ушли на {d:.1f} м > {self.fence:.0f} — на посадку")
+                return _goto(rc, "land", result="FENCE")
         if self.handover is not None and self.handover.maybe_switch(self.stack, s):
             ctx.log.info(f"    ✅ VINS сошёлся ({s.vins_odom_count} odom) → Flow→Vins (hot-swap)")
         ctrl = self.stack.update(s)

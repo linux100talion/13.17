@@ -183,6 +183,8 @@ def _parse() -> tuple:
                    help='глобальный уровень стика для mv_* профиль-сегментов [-1..1]')
     p.add_argument('--pilot', default='scripted', choices=['scripted', 'ros'],
                    help='источник стиков: scripted (sim-профиль) | ros (/mavros/rc/in)')
+    p.add_argument('--fence', type=float, default=_D.fence,
+                   help='геозабор, м от старта: ушли дальше — сразу на посадку (0=выкл)')
     p.add_argument('--excite-max-sec', dest='excite_max_sec', type=float, default=0.0,
                    help='предел длительности EXCITE, sim-сек (0=авто для пилот-режимов)')
     p.add_argument('--alt', type=float, default=3.0)

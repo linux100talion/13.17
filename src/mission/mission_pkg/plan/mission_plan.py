@@ -102,8 +102,10 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
     def _control(name, prof):
         stack = ControlStack(build_stabilizers(cfg, stab_spec), prof, NoExcitation(),
                              slew=cfg.slew)
-        return Control(name, stack, hold, keep=keep, handover=handover,
-                       wait_gt=wait_gt, result="MISSION_DONE")
+        st = Control(name, stack, hold, keep=keep, handover=handover,
+                     wait_gt=wait_gt, result="MISSION_DONE")
+        st.fence = cfg.fence          # стендовая страховка: увод дальше fence → land
+        return st
 
     def _hold_stack():
         # стабилизаторы держат ГОРИЗОНТ на месте (StaticSetpoint) — для набора/сброса.

@@ -49,6 +49,8 @@ ARGS=()
 # ≈ 5.5τ → 99.6%. Без этого выход PID шёл в провод как есть и знак менялся раньше, чем
 # угол устанавливался (факт 3 в src/control/ToDo.md).
 [ -n "${BS_SLEW:-}" ]            && ARGS+=(--slew "$BS_SLEW")
+# геозабор: увод дальше N метров от старта → сразу land (стендовая страховка, по gt)
+[ -n "${BS_FENCE:-}" ]           && ARGS+=(--fence "$BS_FENCE")
 [ -n "${BS_ROLL_IMAX:-}" ]       && ARGS+=(--roll-imax "$BS_ROLL_IMAX")
 [ -n "${BS_PITCH_IMAX:-}" ]      && ARGS+=(--pitch-imax "$BS_PITCH_IMAX")
 # режим управления фазы EXCITE (легаси, срез 2): shuttle (дефолт) | assisted | manual
