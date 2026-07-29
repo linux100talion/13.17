@@ -9,6 +9,8 @@ FlowEstimator (control_pkg.perception), результат отдаёт доме
 Интринсики берутся из разрешения камеры (pinhole 90° hfov: fx=fy=W/2, cx=W/2, cy=H/2).
 R_cam_imu и rotflow_sign — из sim.yaml/монолита (подтверждены flow_derotation_check).
 """
+import math
+
 import numpy as np
 
 from ..perception.flow_estimator import FlowEstimator
@@ -26,6 +28,7 @@ class RosPerception:
                                   roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
                                   yaw_smooth_n=yaw_smooth_n)
         self._omega = np.zeros(3)
+        self._pitch = 0.0
         self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
         self._kf_dx = self._kf_dy = self._kf_logs = self._kf_rot = 0.0
         self._kf_n = self._kf_age = self._kf_reseeds = 0
@@ -38,13 +41,18 @@ class RosPerception:
     def _on_imu(self, m):
         self._omega = np.array([m.angular_velocity.x, m.angular_velocity.y,
                                 m.angular_velocity.z])
+        # тангаж из ориентации того же сообщения — для компенсации наклона камеры
+        # (на борту это оценка FCU; её дрейф 0.19°/с за секундное окно даёт 0.2°,
+        # что мало против рабочих ±10°)
+        q = m.orientation
+        self._pitch = math.asin(max(-1.0, min(1.0, 2.0 * (q.w * q.y - q.z * q.x))))
 
     def _on_image(self, m):
         if m.encoding not in ('mono8', '8UC1'):
             return
         gray = np.frombuffer(m.data, dtype=np.uint8).reshape(m.height, m.width)
         stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
-        res = self._est.process(gray, stamp, self._omega)
+        res = self._est.process(gray, stamp, self._omega, self._pitch)
         if res is None:
             return
         self._lateral = res['lateral']

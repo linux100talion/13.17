@@ -51,7 +51,7 @@ except ImportError:
 class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1, kf_min_pts=40,
-                 kf_max_step=0.05):
+                 kf_max_step=0.05, cam_tilt=0.26, kf_tilt_k=0.05):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -83,6 +83,20 @@ class FlowEstimator:
         self.kf_max_step = float(kf_max_step)
         self._kf_logs_prev = None
         self.kf_rejects = 0
+        # --- КОМПЕНСАЦИЯ НАКЛОНА (главный источник шума опорного канала в полёте) ---
+        # Камера смотрит вниз на cam_tilt (SDF: 0.26 рад = 14.9°; по горизонту в кадре
+        # 12.9° ±2.4 — метод грубый, разница уходит в подобранный коэффициент). Борт для
+        # разгона кладётся на ±10°, угол визирования гуляет, дальность до сцены ∝
+        # 1/sin(наклон+тангаж) — и масштаб меняется БЕЗ всякого перемещения.
+        # Замер (keyframe_track.py, окно 30 кадров): добавление этого члена в модель
+        # подняло R² с 0.10 до 0.63 (K1c) и с 0.31 до 0.50 (G1), а остаток упал
+        # 2.03 → 0.59 м/с. Коэффициент вышел +0.050 и +0.047 на двух независимых
+        # прогонах — совпадение до третьего знака, поэтому берём 0.05.
+        # Почему не 1.00, как у модели плоской земли: основная масса точек не на земле,
+        # а на дальних объектах, чью дальность наклон почти не меняет.
+        self.cam_tilt = float(cam_tilt)
+        self.kf_tilt_k = float(kf_tilt_k)
+        self._kf_pitch0 = 0.0               # тангаж на момент посева опоры
         self.kf_ref = None
         self.kf_cur = None
         self.kf_n0 = 0                      # сколько точек было посеяно в опоре
@@ -149,8 +163,17 @@ class FlowEstimator:
         rot = float(math.atan2(M[1, 0], M[0, 0]))
         return float(M[0, 2]), float(M[1, 2]), s, rot
 
-    def process(self, gray, stamp, omega_imu):
-        """gray: uint8 HxW; stamp: сек; omega_imu: ω в FLU (rad/s). → dict | None."""
+    def _tilt_term(self, pitch):
+        """log отношения дальностей из-за наклона борта: log(sin(α+θ)/sin(α+θ_опоры))."""
+        a1 = math.sin(self.cam_tilt + pitch)
+        a0 = math.sin(self.cam_tilt + self._kf_pitch0)
+        if a1 <= 1e-3 or a0 <= 1e-3:
+            return 0.0
+        return math.log(a1 / a0)
+
+    def process(self, gray, stamp, omega_imu, pitch=0.0):
+        """gray: uint8 HxW; stamp: сек; omega_imu: ω в FLU (rad/s);
+        pitch: тангаж борта, рад (>0 = нос ВНИЗ) — для компенсации наклона. → dict|None."""
         out = None
         if self.prev_gray is not None and self.kf_cur is not None and len(self.kf_cur) > 0:
             dt = max(1e-3, stamp - self.prev_stamp)
@@ -219,7 +242,9 @@ class FlowEstimator:
                 kf_ok = sim is not None
                 if sim is not None:
                     kf_dx, kf_dy, s_kf, kf_rot = sim
-                    kf_logs = float(math.log(s_kf)) if s_kf > 1e-6 else 0.0
+                    kf_logs_raw = float(math.log(s_kf)) if s_kf > 1e-6 else 0.0
+                    # вычитаем вклад собственного наклона — остаётся перемещение
+                    kf_logs = kf_logs_raw - self.kf_tilt_k * self._tilt_term(pitch)
                     if (self.kf_max_step > 0 and self._kf_logs_prev is not None
                             and abs(kf_logs - self._kf_logs_prev) > self.kf_max_step):
                         self.kf_rejects += 1
@@ -262,7 +287,8 @@ class FlowEstimator:
                 or len(self.kf_cur) < self.kf_min_pts):
             if not self._kf_pending and self.kf_cur is not None:
                 self.kf_reseeds += 1        # опора потеряна: точка удержания сменилась
-            self._seed(gray)
+            if self._seed(gray):
+                self._kf_pitch0 = pitch     # наклон опоры — от него считаем поправку
         self.prev_gray = gray
         self.prev_stamp = stamp
         return out
