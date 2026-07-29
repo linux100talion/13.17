@@ -42,6 +42,7 @@ def _overlay_stack(step, ctx, s, rc) -> None:
             return                       # ждём истинную позу (gz-опора) перед активацией
         step.stack.enter(s)
         step._entered_stack = True
+        ctx.reset_keyframe()             # начало сегмента = точка удержания
         ctx.log.info(f"    {step.name}: стек активирован")
     ctrl = step.stack.update(s)
     rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
@@ -163,6 +164,7 @@ class Control(Step):
                 return _run(rc)                      # ждём истинную позу (gz-опора)
             self.stack.enter(s)
             self._entered_stack = True
+            ctx.reset_keyframe()         # начало сегмента = точка удержания
             ctx.log.info(f"    {self.name}: стек активирован")
         if self.handover is not None and self.handover.maybe_switch(self.stack, s):
             ctx.log.info(f"    ✅ VINS сошёлся ({s.vins_odom_count} odom) → Flow→Vins (hot-swap)")

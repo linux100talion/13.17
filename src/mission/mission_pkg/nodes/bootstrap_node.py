@@ -118,7 +118,8 @@ class BootstrapArch2Node(Node):
                              f"level={cfg.mv_level} токены={tokens}")
         else:
             plan = build_bootstrap_plan(cfg, build_control_stack(cfg), handover)
-        self.runner = PlanRunner(plan, self.clock, self.actuator, self.logger)
+        self.runner = PlanRunner(plan, self.clock, self.actuator, self.logger,
+                                 perception=self.perception)
 
         self._last_rc = RcCommand()
         self._arb_seized = False

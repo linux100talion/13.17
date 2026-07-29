@@ -15,11 +15,12 @@ from .step import FINISH, GOTO, NEXT
 
 
 class PlanRunner:
-    def __init__(self, steps, clock, flight_mode, log):
+    def __init__(self, steps, clock, flight_mode, log, perception=None):
         self.steps = steps
         self.clock = clock
         self.mode = flight_mode
         self.log = log
+        self.perception = perception    # опц. порт зрения: нужен только для reset_keyframe
         self._by_name = {st.name: i for i, st in enumerate(steps)}
         self.i = 0
         self.finished = False
@@ -43,6 +44,15 @@ class PlanRunner:
         if self.now() - self._last_cmd >= 1.0:
             self._last_cmd = self.now()
             fn()
+
+    def reset_keyframe(self):
+        """Назначить точку удержания = ЭТОТ кадр (вход в сегмент со стабилизатором).
+
+        Опорный канал перцепта отдаёт смещение ОТ опорного кадра, поэтому опора и есть
+        точка, к которой борт возвращается. Ставится там же, где `stack.enter()`: у шага
+        с горизонтальной стабилизацией начало сегмента = начало удержания."""
+        if self.perception is not None:
+            self.perception.reset_keyframe()
 
     def keep_mode(self, s, mode):
         # ре-ассерт режима (страховка на смену полётником); '' — транзиент до heartbeat

@@ -51,18 +51,29 @@ check("GzRollHold в стеке: roll держит позицию (≠1500)", rc
 check("GzRollHold в стеке: pitch НЕЗАНЯТ → профиль-оператор (1420)", rc.pitch == 1420)
 check("GzRollHold в стеке: yaw НЕЗАНЯТ → профиль-оператор (1450)", rc.yaw == 1450)
 
-# --- DpPitchHold: демпф продольного потока → pitch ---
-dp = DpPitchHold()  # kp8 ki2 → как DpRollHold, но сигнал flow_longitudinal
+# --- DpPitchHold: УДЕРЖАНИЕ продольного положения по опорному кадру → pitch ---
+# Сигнал теперь kf_logs (log масштаба от опоры, −0.0121 на метр), а не поток в px.
+# Два тика с ОДНИМ значением: на втором производная нулевая, остаётся чистое kp·err —
+# иначе kd на ступеньке загоняет выход в потолок и проверять нечего.
+dp = DpPitchHold(kp=2000.0, ki=0.0, kd=1000.0)
 dp.enter(DroneState(flow_seq=-1))
-rc = dp.update(DroneState(flow_seq=1, flow_longitudinal=5.0, flow_conf=0.5,
-                          flow_dt=0.05, now_sim=0.05), Setpoint(), 0.05)
-check("DpPitchHold демпфит продольный поток (pitch=1540)", rc.pitch == 1540)
+back = DroneState(flow_seq=1, kf_logs=-0.02, flow_conf=0.5, flow_dt=0.05, now_sim=0.05)
+dp.update(back, Setpoint(), 0.05)
+rc = dp.update(DroneState(flow_seq=2, kf_logs=-0.02, flow_conf=0.5,
+                          flow_dt=0.05, now_sim=0.10), Setpoint(), 0.05)
+# уехали назад (масштаб меньше) → нос ВНИЗ → летим к опоре: 1500 + 2000·(−0.02) = 1460
+check("DpPitchHold: ушли назад → нос вниз (pitch=1460)", rc.pitch == 1460)
 check("DpPitchHold владеет только pitch (roll/yaw центр)", rc.roll == 1500 and rc.yaw == 1500)
+fwd = DroneState(flow_seq=3, kf_logs=+0.02, flow_conf=0.5, flow_dt=0.05, now_sim=0.15)
+dp.update(fwd, Setpoint(), 0.05)
+rc = dp.update(DroneState(flow_seq=4, kf_logs=+0.02, flow_conf=0.5,
+                          flow_dt=0.05, now_sim=0.20), Setpoint(), 0.05)
+check("DpPitchHold: ушли вперёд → нос вверх (pitch=1540)", rc.pitch == 1540)
 
-# --- DpHold: композит всех трёх осей ---
+# --- DpHold: композит всех трёх осей (roll/yaw по потоку, pitch по опоре) ---
 dh = DpHold()
 dh.enter(DroneState(flow_seq=-1))
-rc = dh.update(DroneState(flow_seq=1, flow_lateral=5.0, flow_longitudinal=5.0,
+rc = dh.update(DroneState(flow_seq=1, flow_lateral=5.0, kf_logs=-0.02,
                           flow_yaw=3.0, flow_conf=0.5, flow_dt=0.05, now_sim=0.05),
                Setpoint(), 0.05)
 check("DpHold командует roll+pitch+yaw", rc.roll != 1500 and rc.pitch != 1500 and rc.yaw != 1500)

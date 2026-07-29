@@ -67,6 +67,7 @@ class FlowEstimator:
         self._lat_buf = []
         self.pitch_smooth_n = max(1, int(pitch_smooth_n))
         self._lon_buf = []
+        self._kf_buf = []               # то же сглаживание для опорного сигнала
         self.yaw_smooth_n = max(1, int(yaw_smooth_n))
         self._yaw_buf = []
         self.prev_gray = None
@@ -123,6 +124,7 @@ class FlowEstimator:
             self.kf_ref = self.kf_cur = None
             return False
         self._kf_logs_prev = None                   # новая опора — новый отсчёт
+        self._kf_buf = []
         self.kf_ref = pts.reshape(-1, 2).copy()     # где точки были в ОПОРНОМ кадре
         self.kf_cur = pts.reshape(-1, 2).copy()     # где они сейчас (1:1 с kf_ref)
         self.kf_n0 = len(pts)                       # сколько посеяли — база для conf
@@ -224,6 +226,14 @@ class FlowEstimator:
                         kf_logs = self._kf_logs_prev   # выброс: держим прошлое значение
                         kf_ok = False                  # и помечаем кадр недостоверным
                     self._kf_logs_prev = kf_logs
+                    # Сглаживание — тем же N, что у продольной оси. Сигнал медленный
+                    # (положение), поэтому медиана почти не смазывает его, а шум режет:
+                    # σ 0.0025 = 0.14 м на кадр (замер keyframe_track.py).
+                    self._kf_buf.append(kf_logs)
+                    if len(self._kf_buf) > self.pitch_smooth_n:
+                        self._kf_buf.pop(0)
+                    if self.pitch_smooth_n > 1:
+                        kf_logs = float(np.median(self._kf_buf))
                 out = dict(
                     lateral=lateral, lateral_raw=lateral_raw, yaw_flow=yaw_flow,
                     longitudinal=longitudinal, longitudinal_raw=longitudinal_raw,
