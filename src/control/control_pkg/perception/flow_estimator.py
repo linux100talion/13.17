@@ -51,7 +51,7 @@ except ImportError:
 class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1, kf_min_pts=40,
-                 kf_max_step=0.05, cam_tilt=0.26, kf_tilt_k=0.05):
+                 kf_max_step=0.05, cam_tilt=0.26, kf_tilt_k=0.05, feat_lo=0.667):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -83,6 +83,32 @@ class FlowEstimator:
         # вбок 1.4 м (G1, свежие точки) против 12.8 и 13.8 м (H1/H2, состарившиеся).
         # Цена разделения — второй вызов КЛТ на кадр; детект по-прежнему один.
         self.vel_pts = None
+        # --- ГДЕ ИСКАТЬ ТОЧКИ ДЛЯ КАНАЛА СКОРОСТИ ---
+        # feat_lo — доля высоты кадра, ВЫШЕ которой детектор не смотрит (0 = весь кадр).
+        # Замер по L1_scale2ax (оракул ведёт, зрение смотрит), распределение точек:
+        #   строки   0-90 (небо)          4.2%
+        #   строки  90-180 (горизонт)    65.6%
+        #   строки 180-270               27.7%
+        #   строки 270-360                2.5%
+        #   строки 360-540 (земля 7-11м)  0.0%
+        # То есть 93% точек сидели в полосе горизонта, где поток почти нулевой, а до
+        # ближней земли, где он впятеро сильнее, детектор не доходил ни разу: он тратит
+        # бюджет в 200 углов на контрастную линию горизонта. Отсюда S_lat=0.4 вместо
+        # расчётных 1.3-3.3 — мерили скорость по дальнему плану, который не движется.
+        # Что даёт маска (тот же bag, та же обработка):
+        #   весь кадр   S_lat +0.40 px/(м/с), шум 3.10 м/с, R² 0.02
+        #   ниже 200    +1.17,               1.04 м/с,      0.14
+        #   ниже 270    +1.65,               0.76 м/с,      0.23
+        #   ниже 360    +2.42,               0.59 м/с,      0.32   ← 0.667·540
+        # Углов на земле хватает: под маской набираются все 200, и снижение
+        # qualityLevel (0.01→0.001) ничего не меняет — упор в лимит, не в качество.
+        # ⚠️ Порог привязан к геометрии: при 5 м и наклоне 15° земля у нижнего края в
+        # 7 м, у строки 360 — в 11 м. На другой высоте правильнее считать маску от
+        # высоты и наклона; фиксированная доля — первое приближение.
+        # Опорный набор маской НЕ ограничен: у него своя механика (долгая жизнь точек),
+        # и менять оба канала одним прогоном значило бы не понять, что подействовало.
+        self.feat_lo = float(feat_lo)
+        self._mask_vel = None
         # --- ОПОРА (keyframe): точки живут, пока их видно ---
         # kf_ref[i] — где точка была в ОПОРНОМ кадре, kf_cur[i] — где она сейчас.
         # Массивы строго 1:1: потерянная КЛТ точка вычёркивается из обоих.
@@ -118,8 +144,18 @@ class FlowEstimator:
                         criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
         self._feat = dict(maxCorners=max_feats, qualityLevel=0.01, minDistance=8, blockSize=7)
 
-    def _detect(self, gray):
-        return cv2.goodFeaturesToTrack(gray, mask=None, **self._feat)
+    def _detect(self, gray, mask=None):
+        return cv2.goodFeaturesToTrack(gray, mask=mask, **self._feat)
+
+    def _vel_mask(self, gray):
+        """Маска для набора СКОРОСТИ: только нижняя часть кадра (ближняя земля)."""
+        if self.feat_lo <= 0:
+            return None
+        if self._mask_vel is None or self._mask_vel.shape != gray.shape:
+            m = np.zeros(gray.shape, np.uint8)
+            m[int(self.feat_lo * gray.shape[0]):, :] = 255
+            self._mask_vel = m
+        return self._mask_vel
 
     def _rot_flow(self, p0, wx, wy, wz, dt):
         """Вращательный поток (пиксели/кадр) в точках p0 для ω камеры (rad/s)."""
@@ -295,7 +331,7 @@ class FlowEstimator:
                     omega_norm=float(np.linalg.norm(omega_imu)),
                 )
         # Набор СКОРОСТИ переоткрывается каждый кадр — ему так и надо (см. выше).
-        self.vel_pts = self._detect(gray)
+        self.vel_pts = self._detect(gray, self._vel_mask(gray))
         if self.vel_pts is not None:
             self.vel_pts = self.vel_pts.reshape(-1, 2)
         # Опора пересевается ТОЛЬКО когда точек не осталось (или попросили сбросить):
