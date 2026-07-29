@@ -27,6 +27,9 @@ class RosPerception:
                                   yaw_smooth_n=yaw_smooth_n)
         self._omega = np.zeros(3)
         self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
+        self._kf_dx = self._kf_dy = self._kf_logs = self._kf_rot = 0.0
+        self._kf_n = self._kf_age = self._kf_reseeds = 0
+        self._kf_valid = False
         self._dt = 0.0
         self._seq = 0
         node.create_subscription(Imu, imu_topic, self._on_imu, qos_profile_sensor_data)
@@ -48,6 +51,11 @@ class RosPerception:
         self._longitudinal = res['longitudinal']   # looming → DpPitchHold
         self._yaw = res['yaw_flow']
         self._conf = res['conf']
+        # ОПОРА: смещение картинки от опорного кадра (не скорость)
+        self._kf_dx, self._kf_dy = res['kf_dx'], res['kf_dy']
+        self._kf_logs, self._kf_rot = res['kf_logs'], res['kf_rot']
+        self._kf_n, self._kf_age = res['kf_n'], res['kf_age']
+        self._kf_reseeds, self._kf_valid = res['kf_reseeds'], res['kf_valid']
         self._dt = res['dt']
         self._seq += 1               # НОВЫЙ кадр → домен продвинет PID
 
@@ -59,4 +67,12 @@ class RosPerception:
         s.flow_conf = self._conf
         s.flow_dt = self._dt
         s.flow_seq = self._seq
+        s.kf_dx, s.kf_dy = self._kf_dx, self._kf_dy
+        s.kf_logs, s.kf_rot = self._kf_logs, self._kf_rot
+        s.kf_n, s.kf_age = self._kf_n, self._kf_age
+        s.kf_reseeds, s.kf_valid = self._kf_reseeds, self._kf_valid
         return s
+
+    def reset_keyframe(self):
+        """Назначить точку удержания: следующий кадр станет опорным."""
+        self._est.reset_keyframe()

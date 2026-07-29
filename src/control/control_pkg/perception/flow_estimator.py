@@ -7,16 +7,38 @@ FlowEstimator — чистая зрительная часть FLOW-DAMP: кад
 Легаси-копия src/lab/flow_estimator.py остаётся для монолит-инструментов до их вывода.
 БЕЗ ROS (только numpy + cv2) — перцепт-сервис домена восприятия.
 
-Пайплайн (см. FAQ_vins.md 6-11):
+Два канала на одних и тех же точках:
+
+СКОРОСТЬ (как было, см. FAQ_vins.md 6-11):
   sparse LK (поток между соседними кадрами)
     → derotate: вычесть ВРАЩАТЕЛЬНЫЙ поток (ω_cam = R · ω_imu), формула Longuet-Higgins
     → остаточный ТРАНСЛЯЦИОННЫЙ поток
     → агрегаты: боковой (медиана горизонт.) + диагностика (RMS остатка/измерения, |ω|).
 
+ПОЛОЖЕНИЕ (опорный кадр):
+  точки НЕ переоткрываются каждый кадр, а ведутся, пока видны
+    → подобие опорный→текущий (estimateAffinePartial2D)
+    → kf_dx/kf_dy (сдвиг), kf_logs = log(масштаб), kf_rot (поворот).
+
+Зачем. Раньше в конце каждого process() стоял безусловный _detect(): фича жила
+РОВНО ОДИН кадр, и вместе с ней терялось положение — доступна была только скорость.
+Замер (src/lab/keyframe_track.py по bag'у G1, посев 158 точек): медиана жизни точки
+284 кадра = 9.4 с при 30 Гц, 97% доживают до 20 кадров. В окне 12.1..21.9 с покадровый
+сдвиг связан с ИСТИННОЙ СКОРОСТЬЮ на corr −0.22 (то есть почти никак), а log(масштаб)
+с ИСТИННЫМ УДАЛЕНИЕМ — на −0.75 при крутизне −1.8% на метр и шуме 0.14 м. Продольная
+ось живёт в МАСШТАБЕ: камера смотрит почти горизонтально (наклон 15°), ход вперёд идёт
+вдоль оптической оси и сдвига почти не даёт.
+
+Осталось (не в этом слое): звать reset_keyframe() на входе в сегмент удержания —
+опора и есть точка, к которой борт возвращается; и подключить kf_logs к DpPitchHold
+вместо покадрового longitudinal.
+
 rotflow_sign: множитель вращательной поправки. +1/−1 — два знака; 0 — БЕЗ derotation
 (baseline). Перебором {R, Rᵀ}×{±1} оффлайн-тест выбирает верный вариант по минимуму
 остатка на кадрах с большим |ω| (чистое вращение → правильная derotation → остаток≈0).
 """
+
+import math
 
 import numpy as np
 
@@ -28,7 +50,8 @@ except ImportError:
 
 class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
-                 roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1):
+                 roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1, kf_min_pts=40,
+                 kf_max_step=0.05):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -47,8 +70,24 @@ class FlowEstimator:
         self.yaw_smooth_n = max(1, int(yaw_smooth_n))
         self._yaw_buf = []
         self.prev_gray = None
-        self.prev_pts = None
         self.prev_stamp = None
+        # --- ОПОРА (keyframe): точки живут, пока их видно ---
+        # kf_ref[i] — где точка была в ОПОРНОМ кадре, kf_cur[i] — где она сейчас.
+        # Массивы строго 1:1: потерянная КЛТ точка вычёркивается из обоих.
+        self.kf_min_pts = int(kf_min_pts)   # ниже — опора потеряна, пересев
+        # Отсечка выброса подобия. Физика: 3 м/с при 30 Гц = 0.1 м за кадр = 0.0018
+        # в log(масштаба) (крутизна ~1.8%/м). Порог 0.05 — двадцатикратный запас, но
+        # ловит срывы RANSAC на ложной гипотезе (в G1 один такой: −0.60 вместо −0.30).
+        # Выброс не гасится и не сглаживается, а ОТБРАСЫВАЕТСЯ: держим прошлое значение.
+        self.kf_max_step = float(kf_max_step)
+        self._kf_logs_prev = None
+        self.kf_rejects = 0
+        self.kf_ref = None
+        self.kf_cur = None
+        self.kf_n0 = 0                      # сколько точек было посеяно в опоре
+        self.kf_age = 0                     # кадров с момента посева опоры
+        self.kf_reseeds = 0                 # сколько раз опора терялась за прогон
+        self._kf_pending = True             # первый кадр станет опорным
         self._lk = dict(winSize=(21, 21), maxLevel=3,
                         criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
         self._feat = dict(maxCorners=max_feats, qualityLevel=0.01, minDistance=8, blockSize=7)
@@ -68,16 +107,65 @@ class FlowEstimator:
         v_rot = self.fy * v_rot_n
         return np.column_stack([u_rot, v_rot])
 
+    # ---------------------------------------------------------------- опора
+    def reset_keyframe(self):
+        """Сбросить опору: следующий кадр станет новым опорным (точка удержания).
+
+        Зовётся управляющим слоем на входе в сегмент удержания — как `enter()` у
+        стабилизаторов. Позиция, которую отдаёт опорный канал, отсчитывается ОТ
+        этого кадра; вернуться борт может только туда, что видит."""
+        self._kf_pending = True
+
+    def _seed(self, gray):
+        """Посеять точки и сделать текущий кадр опорным."""
+        pts = self._detect(gray)
+        if pts is None or len(pts) < 8:
+            self.kf_ref = self.kf_cur = None
+            return False
+        self._kf_logs_prev = None                   # новая опора — новый отсчёт
+        self.kf_ref = pts.reshape(-1, 2).copy()     # где точки были в ОПОРНОМ кадре
+        self.kf_cur = pts.reshape(-1, 2).copy()     # где они сейчас (1:1 с kf_ref)
+        self.kf_n0 = len(pts)                       # сколько посеяли — база для conf
+        self.kf_age = 0
+        self._kf_pending = False
+        return True
+
+    def _similarity(self):
+        """Подобие опорный→текущий: (dx, dy, масштаб, поворот) или None.
+
+        ⚠️ dx/dy — НЕ чистое смещение борта: поворот камеры по тангажу/курсу даёт
+        такой же сдвиг картинки. Масштаб к вращению нечувствителен (первый порядок),
+        поэтому продольный канал по нему честен, а боковой требует компенсации по
+        углам — она пока не сделана, `kf_rot` отдаётся для диагностики."""
+        if self.kf_ref is None or len(self.kf_ref) < self.kf_min_pts:
+            return None
+        M, _ = cv2.estimateAffinePartial2D(self.kf_ref, self.kf_cur,
+                                           method=cv2.RANSAC, ransacReprojThreshold=2.0)
+        if M is None:
+            return None
+        s = float(math.hypot(M[0, 0], M[0, 1]))
+        rot = float(math.atan2(M[1, 0], M[0, 0]))
+        return float(M[0, 2]), float(M[1, 2]), s, rot
+
     def process(self, gray, stamp, omega_imu):
         """gray: uint8 HxW; stamp: сек; omega_imu: ω в FLU (rad/s). → dict | None."""
         out = None
-        if self.prev_gray is not None and self.prev_pts is not None and len(self.prev_pts) > 0:
+        if self.prev_gray is not None and self.kf_cur is not None and len(self.kf_cur) > 0:
             dt = max(1e-3, stamp - self.prev_stamp)
+            prev_pts = self.kf_cur.reshape(-1, 1, 2).astype(np.float32)
             nxt, st, _ = cv2.calcOpticalFlowPyrLK(self.prev_gray, gray,
-                                                  self.prev_pts, None, **self._lk)
+                                                  prev_pts, None, **self._lk)
             st = st.reshape(-1).astype(bool)
-            p0 = self.prev_pts.reshape(-1, 2)[st]
+            # обратная проверка: точка обязана вернуться в себя (отсев переприлипших)
+            back, st2, _ = cv2.calcOpticalFlowPyrLK(gray, self.prev_gray, nxt, None, **self._lk)
+            st = st & st2.reshape(-1).astype(bool)
+            st &= np.linalg.norm(back.reshape(-1, 2) - prev_pts.reshape(-1, 2), axis=1) < 1.0
+            p0 = prev_pts.reshape(-1, 2)[st]
             p1 = nxt.reshape(-1, 2)[st]
+            # опора: выжившие точки — и в текущем наборе, и в опорном, строго 1:1
+            self.kf_ref = self.kf_ref[st]
+            self.kf_cur = p1.copy()
+            self.kf_age += 1
             n = len(p0)
             if n >= 8:
                 flow = p1 - p0                                  # измеренный поток (px/кадр)
@@ -123,17 +211,48 @@ class FlowEstimator:
                 cu, *_ = np.linalg.lstsq(M, tr[:, 0], rcond=None)
                 cv, *_ = np.linalg.lstsq(M, tr[:, 1], rcond=None)
                 divergence = float(cu[1] + cv[2])
+                # --- ОПОРНЫЙ КАНАЛ: подобие опорный→текущий (СМЕЩЕНИЕ, не скорость) ---
+                sim = self._similarity()
+                kf_dx, kf_dy, kf_logs, kf_rot = (0.0, 0.0, 0.0, 0.0)
+                kf_ok = sim is not None
+                if sim is not None:
+                    kf_dx, kf_dy, s_kf, kf_rot = sim
+                    kf_logs = float(math.log(s_kf)) if s_kf > 1e-6 else 0.0
+                    if (self.kf_max_step > 0 and self._kf_logs_prev is not None
+                            and abs(kf_logs - self._kf_logs_prev) > self.kf_max_step):
+                        self.kf_rejects += 1
+                        kf_logs = self._kf_logs_prev   # выброс: держим прошлое значение
+                        kf_ok = False                  # и помечаем кадр недостоверным
+                    self._kf_logs_prev = kf_logs
                 out = dict(
                     lateral=lateral, lateral_raw=lateral_raw, yaw_flow=yaw_flow,
                     longitudinal=longitudinal, longitudinal_raw=longitudinal_raw,
                     divergence=divergence, n=n, dt=dt,
-                    conf=float(n) / float(self.max_feats),
+                    # conf = какая доля опоры ещё видна. Раньше делили на max_feats,
+                    # и при переоткрытии каждый кадр это было «сколько углов нашлось».
+                    # С удержанием осмысленнее «сколько из посеянного живо»: 1.0 на
+                    # посеве, к порогу пересева ~0.25 — блендер (conf_full=0.20) не
+                    # душит выход в здоровом удержании.
+                    conf=float(n) / float(max(1, self.kf_n0)),
+                    # --- опора: положение относительно опорного кадра ---
+                    kf_dx=kf_dx, kf_dy=kf_dy, kf_logs=kf_logs, kf_rot=kf_rot,
+                    kf_n=len(self.kf_ref) if self.kf_ref is not None else 0,
+                    kf_age=self.kf_age, kf_reseeds=self.kf_reseeds,
+                    kf_valid=kf_ok,
                     # --- диагностика для flow_derotation_check ---
                     resid_rms=float(np.sqrt(np.mean(np.sum(tr ** 2, axis=1)))),
                     meas_rms=float(np.sqrt(np.mean(np.sum(flow ** 2, axis=1)))),
                     omega_norm=float(np.linalg.norm(omega_imu)),
                 )
+        # Пересев — ТОЛЬКО когда точек не осталось (или попросили сбросить опору).
+        # Раньше здесь стоял безусловный _detect() на каждом кадре: фича жила один
+        # кадр, и вместе с ней терялось положение. Замер (keyframe_track.py по G1):
+        # медиана жизни точки 284 кадра = 9.4 с, 97% доживают до 20 кадров.
+        if (self._kf_pending or self.kf_cur is None
+                or len(self.kf_cur) < self.kf_min_pts):
+            if not self._kf_pending and self.kf_cur is not None:
+                self.kf_reseeds += 1        # опора потеряна: точка удержания сменилась
+            self._seed(gray)
         self.prev_gray = gray
-        self.prev_pts = self._detect(gray)
         self.prev_stamp = stamp
         return out

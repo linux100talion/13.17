@@ -30,6 +30,7 @@ class RosDebugSink:
         self._node = node
         self._pub = node.create_publisher(Vector3Stamped, '/flow_dbg', 10)
         self._pub2 = node.create_publisher(Vector3Stamped, '/flow_dbg2', 10)
+        self._pub3 = node.create_publisher(Vector3Stamped, '/flow_dbg3', 10)
 
     def publish(self, roll_off: float, flow_off: float, conf: float, stamp: float) -> None:
         d = Vector3Stamped()
@@ -56,3 +57,11 @@ class RosDebugSink:
         d2.vector.y = float(s.flow_longitudinal)
         d2.vector.z = float(s.flow_yaw)
         self._pub2.publish(d2)
+        # /flow_dbg3 = ОПОРА: (log масштаба, сдвиг X, доля видимой опоры). Топик уже
+        # стоял в TOPICS_EXTRA калиб-прогонов, но публиковать в него было нечего.
+        d3 = Vector3Stamped()
+        d3.header.stamp = t
+        d3.vector.x = float(s.kf_logs)
+        d3.vector.y = float(s.kf_dx)
+        d3.vector.z = float(s.kf_n)
+        self._pub3.publish(d3)
