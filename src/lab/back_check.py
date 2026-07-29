@@ -36,7 +36,7 @@ def stamp(m):
 def read(bag):
     r = SequentialReader()
     r.open(StorageOptions(uri=bag, storage_id='sqlite3'), ConverterOptions('cdr', 'cdr'))
-    od, d1, d2 = [], [], []
+    od, d1, d2, d3 = [], [], [], []
     while r.has_next():
         topic, raw, _ = r.read_next()
         if topic == '/model/iris_cam/odometry':
@@ -50,10 +50,14 @@ def read(bag):
         elif topic == '/flow_dbg2':
             m = deserialize_message(raw, Vector3Stamped)
             d2.append((stamp(m), m.vector.x, m.vector.y, m.vector.z))
-    return np.array(od), np.array(d1), np.array(d2)
+        elif topic == '/flow_dbg3':
+            # ОПОРНЫЙ канал: (kf_logs, kf_dx, kf_n) — положение от опорного кадра
+            m = deserialize_message(raw, Vector3Stamped)
+            d3.append((stamp(m), m.vector.x, m.vector.y, m.vector.z))
+    return np.array(od), np.array(d1), np.array(d2), np.array(d3)
 
 
-od, d1, d2 = read(BAG)
+od, d1, d2, d3 = read(BAG)
 t0 = od[0, 0]
 t = od[:, 0] - t0
 x, y, z, roll, pitch, yaw = od[:, 1], od[:, 2], od[:, 3], od[:, 4], od[:, 5], od[:, 6]
@@ -80,6 +84,28 @@ for tq in np.arange(0, t[-1], 1.0):
           f' {at(td2,d2[:,2],tq):8.2f} {at(td1,d1[:,2],tq):8.2f} {at(td1,d1[:,3],tq):5.2f} |'
           f' {at(td2,d2[:,1],tq):9.1f} {at(td1,d1[:,1],tq):8.1f} |'
           f' {math.degrees(at(t,pitch,tq)):6.2f} {math.degrees(at(t,roll,tq)):6.2f}')
+
+# --- ОПОРНЫЙ КАНАЛ (/flow_dbg3): положение от опорного кадра ---
+if len(d3):
+    td3 = d3[:, 0] - t0
+    A0 = float(os.environ.get('BC_A0', 13)); A1 = float(os.environ.get('BC_A1', 21))
+    w3 = (td3 >= A0) & (td3 <= A1)
+    print(f'\nОПОРНЫЙ КАНАЛ, окно {A0:.0f}..{A1:.0f}с (n={w3.sum()}):')
+    print('   t   kf_logs  kf_dx  точек | v_fwd  путь от начала окна, м | pitch_cmd')
+    x0, y0 = np.interp(A0, t, x), np.interp(A0, t, y)
+    for tq in np.arange(A0, A1 + 0.01, 1.0):
+        dd = math.hypot(np.interp(tq, t, x) - x0, np.interp(tq, t, y) - y0)
+        print(f'{tq:5.1f} {np.interp(tq,td3,d3[:,1]):+8.3f} {np.interp(tq,td3,d3[:,2]):+6.0f} '
+              f'{np.interp(tq,td3,d3[:,3]):6.0f} | {np.interp(tq,t,v_fwd):+5.2f} {dd:20.1f} | '
+              f'{np.interp(tq,td2,d2[:,1]):+8.1f}')
+    if w3.sum() > 10:
+        tt3 = td3[w3]
+        dist3 = np.array([math.hypot(np.interp(v,t,x)-x0, np.interp(v,t,y)-y0) for v in tt3])
+        kfl = d3[w3, 1]
+        print(f'  corr(kf_logs, удаление от начала окна) = {np.corrcoef(kfl, dist3)[0,1]:+.3f}; '
+              f'kf_logs: среднее {kfl.mean():+.3f}, размах {kfl.min():+.3f}..{kfl.max():+.3f}')
+        print(f'  точек опоры: медиана {np.median(d3[w3,3]):.0f} '
+              f'(падение до порога = пересев, точка удержания сменилась)')
 
 # --- перцепт на месте: пока борт стоит/висит почти без скорости ---
 still = np.abs(v_fwd) < 0.3
