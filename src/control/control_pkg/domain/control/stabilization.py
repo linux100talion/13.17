@@ -35,7 +35,7 @@ class GzHold(StabilizationStrategy):
 
     def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
                  psign=1.0, rsign=1.0, axes=frozenset({"roll", "pitch"}),
-                 yaw_kp=80.0, yaw_sign=1.0, cmd_gain=0.8, yaw_cmd_gain=0.5):
+                 yaw_kp=80.0, yaw_sign=-1.0, cmd_gain=0.8, yaw_cmd_gain=0.5):
         self.kp, self.kd, self.ki = kp, kd, ki
         self.imax, self.max = imax, max_pwm
         self.psign, self.rsign = psign, rsign
@@ -85,7 +85,15 @@ class GzHold(StabilizationStrategy):
         ro = self.rsign * (self.kp * e_rgt + self.kd * v_rgt + self.ki * i_rgt)
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
-        # yaw — курс-холд к КОМАНДНОМУ курсу (интеграл yaw-стика; c_yaw=0 → держит вход)
+        # yaw — курс-холд к КОМАНДНОМУ курсу (интеграл yaw-стика; c_yaw=0 → держит вход).
+        # ⚠️ yaw_sign = −1, и это ПРОВЕРЕНО прогоном K1_slope, а не выведено из конвенции.
+        # Там стоял дефолт +1, и борт раскрутило на 439° за 18 с (скорость курса всё
+        # время одного знака, пики 73°/с — предел канала). Разбор: курс рос, значит
+        # eyaw = yawsp − gt_yaw был отрицательным, значит команда шла НИЖЕ центра, и борт
+        # продолжал вращаться туда же. Следовательно «ниже центра» = вращение в +yaw, и
+        # гасить его надо командой ВЫШЕ центра при отрицательной ошибке → знак −1.
+        # Ветка появилась при рефакторинге (в монолите gt-курс-холда не было, курс держал
+        # DpYawHold по потоку) и до K1 в полёте не проверялась ни разу.
         eyaw = math.atan2(math.sin(self._yawsp - s.gt_yaw),
                           math.cos(self._yawsp - s.gt_yaw))
         yo = clamp(self.yaw_sign * self.yaw_kp * eyaw, -self.max, self.max)
