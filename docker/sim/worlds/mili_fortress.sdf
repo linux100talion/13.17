@@ -182,12 +182,14 @@
       <pose>-34.25 -28.43 0 0 0 4.007</pose>
       <uri>model://pine_tree</uri>
     </include>
+    <!-- SCENE-CLEAR pine_tree_5 (pine_tree) — вернуть: scene_objects.py restore
     <include>
       <name>pine_tree_5</name>
       <static>true</static>
       <pose>20.08 19.31 0 0 0 4.415</pose>
       <uri>model://pine_tree</uri>
     </include>
+    -->
     <include>
       <name>pine_tree_6</name>
       <static>true</static>
@@ -294,24 +296,28 @@
     </include>
 
     <!-- ====== Огонь — замена <population> ====== -->
+    <!-- SCENE-CLEAR fire_1 (fire) — вернуть: scene_objects.py restore
     <include>
       <name>fire_1</name>
       <static>true</static>
       <pose>-30.81 14.0 0 0 0 2.752</pose>
       <uri>model://fire</uri>
     </include>
+    -->
     <include>
       <name>fire_2</name>
       <static>true</static>
       <pose>-25.56 -52.19 0 0 0 3.452</pose>
       <uri>model://fire</uri>
     </include>
+    <!-- SCENE-CLEAR fire_3 (fire) — вернуть: scene_objects.py restore
     <include>
       <name>fire_3</name>
       <static>true</static>
       <pose>-26.77 2.07 0 0 0 1.994</pose>
       <uri>model://fire</uri>
     </include>
+    -->
     <include>
       <name>fire_4</name>
       <static>true</static>
@@ -390,12 +396,14 @@
       <pose>-74.18 -77.03 0 0 0 5.971</pose>
       <uri>model://fire</uri>
     </include>
+    <!-- SCENE-CLEAR fire_17 (fire) — вернуть: scene_objects.py restore
     <include>
       <name>fire_17</name>
       <static>true</static>
       <pose>-26.69 -10.63 0 0 0 2.25</pose>
       <uri>model://fire</uri>
     </include>
+    -->
     <include>
       <name>fire_18</name>
       <static>true</static>
