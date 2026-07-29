@@ -52,7 +52,7 @@ class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1, kf_min_pts=40,
                  kf_max_step=0.05, cam_tilt=0.26, kf_tilt_k=0.05, feat_lo=0.667,
-                 kf_alt_max=0.06):
+                 kf_alt_max=0.06, kf_reject_max=10):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -121,6 +121,18 @@ class FlowEstimator:
         self.kf_max_step = float(kf_max_step)
         self._kf_logs_prev = None
         self.kf_rejects = 0
+        # ЗАЩЁЛКА, которую эта переменная снимает. Отсечка выше молчит по одному кадру,
+        # но на скорости точки вылетают из кадра, подобие скачет больше порога КАЖДЫЙ
+        # кадр — и канал затыкается насовсем: значение держится прежнее, kf_valid=False,
+        # регулятор молчит. Пересев при этом не срабатывает (точек хватает, высота
+        # стабильна). Замер H8s1: kf_logs замер на 0.085 и не двигался пять секунд, борт
+        # разогнался с 3.9 до 6.4 м/с и улетел на 20 м; вышло само собой, только когда
+        # точек стало мало и опора пересеялась — контур тут же скомандовал верно.
+        # Чем быстрее борт, тем надёжнее был заткнут канал — ровно когда он нужнее.
+        # Поэтому: отбраковки ПОДРЯД дольше kf_reject_max кадров (10 ≈ 0.5 с) значат не
+        # выброс, а протухшую опору → пересев.
+        self.kf_reject_max = int(kf_reject_max)
+        self._kf_reject_run = 0
         # --- КОМПЕНСАЦИЯ НАКЛОНА (главный источник шума опорного канала в полёте) ---
         # Камера смотрит вниз на cam_tilt (SDF: 0.26 рад = 14.9°; по горизонту в кадре
         # 12.9° ±2.4 — метод грубый, разница уходит в подобранный коэффициент). Борт для
@@ -200,6 +212,7 @@ class FlowEstimator:
             self.kf_ref = self.kf_cur = None
             return False
         self._kf_logs_prev = None                   # новая опора — новый отсчёт
+        self._kf_reject_run = 0
         self._kf_buf = []
         self.kf_ref = pts.reshape(-1, 2).copy()     # где точки были в ОПОРНОМ кадре
         self.kf_cur = pts.reshape(-1, 2).copy()     # где они сейчас (1:1 с kf_ref)
@@ -322,8 +335,11 @@ class FlowEstimator:
                     if (self.kf_max_step > 0 and self._kf_logs_prev is not None
                             and abs(kf_logs - self._kf_logs_prev) > self.kf_max_step):
                         self.kf_rejects += 1
+                        self._kf_reject_run += 1
                         kf_logs = self._kf_logs_prev   # выброс: держим прошлое значение
                         kf_ok = False                  # и помечаем кадр недостоверным
+                    else:
+                        self._kf_reject_run = 0
                     self._kf_logs_prev = kf_logs
                     # Сглаживание — тем же N, что у продольной оси. Сигнал медленный
                     # (положение), поэтому медиана почти не смазывает его, а шум режет:
@@ -360,7 +376,8 @@ class FlowEstimator:
         # и в этих кадрах лежит положение, которого нет в межкадровом сдвиге.
         if (self._kf_pending or self.kf_cur is None
                 or len(self.kf_cur) < self.kf_min_pts
-                or alt_drift > self.kf_alt_max):
+                or alt_drift > self.kf_alt_max
+                or self._kf_reject_run > self.kf_reject_max):
             if not self._kf_pending and self.kf_cur is not None:
                 self.kf_reseeds += 1        # опора потеряна: точка удержания сменилась
             if self._seed(gray):
