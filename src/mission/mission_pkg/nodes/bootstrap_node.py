@@ -226,6 +226,10 @@ def _parse() -> tuple:
     p.add_argument('--roll-osign', dest='roll_osign', type=float, default=_D.roll_osign)
     p.add_argument('--roll-cmd-gain', dest='roll_cmd_gain', type=float, default=_D.roll_cmd_gain)
     p.add_argument('--roll-smooth', dest='roll_smooth', type=int, default=_D.roll_smooth)
+    # --- ВЫСОТА (внешний контур AltHold; обоснование — control/altitude.py) ---
+    p.add_argument('--alt-kp', dest='alt_kp', type=float, default=_D.alt_kp)
+    p.add_argument('--alt-rate-max', dest='alt_rate_max', type=float, default=_D.alt_rate_max)
+    p.add_argument('--alt-tol', dest='alt_tol', type=float, default=_D.alt_tol)
     p.add_argument('--pitch-kp', dest='pitch_kp', type=float, default=_D.pitch_kp)
     p.add_argument('--pitch-ki', dest='pitch_ki', type=float, default=_D.pitch_ki)
     p.add_argument('--pitch-kd', dest='pitch_kd', type=float, default=_D.pitch_kd)

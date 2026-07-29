@@ -25,6 +25,7 @@ ControlStack(build_stabilizers(spec) + профиль-сегмент): один 
 import re
 
 from control_pkg.application.control_stack import ControlStack
+from control_pkg.domain.control.altitude import AltHold
 from control_pkg.domain.control.excitation import NoExcitation
 from control_pkg.domain.control.trajectory import ConstProfile, StationKeep, StaticSetpoint
 from control_pkg.domain.rc import RC_MIN_THR
@@ -94,6 +95,12 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold
     lvl = cfg.mv_level
+    # ОДИН контур высоты на всё задание: набор и удержание должны говорить с FCU одним
+    # законом, иначе на стыке шагов высота прыгает (замер J1b: набор отдавал стик в
+    # центр с vz=+1.6 м/с → перелёт 2.2 м, и висение узаконивало этот перелёт).
+    alt_hold = AltHold(kp=cfg.alt_kp, rate_max=cfg.alt_rate_max, tol=cfg.alt_tol,
+                       dz=cfg.alt_dz, span=cfg.alt_span, rate_full=cfg.alt_rate_full)
+    alt_target = [None]        # высота последнего climb — уставка для Control-шагов
     steps = [
         AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget),
         Arm("arm", RC_MIN_THR, cfg.arm_budget),
@@ -103,7 +110,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
         stack = ControlStack(build_stabilizers(cfg, stab_spec), prof, NoExcitation(),
                              slew=cfg.slew)
         st = Control(name, stack, hold, keep=keep, handover=handover,
-                     wait_gt=wait_gt, result="MISSION_DONE")
+                     wait_gt=wait_gt, result="MISSION_DONE",
+                     alt_hold=alt_hold, alt_target=alt_target[0])
         st.fence = cfg.fence          # стендовая страховка: увод дальше fence → land
         return st
 
@@ -120,9 +128,10 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
         if verb == "climb":
             if num is None:
                 raise ValueError(f"climb требует высоту(м): {tok!r}")
+            alt_target[0] = num
             steps.append(Climb(f"climb{i}", num, cfg.throttle_climb, cfg.climb_budget,
                                land_step="land", keep=keep,
-                               stack=_hold_stack(), wait_gt=wait_gt))
+                               stack=_hold_stack(), wait_gt=wait_gt, alt_hold=alt_hold))
         elif verb in _MV:
             if num is None:
                 raise ValueError(f"{verb} требует длительность(сек): {tok!r}")

@@ -51,7 +51,8 @@ def read(bag):
             m = deserialize_message(raw, Vector3Stamped)
             d2.append((stamp(m), m.vector.x, m.vector.y, m.vector.z))
         elif topic == '/flow_dbg3':
-            # ОПОРНЫЙ канал: (kf_logs, kf_dx, kf_n) — положение от опорного кадра
+            # ОПОРНЫЙ канал: (kf_logs, kf_vel, kf_n) — положение и скорость от опоры
+            # ⚠️ в бэгах до J1c слот y = kf_dx (сдвиг X в px), а не kf_vel
             m = deserialize_message(raw, Vector3Stamped)
             d3.append((stamp(m), m.vector.x, m.vector.y, m.vector.z))
     return np.array(od), np.array(d1), np.array(d2), np.array(d3)
@@ -95,11 +96,11 @@ if len(d3):
     A0 = float(os.environ.get('BC_A0', 13)); A1 = float(os.environ.get('BC_A1', 21))
     w3 = (td3 >= A0) & (td3 <= A1)
     print(f'\nОПОРНЫЙ КАНАЛ, окно {A0:.0f}..{A1:.0f}с (n={w3.sum()}):')
-    print('   t   kf_logs  kf_dx  точек | v_fwd  путь от начала окна, м | pitch_cmd')
+    print('   t   kf_logs  kf_vel  точек | v_fwd  путь от начала окна, м | pitch_cmd')
     x0, y0 = np.interp(A0, t, x), np.interp(A0, t, y)
     for tq in np.arange(A0, A1 + 0.01, 1.0):
         dd = math.hypot(np.interp(tq, t, x) - x0, np.interp(tq, t, y) - y0)
-        print(f'{tq:5.1f} {np.interp(tq,td3,d3[:,1]):+8.3f} {np.interp(tq,td3,d3[:,2]):+6.0f} '
+        print(f'{tq:5.1f} {np.interp(tq,td3,d3[:,1]):+8.3f} {np.interp(tq,td3,d3[:,2])*1e3:+6.1f} '
               f'{np.interp(tq,td3,d3[:,3]):6.0f} | {np.interp(tq,t,v_fwd):+5.2f} {dd:20.1f} | '
               f'{np.interp(tq,td2,d2[:,1]):+8.1f}')
     if w3.sum() > 10:

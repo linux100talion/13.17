@@ -219,6 +219,16 @@ class _FlowDamper1D(StabilizationStrategy):
     def _signal(self, s): raise NotImplementedError
     def _cmd(self, sp): raise NotImplementedError
 
+    def _signal_dot(self, s):
+        """Готовая производная сигнала, если оценщик её считает лучше нас.
+
+        None → D-член берётся разностью соседних кадров (как было). Осям, чей сигнал
+        — уже скорость (roll/yaw по потоку), разность и нужна. Продольной оси, чей
+        сигнал — ПОЛОЖЕНИЕ, разность не годится: её corr с истиной +0.27 против +0.80
+        у оконного наклона (замер J1b), см. DpPitchHold.
+        """
+        return None
+
     def enter(self, s: DroneState) -> None:
         self._i = 0.0
         self._prev_err = 0.0
@@ -244,7 +254,9 @@ class _FlowDamper1D(StabilizationStrategy):
             blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
             err = self._signal(s) - self._cmd(sp) * self.cmd_gain   # velocity-assist
             self._i = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
-            d = self.kd * (err - self._prev_err) / fdt
+            dot = self._signal_dot(s)
+            d = (self.kd * dot if dot is not None
+                 else self.kd * (err - self._prev_err) / fdt)
             self._prev_err = err
             u = clamp(self.kp * err + self._i + d, -self.max, self.max)
             self._out = self.osign * blend * u
@@ -301,6 +313,23 @@ class DpPitchHold(_FlowDamper1D):
 
     def _signal(self, s): return s.kf_logs
     def _cmd(self, sp): return sp.c_fwd
+
+    def _signal_dot(self, s):
+        """D-член по ОКОННОЙ скорости опоры, а не по разности соседних кадров.
+
+        Чем это было: замер J1b (короткая опора с накоплением, hover40). Канал
+        положения стал наконец рабочим — corr с истинным удалением +0.74 на 27 м,
+        накопитель показал 31 м при истинных 28. И тем же прогоном борт ушёл на 34 м
+        в АВТОКОЛЕБАНИЕ: +11 → −23 → +14 м, период 22 с. Знак верен (corr удаления с
+        тангажом −0.91), гейна хватало (kp-член 192 PWM при потолке 150) — не хватало
+        ДЕМПФИРОВАНИЯ. П-регулятор по положению на двойном интеграторе с задержкой
+        1.04 с обязан звенеть, а kd работал по шуму: разность соседних кадров
+        коррелирует с истинной скоростью на +0.27 (шаг сигнала p95 0.0134 против
+        полезного приращения ~0.001 за кадр), выход её kd-члена бил в потолок 150 PWM
+        на 21% кадров и переворачивал знак железной команды 9 раз за 5 с.
+        Оконный наклон (kf_win=1 с) даёт corr +0.80 при той же крутизне.
+        """
+        return s.kf_vel
 
     def _signal_ok(self, s):
         # опора действительна только на постоянной высоте: на наборе и снижении

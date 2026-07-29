@@ -89,6 +89,21 @@ rc = dp.update(DroneState(flow_seq=5, kf_logs=+0.02, kf_valid=False, flow_conf=0
                           flow_dt=0.05, now_sim=0.25), Setpoint(), 0.05)
 check("DpPitchHold: опора протухла → команда в центр", rc.pitch == RC_CENTER)
 
+# D-член берётся из ОКОННОЙ скорости опоры (s.kf_vel), а не разностью кадров: та
+# коррелирует с истинной скоростью на +0.27 против +0.80 у окна (замер J1b, где
+# мёртвый kd дал автоколебание ±20 м). Проверяем оба свойства: (1) при нулевом
+# положении едущий вперёд борт тормозится, (2) разность кадров больше НЕ участвует.
+dv = DpPitchHold(kp=1500.0, ki=0.0, kd=5000.0)
+dv.enter(DroneState(flow_seq=-1))
+rc = dv.update(DroneState(flow_seq=1, kf_logs=0.0, kf_vel=+0.011, kf_valid=True,
+                          flow_conf=0.5, flow_dt=0.05, now_sim=0.05), Setpoint(), 0.05)
+# едем вперёд 1 м/с (kf_vel=+0.011) при нулевой ошибке → 1500 + 5000·0.011 = 1555
+check("DpPitchHold: ход вперёд при нулевой ошибке → торможение (pitch=1555)", rc.pitch == 1555)
+rc = dv.update(DroneState(flow_seq=2, kf_logs=+0.02, kf_vel=0.0, kf_valid=True,
+                          flow_conf=0.5, flow_dt=0.05, now_sim=0.10), Setpoint(), 0.05)
+# положение прыгнуло на +0.02 за кадр, но kf_vel=0 → чистое kp: 1500 + 1500·0.02 = 1530
+check("DpPitchHold: скачок положения БЕЗ скорости → kd молчит (pitch=1530)", rc.pitch == 1530)
+
 # --- DpHold: композит всех трёх осей (roll/yaw по потоку, pitch по опоре) ---
 dh = DpHold()
 dh.enter(DroneState(flow_seq=-1))

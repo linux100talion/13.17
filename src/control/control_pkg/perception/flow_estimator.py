@@ -52,7 +52,7 @@ class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1, kf_min_pts=40,
                  kf_max_step=0.05, cam_tilt=0.26, kf_tilt_k=0.05, feat_lo=0.667,
-                 kf_alt_max=0.06, kf_reject_max=10, kf_seg_max=0.027):
+                 kf_alt_max=0.06, kf_reject_max=10, kf_seg_max=0.027, kf_win=1.0):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -150,6 +150,19 @@ class FlowEstimator:
         self.kf_seg_max = float(kf_seg_max)
         self.kf_acc = 0.0                   # закрытые сегменты, log-единиц
         self.kf_segs = 0                    # сколько сегментов закрыто (диагностика)
+        # --- СКОРОСТЬ ОПОРЫ: наклон МНК в окне kf_win секунд ---
+        # Демпферу нужна производная положения. Считать её кадр-к-кадру нельзя: шаг
+        # сигнала (медиана 0.0007, p95 0.0134 — замер J1b) на порядок больше полезного
+        # приращения, и производная выходит чистым шумом. Замер J1b против истинной
+        # v_fwd по одометрии: кадр-к-кадру corr +0.27, окно 0.25 с +0.46, 0.5 с +0.61,
+        # 1.0 с +0.80, 1.5-2.0 с +0.84. Крутизна при этом стабильна (+11.1±0.5
+        # m-log/(м/с) на всех окнах) — то есть окно не искажает масштаб, только режет шум.
+        # Берём 1.0 с: своя задержка окна ≈ W/2 = 0.5 с, а в контуре уже есть 1.04 с
+        # (замер задержек J1b), и на периоде автоколебания 22 с полсекунды = 8° фазы.
+        # 1.5 с дало бы +0.04 корреляции за вдвое большую задержку — не размен.
+        self.kf_win = float(kf_win)
+        self._kf_hist = []                  # [(stamp, kf_logs)] в окне kf_win
+        self.kf_vel = 0.0                   # log-единиц в секунду (≈ +0.0111·v_fwd)
         # --- КОМПЕНСАЦИЯ НАКЛОНА (главный источник шума опорного канала в полёте) ---
         # Камера смотрит вниз на cam_tilt (SDF: 0.26 рад = 14.9°; по горизонту в кадре
         # 12.9° ±2.4 — метод грубый, разница уходит в подобранный коэффициент). Борт для
@@ -223,6 +236,30 @@ class FlowEstimator:
         self._kf_pending = True
         self.kf_acc = 0.0       # новая точка удержания — счёт с нуля
         self.kf_segs = 0
+        self._kf_hist = []      # положение отсчитывается заново → окно скорости тоже
+        self.kf_vel = 0.0
+
+    def _kf_vel_update(self, stamp, kf_logs, kf_ok):
+        """Скорость опоры = наклон МНК по окну kf_win секунд (см. ctor).
+
+        Недостоверные кадры в окно НЕ кладём: их значение — задержанная копия
+        прошлого, и наклон по ним занижен. Окно при этом не чистим — вернётся
+        достоверность, вернётся и оценка, а пропуск в 2-3 кадра наклону не мешает.
+        """
+        if kf_ok:
+            self._kf_hist.append((float(stamp), float(kf_logs)))
+        self._kf_hist = [p for p in self._kf_hist if stamp - p[0] <= self.kf_win]
+        if len(self._kf_hist) < 4:
+            self.kf_vel = 0.0
+            return
+        ts = np.array([p[0] for p in self._kf_hist])
+        vs = np.array([p[1] for p in self._kf_hist])
+        span = ts[-1] - ts[0]
+        if span < 0.5 * self.kf_win:     # окно ещё не набралось (вход в сегмент)
+            self.kf_vel = 0.0
+            return
+        tc = ts - ts.mean()
+        self.kf_vel = float(np.dot(tc, vs - vs.mean()) / np.dot(tc, tc))
 
     def _seed(self, gray):
         """Посеять точки и сделать текущий кадр опорным."""
@@ -370,6 +407,7 @@ class FlowEstimator:
                         kf_logs = float(np.median(self._kf_buf))
                     kf_seg = kf_logs                  # смещение ВНУТРИ текущего сегмента
                     kf_logs = self.kf_acc + kf_seg    # наружу — полное от точки удержания
+                self._kf_vel_update(stamp, kf_logs, kf_ok)
                 out = dict(
                     lateral=lateral, lateral_raw=lateral_raw, yaw_flow=yaw_flow,
                     longitudinal=longitudinal, longitudinal_raw=longitudinal_raw,
@@ -380,8 +418,10 @@ class FlowEstimator:
                     conf=float(n) / float(self.max_feats),
                     # --- опора: положение относительно опорного кадра ---
                     kf_dx=kf_dx, kf_dy=kf_dy, kf_logs=kf_logs, kf_rot=kf_rot,
+                    kf_vel=self.kf_vel,
                     kf_n=len(self.kf_ref) if self.kf_ref is not None else 0,
                     kf_age=self.kf_age, kf_reseeds=self.kf_reseeds,
+                    kf_segs=self.kf_segs, kf_rejects=self.kf_rejects,
                     kf_valid=kf_ok,
                     # --- диагностика для flow_derotation_check ---
                     resid_rms=float(np.sqrt(np.mean(np.sum(tr ** 2, axis=1)))),

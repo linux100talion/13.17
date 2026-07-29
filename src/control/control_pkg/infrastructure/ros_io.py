@@ -31,6 +31,7 @@ class RosDebugSink:
         self._pub = node.create_publisher(Vector3Stamped, '/flow_dbg', 10)
         self._pub2 = node.create_publisher(Vector3Stamped, '/flow_dbg2', 10)
         self._pub3 = node.create_publisher(Vector3Stamped, '/flow_dbg3', 10)
+        self._pub4 = node.create_publisher(Vector3Stamped, '/flow_dbg4', 10)
 
     def publish(self, roll_off: float, flow_off: float, conf: float, stamp: float) -> None:
         d = Vector3Stamped()
@@ -57,11 +58,25 @@ class RosDebugSink:
         d2.vector.y = float(s.flow_longitudinal)
         d2.vector.z = float(s.flow_yaw)
         self._pub2.publish(d2)
-        # /flow_dbg3 = ОПОРА: (log масштаба, сдвиг X, доля видимой опоры). Топик уже
-        # стоял в TOPICS_EXTRA калиб-прогонов, но публиковать в него было нечего.
+        # /flow_dbg3 = ОПОРА: (log масштаба = ПОЛОЖЕНИЕ, оконная СКОРОСТЬ опоры,
+        # сколько точек видно). Второй слот раньше держал kf_dx (сдвиг X) — в разборе
+        # продольной оси он не использовался ни разу, а kf_vel теперь D-член контура,
+        # и без него в бэге нельзя проверить демпфер.
         d3 = Vector3Stamped()
         d3.header.stamp = t
         d3.vector.x = float(s.kf_logs)
-        d3.vector.y = float(s.kf_dx)
+        d3.vector.y = float(s.kf_vel)
         d3.vector.z = float(s.kf_n)
         self._pub3.publish(d3)
+        # /flow_dbg4 = СУДЬБА ОПОРЫ, накопительные счётчики: (сегментов ЗАЧТЕНО,
+        # пересевов с ВЫБРОШЕННЫМ сегментом, кадров-выбросов). Из телеметрии их не
+        # восстановить: пересев виден только по прыжку kf_n ВВЕРХ, а если новый посев
+        # дал точек меньше, чем отслеживалось, он неотличим — по J1b так насчитались
+        # 25 пересевов в висении при явно большем числе (накопитель дошёл до 0.42,
+        # то есть закрытых сегментов было около полутора десятков).
+        d4 = Vector3Stamped()
+        d4.header.stamp = t
+        d4.vector.x = float(s.kf_segs)
+        d4.vector.y = float(s.kf_reseeds)
+        d4.vector.z = float(s.kf_rejects)
+        self._pub4.publish(d4)

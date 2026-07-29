@@ -107,10 +107,14 @@ class Climb(Step):
     есть; иначе аборт → прыжок на посадочный шаг (RC override не принят / не взлетели)."""
 
     def __init__(self, name, alt, throttle, budget, land_step="land", keep="ALT_HOLD",
-                 stack=None, wait_gt=False):
+                 stack=None, wait_gt=False, alt_hold=None):
         self.name = name
         self.alt = alt
         self.throttle = throttle
+        # AltHold (или None = прежнее поведение: постоянный throttle_climb до цели).
+        # С контуром шаг ТОРМОЗИТ на подходе: без него он выходил с vz=+1.6 м/с и
+        # ALT_HOLD доносил борт ещё на 2.2 м вверх (замер J1b: 3.0 → 5.2 м).
+        self.alt_hold = alt_hold
         self.budget = budget
         self.land_step = land_step
         self.keep = keep
@@ -120,13 +124,21 @@ class Climb(Step):
 
     def enter(self, ctx, s) -> None:
         self._entered_stack = False
+        if self.alt_hold is not None:
+            self.alt_hold.set_target(self.alt)
 
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=self.throttle)
+        thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
+        rc = RcCommand(throttle=thr)
         ctx.keep_mode(s, self.keep)
         _overlay_stack(self, ctx, s, rc)   # набор стабилизирован: горизонт держит стек с отрыва
-        if s.rel_alt is not None and s.rel_alt >= self.alt:
-            ctx.log.info(f"    набрали {s.rel_alt:.1f}м (цель {self.alt}м)")
+        # С контуром цель считается достигнутой по ДОПУСКУ, а не по «перешли черту»:
+        # иначе шаг закрывается на подлёте, когда контур ещё тормозит.
+        reached = (s.rel_alt is not None
+                   and (s.rel_alt >= self.alt if self.alt_hold is None
+                        else abs(s.rel_alt - self.alt) <= self.alt_hold.tol))
+        if reached:
+            ctx.log.info(f"    набрали {s.rel_alt:.2f}м (цель {self.alt}м)")
             return _next(rc)
         if ctx.elapsed() > self.budget:
             if s.rel_alt is not None and s.rel_alt >= 0.5:
@@ -148,10 +160,17 @@ class Control(Step):
     fence = 0.0
 
     def __init__(self, name, stack, throttle, keep="ALT_HOLD", handover=None,
-                 max_sec=0.0, wait_gt=False, result="HOLD_DONE"):
+                 max_sec=0.0, wait_gt=False, result="HOLD_DONE", alt_hold=None,
+                 alt_target=None):
         self.name = name
         self.stack = stack
         self.throttle = throttle
+        # Высоту держит контур, а НЕ «стик в центре»: центр в ALT_HOLD означает лишь
+        # «не менять высоту», и любую уже накопленную ошибку он консервирует. Уставка
+        # приходит от плана (высота последнего climb), а НЕ снимается с борта на входе —
+        # иначе шаг узаконил бы перелёт набора как рабочую высоту.
+        self.alt_hold = alt_hold
+        self.alt_target = alt_target
         self.keep = keep
         self.handover = handover
         self.max_sec = max_sec
@@ -161,9 +180,12 @@ class Control(Step):
 
     def enter(self, ctx, s) -> None:
         self._entered_stack = False
+        if self.alt_hold is not None and self.alt_target is not None:
+            self.alt_hold.set_target(self.alt_target)
 
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=self.throttle)
+        thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
+        rc = RcCommand(throttle=thr)
         ctx.keep_mode(s, self.keep)
         if not self._entered_stack:
             if self.wait_gt and not s.gt_valid:
