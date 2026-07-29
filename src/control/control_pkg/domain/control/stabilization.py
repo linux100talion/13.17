@@ -226,8 +226,19 @@ class _FlowDamper1D(StabilizationStrategy):
         self._out = 0.0
         self._last_frame_sim = -1e9
 
+    def _signal_ok(self, s) -> bool:
+        """Годен ли сигнал этой оси в этом кадре (переопределяется, где есть чем judge)."""
+        return True
+
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
-        if s.flow_seq != self._last_seq:            # НОВЫЙ кадр → продвигаем PID
+        if s.flow_seq != self._last_seq and not self._signal_ok(s):
+            # сигнал протух (у опоры — ушла высота): НЕ командуем и забываем производную,
+            # иначе на возврате она даст пинок на всю накопленную разницу
+            self._last_seq = s.flow_seq
+            self._prev_err = 0.0
+            self._out = 0.0
+            self._last_frame_sim = s.now_sim
+        elif s.flow_seq != self._last_seq:          # НОВЫЙ кадр → продвигаем PID
             self._last_seq = s.flow_seq
             fdt = max(1e-3, s.flow_dt)
             blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
@@ -290,6 +301,11 @@ class DpPitchHold(_FlowDamper1D):
 
     def _signal(self, s): return s.kf_logs
     def _cmd(self, sp): return sp.c_fwd
+
+    def _signal_ok(self, s):
+        # опора действительна только на постоянной высоте: на наборе и снижении
+        # оценщик помечает кадр kf_valid=False (см. flow_estimator.kf_alt_max)
+        return bool(s.kf_valid)
 
 
 class DpPitchBack(DpPitchHold):

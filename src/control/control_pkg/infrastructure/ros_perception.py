@@ -22,6 +22,7 @@ class RosPerception:
                  image_topic='/image_mono', imu_topic='/gz_imu/data_flu'):
         from rclpy.qos import qos_profile_sensor_data
         from sensor_msgs.msg import Image, Imu
+        from std_msgs.msg import Float64
         fx = fy = cam_w / 2.0          # pinhole 90° hfov
         cx, cy = cam_w / 2.0, cam_h / 2.0
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,
@@ -29,6 +30,7 @@ class RosPerception:
                                   yaw_smooth_n=yaw_smooth_n)
         self._omega = np.zeros(3)
         self._pitch = 0.0
+        self._alt = None
         self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
         self._kf_dx = self._kf_dy = self._kf_logs = self._kf_rot = 0.0
         self._kf_n = self._kf_age = self._kf_reseeds = 0
@@ -36,6 +38,9 @@ class RosPerception:
         self._dt = 0.0
         self._seq = 0
         node.create_subscription(Imu, imu_topic, self._on_imu, qos_profile_sensor_data)
+        # баро-высота: опора действительна только пока высота не ушла (см. flow_estimator)
+        node.create_subscription(Float64, '/mavros/global_position/rel_alt',
+                                 self._on_alt, qos_profile_sensor_data)
         node.create_subscription(Image, image_topic, self._on_image, qos_profile_sensor_data)
 
     def _on_imu(self, m):
@@ -47,12 +52,15 @@ class RosPerception:
         q = m.orientation
         self._pitch = math.asin(max(-1.0, min(1.0, 2.0 * (q.w * q.y - q.z * q.x))))
 
+    def _on_alt(self, m):
+        self._alt = float(m.data)
+
     def _on_image(self, m):
         if m.encoding not in ('mono8', '8UC1'):
             return
         gray = np.frombuffer(m.data, dtype=np.uint8).reshape(m.height, m.width)
         stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
-        res = self._est.process(gray, stamp, self._omega, self._pitch)
+        res = self._est.process(gray, stamp, self._omega, self._pitch, self._alt)
         if res is None:
             return
         self._lateral = res['lateral']
