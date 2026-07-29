@@ -52,7 +52,7 @@ class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1, kf_min_pts=40,
                  kf_max_step=0.05, cam_tilt=0.26, kf_tilt_k=0.05, feat_lo=0.667,
-                 kf_alt_max=0.06, kf_reject_max=10):
+                 kf_alt_max=0.06, kf_reject_max=10, kf_seg_max=0.027):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -133,6 +133,23 @@ class FlowEstimator:
         # выброс, а протухшую опору → пересев.
         self.kf_reject_max = int(kf_reject_max)
         self._kf_reject_run = 0
+        # --- КОРОТКАЯ ОПОРА С НАКОПЛЕНИЕМ ---
+        # Канал линеен только вблизи опоры. Замер по H9s1/H9s2/H8s2, |kf_logs| против
+        # истинного удаления: 0-2 м читается на 97/198/72%, 2-5 м на 72/56/44,
+        # 5-9 м на 58/34/63, 9-15 м на 41/30/44, 15-30 м на 3%. Причина геометрическая:
+        # масштаб чувствителен к БЛИЖНИМ точкам, а именно они первыми уходят из кадра
+        # при смещении; остаётся дальний план, у которого метр почти ничего не меняет.
+        # Контур из-за этого садился на устойчивое равновесие в 10-13 м: чем дальше
+        # борт, тем меньше причин его возвращать.
+        # Поэтому опору держим КОРОТКОЙ: набралось |Δ| больше kf_seg_max — сегмент
+        # закрывается, его значение уходит в накопитель, опора сеется заново. Отчёт
+        # наружу = накопитель + текущий сегмент, то есть работаем всегда в линейной зоне.
+        # 0.027 ≈ 2 м при крутизне 1.35%/м.
+        # Платим дрейфом счисления: шум сегмента 0.14 м, за 40 с при ~20 сегментах это
+        # √20·0.14 ≈ 0.6 м — против 13 м нынешнего равновесия размен выгодный.
+        self.kf_seg_max = float(kf_seg_max)
+        self.kf_acc = 0.0                   # закрытые сегменты, log-единиц
+        self.kf_segs = 0                    # сколько сегментов закрыто (диагностика)
         # --- КОМПЕНСАЦИЯ НАКЛОНА (главный источник шума опорного канала в полёте) ---
         # Камера смотрит вниз на cam_tilt (SDF: 0.26 рад = 14.9°; по горизонту в кадре
         # 12.9° ±2.4 — метод грубый, разница уходит в подобранный коэффициент). Борт для
@@ -197,13 +214,15 @@ class FlowEstimator:
         return np.column_stack([u_rot, v_rot])
 
     # ---------------------------------------------------------------- опора
-    def reset_keyframe(self):
+    def reset_keyframe(self):   # noqa: D401 — накопитель тоже обнуляется, см. ниже
         """Сбросить опору: следующий кадр станет новым опорным (точка удержания).
 
         Зовётся управляющим слоем на входе в сегмент удержания — как `enter()` у
         стабилизаторов. Позиция, которую отдаёт опорный канал, отсчитывается ОТ
         этого кадра; вернуться борт может только туда, что видит."""
         self._kf_pending = True
+        self.kf_acc = 0.0       # новая точка удержания — счёт с нуля
+        self.kf_segs = 0
 
     def _seed(self, gray):
         """Посеять точки и сделать текущий кадр опорным."""
@@ -349,6 +368,8 @@ class FlowEstimator:
                         self._kf_buf.pop(0)
                     if self.pitch_smooth_n > 1:
                         kf_logs = float(np.median(self._kf_buf))
+                    kf_seg = kf_logs                  # смещение ВНУТРИ текущего сегмента
+                    kf_logs = self.kf_acc + kf_seg    # наружу — полное от точки удержания
                 out = dict(
                     lateral=lateral, lateral_raw=lateral_raw, yaw_flow=yaw_flow,
                     longitudinal=longitudinal, longitudinal_raw=longitudinal_raw,
@@ -374,12 +395,24 @@ class FlowEstimator:
         # Опора пересевается ТОЛЬКО когда точек не осталось (или попросили сбросить):
         # фича живёт медиану 284 кадра = 9.4 с при 30 Гц (замер keyframe_track.py по G1),
         # и в этих кадрах лежит положение, которого нет в межкадровом сдвиге.
+        seg_full = (self._kf_logs_prev is not None
+                    and abs(self._kf_logs_prev) >= self.kf_seg_max)
         if (self._kf_pending or self.kf_cur is None
                 or len(self.kf_cur) < self.kf_min_pts
                 or alt_drift > self.kf_alt_max
-                or self._kf_reject_run > self.kf_reject_max):
+                or self._kf_reject_run > self.kf_reject_max
+                or seg_full):
             if not self._kf_pending and self.kf_cur is not None:
-                self.kf_reseeds += 1        # опора потеряна: точка удержания сменилась
+                # Сегмент закрываем в накопитель, ЕСЛИ его значение чему-то верили:
+                # плановый (набралось смещение) или потеря точек. На уходе высоты и
+                # на серии отбраковок измерение недостоверно — частичный сегмент
+                # выбрасываем, иначе в накопитель уедет мусор.
+                trust = seg_full or (len(self.kf_cur) < self.kf_min_pts)
+                if trust and self._kf_logs_prev is not None:
+                    self.kf_acc += self._kf_logs_prev
+                    self.kf_segs += 1
+                else:
+                    self.kf_reseeds += 1    # опора потеряна: точка удержания сменилась
             if self._seed(gray):
                 self._kf_pitch0 = pitch     # наклон опоры — от него считаем поправку
                 if alt is not None and alt > 0.2:
