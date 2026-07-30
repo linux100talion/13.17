@@ -48,6 +48,15 @@ WINS = [float(w) for w in os.environ.get('KV_WINS', '0.5,1,1.5,2,3').split(',')]
 # треть кадров теряется. Прореживание воспроизводит это условие офлайн: если шум
 # опоры вырастает до полётного, причина в темпе, а не в самом канале.
 DECIM = int(os.environ.get('KV_DECIM', 1))
+# ИСТОЧНИК ω и ТАНГАЖА. Нода в полёте берёт /gz_imu/data_flu — gz-IMU, пропущенный
+# через low-pass 5 Гц (фильтр настроен под VINS: срезает лимит-цикл rate-loop, см.
+# src/sim/imu_frd_to_flu.py). Оценщик вычитает вращательный поток по этой ω, и если
+# фильтр её запаздывает/ослабляет, остаток вращения уезжает в оценку перемещения.
+# Офлайн по умолчанию берётся MAVROS (EKF, без этого фильтра) — отсюда и подозрение,
+# что полётный шум опоры втрое больше офлайнового при одном и том же коде.
+# KV_IMU=gz — считать ровно тем, что видит нода; mavros — как раньше.
+IMU_SRC = os.environ.get('KV_IMU', 'mavros')
+IMU_TOPIC = '/gz_imu/data_flu' if IMU_SRC == 'gz' else '/mavros/imu/data'
 
 # Интринсики и экстринсики — как у ноды (960×540, pinhole 90° hfov; см. ros_perception)
 CAM_W, CAM_H = 960, 540
@@ -80,7 +89,7 @@ def read(bag):
             m = deserialize_message(raw, Odometry)
             p = m.pose.pose.position
             od.append((stamp(m), p.x, p.y, p.z) + euler(m.pose.pose.orientation))
-        elif topic == '/mavros/imu/data':
+        elif topic == IMU_TOPIC:
             m = deserialize_message(raw, Imu)
             w = m.angular_velocity
             imu.append((stamp(m), w.x, w.y, w.z) + euler(m.orientation))
@@ -113,7 +122,10 @@ def main():
         frames = frames[::DECIM]
     if MAXF:
         frames = frames[:MAXF]
-    print(f'бэг {BAG}: кадров {len(frames)}, одометрии {len(od)}, imu {len(imu)}, баро {len(alt)}')
+    print(f'бэг {BAG}: кадров {len(frames)}, одометрии {len(od)}, '
+          f'imu {len(imu)} ({IMU_TOPIC}), баро {len(alt)}')
+    if not len(imu):
+        print(f'⚠️ в бэге нет {IMU_TOPIC} — нечем считать ω/тангаж'); return
     est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, R_CAM_IMU,
                         rotflow_sign=1.0, pitch_smooth_n=9, roll_smooth_n=25, yaw_smooth_n=5)
     ts, raw, rep, acc = [], [], [], []

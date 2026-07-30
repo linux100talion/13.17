@@ -19,7 +19,21 @@ from ..perception.flow_estimator import FlowEstimator
 class RosPerception:
     def __init__(self, node, cam_w, cam_h, R_cam_imu, rotflow_sign=1.0,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=5,
-                 image_topic='/image_mono', imu_topic='/gz_imu/data_flu'):
+                 image_topic='/image_mono', imu_topic='/mavros/imu/data'):
+        # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
+        # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
+        # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
+        # поток, и прожатая ω оставляет остаток вращения, который уезжает в оценку
+        # перемещения. Замер (kf_vel_check.py, один бэг J3, одни кадры, один код, разница
+        # только в источнике ω):
+        #             положение corr | шаг/кадр | скорость corr (окно 2с) | остаток
+        #   MAVROS         +0.89        0.0034          +0.68              1.43 м/с
+        #   gz_imu_flu     +0.61        0.0070          +0.32              3.86 м/с
+        # Полётная телеметрия того же прогона: +0.55 / +0.34 — то есть нода получала
+        # ровно вторую строку. Ориентация в фильтре проходит НЕтронутой, поэтому дело
+        # именно в угловой скорости, а не в тангаже.
+        # Плюс это совпадает с боевым бортом: на Orin IMU приходит с полётника через
+        # MAVROS (фильтр INS_GYRO_FILTER 20 Гц — вчетверо шире), gz-потока там нет вовсе.
         from rclpy.qos import qos_profile_sensor_data
         from sensor_msgs.msg import Image, Imu
         from std_msgs.msg import Float64
