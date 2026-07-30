@@ -19,7 +19,8 @@ from ..perception.flow_estimator import FlowEstimator
 class RosPerception:
     def __init__(self, node, cam_w, cam_h, R_cam_imu, rotflow_sign=1.0,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=5,
-                 image_topic='/image_mono', imu_topic='/mavros/imu/data'):
+                 image_topic='/image_mono', imu_topic='/mavros/imu/data',
+                 gyro_topic='/mavros/imu/data_raw'):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -43,6 +44,18 @@ class RosPerception:
                                   roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
                                   yaw_smooth_n=yaw_smooth_n)
         self._omega = np.zeros(3)
+        # ω НЕ «последняя пришедшая», а СРЕДНЯЯ ЗА МЕЖКАДРОВЫЙ ИНТЕРВАЛ. Оценщик
+        # умножает ω на dt, то есть ему нужен угол, повёрнутый МЕЖДУ кадрами, а не
+        # мгновенная скорость в момент прихода сообщения. Телеметрия при этом реже
+        # кадров: замер живьём — /mavros/imu/data 12.5 Гц, /mavros/imu/data_raw
+        # 20.8 Гц, камера 19-30 Гц. С «последней пришедшей» ω запаздывает до 80 мс;
+        # при 5°/с это 0.4° неснятого вращения = ~2 px ложного потока на fx=480 —
+        # прямо в оценку подобия опоры.
+        # Гироскоп берём из data_raw (RAW_IMU, вдвое чаще), тангаж — из ориентации
+        # data (ATTITUDE; наклон меняется медленно, 12.5 Гц ему хватает).
+        self._gyro_buf = []                 # [(t, ωx, ωy, ωz)] в окне последних кадров
+        self._gyro_own = False              # пришёл ли data_raw (иначе ATTITUDE-фолбэк)
+        self._prev_img_stamp = None
         self._pitch = 0.0
         self._alt = None
         self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
@@ -54,19 +67,50 @@ class RosPerception:
         self._dt = 0.0
         self._seq = 0
         node.create_subscription(Imu, imu_topic, self._on_imu, qos_profile_sensor_data)
+        if gyro_topic and gyro_topic != imu_topic:
+            node.create_subscription(Imu, gyro_topic,
+                                     lambda m: self._on_gyro(m, own=True),
+                                     qos_profile_sensor_data)
         # баро-высота: опора действительна только пока высота не ушла (см. flow_estimator)
         node.create_subscription(Float64, '/mavros/global_position/rel_alt',
                                  self._on_alt, qos_profile_sensor_data)
         node.create_subscription(Image, image_topic, self._on_image, qos_profile_sensor_data)
 
     def _on_imu(self, m):
-        self._omega = np.array([m.angular_velocity.x, m.angular_velocity.y,
-                                m.angular_velocity.z])
+        # ATTITUDE — только ФОЛБЭК: пока data_raw молчит, ω берём отсюда. Смешивать
+        # два источника в одном буфере нельзя — у них разный темп, и среднее за кадр
+        # перекосило бы в сторону того, кто чаще.
+        if not self._gyro_own:
+            self._on_gyro(m)
         # тангаж из ориентации того же сообщения — для компенсации наклона камеры
         # (на борту это оценка FCU; её дрейф 0.19°/с за секундное окно даёт 0.2°,
         # что мало против рабочих ±10°)
         q = m.orientation
         self._pitch = math.asin(max(-1.0, min(1.0, 2.0 * (q.w * q.y - q.z * q.x))))
+
+    def _on_gyro(self, m, own=False):
+        if own and not self._gyro_own:
+            self._gyro_own = True
+            self._gyro_buf = []             # выкидываем фолбэк-сэмплы, начинаем чисто
+        t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        w = m.angular_velocity
+        self._gyro_buf.append((t, w.x, w.y, w.z))
+        if len(self._gyro_buf) > 120:        # ~6 с при 20 Гц — с запасом на кадр
+            del self._gyro_buf[:-120]
+
+    def _omega_for(self, stamp):
+        """Средняя ω за интервал (прошлый кадр, этот кадр]. Нет попавших сэмплов —
+        берём ближайший по времени (лучше, чем последний пришедший: он в прошлом)."""
+        if not self._gyro_buf:
+            return self._omega
+        arr = np.asarray(self._gyro_buf)
+        t0 = self._prev_img_stamp
+        if t0 is not None:
+            sel = (arr[:, 0] > t0) & (arr[:, 0] <= stamp)
+            if sel.sum():
+                return arr[sel, 1:4].mean(axis=0)
+        i = int(np.argmin(np.abs(arr[:, 0] - stamp)))
+        return arr[i, 1:4]
 
     def _on_alt(self, m):
         self._alt = float(m.data)
@@ -76,7 +120,9 @@ class RosPerception:
             return
         gray = np.frombuffer(m.data, dtype=np.uint8).reshape(m.height, m.width)
         stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
-        res = self._est.process(gray, stamp, self._omega, self._pitch, self._alt)
+        omega = self._omega_for(stamp)
+        self._prev_img_stamp = stamp
+        res = self._est.process(gray, stamp, omega, self._pitch, self._alt)
         if res is None:
             return
         self._lateral = res['lateral']
