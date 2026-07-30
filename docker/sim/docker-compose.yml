@@ -45,7 +45,7 @@ services:
       # как и разрешение камеры → менять только через fresh-start. См. scripts/sim_up.sh.
       - WIND_SPD=${WIND_SPD:-0}
       - WIND_DIR_DEG=${WIND_DIR_DEG:-98}
-      - WIND_FACTOR=${WIND_FACTOR:-0.15}
+      - WIND_FACTOR=${WIND_FACTOR:-0.8}
 
     volumes:
       # - /tmp/.X11-unix:/tmp/.X11-unix:rw  # раскомментировать для GUI-режима
