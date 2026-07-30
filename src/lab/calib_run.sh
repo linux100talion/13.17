@@ -57,7 +57,7 @@ DRY_RUN="${DRY_RUN:-0}"
 # оба sim-штампованы; истина по углам/скорости — /model/iris_cam/odometry; оценка
 # углов у борта — /mavros/imu/data (нужна, чтобы отличить смещение объекта от смещения
 # ОЦЕНКИ, см. ToDo факт 2). /flow_dbg3 ещё не публикуется (очередь п.9) — записи не мешает.
-TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu}"
+TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
 
 # Бюджеты фаз — как в эталонном прогоне bootstrap_arch2 (CPU-бокс, низкий RTF).
 export BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-1800}"
