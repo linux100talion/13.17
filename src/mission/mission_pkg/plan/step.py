@@ -42,9 +42,9 @@ def _overlay_stack(step, ctx, s, rc) -> None:
     if not step._entered_stack:
         if step.wait_gt and not s.gt_valid:
             return                       # ждём истинную позу (gz-опора) перед активацией
-        step.stack.enter(s)
-        step._entered_stack = True
         ctx.reset_keyframe()             # начало сегмента = точка удержания
+        step.stack.enter(s)              # СТРОГО после сброса опоры: холдер положения
+        step._entered_stack = True       # берёт точку с первого кадра ОТ НОВОЙ опоры
         ctx.log.info(f"    {step.name}: стек активирован")
     ctrl = step.stack.update(s)
     rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
@@ -190,9 +190,9 @@ class Control(Step):
         if not self._entered_stack:
             if self.wait_gt and not s.gt_valid:
                 return _run(rc)                      # ждём истинную позу (gz-опора)
-            self.stack.enter(s)
-            self._entered_stack = True
             ctx.reset_keyframe()         # начало сегмента = точка удержания
+            self.stack.enter(s)          # СТРОГО после сброса опоры (см. _enter_stack)
+            self._entered_stack = True
             ctx.log.info(f"    {self.name}: стек активирован")
         if self.fence > 0 and s.gt_valid:
             d = math.hypot(s.gt_x, s.gt_y)

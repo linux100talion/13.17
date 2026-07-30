@@ -32,6 +32,7 @@ class RosDebugSink:
         self._pub2 = node.create_publisher(Vector3Stamped, '/flow_dbg2', 10)
         self._pub3 = node.create_publisher(Vector3Stamped, '/flow_dbg3', 10)
         self._pub4 = node.create_publisher(Vector3Stamped, '/flow_dbg4', 10)
+        self._pub5 = node.create_publisher(Vector3Stamped, '/flow_dbg5', 10)
 
     def publish(self, roll_off: float, flow_off: float, conf: float, stamp: float) -> None:
         d = Vector3Stamped()
@@ -40,6 +41,19 @@ class RosDebugSink:
         d.vector.y = float(flow_off)
         d.vector.z = float(conf)
         self._pub.publish(d)
+
+    def publish_hold(self, hold) -> None:
+        """/flow_dbg5 = УСТАВКА холдера положения: (точка удержания, ошибка до неё,
+        скорость уставки). Нужен, как только команда пилота начинает двигать уставку
+        (DpPitchHold в режиме `pos`): из телеметрии её не восстановить — это интеграл
+        команды по КАДРАМ, со стартом в захваченной точке. Без неё «борт не поехал» и
+        «уставка не поехала» в разборе неразличимы. hold=None (rate-оси) — не шлём."""
+        if hold is None:
+            return
+        d = Vector3Stamped()
+        d.header.stamp = self._node.get_clock().now().to_msg()
+        d.vector.x, d.vector.y, d.vector.z = (float(v) for v in hold)
+        self._pub5.publish(d)
 
     def publish_axes(self, s, rc) -> None:
         """Полный флоу-дамп (sim-штамп): /flow_dbg = (roll_off, flow_lateral, conf),

@@ -201,8 +201,38 @@ def _blend(conf, conf_min, conf_full):
 class _FlowDamper1D(StabilizationStrategy):
     """Общий одноосевой флоу-демпфер: гасит визуальную скорость к цели по ОДНОЙ оси.
     Покадровая интеграция (flow_seq), conf/stale-fade. Подклассы задают: какой сигнал
-    потока читать (_signal), какую c_* брать целью (_cmd), какую ось выдавать (_axis)."""
+    потока читать (_signal), какую c_* брать целью (_cmd), какую ось выдавать (_axis).
+
+    КАК ОСЬ ЧИТАЕТ КОМАНДУ ПИЛОТА (`_cmd_mode`) — по ПОРЯДКУ сигнала, не по вкусу:
+
+    - `rate` (сигнал = СКОРОСТЬ: flow_lateral у крена, flow_yaw у рыскания) —
+      c_*·cmd_gain это ЦЕЛЬ скорости, вычитается из сигнала. Стик держат — борт едет,
+      отпустили — встал. Так было всегда и для этих осей верно.
+    - `pos` (сигнал = ПОЛОЖЕНИЕ: kf_logs у тангажа) — c_*·cmd_gain это СКОРОСТЬ УСТАВКИ,
+      она ИНТЕГРИРУЕТСЯ в точку удержания (`_sp`), а ошибка считается до неё. Тот же
+      механизм, что `_spx/_spy` у GzHold/VinsHold, только уставка живёт в единицах
+      сигнала (log масштаба), а не в метрах.
+
+    Почему `pos` нельзя заменить вычитанием: у холдера положения c_*·cmd_gain дало бы
+    ПОСТОЯННОЕ СМЕЩЕНИЕ уставки — пилот жмёт «вперёд», борт уезжает на N метров и встаёт,
+    отпускает — возвращается назад. Не движение, а параллакс ручки.
+
+    Две детали режима `pos`, без которых он не летит:
+    1. Уставка стартует С НУЛЯ, а не с захваченного значения сигнала. Ноль сигнала = сам
+       опорный кадр, а шаг сбрасывает опору РОВНО при входе в сегмент (step.py зовёт
+       reset_keyframe перед stack.enter) — значит ноль и есть точка входа. Захват «где
+       стоим» пробовать нельзя: сброс опоры обнуляет накопитель, и кадр, посчитанный до
+       сброса, дал бы уставку, смещённую на всю прошлую отсидку — не разовый пинок, как
+       сейчас, а СТОЙКО ложную точку удержания. Пока сигнал негоден (набор высоты →
+       kf_valid=False), уставка не едет: иначе на возврате достоверности она окажется
+       впереди на весь простой.
+    2. D-член вычитает скорость уставки: демпфируется отклонение от ЗАДАННОЙ скорости,
+       а не сама заданная скорость. Иначе (kd=5000, крутизна 0.0145 log/м) команда 1 м/с
+       рождает 72 PWM постоянного сопротивления, 2 м/с — 145 PWM при потолке 150, то есть
+       контур душит собственную команду насыщением.
+    """
     _axis = "roll"
+    _cmd_mode = "rate"       # rate: c_* = цель скорости | pos: c_* = скорость уставки
 
     def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_pwm=150.0,
                  conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5):
@@ -215,6 +245,8 @@ class _FlowDamper1D(StabilizationStrategy):
         self._last_seq = -1
         self._out = 0.0
         self._last_frame_sim = -1e9
+        self._sp = 0.0           # pos-режим: точка удержания (0 = опорный кадр)
+        self._sp_rate = 0.0      # её текущая скорость — для D-члена и отладки
 
     def _signal(self, s): raise NotImplementedError
     def _cmd(self, sp): raise NotImplementedError
@@ -235,6 +267,10 @@ class _FlowDamper1D(StabilizationStrategy):
         self._last_seq = -1
         self._out = 0.0
         self._last_frame_sim = -1e9
+        # Уставка = опорный кадр (0), который шаг только что назначил сбросом опоры.
+        # Захват текущего сигнала здесь был бы гонкой со сбросом — см. docstring класса.
+        self._sp = 0.0
+        self._sp_rate = 0.0
 
     def _signal_ok(self, s) -> bool:
         """Годен ли сигнал этой оси в этом кадре (переопределяется, где есть чем judge)."""
@@ -252,10 +288,18 @@ class _FlowDamper1D(StabilizationStrategy):
             self._last_seq = s.flow_seq
             fdt = max(1e-3, s.flow_dt)
             blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
-            err = self._signal(s) - self._cmd(sp) * self.cmd_gain   # velocity-assist
+            if self._cmd_mode == "pos":
+                self._sp_rate = self._cmd(sp) * self.cmd_gain    # ед. сигнала в секунду
+                self._sp += self._sp_rate * fdt                  # УСТАВКА ЕДЕТ
+                err = self._signal(s) - self._sp
+            else:
+                self._sp_rate = 0.0
+                err = self._signal(s) - self._cmd(sp) * self.cmd_gain   # velocity-assist
             self._i = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
             dot = self._signal_dot(s)
-            d = (self.kd * dot if dot is not None
+            # разность соседних кадров уже считает производную ОШИБКИ (уставка в err),
+            # готовой производной сигнала уставку надо вычесть руками
+            d = (self.kd * (dot - self._sp_rate) if dot is not None
                  else self.kd * (err - self._prev_err) / fdt)
             self._prev_err = err
             u = clamp(self.kp * err + self._i + d, -self.max, self.max)
@@ -266,6 +310,16 @@ class _FlowDamper1D(StabilizationStrategy):
         rc = RcCommand(throttle=RC_CENTER)
         setattr(rc, self._axis, RC_CENTER + off)
         return rc
+
+    def hold_dbg(self):
+        """(уставка, ошибка до неё, скорость уставки) для бэга — или None у rate-осей.
+
+        Из телеметрии уставку не восстановить: она интеграл команды по КАДРАМ (fdt), а
+        не по тикам ноды, и стартует с захваченного значения. Без неё в разборе нельзя
+        отличить «борт не поехал» от «уставка не поехала»."""
+        if self._cmd_mode != "pos":
+            return None
+        return (self._sp, self._prev_err, self._sp_rate)
 
 
 class DpRollHold(_FlowDamper1D):
@@ -298,9 +352,17 @@ class DpPitchHold(_FlowDamper1D):
 
     ⚠️ Набор высоты тоже отдаляет землю (камера наклонена вниз) и читается как «уехал
     назад» → на подъёме контур будет толкать ВПЕРЁД. Компенсация по высоте не сделана;
-    пока это заметно только вне висения, где z держится."""
+    пока это заметно только вне висения, где z держится.
+
+    КОМАНДА ПИЛОТА идёт через ИНТЕГРАТОР УСТАВКИ (`_cmd_mode='pos'`, см. базу): стик
+    задаёт скорость, с которой едет точка удержания. `cmd_gain` поэтому меряется в
+    log/с при полном стике, а не в единицах сигнала: полный стик = желаемые v_max м/с,
+    то есть `cmd_gain = v_max · 0.0145` (крутизна канала 1.45-1.58 %/м, замер J2/K1s).
+    Для v_max = 2 м/с это 0.029 — на три порядка меньше ролловых 10, потому что там
+    ручка меряется в px/кадр. Дефолт 0.0 = команда не проходит (чистое удержание)."""
     axes = frozenset({"pitch"})
     _axis = "pitch"
+    _cmd_mode = "pos"        # сигнал = ПОЛОЖЕНИЕ → команду интегрируем в уставку
 
     def __init__(self, kp=2000.0, ki=0.0, kd=1000.0, imax=120.0, max_pwm=150.0,
                  conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=0.0, stale_sec=0.5):

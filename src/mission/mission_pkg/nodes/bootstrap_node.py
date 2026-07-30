@@ -155,6 +155,20 @@ class BootstrapArch2Node(Node):
         self._last_rc = rc
         self._publish(rc)
         self.debug.publish_axes(s, rc)   # флоу-дамп в bag: /flow_dbg + /flow_dbg2 (sim-штамп)
+        self.debug.publish_hold(self._hold_dbg())   # /flow_dbg5: уставка холдера положения
+
+    def _hold_dbg(self):
+        """Уставка активного холдера положения (DpPitchHold в режиме `pos`) — или None.
+
+        Ищем в стеке ТЕКУЩЕГО шага: стеки живут по сегментам, и уставка у каждого своя
+        (каждый сегмент = своя точка удержания). Первый ответивший и есть продольный
+        холдер — режим `pos` сейчас ровно у одной оси."""
+        st = None if self.runner.finished else self.runner.steps[self.runner.i]
+        for stab in getattr(getattr(st, 'stack', None), 'stabs', ()):
+            fn = getattr(stab, 'hold_dbg', None)
+            if fn is not None and fn() is not None:
+                return fn()
+        return None
 
     def _publish(self, rc: RcCommand):
         if self.runner.finished:          # план завершён — override не нужен
