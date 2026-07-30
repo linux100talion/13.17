@@ -41,6 +41,11 @@ services:
       # Применяется при СОЗДАНИИ контейнера → менять только через up/fresh-start.
       - CAMERA_W=${CAMERA_W:-1280}
       - CAMERA_H=${CAMERA_H:-720}
+      # ВЕТЕР (Gazebo WindEffects; 0 = выкл). Применяется при СОЗДАНИИ контейнера,
+      # как и разрешение камеры → менять только через fresh-start. См. scripts/sim_up.sh.
+      - WIND_SPD=${WIND_SPD:-0}
+      - WIND_DIR_DEG=${WIND_DIR_DEG:-98}
+      - WIND_FACTOR=${WIND_FACTOR:-0.15}
 
     volumes:
       # - /tmp/.X11-unix:/tmp/.X11-unix:rw  # раскомментировать для GUI-режима
