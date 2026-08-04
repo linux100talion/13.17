@@ -63,6 +63,21 @@ rc = gy.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=-0.2, now_si
                Setpoint(), 0.1)
 check("GzYawHold: уход в −yaw → команда ниже центра", rc.yaw < RC_CENTER)
 
+# --- GzYawHold: ЗНАК yaw-КОМАНДЫ (mv_cw/mv_ccw обязаны значить одно и то же
+# с холдером и без него). Открытый контур: c_yaw>0 → PWM выше центра (ControlStack),
+# а «выше центра» = разворот в −yaw ENU = ВПРАВО (замер K1_slope). Значит холдер на
+# c_yaw>0 обязан вести _yawsp в −yaw и выдавать команду ТОЖЕ выше центра.
+open_loop = ControlStack([], ConstProfile(10, c_yaw=0.3), NoExcitation())
+open_loop.enter(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.0))
+rc_open = open_loop.update(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.1))
+gy = GzYawHold()
+gy.enter(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.0))
+rc_hold = gy.update(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.1),
+                    Setpoint(c_yaw=0.3), 0.1)
+check("yaw-команда: открытый контур на c_yaw>0 → выше центра", rc_open.yaw > RC_CENTER)
+check("yaw-команда: GzYawHold на c_yaw>0 → ТУДА ЖЕ (выше центра)", rc_hold.yaw > RC_CENTER)
+check("yaw-команда: GzYawHold ведёт уставку в −yaw (вправо)", gy._yawsp < 0.0)
+
 # --- DpPitchHold: УДЕРЖАНИЕ продольного положения по опорному кадру → pitch ---
 # Сигнал теперь kf_logs (log масштаба от опоры, −0.0121 на метр), а не поток в px.
 # Два тика с ОДНИМ значением: на втором производная нулевая, остаётся чистое kp·err —

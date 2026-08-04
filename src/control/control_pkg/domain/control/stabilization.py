@@ -61,7 +61,12 @@ class GzHold(StabilizationStrategy):
         s0 = math.sin(self._yaw0)
         self._spx += (sp.c_fwd * c0 + sp.c_right * s0) * self.cmd_gain * dt
         self._spy += (sp.c_fwd * s0 - sp.c_right * c0) * self.cmd_gain * dt
-        self._yawsp += sp.c_yaw * self.yaw_cmd_gain * dt
+        # ⚠️ МИНУС, а не плюс. `c_yaw` — стик-конвенция (c_yaw>0 = стик вправо = разворот
+        # ВПРАВО), а `_yawsp`/`gt_yaw` — ENU (влево = +yaw). Замер K1_slope: PWM ниже
+        # центра = вращение в +yaw, значит открытый контур (control_stack: c_yaw → PWM
+        # выше центра) на c_yaw>0 крутит в −yaw. Холдер обязан ехать туда же, иначе один
+        # и тот же токен `mv_cw` означает разные стороны с холдером и без него.
+        self._yawsp -= sp.c_yaw * self.yaw_cmd_gain * dt
         ex = s.gt_x - self._spx
         ey = s.gt_y - self._spy
         now = s.now_sim
