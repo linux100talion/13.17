@@ -155,19 +155,32 @@ class BootstrapArch2Node(Node):
         self._last_rc = rc
         self._publish(rc)
         self.debug.publish_axes(s, rc)   # флоу-дамп в bag: /flow_dbg + /flow_dbg2 (sim-штамп)
-        self.debug.publish_hold(self._hold_dbg())   # /flow_dbg5: уставка холдера положения
+        self.debug.publish_hold(self._hold_dbg('pitch'))       # /flow_dbg5: уставка тангажа
+        self.debug.publish_hold_yaw(self._hold_dbg('yaw'))     # /flow_dbg6: уставка курса
 
-    def _hold_dbg(self):
-        """Уставка активного холдера положения (DpPitchHold в режиме `pos`) — или None.
+    def _hold_dbg(self, axis):
+        """Уставка холдера положения ЗАДАННОЙ оси (режим `pos`) — или None.
 
         Ищем в стеке ТЕКУЩЕГО шага: стеки живут по сегментам, и уставка у каждого своя
-        (каждый сегмент = своя точка удержания). Первый ответивший и есть продольный
-        холдер — режим `pos` сейчас ровно у одной оси."""
+        (каждый сегмент = своя точка удержания). Ось спрашиваем ЯВНО: pos-осей теперь
+        две (тангаж по kf_logs, рыскание по накопленному визуальному курсу), и прежнее
+        «первый ответивший» отдало бы в /flow_dbg5 то из них, что раньше в списке."""
         st = None if self.runner.finished else self.runner.steps[self.runner.i]
-        for stab in getattr(getattr(st, 'stack', None), 'stabs', ()):
-            fn = getattr(stab, 'hold_dbg', None)
-            if fn is not None and fn() is not None:
-                return fn()
+        return self._find_hold(getattr(getattr(st, 'stack', None), 'stabs', ()), axis)
+
+    def _find_hold(self, stabs, axis):
+        """Спуск в композиты: DpHold держит оси в `_subs`, снаружи у него одного
+        `hold_dbg` нет — под ним уставка не писалась вообще (и до рыскания тоже)."""
+        for stab in stabs:
+            sub = getattr(stab, '_subs', None)
+            if sub:
+                got = self._find_hold(sub, axis)
+                if got is not None:
+                    return got
+            elif getattr(stab, '_axis', None) == axis:
+                fn = getattr(stab, 'hold_dbg', None)
+                if fn is not None and fn() is not None:
+                    return fn()
         return None
 
     def _publish(self, rc: RcCommand):
@@ -252,6 +265,8 @@ def _parse() -> tuple:
     p.add_argument('--pitch-smooth', dest='pitch_smooth', type=int, default=_D.pitch_smooth)
     p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=_D.yaw_kp)
     p.add_argument('--yaw-ki', dest='yaw_ki', type=float, default=_D.yaw_ki)
+    p.add_argument('--yaw-kd', dest='yaw_kd', type=float, default=_D.yaw_kd)
+    p.add_argument('--yaw-leak', dest='yaw_leak', type=float, default=_D.yaw_leak)
     p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=_D.yaw_osign)
     p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=_D.yaw_cmd_gain)
     p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=_D.yaw_smooth)

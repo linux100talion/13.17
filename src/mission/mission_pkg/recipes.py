@@ -47,8 +47,9 @@ def _dp_pitch(cfg, klass=DpPitchHold):
 
 
 def _dp_yaw(cfg):
-    return DpYawHold(cfg.yaw_kp, cfg.yaw_ki, cfg.yaw_imax, cfg.yaw_max,
-                     cfg.yaw_conf_min, cfg.yaw_conf_full, cfg.yaw_osign, cfg.yaw_cmd_gain)
+    return DpYawHold(cfg.yaw_kp, cfg.yaw_ki, cfg.yaw_kd, cfg.yaw_imax, cfg.yaw_max,
+                     cfg.yaw_conf_min, cfg.yaw_conf_full, cfg.yaw_osign, cfg.yaw_cmd_gain,
+                     leak_sec=cfg.yaw_leak)
 
 
 def _vins(cfg):

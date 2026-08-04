@@ -256,6 +256,15 @@ class _FlowDamper1D(StabilizationStrategy):
     def _signal(self, s): raise NotImplementedError
     def _cmd(self, sp): raise NotImplementedError
 
+    def _advance(self, s, fdt) -> None:
+        """Хук: продвинуть внутреннее состояние сигнала РОВНО раз на новый кадр.
+
+        Осям, чей сигнал приходит готовым (flow_lateral, kf_logs), не нужен — no-op.
+        Нужен рысканию: его позиционный сигнал (визуальный курс) не измеряется, а
+        НАКАПЛИВАЕТСЯ из flow_yaw, и накапливать его можно только по кадрам, а не по
+        тикам ноды. Считать это внутри _signal() нельзя: тот вызывается не всегда
+        (протухший сигнал коротит ветку) и накопитель разъехался бы с кадрами."""
+
     def _signal_dot(self, s):
         """Готовая производная сигнала, если оценщик её считает лучше нас.
 
@@ -293,6 +302,7 @@ class _FlowDamper1D(StabilizationStrategy):
             self._last_seq = s.flow_seq
             fdt = max(1e-3, s.flow_dt)
             blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
+            self._advance(s, fdt)
             if self._cmd_mode == "pos":
                 self._sp_rate = self._cmd(sp) * self.cmd_gain    # ед. сигнала в секунду
                 self._sp += self._sp_rate * fdt                  # УСТАВКА ЕДЕТ
@@ -420,41 +430,59 @@ class DpPitchBack(DpPitchHold):
         return rc
 
 
-class DpYawHold(StabilizationStrategy):
-    """Демпфер визуального рыскания по потоку → YAW (был YawHold). Победитель свипа
-    [[yaw-hold-tuning]] — ki=0 (интеграл вреден, bias yaw_flow). ∫err = курс-ошибка."""
-    axes = frozenset({"yaw"})
+class DpYawHold(_FlowDamper1D):
+    """КУРС-ХОЛД по потоку → YAW. Команда идёт тем же механизмом, что у тангажа:
+    интегратор уставки (`pos`), а не velocity-assist.
 
-    def __init__(self, kp=6.0, ki=0.0, imax=200.0, max_pwm=150.0,
-                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5):
-        self.kp, self.ki = kp, ki
-        self.imax, self.max = imax, max_pwm
-        self.conf_min, self.conf_full = conf_min, conf_full
-        self.osign, self.cmd_gain, self.stale = osign, cmd_gain, stale_sec
+    ПОЧЕМУ `pos`, хотя flow_yaw — скорость. Позиционного сигнала у оси нет (опорного
+    кадра для курса не существует), поэтому он НАКАПЛИВАЕТСЯ: визуальный курс
+    `_head = ∫flow_yaw·dt`. Единицы: 1 ед. = 1/S градусов, S = 0.253 px/кадр на °/с
+    (замер Y1s, corr +0.886 на ротации, стабильность между прогонами ±1.2% — это
+    первая ось кампании, прошедшая ворота tune.md Фазы 2).
+
+    СТАРЫЙ ЗАКОН НИКУДА НЕ ДЕЛСЯ, он переехал в Д-слот. В pos-режиме
+        (err − prev_err)/fdt = (flow_yaw·fdt − _sp_rate·fdt)/fdt = flow_yaw − _sp_rate,
+    то есть `kd·(…)` — это ровно прежнее `kp·(flow_yaw − цель)`. Победитель свипа
+    [[yaw-hold-tuning]] kp=6 стал kd=6 БЕЗ переигрывания. При kp=0 поведение совпадает
+    с прежним побитово; kp>0 включает курс-холд, ради которого всё и делалось.
+
+    ⚠️ УТЕЧКА (`leak_sec`) — не украшение, а условие работоспособности. У тангажа
+    позиционный сигнал меряется против опорного кадра, у нас он интеграл, поэтому
+    смещение flow_yaw копится как ФАНТОМНЫЙ курс без предела. Это тот самый механизм,
+    которым свип отверг ki (ki=2 → СКО 10.65°): П-член по накопленному курсу — то же
+    самое. Замер Y1s дал число: смещение на висении −0.13/−0.09 px/кадр = −0.50/−0.34
+    °/с, то есть 1.7–3.5° за командный сегмент (терпимо) и 14–20° за hover40 (нет).
+    Утечка ограничивает фантом уровнем bias·T вместо роста: при T=8с это 3–4°.
+    ЦЕНА, которую платим сознательно: на временах ≫T ось перестаёт быть абсолютным
+    курс-холдом и работает демпфером скорости. Абсолютный курс — работа NN1/VINS.
+
+    cmd_gain — в ЕДИНИЦАХ СИГНАЛА В СЕКУНДУ при полном стике, = S · (°/с). Дефолт 7.25
+    = 0.253 · 28.65 °/с даёт полному стику тот же темп, что у GzHold (yaw_cmd_gain 0.5
+    рад/с), — значит один и тот же токен mv_* крутит на одинаковый угол под обоими
+    холдерами. Прежние 10.0 были в px/кадр (= 39.5 °/с, на 38% быстрее)."""
+    axes = frozenset({"yaw"})
+    _axis = "yaw"
+    _cmd_mode = "pos"
+
+    def __init__(self, kp=0.0, ki=0.0, kd=6.0, imax=200.0, max_pwm=150.0,
+                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=7.25,
+                 stale_sec=0.5, leak_sec=8.0):
+        super().__init__(kp, ki, kd, imax, max_pwm, conf_min, conf_full,
+                         osign, cmd_gain, stale_sec)
+        self.leak = leak_sec
         self._head = 0.0
-        self._last_seq = -1
-        self._out = 0.0
-        self._last_frame_sim = -1e9
 
     def enter(self, s: DroneState) -> None:
-        self._head = 0.0
-        self._last_seq = -1
-        self._out = 0.0
-        self._last_frame_sim = -1e9
+        super().enter(s)
+        self._head = 0.0          # визуальный курс отсчитывается от входа в сегмент
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
-        if s.flow_seq != self._last_seq:
-            self._last_seq = s.flow_seq
-            blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
-            target = sp.c_yaw * self.cmd_gain
-            err = s.flow_yaw - target
-            self._head = clamp(self._head + err, -self.imax, self.imax)
-            yu = clamp(self.kp * err + self.ki * self._head, -self.max, self.max)
-            self._out = self.osign * blend * yu
-            self._last_frame_sim = s.now_sim
-        fresh = (s.now_sim - self._last_frame_sim) < self.stale
-        off = int(self._out) if fresh else 0
-        return RcCommand(yaw=RC_CENTER + off, throttle=RC_CENTER)
+    def _advance(self, s, fdt) -> None:
+        self._head += s.flow_yaw * fdt
+        if self.leak > 0.0:
+            self._head -= self._head * min(1.0, fdt / self.leak)
+
+    def _signal(self, s): return self._head
+    def _cmd(self, sp): return sp.c_yaw
 
 
 class DpHold(StabilizationStrategy):

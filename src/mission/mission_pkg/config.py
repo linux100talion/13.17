@@ -167,15 +167,24 @@ class BootstrapConfig:
                                       # держит борт ПРИ уставке — реально достижимая
                                       # скорость ограничена max_pwm=150 и наклоном.
     pitch_smooth: int = 1
-    # --- yaw: визуальный курс, сигнал flow_yaw → стик yaw (kd нет: DpYawHold — PI) ---
-    yaw_kp: float = 6.0
+    # --- yaw: КУРС-ХОЛД, сигнал = накопленный визуальный курс ∫flow_yaw·dt (pos-режим,
+    # как у тангажа). Команда едет через интегратор уставки, а не вычитанием цели.
+    yaw_kp: float = 0.0              # курс-холд. 0 = прежнее поведение ПОБИТОВО
     yaw_ki: float = 0.0              # ВРЕДЕН (bias yaw_flow) — держим 0
+    yaw_kd: float = 6.0              # ПОБЕДИТЕЛЬ свипа [[yaw-hold-tuning]] (был yaw_kp):
+                                     # в pos-режиме D-член = kd·(flow_yaw − скорость
+                                     # уставки), т.е. прежний закон ровно. Не переигран.
     yaw_imax: float = 200.0
     yaw_max: float = 150.0
     yaw_conf_min: float = 0.05
     yaw_conf_full: float = 0.20
     yaw_osign: float = 1.0
-    yaw_cmd_gain: float = 10.0
+    yaw_cmd_gain: float = 7.25       # ед. сигнала/с при полном стике = S·28.65°/с; тот же
+                                     # темп, что у GzHold → токен mv_* даёт одинаковый
+                                     # угол под обоими холдерами (S=0.253, замер Y1s)
+    yaw_leak: float = 8.0            # утечка накопителя курса, с. Ограничивает фантом от
+                                     # смещения flow_yaw (−0.4°/с, Y1s) уровнем bias·T
+                                     # ≈3–4° вместо роста. 0 = без утечки (разгон курса)
     yaw_smooth: int = 5              # победитель свипа [[yaw-hold-tuning]]
     flow_hold_sec: float = 30.0      # flow_assist: сколько держать (флоу гасит снос) до land
     flow_observe: bool = False       # ТОЛЬКО НАБЛЮДЕНИЕ: поднять зрение и писать /flow_dbg*,

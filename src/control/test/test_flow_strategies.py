@@ -58,18 +58,53 @@ fd4.enter(st(-1))
 rc = fd4.update(st(1, lat=5.0, conf=0.0, now=0.05), Setpoint(), 0.05)
 check("DpRollHold conf<min → авторитет 0 (центр)", rc.roll == 1500)
 
-# --- DpYawHold: чистый rate-демпф (ki=0) ---
-yh = DpYawHold()  # kp6 ki0 → yu=6*err
+# --- DpYawHold: pos-режим (курс-холд), команда через интегратор уставки ---
+# ЭКВИВАЛЕНТНОСТЬ СТАРОМУ ЗАКОНУ. Был чистый rate-демпф yu = kp·flow_yaw при kp=6.
+# Стало: D-член pos-режима = kd·(flow_yaw − скорость уставки), kd=6. При kp=0 и нулевой
+# команде это ТО ЖЕ ЧИСЛО — победитель свипа [[yaw-hold-tuning]] не переигран.
+yh = DpYawHold(leak_sec=0.0)  # kp0 ki0 kd6, утечка выключена → u = 6·flow_yaw РОВНО
 yh.enter(st(-1))
 rc = yh.update(st(1, yaw=3.0, now=0.05), Setpoint(), 0.05)
-check("DpYawHold rate-демпф (yaw=1518)", rc.yaw == 1518)
-# velocity-assist: стик=цель → ошибка 0
-yh2 = DpYawHold(cmd_gain=1.0)
+check("DpYawHold: старый закон сохранён ТОЧНО (yaw=1518)", rc.yaw == 1518)
+check("DpYawHold владеет только yaw", rc.roll == 1500 and rc.pitch == 1500)
+# с утечкой по умолчанию (T=8с) D-член слабее на fdt/T = 0.6% за кадр — в PWM не видно
+yhl = DpYawHold()
+yhl.enter(st(-1))
+rc = yhl.update(st(1, yaw=3.0, now=0.05), Setpoint(), 0.05)
+check("DpYawHold: утечка T=8с почти не трогает демпфер (1517..1518)",
+      rc.yaw in (1517, 1518))
+
+# КОМАНДА ЕДЕТ ЧЕРЕЗ УСТАВКУ, а не вычитается из сигнала. cmd_gain=1, c_yaw=3 →
+# скорость уставки 3 ед/с; за кадр 0.05с уставка уезжает на 0.15, а визуальный курс
+# накопил flow_yaw·fdt = 0.15 — ошибка ноль, и D-член тоже (поток = скорость уставки).
+yh2 = DpYawHold(cmd_gain=1.0, leak_sec=0.0)
 yh2.enter(st(-1))
 rc = yh2.update(st(1, yaw=3.0, now=0.05), Setpoint(c_yaw=3.0), 0.05)
-check("DpYawHold velocity-assist: стик=поток → yaw=центр", rc.yaw == 1500)
-# DpYawHold трогает ТОЛЬКО yaw (roll/pitch = центр в его выходе)
-check("DpYawHold владеет только yaw", rc.roll == 1500 and rc.pitch == 1500)
+check("DpYawHold: борт идёт за уставкой → yaw=центр", rc.yaw == 1500)
+sp, err, rate = yh2.hold_dbg()
+check("DpYawHold отдаёт уставку курса (pos-ось)", abs(sp - 0.15) < 1e-9 and abs(err) < 1e-9)
+check("DpYawHold: скорость уставки = c_yaw·cmd_gain", abs(rate - 3.0) < 1e-9)
+
+# УСТАВКА ОСТАЁТСЯ ПОСЛЕ ОТПУСКАНИЯ СТИКА (в этом вся разница с velocity-assist:
+# там борт вставал где угодно, здесь недоехавший угол остаётся долгом контура).
+rc = yh2.update(st(2, yaw=0.0, now=0.10), Setpoint(), 0.05)
+sp2, err2, rate2 = yh2.hold_dbg()
+check("DpYawHold: стик отпущен → уставка стоит, не сбрасывается", abs(sp2 - 0.15) < 1e-9)
+check("DpYawHold: скорость уставки обнулилась", rate2 == 0.0)
+
+# УТЕЧКА накопителя: без неё смещение flow_yaw (−0.4°/с, замер Y1s) копится в фантомный
+# курс без предела — это тот механизм, которым свип отверг ki.
+leaky = DpYawHold(leak_sec=1.0)
+leaky.enter(st(-1))
+for k in range(1, 41):                       # 40 кадров по 0.05с = 2с постоянного смещения
+    leaky.update(st(k, yaw=1.0, now=0.05 * k), Setpoint(), 0.05)
+tight = DpYawHold(leak_sec=0.0)
+tight.enter(st(-1))
+for k in range(1, 41):
+    tight.update(st(k, yaw=1.0, now=0.05 * k), Setpoint(), 0.05)
+check("DpYawHold: утечка ограничивает накопленный курс", leaky._head < tight._head)
+check("DpYawHold: без утечки курс копится линейно (≈2.0)", abs(tight._head - 2.0) < 1e-6)
+check("DpYawHold: с утечкой T=1с фантом насыщается (<1.1)", leaky._head < 1.1)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ФЛОУ-СТАБИЛИЗАТОРЫ OK" if ok_all else "❌ СБОЙ")

@@ -33,6 +33,10 @@ class RosDebugSink:
         self._pub3 = node.create_publisher(Vector3Stamped, '/flow_dbg3', 10)
         self._pub4 = node.create_publisher(Vector3Stamped, '/flow_dbg4', 10)
         self._pub5 = node.create_publisher(Vector3Stamped, '/flow_dbg5', 10)
+        # /flow_dbg6 = уставка КУРСА (DpYawHold в pos-режиме). Отдельный топик, а не
+        # второй источник в /flow_dbg5: pos-осей стало две, и «первый ответивший»
+        # молча подменил бы диагностику тангажа рысканием.
+        self._pub6 = node.create_publisher(Vector3Stamped, '/flow_dbg6', 10)
 
     def publish(self, roll_off: float, flow_off: float, conf: float, stamp: float) -> None:
         d = Vector3Stamped()
@@ -48,12 +52,22 @@ class RosDebugSink:
         (DpPitchHold в режиме `pos`): из телеметрии её не восстановить — это интеграл
         команды по КАДРАМ, со стартом в захваченной точке. Без неё «борт не поехал» и
         «уставка не поехала» в разборе неразличимы. hold=None (rate-оси) — не шлём."""
+        self._publish_hold(self._pub5, hold)
+
+    def publish_hold_yaw(self, hold) -> None:
+        """/flow_dbg6 = уставка КУРСА (DpYawHold, pos-режим): (курс-уставка, ошибка до
+        неё, её скорость) в единицах визуального курса — 1 ед. = 1/S градусов,
+        S = 0.253 px/кадр на °/с (замер Y1s). Без неё «борт не довернул» и «уставка не
+        доехала» неразличимы — ровно та же нужда, что у тангажа в /flow_dbg5."""
+        self._publish_hold(self._pub6, hold)
+
+    def _publish_hold(self, pub, hold) -> None:
         if hold is None:
             return
         d = Vector3Stamped()
         d.header.stamp = self._node.get_clock().now().to_msg()
         d.vector.x, d.vector.y, d.vector.z = (float(v) for v in hold)
-        self._pub5.publish(d)
+        pub.publish(d)
 
     def publish_axes(self, s, rc) -> None:
         """Полный флоу-дамп (sim-штамп): /flow_dbg = (roll_off, flow_lateral, conf),

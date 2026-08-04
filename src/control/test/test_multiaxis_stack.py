@@ -45,7 +45,8 @@ check("[]+профиль → roll = c_right·span (1400)", rc.roll == 1400)
 check("[]+профиль → yaw = c_yaw·span (1540)", rc.yaw == 1540)
 
 # --- 2. Частичные: DpRollHold(roll)+DpYawHold(yaw), pitch НЕ занят → профиль-оператор ---
-stack = ControlStack([DpRollHold(), DpYawHold()],
+# leak_sec=0: тест про ВЛАДЕНИЕ осью, а не про утечку — держим арифметику точной
+stack = ControlStack([DpRollHold(), DpYawHold(leak_sec=0.0)],
                      ConstProfile(10, c_fwd=0.5), NoExcitation())
 s = state(flow_seq=1, flow_lateral=5.0, flow_yaw=3.0, flow_conf=0.5, flow_dt=0.05)
 stack.enter(s)
