@@ -10,6 +10,7 @@ PROFILE-ONLY: каждая выдаёт нормированный стик-ур
 - RcTransmitter — живой пилот = живой профиль (нормир. стики /mavros/rc/in).
 - ProfileTrajectory — скриптовый профиль по sim-времени (сегменты уровень×длительность).
 - ConstProfile — постоянная стик-команда c_* на dur сек (атом профиль-миссии mv_*/hover).
+- YawTurn — разворот на заданный УГОЛ: команда + добор одним сегментом (yaw_l30/yaw_r60).
 - StationKeep — оператор-манёвр «выдвинуться и вернуться» (+τ/−2τ/+τ): на незанятой оси
   открытым контуром дрон осциллирует У ТОЧКИ (скорость/позиция возвращаются), не уносит.
 """
@@ -135,6 +136,35 @@ class ConstProfile(TrajectoryStrategy):
 
     def done(self, t: float) -> bool:
         return t > self.dur
+
+
+class YawTurn(TrajectoryStrategy):
+    """Разворот на ЗАДАННЫЙ УГОЛ: команда `turn` сек, затем ноль `settle` сек — всё
+    ВНУТРИ ОДНОГО сегмента, не отпуская стек.
+
+    Почему один сегмент, а не `mv_cw3.5,hover12`. Курс-холд копит уставку у себя, а
+    `enter()` следующего сегмента её обнуляет — вместе с НЕДОЕХАВШИМ остатком. Замер
+    Y1s: недобор 11.7 ± 1.7°, ОДИНАКОВЫЙ на заказе 30° и 60° (не пропорциональный) —
+    подпись выброшенного долга, а не шума. Внутри одного сегмента долг живёт, и `settle`
+    даёт борту его выбрать.
+
+    PROFILE-ONLY не нарушается: наружу по-прежнему уходит нормированный стик-уровень.
+    Градусы в длительность пересчитывает компилятор миссии, который один знает
+    калибровку темпа (`yaw_rate_full`), — стратегия про гейны холдера ничего не знает."""
+
+    def __init__(self, level: float, turn_sec: float, settle_sec: float = 6.0):
+        self.level = level                  # знак = сторона (c_yaw>0 = вправо)
+        self.turn = turn_sec
+        self.settle = settle_sec
+
+    def intent(self, s: DroneState, t: float) -> MotionIntent:
+        return MotionIntent(c_yaw=self.level if t < self.turn else 0.0)
+
+    def total(self) -> float:
+        return self.turn + self.settle
+
+    def done(self, t: float) -> bool:
+        return t > self.total()
 
 
 class StationKeep(TrajectoryStrategy):

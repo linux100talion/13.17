@@ -202,6 +202,37 @@ def main():
     checks.append(("compile: sk_fwd → Control со StationKeep",
                    type(sk_seg.stack.traj).__name__ == "StationKeep"))
 
+    # --- токен в ГРАДУСАХ (yaw_l/yaw_r) ---
+    # Смысл токена: угол — величина, за которую отвечает контур. Держится на двух вещах:
+    # (1) длительность считается из общего темпа, (2) команда и добор в ОДНОМ сегменте,
+    # иначе enter() следующего обнулит уставку вместе с недоехавшим долгом (замер Y1s:
+    # недобор 11.7±1.7°, одинаковый на 30° и 60°).
+    yw = compile_mission(cfg, "climb3,yaw_l30,yaw_r60,land", "DpRollHold+DpYawHold")
+    l30 = next(st for st in yw if st.name.startswith("yaw_l")).stack.traj
+    r60 = next(st for st in yw if st.name.startswith("yaw_r")).stack.traj
+    checks.append(("compile: yaw_l → Control с YawTurn", type(l30).__name__ == "YawTurn"))
+    # заказанный угол = уровень · темп · длительность команды
+    deg_l = l30.level * cfg.yaw_rate_full * l30.turn
+    deg_r = r60.level * cfg.yaw_rate_full * r60.turn
+    checks.append(("yaw_l30 = 30° ВЛЕВО (c_yaw<0)", abs(deg_l + 30.0) < 1e-6))
+    checks.append(("yaw_r60 = 60° ВПРАВО (c_yaw>0)", abs(deg_r - 60.0) < 1e-6))
+    # добор внутри сегмента: после команды стик в ноль, но сегмент ещё идёт
+    checks.append(("yaw_l30: команда кончилась, сегмент жив (добор)",
+                   l30.intent(None, l30.turn + 0.1).c_yaw == 0.0
+                   and not l30.done(l30.turn + 0.1)))
+    checks.append(("yaw_l30: сегмент = команда + добор",
+                   abs(l30.total() - (l30.turn + cfg.yaw_settle)) < 1e-9))
+    # ЕДИНЫЙ ТЕМП: гейн команды у обоих холдеров выведен из одного yaw_rate_full,
+    # иначе один токен дал бы разный угол под Gz-оракулом и под флоу-демпфером
+    import math as _m
+
+    from mission_pkg.recipes import yaw_cmd_gain
+    gz = build_stabilizers(cfg, "GzYawHold")[0]
+    checks.append(("единый темп: Gz = yaw_rate_full",
+                   abs(_m.degrees(gz.yaw_cmd_gain) - cfg.yaw_rate_full) < 1e-6))
+    checks.append(("единый темп: Dp = S·yaw_rate_full",
+                   abs(yaw_cmd_gain(cfg) / cfg.yaw_flow_scale - cfg.yaw_rate_full) < 1e-6))
+
     print("Оффлайн-гейт stab×mission:")
     ok_all = True
     for name, ok in checks:

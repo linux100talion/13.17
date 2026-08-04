@@ -14,6 +14,10 @@ ControlStack(build_stabilizers(spec) + профиль-сегмент): один 
   mv_fwd/bkwd<t>        — продольный стик ±level на t sim-сек (ПОСТОЯННЫЙ наклон — уносит!)
   mv_right/left<t>      — боковой стик ±level
   mv_cw/ccw<t>          — yaw-стик ±level
+  yaw_r/l<град>         — разворот на ЗАДАННЫЙ УГОЛ (yaw_l30 = 30° ВЛЕВО, yaw_r60 = вправо):
+                          команда И добор ОДНИМ сегментом. В отличие от mv_cw<t> градусы
+                          тут величина, за которую отвечает контур, а не производная от
+                          того, сколько борт успел довернуть за отпущенное время
   sk_fwd/bkwd<τ>        — station-keeping оператор на pitch: +τ/−2τ/+τ, дрон У ТОЧКИ (не уносит)
   sk_right/left<τ>      — то же на roll
   hover<t>              — держать t сек (стик центр; стабилизатор гасит снос/держит)
@@ -27,7 +31,8 @@ import re
 from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.altitude import AltHold
 from control_pkg.domain.control.excitation import NoExcitation
-from control_pkg.domain.control.trajectory import ConstProfile, StationKeep, StaticSetpoint
+from control_pkg.domain.control.trajectory import (ConstProfile, StationKeep,
+                                                   StaticSetpoint, YawTurn)
 from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
@@ -41,6 +46,9 @@ _MV = {
     "mv_right": (0.0, 1.0, 0.0), "mv_left":  (0.0, -1.0, 0.0),
     "mv_cw":    (0.0, 0.0, 1.0), "mv_ccw":   (0.0, 0.0, -1.0),
 }
+
+# разворот на угол → знак стика (c_yaw>0 = ВПРАВО, стик-конвенция; проверено Y1s)
+_YAW = {"yaw_r": 1.0, "yaw_l": -1.0}
 
 # station-keeping оператор → (ось, знак первого импульса): +τ/−2τ/+τ, возврат к точке
 _SK = {
@@ -139,6 +147,20 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
             steps.append(_control(f"{verb}_{i}",
                                   ConstProfile(num, c_fwd=fx * lvl, c_right=rx * lvl,
                                                c_yaw=yx * lvl)))
+        elif verb in _YAW:
+            if num is None:
+                raise ValueError(f"{verb} требует УГОЛ(градусы): {tok!r}")
+            # градусы → длительность по общему темпу. Темп берётся из cfg.yaw_rate_full,
+            # из которого выведены гейны команды У ОБОИХ холдеров (recipes) — поэтому
+            # один и тот же токен даёт один угол и под Gz-оракулом, и под DpYawHold.
+            rate = lvl * cfg.yaw_rate_full          # °/с на рабочем уровне стика
+            if rate <= 0:
+                raise ValueError(f"нулевой темп разворота: mv_level={lvl}, "
+                                 f"yaw_rate_full={cfg.yaw_rate_full}")
+            steps.append(_control(f"{verb}_{i}",
+                                  YawTurn(level=_YAW[verb] * lvl,
+                                          turn_sec=num / rate,
+                                          settle_sec=cfg.yaw_settle)))
         elif verb in _SK:
             if num is None:
                 raise ValueError(f"{verb} требует τ(сек): {tok!r}")
@@ -154,7 +176,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
                               stack=_hold_stack(), wait_gt=wait_gt))
         else:
             raise ValueError(f"неизвестный глагол миссии {verb!r} (токен {tok!r}); допустимо: "
-                             f"climb, {', '.join(_MV)}, {', '.join(_SK)}, hover, land")
+                             f"climb, {', '.join(_MV)}, {', '.join(_YAW)}, "
+                             f"{', '.join(_SK)}, hover, land")
 
     # гарантируем посадочный шаг 'land' (Climb абортит на него; и эпилог, если не задан)
     if not any(st.name == "land" for st in steps):

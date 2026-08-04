@@ -18,6 +18,8 @@
   flow_assist — БОЕВОЙ пре-VINS: [DpRollHold, DpYawHold] (демпфер по потоку) + пульт (velocity-assist);
                 pitch — сырой стик пилота, throttle держит миссия.
 """
+import math
+
 from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.excitation import NoExcitation
 from control_pkg.domain.control.stabilization import (
@@ -33,7 +35,10 @@ CONTROL_MODES = ("shuttle", "assisted", "manual", "flow_assist")
 def _gz_alias(klass, cfg):
     """Gz*-алиас с gz-гейнами (ось задаёт сам алиас через kw['axes'])."""
     return klass(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax, cfg.gz_max,
-                 cfg.gz_psign, cfg.gz_rsign, cmd_gain=cfg.gz_cmd_gain)
+                 cfg.gz_psign, cfg.gz_rsign, cmd_gain=cfg.gz_cmd_gain,
+                 # темп разворота — из ОБЩЕГО yaw_rate_full, а не из класс-дефолта:
+                 # иначе один токен yaw_l30 даёт разный угол под Gz и под Dp
+                 yaw_cmd_gain=math.radians(cfg.yaw_rate_full))
 
 
 def _dp_roll(cfg):
@@ -46,10 +51,18 @@ def _dp_pitch(cfg, klass=DpPitchHold):
                  cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign, cfg.pitch_cmd_gain)
 
 
+def yaw_cmd_gain(cfg):
+    """Гейн yaw-команды DpYawHold в ед. сигнала/с. Норма — вывод из общего темпа:
+    сигнал = накопленный визуальный курс, значит ед./с = S · °/с."""
+    if cfg.yaw_cmd_gain is not None:
+        return cfg.yaw_cmd_gain                    # ручной override (свип)
+    return cfg.yaw_flow_scale * cfg.yaw_rate_full
+
+
 def _dp_yaw(cfg):
     return DpYawHold(cfg.yaw_kp, cfg.yaw_ki, cfg.yaw_kd, cfg.yaw_imax, cfg.yaw_max,
-                     cfg.yaw_conf_min, cfg.yaw_conf_full, cfg.yaw_osign, cfg.yaw_cmd_gain,
-                     leak_sec=cfg.yaw_leak)
+                     cfg.yaw_conf_min, cfg.yaw_conf_full, cfg.yaw_osign,
+                     yaw_cmd_gain(cfg), leak_sec=cfg.yaw_leak)
 
 
 def _vins(cfg):
