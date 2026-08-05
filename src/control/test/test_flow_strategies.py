@@ -131,6 +131,20 @@ sp, err, _ = cmd.hold_dbg()
 check("DpYawHold: утечка не съедает уставку команды (≈−6.0)", abs(sp + 6.0) < 1e-6)
 check("DpYawHold: борт за уставкой → утечке нечего есть (ошибка ≈0)", abs(err) < 1e-6)
 
+# ШАГ ИНТЕГРИРОВАНИЯ = время С ПРОШЛОГО ПРОДВИЖЕНИЯ КОНТУРА, а не flow_dt. Домен тикает
+# 20 Гц, камера ~30 кадров/с → часть кадров контур не видит, и по flow_dt он засчитывал
+# 2/3 времени (замер Y3: уставка 20.0° за 3.5 с команды вместо 30°).
+fdt = DpYawHold(cmd_gain=1.0, leak_sec=0.0)
+fdt.enter(st(-1))
+fdt.update(st(1, dt=1 / 30, now=0.05), Setpoint(c_yaw=-1.0), 0.05)   # 1-й кадр → flow_dt
+sp1 = fdt.hold_dbg()[0]
+fdt.update(st(3, dt=1 / 30, now=0.10), Setpoint(c_yaw=-1.0), 0.05)   # seq 1→3: кадр пропущен
+sp2 = fdt.hold_dbg()[0]
+check("DpYawHold: первый кадр сегмента опирается на flow_dt (≈1/30)",
+      abs(sp1 - 1 / 30) < 1e-9)
+check("DpYawHold: дальше шаг = зазор домена (0.05), пропущенный кадр не теряется",
+      abs((sp2 - sp1) - 0.05) < 1e-9)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ФЛОУ-СТАБИЛИЗАТОРЫ OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

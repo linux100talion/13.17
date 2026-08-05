@@ -290,6 +290,29 @@ class _FlowDamper1D(StabilizationStrategy):
         """Годен ли сигнал этой оси в этом кадре (переопределяется, где есть чем judge)."""
         return True
 
+    def _fdt(self, s) -> float:
+        """Шаг интегрирования = время С ПРОШЛОГО ПРОДВИЖЕНИЯ КОНТУРА, а не `flow_dt`.
+
+        Домен тикает 20 Гц (`create_timer(0.05)`), камера на 960×540 даёт ~30 кадров/с:
+        между двумя тиками успевает пройти больше одного кадра, `flow_seq` перескакивает,
+        и контур видит ОДИН шаг там, где кадров было два. Беря `flow_dt` (промежуток
+        между СОСЕДНИМИ кадрами), он засчитывал ~2/3 реального времени — замер Y3:
+        уставка курса набрала 20.0° за 3.5 с команды вместо 30° (темп 5.71 против
+        номинальных 8.60 °/с), и токен недодавал угол ровно на эту долю.
+
+        Разница по осям невелика, потому что `flow_dt` стоял только там, где нужно
+        «время с прошлого раза»: интеграл уставки, И-член и знаменатель Д-члена. У
+        тангажа ki=0, а Д-член идёт через `_signal_dot` (без деления) — там правка
+        трогает ровно уставку, то есть чинит тот же недобор. У крена ki=2, и его
+        интегратор теперь копится в 1.5 раза быстрее — при возврате `DpRollHold`
+        в стек это проверить.
+
+        Потолок `stale`: после долгого провала сигнала не впрыскивать разом весь простой.
+        """
+        if self._last_frame_sim < -1e8:          # первый кадр сегмента — опереться не на что
+            return max(1e-3, s.flow_dt)
+        return clamp(s.now_sim - self._last_frame_sim, 1e-3, self.stale)
+
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
         if s.flow_seq != self._last_seq and not self._signal_ok(s):
             # сигнал протух (у опоры — ушла высота): НЕ командуем и забываем производную,
@@ -300,7 +323,7 @@ class _FlowDamper1D(StabilizationStrategy):
             self._last_frame_sim = s.now_sim
         elif s.flow_seq != self._last_seq:          # НОВЫЙ кадр → продвигаем PID
             self._last_seq = s.flow_seq
-            fdt = max(1e-3, s.flow_dt)
+            fdt = self._fdt(s)
             blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
             if self._cmd_mode == "pos":
                 self._sp_rate = self._cmd(sp) * self.cmd_gain    # ед. сигнала в секунду
