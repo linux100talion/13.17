@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from control_pkg.domain.control.stabilization import DpRollHold, DpYawHold  # noqa: E402
+from control_pkg.domain.rc import RC_CENTER                               # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                          # noqa: E402
 from control_pkg.domain.state import DroneState                           # noqa: E402
 
@@ -74,22 +75,34 @@ rc = yhl.update(st(1, yaw=3.0, now=0.05), Setpoint(), 0.05)
 check("DpYawHold: утечка T=8с почти не трогает демпфер (1517..1518)",
       rc.yaw in (1517, 1518))
 
+# ЗНАК КОМАНДЫ (замер Y2: без минуса ось отрабатывала токен ЗЕРКАЛЬНО — yaw_l30 давал
+# −21…−28°, yaw_r60 давал +70…+76°). `c_yaw>0` = стик ВПРАВО, и открытый контур на нём
+# даёт PWM ВЫШЕ центра (см. test_families). Холдер обязан выдавать ТУДА ЖЕ, иначе один
+# и тот же токен означает разные стороны с холдером и без него.
+yhs = DpYawHold(leak_sec=0.0)
+yhs.enter(st(-1))
+rc = yhs.update(st(1, yaw=0.0, now=0.05), Setpoint(c_yaw=0.3), 0.05)
+check("DpYawHold: c_yaw>0 (вправо) → PWM выше центра, как открытый контур",
+      rc.yaw > RC_CENTER)
+check("DpYawHold: уставка курса едет в МИНУС (flow_yaw>0 = разворот влево)",
+      yhs.hold_dbg()[0] < 0.0)
+
 # КОМАНДА ЕДЕТ ЧЕРЕЗ УСТАВКУ, а не вычитается из сигнала. cmd_gain=1, c_yaw=3 →
-# скорость уставки 3 ед/с; за кадр 0.05с уставка уезжает на 0.15, а визуальный курс
-# накопил flow_yaw·fdt = 0.15 — ошибка ноль, и D-член тоже (поток = скорость уставки).
+# скорость уставки −3 ед/с; за кадр 0.05с уставка уезжает на −0.15, и если борт
+# развернулся вправо ровно на столько (flow_yaw=−3) — ошибка ноль, и D-член тоже.
 yh2 = DpYawHold(cmd_gain=1.0, leak_sec=0.0)
 yh2.enter(st(-1))
-rc = yh2.update(st(1, yaw=3.0, now=0.05), Setpoint(c_yaw=3.0), 0.05)
+rc = yh2.update(st(1, yaw=-3.0, now=0.05), Setpoint(c_yaw=3.0), 0.05)
 check("DpYawHold: борт идёт за уставкой → yaw=центр", rc.yaw == 1500)
 sp, err, rate = yh2.hold_dbg()
-check("DpYawHold отдаёт уставку курса (pos-ось)", abs(sp - 0.15) < 1e-9 and abs(err) < 1e-9)
-check("DpYawHold: скорость уставки = c_yaw·cmd_gain", abs(rate - 3.0) < 1e-9)
+check("DpYawHold отдаёт уставку курса (pos-ось)", abs(sp + 0.15) < 1e-9 and abs(err) < 1e-9)
+check("DpYawHold: скорость уставки = −c_yaw·cmd_gain", abs(rate + 3.0) < 1e-9)
 
 # УСТАВКА ОСТАЁТСЯ ПОСЛЕ ОТПУСКАНИЯ СТИКА (в этом вся разница с velocity-assist:
 # там борт вставал где угодно, здесь недоехавший угол остаётся долгом контура).
 rc = yh2.update(st(2, yaw=0.0, now=0.10), Setpoint(), 0.05)
 sp2, err2, rate2 = yh2.hold_dbg()
-check("DpYawHold: стик отпущен → уставка стоит, не сбрасывается", abs(sp2 - 0.15) < 1e-9)
+check("DpYawHold: стик отпущен → уставка стоит, не сбрасывается", abs(sp2 + 0.15) < 1e-9)
 check("DpYawHold: скорость уставки обнулилась", rate2 == 0.0)
 
 # УТЕЧКА накопителя: без неё смещение flow_yaw (−0.4°/с, замер Y1s) копится в фантомный
@@ -105,6 +118,18 @@ for k in range(1, 41):
 check("DpYawHold: утечка ограничивает накопленный курс", leaky._head < tight._head)
 check("DpYawHold: без утечки курс копится линейно (≈2.0)", abs(tight._head - 2.0) < 1e-6)
 check("DpYawHold: с утечкой T=1с фантом насыщается (<1.1)", leaky._head < 1.1)
+
+# УТЕЧКА НЕ ЕСТ КОМАНДУ. Течёт ОШИБКА (курс к уставке), а не курс к нулю: борт,
+# идущий за уставкой, для утечки неотличим от стоящего. Замер Y2 показал цену
+# прежней утечки-к-нулю: на токене 60° накопитель просел с 82° до 46°, и контур
+# добирал разницу разворотом — токен переворачивал на +25%.
+cmd = DpYawHold(cmd_gain=1.0, leak_sec=1.0)
+cmd.enter(st(-1))
+for k in range(1, 41):                       # 2с команды, борт идёт РОВНО за уставкой
+    cmd.update(st(k, yaw=-3.0, now=0.05 * k), Setpoint(c_yaw=3.0), 0.05)
+sp, err, _ = cmd.hold_dbg()
+check("DpYawHold: утечка не съедает уставку команды (≈−6.0)", abs(sp + 6.0) < 1e-6)
+check("DpYawHold: борт за уставкой → утечке нечего есть (ошибка ≈0)", abs(err) < 1e-6)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ФЛОУ-СТАБИЛИЗАТОРЫ OK" if ok_all else "❌ СБОЙ")

@@ -59,8 +59,11 @@ DRY_RUN="${DRY_RUN:-0}"
 # ОЦЕНКИ, см. ToDo факт 2). /flow_dbg3 ещё не публикуется (очередь п.9) — записи не мешает.
 # /flow_dbg5 — УСТАВКА продольного холдера (когда стик двигает точку удержания): из
 # телеметрии не восстановить, это интеграл команды по КАДРАМ. Без неё «борт не поехал»
-# и «уставка не поехала» в разборе неразличимы.
-TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /flow_dbg5 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
+# и «уставка не поехала» в разборе неразличимы. /flow_dbg6 — то же для КУРСА: без неё
+# свип Y2 пришлось восстанавливать офлайн интегрированием /flow_dbg2, а там неизвестен
+# покадровый fdt (сглаживание медианой по 5 кадрам склеивает соседние значения) —
+# калибровка градусов повисла на догадке о частоте кадров.
+TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /flow_dbg5 /flow_dbg6 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
 
 # Бюджеты фаз — как в эталонном прогоне bootstrap_arch2 (CPU-бокс, низкий RTF).
 export BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-1800}"

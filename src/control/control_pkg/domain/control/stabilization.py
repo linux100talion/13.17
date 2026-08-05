@@ -302,13 +302,18 @@ class _FlowDamper1D(StabilizationStrategy):
             self._last_seq = s.flow_seq
             fdt = max(1e-3, s.flow_dt)
             blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
-            self._advance(s, fdt)
             if self._cmd_mode == "pos":
                 self._sp_rate = self._cmd(sp) * self.cmd_gain    # ед. сигнала в секунду
                 self._sp += self._sp_rate * fdt                  # УСТАВКА ЕДЕТ
+                # сигнал продвигаем ПОСЛЕ уставки: у рыскания `_advance` подтягивает
+                # накопитель К УСТАВКЕ, и подтягивать его надо к свежей, а не к
+                # прошлокадровой — иначе едущая уставка оставляет постоянный хвост
+                # ошибки в один кадр команды
+                self._advance(s, fdt)
                 err = self._signal(s) - self._sp
             else:
                 self._sp_rate = 0.0
+                self._advance(s, fdt)
                 err = self._signal(s) - self._cmd(sp) * self.cmd_gain   # velocity-assist
             self._i = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
             dot = self._signal_dot(s)
@@ -455,6 +460,7 @@ class DpYawHold(_FlowDamper1D):
     Утечка ограничивает фантом уровнем bias·T вместо роста: при T=8с это 3–4°.
     ЦЕНА, которую платим сознательно: на временах ≫T ось перестаёт быть абсолютным
     курс-холдом и работает демпфером скорости. Абсолютный курс — работа NN1/VINS.
+    Течёт ОШИБКА (курс к уставке), а не курс к нулю — см. `_advance`.
 
     cmd_gain — в ЕДИНИЦАХ СИГНАЛА В СЕКУНДУ при полном стике, = S · (°/с). Дефолт 7.25
     = 0.253 · 28.65 °/с даёт полному стику тот же темп, что у GzHold (yaw_cmd_gain 0.5
@@ -479,10 +485,23 @@ class DpYawHold(_FlowDamper1D):
     def _advance(self, s, fdt) -> None:
         self._head += s.flow_yaw * fdt
         if self.leak > 0.0:
-            self._head -= self._head * min(1.0, fdt / self.leak)
+            # утечка К УСТАВКЕ, а не к нулю. Ноль был опорой, пока уставка не ездила;
+            # с командой он стал произвольной точкой, и утечка к нему СЪЕДАЛА разворот:
+            # замер Y2 — на токене 60° (7с команды + 6с добора) накопитель просел с 82°
+            # до 46°, борт добирал разницу и переворачивал на +25%. Утечка ошибки даёт
+            # ровно то, ради чего заводилась: фантом от смещения по-прежнему ограничен
+            # bias·T (на командах ошибка мала, утечке нечего есть).
+            self._head += (self._sp - self._head) * min(1.0, fdt / self.leak)
 
     def _signal(self, s): return self._head
-    def _cmd(self, sp): return sp.c_yaw
+
+    def _cmd(self, sp):
+        # ⚠️ МИНУС — тот же, что в GzHold._yawsp. `c_yaw>0` = стик ВПРАВО, а `flow_yaw`
+        # (медиана горизонтального сдвига картинки) при развороте вправо ОТРИЦАТЕЛЕН:
+        # сцена уезжает влево. Значит уставка накопленного курса обязана ехать в минус.
+        # Без минуса ось отрабатывала команду ЗЕРКАЛЬНО — замер Y2 на всех четырёх
+        # точках свипа: yaw_l30 давал −21…−28°, yaw_r60 давал +70…+76°.
+        return -sp.c_yaw
 
 
 class DpHold(StabilizationStrategy):

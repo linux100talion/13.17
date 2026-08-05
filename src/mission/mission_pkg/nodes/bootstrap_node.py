@@ -156,7 +156,8 @@ class BootstrapArch2Node(Node):
         self._publish(rc)
         self.debug.publish_axes(s, rc)   # флоу-дамп в bag: /flow_dbg + /flow_dbg2 (sim-штамп)
         self.debug.publish_hold(self._hold_dbg('pitch'))       # /flow_dbg5: уставка тангажа
-        self.debug.publish_hold_yaw(self._hold_dbg('yaw'))     # /flow_dbg6: уставка курса
+        # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
+        self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
 
     def _hold_dbg(self, axis):
         """Уставка холдера положения ЗАДАННОЙ оси (режим `pos`) — или None.
