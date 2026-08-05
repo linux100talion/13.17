@@ -233,6 +233,7 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
       -e BS_ROLL_SMOOTH="${BS_ROLL_SMOOTH:-}" \
       -e BS_ALT_KP="${BS_ALT_KP:-}" -e BS_ALT_RATE_MAX="${BS_ALT_RATE_MAX:-}" -e BS_ALT_TOL="${BS_ALT_TOL:-}" \
       -e BS_PITCH_KP="${BS_PITCH_KP:-}" -e BS_PITCH_KI="${BS_PITCH_KI:-}" -e BS_PITCH_KD="${BS_PITCH_KD:-}" \
+      -e BS_KF_ALT_MAX="${BS_KF_ALT_MAX:-}" \
       -e BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-}" -e BS_PITCH_CMD_GAIN="${BS_PITCH_CMD_GAIN:-}" \
       -e BS_PITCH_SMOOTH="${BS_PITCH_SMOOTH:-}" \
       -e BS_FLOW_OBS="${BS_FLOW_OBS:-}" \

@@ -21,7 +21,12 @@ def period(t,x):
     x=x-np.mean(x); s=np.sign(x); z=np.where(np.diff(s)!=0)[0]
     if len(z)<3: return float('nan')
     return float(2*np.mean(np.diff(t[z])))
-print(f'{"прогон":10} | {"уход":>6} | {"размах прод":>11} | {"период":>7} | {"в потолке":>9} | {"|команда|":>9}')
+# H СКО — не украшение, а КОВАРИАТА: ушла высота больше kf_alt_max (6%) — опора
+# пересевается с ВЫБРОСОМ сегмента (flow_estimator.py:459), накопитель положения не
+# наполняется, П-член слепнет и борт уезжает ГОРИЗОНТАЛЬНО. По кампании N порядок
+# прогонов по H СКО почти совпал с порядком по уходу при перемешанных pitch_kd.
+print(f'{"прогон":10} | {"уход":>6} | {"размах прод":>11} | {"период":>7} | {"в потолке":>9} | '
+      f'{"|команда|":>9} | {"H СКО":>6}')
 for bag in sys.argv[1:]:
     try: od,d2=load(bag)
     except Exception as e: print(f'{os.path.basename(bag)}: {e}'); continue
@@ -37,4 +42,4 @@ for bag in sys.argv[1:]:
         amp=np.mean(np.abs(p)) if len(p) else float('nan')
     else: sat=amp=float('nan')
     print(f'{os.path.basename(bag).replace("_bag",""):10} | {d.max():5.1f}м | {f.max()-f.min():10.1f}м | '
-          f'{period(t,f):6.1f}с | {sat:8.0f}% | {amp:8.0f}')
+          f'{period(t,f):6.1f}с | {sat:8.0f}% | {amp:8.0f} | {np.std(od[sel,3]):5.2f}м')

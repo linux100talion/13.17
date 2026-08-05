@@ -19,6 +19,7 @@ from ..perception.flow_estimator import FlowEstimator
 class RosPerception:
     def __init__(self, node, cam_w, cam_h, R_cam_imu, rotflow_sign=1.0,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=5,
+                 kf_alt_max=None,
                  image_topic='/image_mono', imu_topic='/mavros/imu/data',
                  gyro_topic=None):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
@@ -40,9 +41,16 @@ class RosPerception:
         from std_msgs.msg import Float64
         fx = fy = cam_w / 2.0          # pinhole 90° hfov
         cx, cy = cam_w / 2.0, cam_h / 2.0
+        # kf_alt_max вынесен наружу ради опыта «высота против ухода»: ушла высота больше
+        # порога — опора пересевается и частичный сегмент ВЫБРАСЫВАЕТСЯ, накопитель
+        # положения не наполняется. По кампании N порядок прогонов по СКО высоты почти
+        # совпал с порядком по горизонтальному уходу, но направление причинности из
+        # наблюдений не выводится. Поднять порог = разорвать связь, не трогая лётный
+        # контур. None = дефолт оценщика (0.06).
+        extra = {} if kf_alt_max is None else {'kf_alt_max': float(kf_alt_max)}
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,
                                   roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
-                                  yaw_smooth_n=yaw_smooth_n)
+                                  yaw_smooth_n=yaw_smooth_n, **extra)
         self._omega = np.zeros(3)
         # ω НЕ «последняя пришедшая», а СРЕДНЯЯ ЗА МЕЖКАДРОВЫЙ ИНТЕРВАЛ. Оценщик
         # умножает ω на dt, то есть ему нужен угол, повёрнутый МЕЖДУ кадрами, а не
