@@ -34,7 +34,7 @@ yaw_seg_check — разбор СЕГМЕНТОВ разворота: сколь
     bash -lc 'source /opt/ros/humble/setup.bash; BAG=/out/Y2_kp10_bag python3 /lab/yaw_seg_check.py'
 
 Env: BAG, ODOM_TOPIC (/model/iris_cam/odometry), FLOW_TOPIC (/flow_dbg2),
-     HOLD_TOPIC (/flow_dbg6), S (0.253 px/кадр на °/с), LEAK (8.0 с),
+     HOLD_TOPIC (/flow_dbg6), S (0.324 px/кадр на °/с), LEAK (8.0 с),
      WZ_MIN (2.0 °/с), MIN_SEC (1.0), SETTLE (6.0 с добора после команды),
      YAW_MAX (150 PWM — потолок контура, для проверки насыщения).
 """
@@ -52,7 +52,7 @@ FLOW = os.environ.get('FLOW_TOPIC', '/flow_dbg2')
 HOLD = os.environ.get('HOLD_TOPIC', '/flow_dbg6')
 SETTLE = float(os.environ.get('SETTLE', '6.0'))
 YAW_MAX = float(os.environ.get('YAW_MAX', '150'))
-S = float(os.environ.get('S', '0.253'))          # px/кадр на °/с
+S = float(os.environ.get('S', '0.324'))          # px/кадр на °/с (замер Y4)
 LEAK = float(os.environ.get('LEAK', '8.0'))      # с; 0 = без утечки
 WZ_MIN = float(os.environ.get('WZ_MIN', '2.0'))  # °/с — порог «идёт разворот»
 MIN_SEC = float(os.environ.get('MIN_SEC', '1.0'))
