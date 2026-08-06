@@ -25,8 +25,20 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# ⚠️ Проверяем БОЕВУЮ копию (`control_pkg/perception/flow_estimator.py`), а не
+# `src/lab/flow_estimator.py`: тот — старый скелет, разошедшийся с лётным кодом.
+for _p in (os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        '..', 'control', 'control_pkg', 'perception'),
+           '/root/sim_ws/src/control/control_pkg/perception',
+           '/control/control_pkg/perception'):
+    if os.path.isfile(os.path.join(_p, 'flow_estimator.py')):
+        sys.path.insert(0, _p)
+        break
+else:                                    # noqa: PLW0120
+    sys.exit('боевой flow_estimator.py не найден — проверять нечего')
+import flow_estimator as _fe             # noqa: E402
 from flow_estimator import FlowEstimator  # noqa: E402
+print(f'проверяем оценщик: {_fe.__file__}', file=sys.stderr)
 
 # дефолты intrinsics + extrinsicRotation из sim.yaml
 DEF_FX, DEF_FY, DEF_CX, DEF_CY = 640.0, 640.0, 640.0, 360.0

@@ -23,13 +23,27 @@ derotation дают правильный знак и величину — БЕЗ
 u_rot≈−fx·wy·dt). Краевые члены (1+xn²) дают малый разброс → допуск ~десятки %.
 Тест проверяет СВЯЗКУ/ЗНАК derotation, а не переисследует формулу _rot_flow.
 """
+import os
 import sys
 import numpy as np
 import cv2
 
-sys.path.insert(0, '/lab')
-sys.path.insert(0, '.')
+# ⚠️ БОЕВАЯ копия оценщика — `control_pkg/perception/flow_estimator.py`, и проверять надо
+# ЕЁ. `src/lab/flow_estimator.py` — старый скелет (129 строк против 471), разошедшийся
+# с лётным кодом; тест на нём пинил бы знак у кода, который никуда не летает.
+# Путь ищем от файла (репо) и по типовым точкам монтирования контейнеров.
+for _p in (os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        '..', 'control', 'control_pkg', 'perception'),
+           '/root/sim_ws/src/control/control_pkg/perception',
+           '/control/control_pkg/perception'):
+    if os.path.isfile(os.path.join(_p, 'flow_estimator.py')):
+        sys.path.insert(0, _p)
+        break
+else:                                    # noqa: PLW0120 — не нашли боевую: это ОШИБКА
+    sys.exit('боевой flow_estimator.py не найден — проверять нечего')
+import flow_estimator as _fe             # noqa: E402
 from flow_estimator import FlowEstimator  # noqa: E402
+print(f'проверяем оценщик: {_fe.__file__}')
 
 # --- константы: зеркало alt_hold_bootstrap.py:59-61 (sim.yaml интринсики + экстринсики)
 FX = FY = 640.0
