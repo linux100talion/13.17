@@ -41,6 +41,63 @@
    после снятия команды). В кампании R выбег 1.5–4.3 м нашёлся ТОЛЬКО потому, что
    проверялась семантика; по приёмке команды ось проходила.
 
+## Как запускать: прогоны и разбор
+
+**Серия/свип — heredoc'ом целиком, НЕ `sed`'ом по предыдущему скрипту.** Замена `N=1` на
+`N=3` однажды попала в `BS_ROLL_OSIGN=1` и в хвост `BS_ROLL_CMD_GAIN=10` — серия ушла в
+воздух с перевёрнутым знаком оси и тройным гейном. Не падает, а даёт правдоподобно
+странный полёт.
+
+```bash
+cat > /tmp/rN_run.sh <<'EOF'
+#!/bin/bash
+for pair in "R8a:0" "R8b:1.5"; do          # свип: одиночки, PREFIX:значение
+    pre="${pair%%:*}"; val="${pair##*:}"
+    env N=1 PREFIX="$pre" \
+        BS_STAB=GzPitchHold+GzYawHold+DpRollHold \
+        BS_MISSION=climb3,hover5,mv_right6,hover8,mv_left6,hover8,land \
+        BS_SLEW=300 BS_FENCE=25 BS_FLOW_OBS=1 BS_THROTTLE_CLIMB=1800 \
+        BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_LAND_BUDGET=180 \
+        BS_ROLL_KP=48 BS_ROLL_KI="$val" BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 \
+        BS_ROLL_SMOOTH=25 BS_ROLL_CMD_GAIN=10 \
+        GDRIVE_UP=1 MP4=1 \
+        bash /root/13.17/src/lab/hover_series.sh
+done
+echo "######## СВИП ЗАВЕРШЁН ########"
+EOF
+grep -E "N=|KP=|KI=|OSIGN|CMD_GAIN" /tmp/rN_run.sh    # ГЛАЗАМИ сверить ДО запуска
+setsid nohup bash /tmp/rN_run.sh > docker/sim/output/RN.log 2>&1 < /dev/null & disown
+```
+Серия n=3 — тот же скрипт без цикла, с `N=3 PREFIX=R9s`. `GDRIVE_UP=1 MP4=1` —
+обязательно (видео на Drive). Отсоединённый запуск (`setsid nohup … & disown`) переживает
+обрыв ssh; ждать — `until grep -q "ЗАВЕРШЁН" …; do sleep 60; done`.
+
+**Разбор — из образа, без поднятого стека.** Контейнер `p1317_nav` между прогонами лежит,
+а перезапускать его ради чтения бэга нельзя (дисциплина прогона). Одноразовый контейнер
+с бэгами и скриптами только на чтение:
+
+```bash
+D="docker run --rm --network none \
+   -v /root/13.17/docker/sim/output:/out:ro -v /root/13.17/src/lab:/lab:ro \
+   sim-nav:latest bash -lc"
+$D "source /opt/ros/humble/setup.bash; python3 /lab/<скрипт> <аргументы>"
+```
+
+| Что мерим | Скрипт | Аргументы |
+|---|---|---|
+| уход/размах/период/потолок/H СКО | `hover_stats.py` | `/out/N1s1_bag /out/N1s2_bag …` |
+| разложение выхода на П и Д | `pd_split.py` | `KD=1500 … /out/N1s1_bag` (env `KD`) |
+| здоровье опоры (kf_n, сегменты, пересевы) | `kf_health.py` | `/out/N1s1_bag …` |
+| паспорт бокового датчика | `roll_sensor_check.py` | env `BAG=/out/…` ⚠️ бэг новее `be8688f` |
+| калибровка боковой команды | `roll_cmd_check.py` | env `BAG=`, `GAIN=`, `S_LAT=` |
+| выбег после снятия команды | `roll_brake_check.py` | `R7s1:48 R4s1:16 …` (бэг:значение) |
+| потолок/период/размах на висении | `roll_osc_check.py` | то же |
+| чистый снос (метрика для `ki`) | `roll_drift_check.py` | то же |
+| сегменты курса, калибровка `S` | `yaw_seg_check.py` | env `BAG=`, `S=` |
+
+⚠️ Пути монтирования — АБСОЛЮТНЫЕ. `-v "$PWD/output:/out:ro"` молча подставит не тот
+каталог, если оболочка не в `docker/sim`, и бэг «не найдётся» при живом файле.
+
 ## Фаза 0 — паспорт стенда (2 прогона)
 
 Прежде чем что-то улучшать, надо знать, что такое «не изменилось».
@@ -113,6 +170,10 @@ BS_STAB="GzRollHold+GzPitchHold+DpYawHold" BS_MISSION="climb3,hover40,land" \
 Отдельно: сглаживание — это ВРЕМЕННОЕ окно, а не число кадров. При смене fps его надо
 пересчитывать, иначе настройка «переезжает» вместе с нагрузкой стенда.
 
+```bash
+$D "source /opt/ros/humble/setup.bash; BAG=/out/Y5s1_bag S=0.324 python3 /lab/yaw_seg_check.py"
+```
+
 ## Фаза 4 — КРЕН (6–8 прогонов; фактически ушло 9 — кампания R)
 
 Петля по СКОРОСТИ (сигнал `flow_lateral` — межкадровый сдвиг), первого порядка. Звенеть
@@ -147,7 +208,19 @@ BS_MISSION="climb3,hover5,mv_right6,hover8,mv_left6,hover8,land" \
 - *удержание*: доля потолка, средняя `|v|` и РАЗМАХ `v` на свободном висении
   (`roll_osc_check.py`). Эталон на `kp=48`: 5% потолка, |v| 0.29 м/с, размах 3.1–3.9 м/с;
 - *торможение*: выбег вбок за 6 с ПОСЛЕ снятия команды (`roll_brake_check.py`). Эталон:
-  **1.13 ± 0.43 м** вправо, **0.81 ± 0.35 м** влево.
+  **1.13 ± 0.43 м** вправо, **0.81 ± 0.35 м** влево;
+- *снос* (только для свипа `ki`): `roll_drift_check.py` — чистое смещение по свободным
+  участкам и отношение `|снос|/|путь|`. База на `ki=3`: −1.61 ± 1.55 м, направленность
+  0.09–0.44. ⚠️ Разброс почти равен эффекту — одиночка значима, только если вылетит
+  далеко за полосу.
+
+```bash
+$D "source /opt/ros/humble/setup.bash;
+    python3 /lab/roll_cmd_check.py                        # знак и gain, env BAG=
+    python3 /lab/roll_brake_check.py  R7s1:48 R4s1:16     # выбег
+    python3 /lab/roll_osc_check.py    R7s1:48 R4s1:16     # потолок/период
+    python3 /lab/roll_drift_check.py  R8a1:0  R7s1:3"     # снос (для ki)
+```
 
 Итог кампании R: `kp` 16 → **48** (выбег 3.05 → 1.13 м ценой |v| 0.23 → 0.29 при
 неизменном размахе), `cmd_gain=10` подтверждён, `ki` не проверен.
@@ -198,6 +271,15 @@ ki = 0                                интеграл по положению �
 сегмент выбрасывается → П слепнет → уход». Опыт N4s (`kf_alt_max` 0.06 → 0.25, всё
 прочее то же) обнулил выбросы (11/12/36 → 0/0/1) — и срыв всё равно случился при НУЛЕ
 выбросов. Высота оказалась симптомом (срыв → крен → просадка тяги), а не причиной.
+
+Разбор кампании тангажа:
+
+```bash
+$D "source /opt/ros/humble/setup.bash;
+    python3 /lab/hover_stats.py /out/N1s{1,2,3}_bag       # уход/размах/потолок/H СКО
+    KD=1500 python3 /lab/pd_split.py /out/N1s1_bag        # выход на П и Д
+    python3 /lab/kf_health.py /out/N1s{1,2,3}_bag"        # здоровье опоры
+```
 
 Диагностика звона по бэгу: период автоколебания. Если при СНИЖЕНИИ `kp` период
 УКОРАЧИВАЕТСЯ (замер `K4s1`: 6.3 с против базовых 7.4–8.6) — это не второй порядок, а
