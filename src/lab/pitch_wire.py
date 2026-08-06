@@ -63,6 +63,21 @@ def load(bag):
     return f(od), f(d2), f(d3), f(d4), f(d5)
 
 
+EARLY = 5.0          # с — «первые секунды удержания», где родится разгон
+
+
+def hover_start(od, d4):
+    """Момент входа в шаг висения: ПЕРВОЕ обнуление счётчика сегментов (climb → hover).
+
+    Обнуляет счётчик только `reset_keyframe()`, а его зовёт вход в шаг миссии
+    (`plan/step.py`). Второе обнуление — уже вход в посадку."""
+    if d4 is None or len(d4) < 5:
+        return None
+    segs = d4[:, 1]
+    drops = np.where((segs[1:] == 0) & (segs[:-1] > 0))[0]
+    return float(d4[drops[0] + 1, 0]) if len(drops) else None
+
+
 def at(arr, ts, col):
     """Значение колонки col в моменты ts (ближайший отсчёт), NaN если потока нет."""
     if arr is None or len(arr) == 0:
@@ -84,10 +99,21 @@ def main(bags):
             continue
         t0, yaw0 = h[0, 0], h[0, 4]
         t = h[:, 0] - t0
-        fwd = (h[:, 1] - h[0, 1]) * math.cos(yaw0) + (h[:, 2] - h[0, 2]) * math.sin(yaw0)
+        # ⚠️ Ось «вперёд» берём по ТЕКУЩЕМУ курсу, а не по курсу на входе в висение.
+        # Опорный канал меряет движение вдоль оси КАМЕРЫ, то есть в связанной системе;
+        # если борт рыскает, мировая ось «вперёд на старте» и ось камеры расходятся, и
+        # корреляция сигнала с уходом падает (вплоть до смены знака) НЕ из-за сигнала.
+        # Поэтому продольный путь считаем интегралом проекции скорости на нос борта.
+        dx, dy = np.diff(h[:, 1]), np.diff(h[:, 2])
+        yaw_m = h[:-1, 4]
+        fwd = np.concatenate([[0.0], np.cumsum(dx * np.cos(yaw_m) + dy * np.sin(yaw_m))])
+        # для сравнения — старая мировая ось (курс зафиксирован на входе)
+        fwd_w = (h[:, 1] - h[0, 1]) * math.cos(yaw0) + (h[:, 2] - h[0, 2]) * math.sin(yaw0)
+        yaw_span = math.degrees(h[:, 4].max() - h[:, 4].min())
         sel = np.linspace(0, len(t) - 1, ROWS).astype(int)
         ts = h[sel, 0]
-        print(f"\n=== {name} · висение {t[-1]:.0f} с, уход вперёд {fwd[-1]:+.1f} м ===")
+        print(f"\n=== {name} · висение {t[-1]:.0f} с, продольный путь {fwd[-1]:+.1f} м "
+              f"(в мировой оси {fwd_w[-1]:+.1f} м, размах курса {yaw_span:.0f}°) ===")
         print(f"{'t,с':>5s} | {'уход,м':>7s} | {'kf_logs':>8s} | {'уставка':>8s} | "
               f"{'ошибка':>8s} | {'PWM':>6s} | {'сегм':>4s} | {'перес':>5s}")
         for k, i in enumerate(sel):
@@ -100,8 +126,27 @@ def main(bags):
         ok = np.isfinite(sig) & np.isfinite(fwd)
         if ok.sum() > 10 and fwd[ok].ptp() > 1.0:
             k, _ = np.polyfit(fwd[ok], sig[ok], 1)
+            kw, _ = np.polyfit(fwd_w[ok], sig[ok], 1)
             print(f"крутизна канала: {k:+.4f} log/м (паспорт −0.0121), "
-                  f"corr {np.corrcoef(fwd[ok], sig[ok])[0, 1]:+.2f}")
+                  f"corr {np.corrcoef(fwd[ok], sig[ok])[0, 1]:+.2f}"
+                  f"  | в мировой оси {kw:+.4f}, corr "
+                  f"{np.corrcoef(fwd_w[ok], sig[ok])[0, 1]:+.2f}")
+        # Разгон рождается в ПЕРВЫЕ секунды удержания: пока смещение мало, сигнал тонет
+        # в шуме и может показать знак НАОБОРОТ — контур тогда сам толкает борт наружу
+        # (E2s3: уход +2.9 м, kf_logs −0.063, PWM −107 = нос вниз = вперёд). Поэтому
+        # крутизну считаем отдельно на старте удержания и на остатке.
+        t_h = hover_start(od, d4)
+        if t_h is not None:
+            m = h[:, 0] >= t_h
+            for tag, sub in (('старт удержания (первые %.0f с)' % EARLY,
+                              m & (h[:, 0] < t_h + EARLY)),
+                             ('дальше', m & (h[:, 0] >= t_h + EARLY))):
+                g = sub & ok
+                if g.sum() > 10 and fwd[g].ptp() > 0.5:
+                    kk, _ = np.polyfit(fwd[g], sig[g], 1)
+                    print(f"  {tag}: {kk:+.4f} log/м, corr "
+                          f"{np.corrcoef(fwd[g], sig[g])[0, 1]:+.2f}, "
+                          f"уход {fwd[g][0]:+.1f} → {fwd[g][-1]:+.1f} м")
 
 
 if __name__ == '__main__':
