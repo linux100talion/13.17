@@ -146,6 +146,50 @@ n=10, `hover20`, конфиг ровно как `D2s`: та серия уже о
 Дополнительное предсказание: длиннее сегменты → реже обнуления → должны поехать размах
 и период качелей (в `D1s` продольный размах 15.7–24.7 м с периодом 12–15 с).
 
+### Команда прогона
+
+Скрипт пишется ЦЕЛИКОМ heredoc'ом — `sed`-правкой по числовому шаблону нельзя, `N=1`
+цепляет `OSIGN` и `CMD_GAIN`. Отвязанно (`setsid nohup`), чтобы пережить обрыв связи.
+
+```bash
+cat > /tmp/e1_run.sh <<'SH'
+#!/usr/bin/env bash
+set -u
+cd /root/13.17/docker/sim
+for pair in "E1a:0.06" "E1b:0.15" "E1c:0.25" "E1d:0.40"; do
+    name="${pair%%:*}"; val="${pair##*:}"
+    echo "======== СВИП E1: $name  kf_alt_max=$val ========"
+    env N=1 PREFIX="$name" GDRIVE_UP=1 MP4=1 \
+        BS_STAB=DpHold BS_MISSION="climb3,hover20,land" \
+        BS_KF_ALT_MAX="$val" \
+        BS_FENCE=25 BS_FLOW_OBS=1 BS_SLEW=300 BS_THROTTLE_CLIMB=1800 \
+        BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_MODE_BUDGET=80 BS_LAND_BUDGET=180 \
+        BS_ROLL_KP=48 BS_ROLL_KI=0 BS_ROLL_IMAX=150 BS_ROLL_SMOOTH=25 \
+        BS_ROLL_OSIGN=1 BS_ROLL_CMD_GAIN=10 \
+        BS_PITCH_KP=1500 BS_PITCH_KI=0 BS_PITCH_KD=1500 BS_PITCH_SMOOTH=9 \
+        BS_PITCH_OSIGN=1 BS_PITCH_CMD_GAIN=0 \
+        BS_YAW_KP=20 BS_YAW_KI=0 BS_YAW_SMOOTH=5 \
+        bash /root/13.17/src/lab/hover_series.sh
+done
+echo "######## СВИП E1 ЗАВЕРШЁН ########"
+SH
+cd /root/13.17/docker/sim && setsid nohup bash /tmp/e1_run.sh \
+  > /root/13.17/docker/sim/output/E1.log 2>&1 < /dev/null & disown
+```
+
+Разбор (нода не нужна, контейнер одноразовый — стенд между сериями лежит):
+
+```bash
+docker run --rm -v /root/13.17/src/lab:/lab:ro \
+  -v /root/13.17/docker/sim/output:/out:ro ros:humble-ros-base bash -lc \
+  'source /opt/ros/humble/setup.bash
+   for b in E1a1 E1b1 E1c1 E1d1; do python3 /lab/kf_health.py /out/${b}_bag; done'
+```
+
+`kf_health.py` даёт сегменты/пересевы/выбросы, `axis_split.py` — уход по осям.
+⚠️ Обе принимают ПОЛНЫЙ путь к бэгу (`/out/<имя>_bag`), от голого имени печатают
+только шапку.
+
 ### Результат свипа
 
 | прогон | kf_alt_max | сегм | пересев | **доля** | выбросов | \|kf_vel\| | траектория «вперёд», м |
@@ -190,6 +234,22 @@ n=10, `hover20`, конфиг ровно как `D2s`: та серия уже о
 3. ⏳ Серия `E2` (n=10, `hover20`, конфиг `D2s`) против отлетанной `D2s`. Метрики: доля
    сохранённых сегментов (ожидание ~100 %), продольный уход, число заборов, форма
    траектории (уезжает монотонно или разворачивается, как на 0.25).
+
+   Команда — та же, что у `E1`, но БЕЗ `BS_KF_ALT_MAX`/`BS_KF_ALT_HOLD` (идут дефолты
+   оценщика 0.06 и 1.5 с) и одним вызовом на десять прогонов:
+
+   ```bash
+   env N=10 PREFIX=E2s GDRIVE_UP=1 MP4=1 \
+       BS_STAB=DpHold BS_MISSION="climb3,hover20,land" \
+       BS_FENCE=25 BS_FLOW_OBS=1 BS_SLEW=300 BS_THROTTLE_CLIMB=1800 \
+       BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_MODE_BUDGET=80 BS_LAND_BUDGET=180 \
+       BS_ROLL_KP=48 BS_ROLL_KI=0 BS_ROLL_IMAX=150 BS_ROLL_SMOOTH=25 \
+       BS_ROLL_OSIGN=1 BS_ROLL_CMD_GAIN=10 \
+       BS_PITCH_KP=1500 BS_PITCH_KI=0 BS_PITCH_KD=1500 BS_PITCH_SMOOTH=9 \
+       BS_PITCH_OSIGN=1 BS_PITCH_CMD_GAIN=0 \
+       BS_YAW_KP=20 BS_YAW_KI=0 BS_YAW_SMOOTH=5 \
+       bash /root/13.17/src/lab/hover_series.sh
+   ```
 3. Перемерить крутизну канала после правки — она была плавающей, а на ней стоят все
    значения кампании `N` (их придётся перемерить).
 4. Дальше по `ToDo4.md`: корень `kf_vel` (остаток 3.0–3.5 м/с в полёте против 0.8 м/с
