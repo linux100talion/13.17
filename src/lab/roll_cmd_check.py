@@ -10,9 +10,9 @@
   отдача = истинная боковая скорость по одометрии Gazebo;
   и калибровка gain_нов = gain_стар · (заказ/отдача), как S для рыскания в Y4.
 
-Сегменты ищутся по команде в `/flow_dbg.x` (PWM крена) НЕЛЬЗЯ — там выход контура,
-а не стик. Поэтому режем по СКАЧКАМ истинной скорости и сверяем число сегментов с
-миссией: `climb3,hover5,mv_right6,hover8,mv_left6,hover8,land` = 2 проезда.
+Сегменты берутся из `/flow_dbg7` (цель, ошибка, PWM) — записи САМОЙ команды. Резать
+по истинной скорости нельзя: замер R1 нашёл так три «проезда» на две команды миссии
+(откат борта после торможения выглядит как новая команда) и дал разброс гейна 26%.
 
 Запуск:
   docker run --rm --network none -v /root/13.17/docker/sim/output:/out:ro \
@@ -40,7 +40,7 @@ def yw(q):
 
 r = SequentialReader()
 r.open(StorageOptions(uri=BAG, storage_id='sqlite3'), ConverterOptions('cdr', 'cdr'))
-od, d1 = [], []
+od, d1, d7 = [], [], []
 while r.has_next():
     t, raw, ts = r.read_next()
     if t == '/model/iris_cam/odometry':
@@ -50,8 +50,14 @@ while r.has_next():
     elif t == '/flow_dbg':
         m = deserialize_message(raw, Vector3Stamped)
         d1.append((st(m), m.vector.x, m.vector.y, m.vector.z))
-od, d1 = np.array(od), np.array(d1)
-print(f'бэг {BAG}: одометрия {len(od)}, /flow_dbg {len(d1)}')
+    elif t == '/flow_dbg7':
+        m = deserialize_message(raw, Vector3Stamped)
+        d7.append((st(m), m.vector.x, m.vector.y, m.vector.z))
+od, d1, d7 = np.array(od), np.array(d1), np.array(d7)
+print(f'бэг {BAG}: одометрия {len(od)}, /flow_dbg {len(d1)}, /flow_dbg7 {len(d7)}')
+if not len(d7):
+    raise SystemExit('НЕТ /flow_dbg7 — бэг снят до записи команды крена (коммит d614c5d). '
+                     'Резать по истинной скорости нельзя: см. шапку.')
 
 g = np.arange(od[0, 0], od[-1, 0], 0.05)
 x, y = np.interp(g, od[:, 0], od[:, 1]), np.interp(g, od[:, 0], od[:, 2])
@@ -62,36 +68,40 @@ v_left = -vx * np.sin(hd) + vy * np.cos(hd)      # ось ВЛЕВО (FLU), см
 pwm = np.interp(g, d1[:, 0], d1[:, 1]) if len(d1) else np.zeros_like(g)
 sig = np.interp(g, d1[:, 0], d1[:, 2]) if len(d1) else np.zeros_like(g)
 
-# командный сегмент: держимся выше порога дольше 2 с, на постоянной высоте (не набор)
-lvl = z > 0.9 * np.percentile(z, 90)
-mov = (np.abs(v_left) > MIN_V) & lvl
-edges = np.nonzero(np.diff(mov.astype(int)))[0]
+# КОМАНДНЫЙ СЕГМЕНТ = участок, где цель контура отлична от нуля (/flow_dbg7.x).
+# Это сама команда, а не её последствие: откат борта после торможения сюда не попадёт.
+tgt = np.interp(g, d7[:, 0], d7[:, 1])
+err7 = np.interp(g, d7[:, 0], d7[:, 2])
+pwm7 = np.interp(g, d7[:, 0], d7[:, 3])
+on = np.abs(tgt) > 1e-6
+edges = np.nonzero(np.diff(on.astype(int)))[0]
 segs, a = [], None
 for e in edges:
-    if mov[e + 1] and a is None:
+    if on[e + 1] and a is None:
         a = e + 1
-    elif not mov[e + 1] and a is not None:
-        if g[e] - g[a] > 2.0:
+    elif not on[e + 1] and a is not None:
+        if g[e] - g[a] > 1.0:
             segs.append((a, e))
         a = None
-if a is not None and g[-1] - g[a] > 2.0:
+if a is not None and g[-1] - g[a] > 1.0:
     segs.append((a, len(g) - 1))
 
-want = LEVEL * GAIN / S_LAT      # м/с при уровне стика LEVEL
-print(f'\nзаказ: стик {LEVEL} · gain {GAIN} / S_lat {S_LAT} = {want:+.2f} м/с\n')
-print(f'{"сегмент":>18} | {"длит":>5} | {"отдача":>8} | {"пик":>6} | {"PWM пик":>7} | '
-      f'{"в потолке":>9} | {"gain нов":>8}')
+print(f'\nS_lat {S_LAT} ед./(м/с) — крутизна канала из паспорта датчика\n')
+print(f'{"сегмент":>18} | {"длит":>5} | {"цель":>7} | {"заказ":>8} | {"отдача":>8} | '
+      f'{"PWM пик":>7} | {"потолок":>7} | {"gain нов":>8}')
 gains = []
 for i, j in segs:
     vs = v_left[i:j]
     v_mean = float(np.mean(vs))
-    side = 'ВЛЕВО' if v_mean > 0 else 'ВПРАВО'
-    p = pwm[i:j]
+    tg = float(np.mean(tgt[i:j]))            # цель в ЕДИНИЦАХ СИГНАЛА
+    want = tg / S_LAT                        # она же в м/с
+    side = 'ВЛЕВО' if tg > 0 else 'ВПРАВО'
+    p = pwm7[i:j]
     sat = 100.0 * np.mean(np.abs(p) >= 149)
     gn = GAIN * abs(want) / abs(v_mean) if abs(v_mean) > 1e-3 else float('nan')
     gains.append(gn)
-    print(f'{side:>8} t+{g[i]-g[0]:6.1f}с | {g[j]-g[i]:4.1f}с | {v_mean:+7.2f}м/с | '
-          f'{np.max(np.abs(vs)):5.2f} | {np.max(np.abs(p)):7.0f} | {sat:8.0f}% | {gn:8.1f}')
+    print(f'{side:>8} t+{g[i]-g[0]:6.1f}с | {g[j]-g[i]:4.1f}с | {tg:+7.2f} | {want:+7.2f}м/с | '
+          f'{v_mean:+7.2f}м/с | {np.max(np.abs(p)):7.0f} | {sat:6.0f}% | {gn:8.1f}')
 if len(gains) > 1:
     a_, s_ = np.mean(gains), np.std(gains)
     print(f'\nroll_cmd_gain по сегментам: {a_:.1f} ± {s_:.1f} ({100*s_/a_:.0f}%) '
