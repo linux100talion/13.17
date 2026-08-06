@@ -19,7 +19,7 @@ from ..perception.flow_estimator import FlowEstimator
 class RosPerception:
     def __init__(self, node, cam_w, cam_h, R_cam_imu, rotflow_sign=1.0,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=5,
-                 kf_alt_max=None,
+                 kf_alt_max=None, kf_alt_hold=None,
                  image_topic='/image_mono', imu_topic='/mavros/imu/data',
                  gyro_topic=None):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
@@ -41,13 +41,18 @@ class RosPerception:
         from std_msgs.msg import Float64
         fx = fy = cam_w / 2.0          # pinhole 90° hfov
         cx, cy = cam_w / 2.0, cam_h / 2.0
-        # kf_alt_max вынесен наружу ради опыта «высота против ухода»: ушла высота больше
-        # порога — опора пересевается и частичный сегмент ВЫБРАСЫВАЕТСЯ, накопитель
-        # положения не наполняется. По кампании N порядок прогонов по СКО высоты почти
-        # совпал с порядком по горизонтальному уходу, но направление причинности из
-        # наблюдений не выводится. Поднять порог = разорвать связь, не трогая лётный
-        # контур. None = дефолт оценщика (0.06).
-        extra = {} if kf_alt_max is None else {'kf_alt_max': float(kf_alt_max)}
+        # Затвор опоры по высоте — две ручки, обе наружу (свип E1, разбор в ToDo5.md):
+        #   kf_alt_max  — ПОРОГ заморозки: ушла высота больше — кадр недостоверен,
+        #                 регулятор по нему не командует;
+        #   kf_alt_hold — сколько секунд держаться вне порога, чтобы признать это
+        #                 настоящим набором и пересеять опору. Болтанка ALT_HOLD
+        #                 (~0.3 с) до пересева не доживает — точка удержания стоит.
+        # None = дефолты оценщика (0.06 и 1.5 с).
+        extra = {}
+        if kf_alt_max is not None:
+            extra['kf_alt_max'] = float(kf_alt_max)
+        if kf_alt_hold is not None:
+            extra['kf_alt_hold'] = float(kf_alt_hold)
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,
                                   roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
                                   yaw_smooth_n=yaw_smooth_n, **extra)

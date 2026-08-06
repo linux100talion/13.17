@@ -52,7 +52,8 @@ class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1, kf_min_pts=40,
                  kf_max_step=0.05, cam_tilt=0.26, kf_tilt_k=0.05, feat_lo=0.667,
-                 kf_alt_max=0.06, kf_reject_max=10, kf_seg_max=0.027, kf_win=2.0):
+                 kf_alt_max=0.06, kf_reject_max=10, kf_seg_max=0.027, kf_win=2.0,
+                 kf_alt_hold=1.5):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -194,11 +195,31 @@ class FlowEstimator:
         # слю-лимит размазывает её в устойчивые −70 PWM, рама кладётся на 6.9° и разгоняет
         # борт до 1.5 м/с — ВСЯ скорость на входе в висение оказалась самодельной
         # (до больших команд борт шёл 0.25 м/с).
-        # Поэтому: ушла высота больше чем на kf_alt_max (в логарифме) — опора пересевается,
-        # кадр помечается kf_valid=False, и регулятор по ней НЕ командует.
+        # Поэтому: ушла высота больше чем на kf_alt_max (в логарифме) — блок опоры
+        # ЗАМИРАЕТ. Кадр помечается kf_valid=False (регулятор по нему НЕ командует), и
+        # при этом НИЧЕГО не меняется: сегмент не закрывается, опора не пересевается,
+        # `_kf_logs_prev`/медианный буфер держат последнее хорошее значение.
         # 0.06 ≈ 6% высоты: на 5 м это 30 см, меньше рабочего шага набора и больше
-        # колебаний удержания высоты.
+        # колебаний удержания высоты. НО летаем мы на 3 м, где 6% = 19 см при размахе
+        # болтанки ALT_HOLD 0.2-0.4 м — порог срабатывает на штатном удержании высоты.
+        #
+        # Почему замирание, а не пересев (было: пересев, разбор в ToDo5.md).
+        # Пересев по высоте выбрасывал накопленное смещение (`trust=False`) — 31-39 раз
+        # за 20 с висения, то есть точка удержания переезжала дважды в секунду. Контур
+        # от этого умел только гасить и не умел возвращать. Свип E1 (kf_alt_max
+        # 0.06/0.15/0.25/0.40) это подтвердил: доля сохранённых сегментов 28/85/89/95%.
+        # Пересев не нужен, потому что вклад высоты в масштаб МГНОВЕННЫЙ (считается по
+        # текущей высоте) — вернулась высота, сигнал продолжился сам. А фича живёт
+        # медиану 284 кадра ≈ 9.4 с против долей секунды болтанки, так что опора
+        # переживает заморозку с запасом порядка.
         self.kf_alt_max = float(kf_alt_max)
+        # Настоящий набор высоты пересев ТРЕБУЕТ — там высота не возвращается. Отличаем
+        # по ДЛИТЕЛЬНОСТИ, а не по величине: не нужен дифференциатор высоты со своим
+        # шумом, хватает одного счётчика. 1.5 с лежит между болтанкой (~0.3 с) и набором
+        # (десятки секунд). На таком пересеве сегмент ЗАСЧИТЫВАЕТСЯ: `_kf_logs_prev` —
+        # последнее достоверное значение (заморозка его не портила), ему верим.
+        self.kf_alt_hold = float(kf_alt_hold)
+        self._alt_out = 0.0                 # сколько секунд подряд высота вне порога
         self._kf_alt0 = None
         self.kf_ref = None
         self.kf_cur = None
@@ -247,6 +268,7 @@ class FlowEstimator:
         self.kf_segs = 0
         self._kf_hist = []      # положение отсчитывается заново → окно скорости тоже
         self.kf_vel = 0.0
+        self._alt_out = 0.0     # заморозка по высоте — тоже заново
 
     def _kf_vel_update(self, stamp, kf_logs, kf_ok):
         """Скорость опоры = наклон МНК по окну kf_win секунд (см. ctor).
@@ -318,6 +340,10 @@ class FlowEstimator:
         alt_drift = 0.0
         if alt is not None and self._kf_alt0 and alt > 0.2:
             alt_drift = abs(math.log(alt / self._kf_alt0))
+        # ЗАМОРОЗКА: высота ушла — масштаб испорчен ЕЮ, а не движением (см. __init__).
+        frozen = alt_drift > self.kf_alt_max
+        dt_frame = 0.0 if self.prev_stamp is None else max(0.0, stamp - self.prev_stamp)
+        self._alt_out = (self._alt_out + dt_frame) if frozen else 0.0
         out = None
         if self.prev_gray is not None and self.vel_pts is not None and len(self.vel_pts) > 0:
             dt = max(1e-3, stamp - self.prev_stamp)
@@ -395,24 +421,31 @@ class FlowEstimator:
                     kf_logs_raw = float(math.log(s_kf)) if s_kf > 1e-6 else 0.0
                     # вычитаем вклад собственного наклона — остаётся перемещение
                     kf_logs = kf_logs_raw - self.kf_tilt_k * self._tilt_term(pitch)
-                    if alt_drift > self.kf_alt_max:
-                        kf_ok = False              # высота ушла — опора протухла
-                    if (self.kf_max_step > 0 and self._kf_logs_prev is not None
-                            and abs(kf_logs - self._kf_logs_prev) > self.kf_max_step):
-                        self.kf_rejects += 1
-                        self._kf_reject_run += 1
-                        kf_logs = self._kf_logs_prev   # выброс: держим прошлое значение
-                        kf_ok = False                  # и помечаем кадр недостоверным
+                    if frozen:
+                        # Кадру не верим И НИЧЕГО НЕ МЕНЯЕМ: ни отбраковку, ни
+                        # `_kf_logs_prev`, ни медианный буфер. Иначе испорченные высотой
+                        # значения (а) отравят медиану на pitch_smooth_n кадров вперёд и
+                        # (б) уедут в накопитель при закрытии сегмента — подъём запишется
+                        # как перемещение, причём с пометкой «доверенный».
+                        kf_ok = False
+                        kf_logs = self._kf_logs_prev if self._kf_logs_prev is not None else 0.0
                     else:
-                        self._kf_reject_run = 0
-                    self._kf_logs_prev = kf_logs
-                    # Сглаживание — тем же N, что у продольной оси. Сигнал медленный
-                    # (положение), поэтому медиана почти не смазывает его, а шум режет:
-                    # σ 0.0025 = 0.14 м на кадр (замер keyframe_track.py).
-                    self._kf_buf.append(kf_logs)
-                    if len(self._kf_buf) > self.pitch_smooth_n:
-                        self._kf_buf.pop(0)
-                    if self.pitch_smooth_n > 1:
+                        if (self.kf_max_step > 0 and self._kf_logs_prev is not None
+                                and abs(kf_logs - self._kf_logs_prev) > self.kf_max_step):
+                            self.kf_rejects += 1
+                            self._kf_reject_run += 1
+                            kf_logs = self._kf_logs_prev  # выброс: держим прошлое значение
+                            kf_ok = False                 # и помечаем кадр недостоверным
+                        else:
+                            self._kf_reject_run = 0
+                        self._kf_logs_prev = kf_logs
+                        # Сглаживание — тем же N, что у продольной оси. Сигнал медленный
+                        # (положение), поэтому медиана почти не смазывает его, а шум режет:
+                        # σ 0.0025 = 0.14 м на кадр (замер keyframe_track.py).
+                        self._kf_buf.append(kf_logs)
+                        if len(self._kf_buf) > self.pitch_smooth_n:
+                            self._kf_buf.pop(0)
+                    if self.pitch_smooth_n > 1 and self._kf_buf:
                         kf_logs = float(np.median(self._kf_buf))
                     kf_seg = kf_logs                  # смещение ВНУТРИ текущего сегмента
                     kf_logs = self.kf_acc + kf_seg    # наружу — полное от точки удержания
@@ -444,24 +477,28 @@ class FlowEstimator:
         # Опора пересевается ТОЛЬКО когда точек не осталось (или попросили сбросить):
         # фича живёт медиану 284 кадра = 9.4 с при 30 Гц (замер keyframe_track.py по G1),
         # и в этих кадрах лежит положение, которого нет в межкадровом сдвиге.
-        seg_full = (self._kf_logs_prev is not None
+        # На заморозке сегмент НЕ закрывается: `_kf_logs_prev` стоит на месте, значит и
+        # seg_full сработать не может (проверка избыточна, но пишем явно — читателю).
+        seg_full = (not frozen and self._kf_logs_prev is not None
                     and abs(self._kf_logs_prev) >= self.kf_seg_max)
+        # Высота не вернулась за kf_alt_hold — это НАСТОЯЩИЙ набор, опора протухла честно.
+        alt_stale = frozen and self._alt_out > self.kf_alt_hold
         if (self._kf_pending or self.kf_cur is None
                 or len(self.kf_cur) < self.kf_min_pts
-                or alt_drift > self.kf_alt_max
                 or self._kf_reject_run > self.kf_reject_max
-                or seg_full):
+                or seg_full or alt_stale):
             if not self._kf_pending and self.kf_cur is not None:
                 # Сегмент закрываем в накопитель, ЕСЛИ его значение чему-то верили:
-                # плановый (набралось смещение) или потеря точек. На уходе высоты и
-                # на серии отбраковок измерение недостоверно — частичный сегмент
-                # выбрасываем, иначе в накопитель уедет мусор.
-                trust = seg_full or (len(self.kf_cur) < self.kf_min_pts)
+                # плановый (набралось смещение), потеря точек или честный набор высоты
+                # (`_kf_logs_prev` заморозка не портила — это последнее ДОСТОВЕРНОЕ
+                # значение). Не верим только серии отбраковок: там измерение уже врало.
+                trust = seg_full or alt_stale or (len(self.kf_cur) < self.kf_min_pts)
                 if trust and self._kf_logs_prev is not None:
                     self.kf_acc += self._kf_logs_prev
                     self.kf_segs += 1
                 else:
                     self.kf_reseeds += 1    # опора потеряна: точка удержания сменилась
+            self._alt_out = 0.0             # повод отработан — счётчик заново
             if self._seed(gray):
                 self._kf_pitch0 = pitch     # наклон опоры — от него считаем поправку
                 if alt is not None and alt > 0.2:
