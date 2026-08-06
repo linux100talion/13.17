@@ -40,10 +40,14 @@ check("DpRollHold демпфит боковой поток (roll=1540)", rc.roll
 rc2 = fd.update(st(1, lat=5.0, now=0.06), Setpoint(), 0.05)
 check("DpRollHold покадрово: тот же seq → выход держится", rc2.roll == 1540)
 
-# velocity-assist: стик задаёт цель = поток → ошибка 0 → нет коррекции
+# velocity-assist: стик задаёт цель = поток → ошибка 0 → нет коррекции.
+# ⚠️ ЗНАК: было `lat=+5` против `c_right=+5`, то есть снос ВЛЕВО (flow_lat>0 = борт
+# идёт влево) гасился стиком ВПРАВО. Тест был написан под реализацию, а не под физику,
+# и ровно поэтому пропустил зеркальную команду до самого R2. Правильно: сносит влево —
+# отпускает это стик ВЛЕВО.
 fd2 = DpRollHold(cmd_gain=1.0)
 fd2.enter(st(-1))
-rc = fd2.update(st(1, lat=5.0, now=0.05), Setpoint(c_right=5.0), 0.05)
+rc = fd2.update(st(1, lat=5.0, now=0.05), Setpoint(c_right=-5.0), 0.05)
 check("DpRollHold velocity-assist: стик=поток → roll=центр", rc.roll == 1500)
 
 # stale: кадр протух (>0.5с без нового seq) → fade в центр
@@ -152,14 +156,28 @@ rr = DpRollHold(kp=8.0, ki=0.0, kd=0.0, cmd_gain=10.0)
 rr.enter(st(-1))
 rr.update(st(1, lat=0.0), Setpoint(c_right=0.3), 0.05)
 dbg = rr.rate_dbg()
-check("DpRollHold: rate_dbg отдаёт цель c_right·cmd_gain (≈3.0)",
-      dbg is not None and abs(dbg[0] - 3.0) < 1e-9)
-check("DpRollHold: ошибка = сигнал − цель (≈−3.0)", abs(dbg[1] + 3.0) < 1e-9)
+check("DpRollHold: rate_dbg отдаёт цель −c_right·cmd_gain (≈−3.0)",
+      dbg is not None and abs(dbg[0] + 3.0) < 1e-9)
+check("DpRollHold: ошибка = сигнал − цель (≈+3.0)", abs(dbg[1] - 3.0) < 1e-9)
 check("DpRollHold: третий слот — PWM выхода", abs(dbg[2] - (rr.update(
     st(2, lat=0.0), Setpoint(c_right=0.3), 0.05).roll - RC_CENTER)) < 1e-6)
 check("DpYawHold (pos-ось) на rate_dbg молчит",
       DpYawHold(cmd_gain=1.0).rate_dbg() is None)
 check("DpRollHold (rate-ось) на hold_dbg молчит", rr.hold_dbg() is None)
+
+# ЗНАК БОКОВОЙ КОМАНДЫ. Стик ВПРАВО обязан гнать борт вправо, то есть ставить
+# ОТРИЦАТЕЛЬНУЮ цель по flow_lateral (мир в кадре уезжает влево) и выдавать PWM ВЫШЕ
+# центра (провод крена: PWM>1500 = крен вправо = разгон вправо). R2 показал зеркало.
+rs = DpRollHold(kp=8.0, ki=0.0, kd=0.0, cmd_gain=10.0)
+rs.enter(st(-1))
+rc_r = rs.update(st(1, lat=0.0), Setpoint(c_right=0.3), 0.05)
+check("DpRollHold: стик ВПРАВО → цель по сигналу ОТРИЦАТЕЛЬНА",
+      rs.rate_dbg()[0] < 0)
+check("DpRollHold: стик ВПРАВО → PWM выше центра", rc_r.roll > RC_CENTER)
+rs2 = DpRollHold(kp=8.0, ki=0.0, kd=0.0, cmd_gain=10.0)
+rs2.enter(st(-1))
+check("DpRollHold: стик ВЛЕВО → PWM ниже центра",
+      rs2.update(st(1, lat=0.0), Setpoint(c_right=-0.3), 0.05).roll < RC_CENTER)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ФЛОУ-СТАБИЛИЗАТОРЫ OK" if ok_all else "❌ СБОЙ")
