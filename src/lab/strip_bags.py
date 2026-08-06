@@ -32,7 +32,7 @@ from rosbag2_py import (ConverterOptions, SequentialReader, SequentialWriter,
 
 # Телеметрия, на которой стоит весь разбор. Всё остальное (кадры) — за борт.
 KEEP = {
-    '/flow_dbg', '/flow_dbg2', '/flow_dbg3', '/flow_dbg4', '/flow_dbg5', '/flow_dbg6',
+    '/flow_dbg', '/flow_dbg2', '/flow_dbg3', '/flow_dbg4', '/flow_dbg5', '/flow_dbg6', '/flow_dbg7',
     '/mavros/global_position/rel_alt', '/gz_imu/data_flu', '/mavros/imu/data_raw',
     '/model/iris_cam/odometry',
     '/mavros/imu/data', '/mavros/imu/data_raw',

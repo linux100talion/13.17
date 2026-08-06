@@ -63,7 +63,7 @@ DRY_RUN="${DRY_RUN:-0}"
 # свип Y2 пришлось восстанавливать офлайн интегрированием /flow_dbg2, а там неизвестен
 # покадровый fdt (сглаживание медианой по 5 кадрам склеивает соседние значения) —
 # калибровка градусов повисла на догадке о частоте кадров.
-TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /flow_dbg5 /flow_dbg6 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
+TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /flow_dbg5 /flow_dbg6 /flow_dbg7 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
 
 # Бюджеты фаз — как в эталонном прогоне bootstrap_arch2 (CPU-бокс, низкий RTF).
 export BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-1800}"

@@ -33,6 +33,7 @@ class RosDebugSink:
         self._pub3 = node.create_publisher(Vector3Stamped, '/flow_dbg3', 10)
         self._pub4 = node.create_publisher(Vector3Stamped, '/flow_dbg4', 10)
         self._pub5 = node.create_publisher(Vector3Stamped, '/flow_dbg5', 10)
+        self._pub7 = node.create_publisher(Vector3Stamped, '/flow_dbg7', 10)
         # /flow_dbg6 = уставка КУРСА (DpYawHold в pos-режиме). Отдельный топик, а не
         # второй источник в /flow_dbg5: pos-осей стало две, и «первый ответивший»
         # молча подменил бы диагностику тангажа рысканием.
@@ -53,6 +54,18 @@ class RosDebugSink:
         команды по КАДРАМ, со стартом в захваченной точке. Без неё «борт не поехал» и
         «уставка не поехала» в разборе неразличимы. hold=None (rate-оси) — не шлём."""
         self._publish_hold(self._pub5, hold)
+
+    def publish_rate_roll(self, dbg) -> None:
+        """/flow_dbg7 = КРЕН-контур целиком: (цель по скорости, ошибка до неё, PWM).
+
+        Крен — ось по СКОРОСТИ (`rate`), у неё нет уставки-накопителя, поэтому
+        /flow_dbg5 её не берёт. Но команда всё равно должна лежать в бэге: без неё
+        командный сегмент ищется по ИСТИННОЙ скорости, и откат борта после торможения
+        неотличим от новой команды (замер R1: три «проезда» на две команды миссии,
+        разброс калиброванного гейна 26%). dbg=None (pos-оси) — не шлём."""
+        if dbg is None:
+            return
+        self._publish_hold(self._pub7, dbg)
 
     def publish_hold_yaw(self, hold, yaw_off: float = 0.0) -> None:
         """/flow_dbg6 = КУРС-контур целиком: (курс-уставка, ошибка до неё, PWM на выходе).

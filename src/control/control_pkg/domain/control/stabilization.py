@@ -252,6 +252,10 @@ class _FlowDamper1D(StabilizationStrategy):
         self._last_frame_sim = -1e9
         self._sp = 0.0           # pos-режим: точка удержания (0 = опорный кадр)
         self._sp_rate = 0.0      # её текущая скорость — для D-члена и отладки
+        self._target = 0.0       # ЦЕЛЬ rate-оси (c_*·cmd_gain) — записи команды у этих
+                                 # осей не было вовсе: /flow_dbg5 шлёт только pos-оси, и
+                                 # калибровку R1 пришлось резать по истинной скорости,
+                                 # где откат после торможения неотличим от команды
 
     def _signal(self, s): raise NotImplementedError
     def _cmd(self, sp): raise NotImplementedError
@@ -337,7 +341,8 @@ class _FlowDamper1D(StabilizationStrategy):
             else:
                 self._sp_rate = 0.0
                 self._advance(s, fdt)
-                err = self._signal(s) - self._cmd(sp) * self.cmd_gain   # velocity-assist
+                self._target = self._cmd(sp) * self.cmd_gain
+                err = self._signal(s) - self._target                    # velocity-assist
             self._i = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
             dot = self._signal_dot(s)
             # разность соседних кадров уже считает производную ОШИБКИ (уставка в err),
@@ -363,6 +368,18 @@ class _FlowDamper1D(StabilizationStrategy):
         if self._cmd_mode != "pos":
             return None
         return (self._sp, self._prev_err, self._sp_rate)
+
+    def rate_dbg(self):
+        """(цель, ошибка до неё, PWM на выходе) для бэга — или None у pos-осей.
+
+        Зеркало `hold_dbg` для осей по СКОРОСТИ. Нужен по той же причине, по какой
+        рысканию понадобился /flow_dbg6: без записи команды сегмент приходится искать
+        по ИСТИННОЙ скорости, а там откат после торможения выглядит как ещё одна
+        команда — калибровка R1 нашла три «проезда» на две команды миссии и дала
+        разброс гейна 26%, где часть сегментов была не командой."""
+        if self._cmd_mode == "pos":
+            return None
+        return (self._target, self._prev_err, self._out)
 
 
 class DpRollHold(_FlowDamper1D):

@@ -157,8 +157,17 @@ class BootstrapArch2Node(Node):
         self._publish(rc)
         self.debug.publish_axes(s, rc)   # флоу-дамп в bag: /flow_dbg + /flow_dbg2 (sim-штамп)
         self.debug.publish_hold(self._hold_dbg('pitch'))       # /flow_dbg5: уставка тангажа
+        # /flow_dbg7: цель крена по скорости + PWM (единственная запись roll-команды)
+        self.debug.publish_rate_roll(self._rate_dbg('roll'))
         # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
+
+    def _rate_dbg(self, axis):
+        """Цель rate-оси (режим `rate`) — или None. Зеркало `_hold_dbg`."""
+        st = None if self.runner.finished else self.runner.steps[self.runner.i]
+        h = self._find_hold(getattr(getattr(st, 'stack', None), 'stabs', ()), axis,
+                            attr='rate_dbg')
+        return h
 
     def _hold_dbg(self, axis):
         """Уставка холдера положения ЗАДАННОЙ оси (режим `pos`) — или None.
@@ -170,17 +179,21 @@ class BootstrapArch2Node(Node):
         st = None if self.runner.finished else self.runner.steps[self.runner.i]
         return self._find_hold(getattr(getattr(st, 'stack', None), 'stabs', ()), axis)
 
-    def _find_hold(self, stabs, axis):
+    def _find_hold(self, stabs, axis, attr='hold_dbg'):
         """Спуск в композиты: DpHold держит оси в `_subs`, снаружи у него одного
-        `hold_dbg` нет — под ним уставка не писалась вообще (и до рыскания тоже)."""
+        `hold_dbg` нет — под ним уставка не писалась вообще (и до рыскания тоже).
+
+        `attr` выбирает, ЧТО спрашиваем: `hold_dbg` у pos-осей (уставка) или
+        `rate_dbg` у осей по скорости (цель). Каждый метод сам отдаёт None, если ось
+        не его режима, поэтому один обход годится для обоих."""
         for stab in stabs:
             sub = getattr(stab, '_subs', None)
             if sub:
-                got = self._find_hold(sub, axis)
+                got = self._find_hold(sub, axis, attr)
                 if got is not None:
                     return got
             elif getattr(stab, '_axis', None) == axis:
-                fn = getattr(stab, 'hold_dbg', None)
+                fn = getattr(stab, attr, None)
                 if fn is not None and fn() is not None:
                     return fn()
         return None

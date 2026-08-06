@@ -145,6 +145,22 @@ check("DpYawHold: первый кадр сегмента опирается на
 check("DpYawHold: дальше шаг = зазор домена (0.05), пропущенный кадр не теряется",
       abs((sp2 - sp1) - 0.05) < 1e-9)
 
+# ЗАПИСЬ КОМАНДЫ rate-оси. Без неё командный сегмент ищется по истинной скорости, где
+# откат борта после торможения неотличим от новой команды (R1: три «проезда» на две
+# команды миссии). Крен обязан отдавать цель, тангаж на этот вопрос молчит.
+rr = DpRollHold(kp=8.0, ki=0.0, kd=0.0, cmd_gain=10.0)
+rr.enter(st(-1))
+rr.update(st(1, lat=0.0), Setpoint(c_right=0.3), 0.05)
+dbg = rr.rate_dbg()
+check("DpRollHold: rate_dbg отдаёт цель c_right·cmd_gain (≈3.0)",
+      dbg is not None and abs(dbg[0] - 3.0) < 1e-9)
+check("DpRollHold: ошибка = сигнал − цель (≈−3.0)", abs(dbg[1] + 3.0) < 1e-9)
+check("DpRollHold: третий слот — PWM выхода", abs(dbg[2] - (rr.update(
+    st(2, lat=0.0), Setpoint(c_right=0.3), 0.05).roll - RC_CENTER)) < 1e-6)
+check("DpYawHold (pos-ось) на rate_dbg молчит",
+      DpYawHold(cmd_gain=1.0).rate_dbg() is None)
+check("DpRollHold (rate-ось) на hold_dbg молчит", rr.hold_dbg() is None)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ФЛОУ-СТАБИЛИЗАТОРЫ OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
