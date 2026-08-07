@@ -23,7 +23,7 @@ import math
 from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.excitation import NoExcitation
 from control_pkg.domain.control.stabilization import (
-    DpHold, DpPitchBack, DpPitchHold, DpPitchRate, DpRollHold, DpYawHold, GzHold, GzPitchHold,
+    DpHold, DpPitchBack, DpPitchHold, DpPitchRate, DpRollHold, DpRollRate, DpYawHold, GzHold, GzPitchHold,
     GzPosHold, GzRollHold, GzYawHold, VinsHold)
 from control_pkg.domain.control.trajectory import RcTransmitter, Shuttle
 
@@ -87,6 +87,14 @@ _STAB = {
         cfg.pitch_rate_cmd_gain),
     # весь демпфер, но продольная ось по скорости
     "DpHoldR": lambda cfg: DpHold(_dp_roll(cfg), _STAB["DpPitchRate"](cfg), _dp_yaw(cfg)),
+    # Боковая ось тоже по МЕТРИЧЕСКОЙ скорости (гейны roll_rate_*), см. DpRollRate.
+    "DpRollRate": lambda cfg: DpRollRate(
+        cfg.roll_rate_kp, cfg.roll_rate_ki, cfg.roll_rate_kd, cfg.roll_imax,
+        cfg.roll_max, cfg.roll_conf_min, cfg.roll_conf_full, cfg.roll_osign,
+        cfg.roll_rate_cmd_gain),
+    # ОБЕ горизонтальные оси в метрах: демпфер целиком на виде сверху
+    "DpHoldM": lambda cfg: DpHold(_STAB["DpRollRate"](cfg), _STAB["DpPitchRate"](cfg),
+                                  _dp_yaw(cfg)),
     # ЗОНД канала: команда демпфера по такту/амплитуде, но выпрямлена назад (u=−|u|)
     "DpPitchBack": lambda cfg: _dp_pitch(cfg, DpPitchBack),
     "DpYawHold":   _dp_yaw,

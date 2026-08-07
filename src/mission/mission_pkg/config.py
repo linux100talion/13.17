@@ -128,6 +128,13 @@ class BootstrapConfig:
     roll_kd: float = 0.0
     roll_imax: float = 150.0
     roll_max: float = 150.0
+    # --- боковая ось ПО МЕТРИЧЕСКОЙ СКОРОСТИ (DpRollRate, сигнал ipm_vlat в М/С) ---
+    # 120 — это ПЕРЕСЧЁТ подобранного roll_kp=48 в новые единицы, а не новая догадка:
+    # 48 × 2.42 px/(м/с) ≈ 116 PWM на 1 м/с (S_lat под маской feat_lo, замер L1_scale2ax).
+    roll_rate_kp: float = 120.0
+    roll_rate_ki: float = 0.0
+    roll_rate_kd: float = 0.0
+    roll_rate_cmd_gain: float = 0.0   # м/с при полном стике (0 = чистое удержание)
     roll_conf_min: float = 0.05
     roll_conf_full: float = 0.20
     roll_osign: float = +1.0         # ⚠️ БЫЛО −1 и это оказалось ЗНАКОМ РАЗГОНА.
