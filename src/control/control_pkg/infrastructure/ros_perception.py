@@ -16,13 +16,51 @@ import numpy as np
 from ..perception.flow_estimator import FlowEstimator
 
 
+def attitude_at(pitch, roll, att_t, gyro_buf, stamp,
+                extrap=True, extrap_max=0.2):
+    """Ориентация, ДОТЯНУТАЯ гироскопом до штампа кадра.
+
+    ЗАЧЕМ. ATTITUDE идёт 12.5 Гц, камера — 20-30 Гц, и `_pitch`/`_roll` до этого
+    брались как «последнее пришедшее», без привязки ко времени кадра. Внутри одного
+    интервала ATTITUDE ориентация держится СТУПЕНЬКОЙ, а истинная уходит со скоростью
+    ω — значит ошибка растёт линейно, и полоса земли в `_ipm_rectify` уезжает
+    пропорционально угловой СКОРОСТИ. Ровно это и меряется в бэгах как утечка крена
+    в боковой канал.
+
+    ЧИСЛО СХОДИТСЯ. Точка земли 4.5 м впереди при h=3 и наклоне камеры 0.26 рад лежит
+    на 163 px ниже центра (fy≈480 на 960×540); ошибка крена δφ двигает её вбок на
+    δφ·163 px, метр на пиксель там 4.5/480 → чувствительность 1.53 м на радиан.
+    Замер по G3 (регрессия сигнала оси на истинные скорость и угловые скорости):
+    0.85 / 1.04 / 1.32 / 1.01 на спокойных прогонах, 2.13 на самом дёрганом.
+    Предсказание модели и замер совпали — поэтому лечим запаздывание, а не «вращение»:
+    само вращение выпрямление снимает и так, оно строит полосу по текущим углам.
+
+    ⚠️ ω тут НЕ та, что уходит в оценщик. Оценщику нужен угол, повёрнутый МЕЖДУ
+    кадрами (`_omega_for` — среднее по интервалу), а нам — скорость НА МОМЕНТ
+    сообщения ориентации, чтобы дотянуть её вперёд. Разные вопросы, разные выборки.
+
+    Малые углы: φ̇ ≈ ωx, θ̇ ≈ ωy. Точные формулы Эйлера добавляют множители
+    sinφ·tanθ / cosφ, но на рабочих ±15° это ≤5 %, а интервал дотяжки ≤80 мс —
+    поправка к поправке. Дотяжка ограничена `att_extrap_max`: если ATTITUDE замолчал,
+    интегрировать старую скорость минуты нельзя, лучше вернуть последнее известное."""
+    if not extrap or att_t is None or len(gyro_buf) == 0:
+        return pitch, roll
+    dt = stamp - att_t
+    if dt <= 0.0 or dt > extrap_max:
+        return pitch, roll
+    arr = np.asarray(gyro_buf)
+    sel = arr[:, 0] >= att_t
+    w = arr[sel, 1:4].mean(axis=0) if sel.sum() else arr[-1, 1:4]
+    return pitch + float(w[1]) * dt, roll + float(w[0]) * dt
+
+
 class RosPerception:
     def __init__(self, node, cam_w, cam_h, R_cam_imu, rotflow_sign=1.0,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=5,
                  kf_alt_max=None, kf_alt_hold=None, yaw_trans_fix=None,
                  kf_seg_min_sec=None, kf_seg_frac=None,
                  image_topic='/image_mono', imu_topic='/mavros/imu/data',
-                 gyro_topic=None):
+                 gyro_topic=None, att_extrap=True, att_extrap_max=0.2):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -93,6 +131,9 @@ class RosPerception:
         self._prev_img_stamp = None
         self._pitch = 0.0
         self._roll = 0.0
+        self._att_t = None                  # штамп САМОГО сообщения ориентации
+        self._att_extrap = bool(att_extrap)
+        self._att_extrap_max = float(att_extrap_max)
         self._alt = None
         self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
         self._kf_dx = self._kf_dy = self._kf_logs = self._kf_rot = 0.0
@@ -126,6 +167,7 @@ class RosPerception:
         # крен — только для канала вида сверху (выпрямление полосы земли)
         self._roll = math.atan2(2.0 * (q.w * q.x + q.y * q.z),
                                 1.0 - 2.0 * (q.x * q.x + q.y * q.y))
+        self._att_t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
 
     def _on_gyro(self, m, own=False):
         if own and not self._gyro_own:
@@ -151,6 +193,13 @@ class RosPerception:
         i = int(np.argmin(np.abs(arr[:, 0] - stamp)))
         return arr[i, 1:4]
 
+    def _att_for(self, stamp):
+        """Ориентация на штамп кадра. Логика — в `attitude_at` (см. её док):
+        вынесена функцией модуля, чтобы офлайн-стенд `att_extrap_test.py` гонял
+        РОВНО тот же код, а не свою копию."""
+        return attitude_at(self._pitch, self._roll, self._att_t, self._gyro_buf,
+                           stamp, self._att_extrap, self._att_extrap_max)
+
     def _on_alt(self, m):
         self._alt = float(m.data)
 
@@ -161,8 +210,9 @@ class RosPerception:
         stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
         omega = self._omega_for(stamp)
         self._prev_img_stamp = stamp
-        res = self._est.process(gray, stamp, omega, self._pitch, self._alt,
-                                roll=self._roll)
+        pitch, roll = self._att_for(stamp)
+        res = self._est.process(gray, stamp, omega, pitch, self._alt,
+                                roll=roll)
         if res is None:
             return
         self._lateral = res['lateral']
