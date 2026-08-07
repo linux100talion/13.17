@@ -49,6 +49,8 @@ CAM_W, CAM_H = 960, 540
 FLOW_R = [0.0, -1.0, 0.0, -0.25708, 0.0, -0.96639, 0.96639, 0.0, -0.25708]
 HOVER_Z = 2.0
 MIN_M = 0.3          # сегменты короче этого по истине не судим: делить на шум нельзя
+SEGMIN = float(os.environ.get('KS_SEGMIN', -1))   # kf_seg_min_sec; <0 = дефолт оценщика
+QUIET = os.environ.get('KS_QUIET') == '1'         # печатать только итог (свип по сроку)
 
 
 def euler(q):
@@ -101,8 +103,10 @@ def main():
     fwd = np.concatenate([[0.0], np.cumsum(dx * np.cos(ym) + dy * np.sin(ym))])
     ft = h[:, 0]
 
+    kw = {} if SEGMIN < 0 else {'kf_seg_min_sec': SEGMIN}
     est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, FLOW_R,
-                        rotflow_sign=1.0, pitch_smooth_n=9, roll_smooth_n=25, yaw_smooth_n=5)
+                        rotflow_sign=1.0, pitch_smooth_n=9, roll_smooth_n=25,
+                        yaw_smooth_n=5, **kw)
     segs = []
     prev_acc, prev_segs, seg_t0 = 0.0, 0, None
     for t, gray in frames:
@@ -140,8 +144,9 @@ def main():
             else:
                 bad_n += 1
                 bad_m += abs(d_true)
-        print(f'{tt:5.1f} | {dur:5.2f} | {d_true:+8.2f} | {banked:+8.4f} | '
-              f'{slope:+8.4f} | {mark}')
+        if not QUIET:
+            print(f'{tt:5.1f} | {dur:5.2f} | {d_true:+8.2f} | {banked:+8.4f} | '
+                  f'{slope:+8.4f} | {mark}')
     tot = ok_n + bad_n
     if tot:
         print(f'\nсегментов с ВЕРНЫМ знаком {ok_n}/{tot} ({100 * ok_n / tot:.0f}%), '

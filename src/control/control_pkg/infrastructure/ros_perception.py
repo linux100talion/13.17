@@ -20,6 +20,7 @@ class RosPerception:
     def __init__(self, node, cam_w, cam_h, R_cam_imu, rotflow_sign=1.0,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=5,
                  kf_alt_max=None, kf_alt_hold=None, yaw_trans_fix=None,
+                 kf_seg_min_sec=None,
                  image_topic='/image_mono', imu_topic='/mavros/imu/data',
                  gyro_topic=None):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
@@ -57,6 +58,8 @@ class RosPerception:
         # переигрывание требует прогона со СТАРЫМ законом и сохранёнными кадрами,
         # иначе мерить нечего — исправленная ось держит курс, и разворота в данных
         # не остаётся (E3f1: истинных 7° за висение, отношение тонет в шуме).
+        if kf_seg_min_sec is not None:
+            extra['kf_seg_min_sec'] = float(kf_seg_min_sec)
         if yaw_trans_fix is not None:
             extra['yaw_trans_fix'] = bool(yaw_trans_fix)
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,

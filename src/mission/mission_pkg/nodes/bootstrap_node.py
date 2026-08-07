@@ -102,7 +102,8 @@ class BootstrapArch2Node(Node):
                                             yaw_smooth_n=cfg.yaw_smooth,
                                             kf_alt_max=cfg.kf_alt_max,
                                             kf_alt_hold=cfg.kf_alt_hold,
-                                            yaw_trans_fix=cfg.yaw_trans_fix)
+                                            yaw_trans_fix=cfg.yaw_trans_fix,
+                                            kf_seg_min_sec=cfg.kf_seg_min_sec)
 
         # рантайм switch Flow→Vins: флаг + флоу-стабилизатор (VinsHold на gz_* гейнах)
         handover = None
@@ -280,6 +281,8 @@ def _parse() -> tuple:
     p.add_argument('--kf-alt-max', dest='kf_alt_max', type=float, default=_D.kf_alt_max)
     p.add_argument('--kf-alt-hold', dest='kf_alt_hold', type=float, default=_D.kf_alt_hold)
     p.add_argument('--yaw-trans-fix', dest='yaw_trans_fix', type=int, default=_D.yaw_trans_fix)
+    p.add_argument('--kf-seg-min-sec', dest='kf_seg_min_sec', type=float,
+                   default=_D.kf_seg_min_sec)
     p.add_argument('--pitch-osign', dest='pitch_osign', type=float, default=_D.pitch_osign)
     p.add_argument('--pitch-cmd-gain', dest='pitch_cmd_gain', type=float, default=_D.pitch_cmd_gain)
     p.add_argument('--pitch-smooth', dest='pitch_smooth', type=int, default=_D.pitch_smooth)
