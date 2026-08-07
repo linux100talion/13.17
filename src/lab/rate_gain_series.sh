@@ -33,12 +33,21 @@
 # Запуск (отвязанно, чтобы пережил обрыв связи):
 #   cd /root/13.17/docker/sim && setsid nohup env KP_LIST="100 50" N=5 \
 #     bash /root/13.17/src/lab/rate_gain_series.sh > output/F2.log 2>&1 < /dev/null & disown
+#   # крен на метрическом канале (обе оси в метрах):
+#   ... env AXIS=roll STAB=DpHoldM KP_LIST="60 30" PREFIX_BASE=G N=5 ...
 # Env: KP_LIST (значения гейна через пробел, "100 50"), N (прогонов на значение, 5),
+#      AXIS (pitch|roll — какую rate-ось свипить), STAB (DpHoldR|DpHoldM),
 #      PREFIX_BASE (имя-основа, "F"; серии выйдут F2s/F3s/...), остальное — как у
 #      hover_series.sh.
+#
+# ⚠️ Гейны rate-осей ЖИВУТ В РАЗНЫХ ЕДИНИЦАХ и свипятся ПОРОЗНЬ: тангаж читает
+# ipm_vfwd (м/с), крен на DpHoldR — flow_lateral (px/кадр), крен на DpHoldM — ipm_vlat
+# (м/с). Переносить числа между ними нельзя.
 set -u
 
 KP_LIST="${KP_LIST:-100 50}"
+AXIS="${AXIS:-pitch}"           # какую rate-ось свипить: pitch | roll
+STAB="${STAB:-DpHoldR}"        # DpHoldR (крен пиксельный) | DpHoldM (обе оси в метрах)
 N="${N:-5}"
 PREFIX_BASE="${PREFIX_BASE:-F}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,7 +55,7 @@ cd /root/13.17/docker/sim
 
 # Конфиг ОДИН на все значения: меняется ровно одна ручка, остальное прибито.
 COMMON=(
-    BS_STAB=DpHoldR BS_MISSION="climb3,hover20,land"
+    BS_STAB="$STAB" BS_MISSION="climb3,hover20,land"
     BS_FENCE=25 BS_FLOW_OBS=1 BS_SLEW=300 BS_THROTTLE_CLIMB=1800
     BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_MODE_BUDGET=80 BS_LAND_BUDGET=180
     BS_ROLL_KP=48 BS_ROLL_KI=0 BS_ROLL_IMAX=150 BS_ROLL_SMOOTH=25
@@ -58,8 +67,13 @@ COMMON=(
 i=2
 for kp in $KP_LIST; do
     name="${PREFIX_BASE}${i}s"
-    echo "======== СЕРИЯ ${name}: pitch_rate_kp=${kp}, n=${N} ========"
-    env N="$N" PREFIX="$name" GDRIVE_UP=1 MP4=1 BS_PITCH_RATE_KP="$kp" "${COMMON[@]}" \
+    echo "======== СЕРИЯ ${name}: ${AXIS}_rate_kp=${kp}, stab=${STAB}, n=${N} ========"
+    if [ "$AXIS" = "roll" ]; then
+        KNOB=(BS_ROLL_RATE_KP="$kp")
+    else
+        KNOB=(BS_PITCH_RATE_KP="$kp")
+    fi
+    env N="$N" PREFIX="$name" GDRIVE_UP=1 MP4=1 "${KNOB[@]}" "${COMMON[@]}" \
         bash "$SCRIPT_DIR/hover_series.sh"
     df -h / | tail -1
     i=$((i + 1))
