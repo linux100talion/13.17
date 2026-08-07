@@ -105,7 +105,8 @@ class BootstrapArch2Node(Node):
                                             yaw_trans_fix=cfg.yaw_trans_fix,
                                             kf_seg_min_sec=cfg.kf_seg_min_sec,
                                             kf_seg_frac=cfg.kf_seg_frac,
-                                            att_extrap=cfg.att_extrap)
+                                            att_extrap=cfg.att_extrap,
+                                            ipm_model=cfg.ipm_model)
 
         # рантайм switch Flow→Vins: флаг + флоу-стабилизатор (VinsHold на gz_* гейнах)
         handover = None
@@ -284,6 +285,8 @@ def _parse() -> tuple:
     p.add_argument('--kf-alt-hold', dest='kf_alt_hold', type=float, default=_D.kf_alt_hold)
     p.add_argument('--yaw-trans-fix', dest='yaw_trans_fix', type=int, default=_D.yaw_trans_fix)
     p.add_argument('--att-extrap', dest='att_extrap', type=int, default=_D.att_extrap)
+    p.add_argument('--ipm-model', dest='ipm_model', default=_D.ipm_model,
+                   choices=['legacy', 'rsign', 'exact'])
     p.add_argument('--kf-seg-min-sec', dest='kf_seg_min_sec', type=float,
                    default=_D.kf_seg_min_sec)
     p.add_argument('--kf-seg-frac', dest='kf_seg_frac', type=float, default=_D.kf_seg_frac)

@@ -55,7 +55,7 @@ class FlowEstimator:
                  kf_alt_max=0.06, kf_reject_max=10, kf_seg_max=0.027, kf_win=2.0,
                  kf_alt_hold=1.5, yaw_trans_fix=True, kf_seg_min_sec=0.3, kf_seg_frac=0.30,
                  kf_seg_cap_sec=10.0, ipm=True, ipm_x0=3.0, ipm_x1=6.0,
-                 ipm_yhalf=2.0, ipm_res=0.02, ipm_win=0.5):
+                 ipm_yhalf=2.0, ipm_res=0.02, ipm_win=0.5, ipm_model='legacy'):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -83,6 +83,10 @@ class FlowEstimator:
         self.ipm_x0, self.ipm_x1 = float(ipm_x0), float(ipm_x1)
         self.ipm_yhalf, self.ipm_res = float(ipm_yhalf), float(ipm_res)
         self.ipm_win = float(ipm_win)
+        # Модель проекции земли в кадр: 'legacy' | 'signs' | 'exact' (см. `_ipm_px`).
+        # ⚠️ Дефолт `legacy` — ЛЁТНАЯ модель, на которой отлетаны серии E8-H2; менять
+        # его можно только по замеру, иначе разом уедут все прежние числа кампании.
+        self.ipm_model = str(ipm_model)
         self._ipm_prev = None
         self._ipm_hist = []          # (t, путь вперёд, путь вбок) — окно для скорости
         self.ipm_fwd = self.ipm_lat = 0.0
@@ -356,28 +360,58 @@ class FlowEstimator:
         return np.column_stack([u_rot, v_rot])
 
     # ------------------------------------------------------------- вид сверху
-    def _ipm_px(self, X, Y, h, a_down, roll):
+    def _ipm_px(self, X, Y, h, pitch, roll):
         """Точка земли (X вперёд, Y вправо, глубина h) → пиксель кадра. None вне кадра.
 
-        Оси камеры: x вправо, y вниз, z вперёд. Точка в горизонтной системе (0,h,X)
-        поворачивается НА +a вокруг оси x (проверено численно: при h=3 м и наклоне 15°
-        земля в 3.1 м ложится на нижний край кадра, в 12 м — на строку 358)."""
-        ca, sa = math.cos(a_down), math.sin(a_down)
-        cr, sr = math.cos(roll), math.sin(roll)
-        P = np.array([[cr, -sr, 0.0], [sr, cr, 0.0], [0.0, 0.0, 1.0]]) @ (
-            np.array([[1.0, 0.0, 0.0], [0.0, ca, -sa], [0.0, sa, ca]])
-            @ np.array([Y, h, X], dtype=np.float64))
+        Оси камеры: x вправо, y вниз, z вперёд. Модель выбирается `ipm_model`.
+
+        ⚠️ УГЛЫ ПРИХОДЯТ В СИСТЕМЕ ROS (ENU/FLU: y ВЛЕВО, z ВВЕРХ), а не в авиационной
+        FRD. По правилу правой руки вокруг оси «влево» вектор вперёд уходит ВНИЗ, то есть
+        ПОЛОЖИТЕЛЬНЫЙ ТАНГАЖ ЗДЕСЬ = НОС ВНИЗ. Поэтому `cam_tilt + pitch` ВЕРНО: нос вниз
+        увеличивает угол взгляда вниз. Это проверено замером, а не рассуждением: попытка
+        «исправить» знак на `cam_tilt − pitch` разнесла продольный масштаб с 1.10 до 4.06
+        при ошибке 2.64 м/с вместо 0.40 (стенд `att_extrap_test.py`, бэг I1s1).
+        Ошибка вывода была в том, что эталонная цепочка выводилась в FRD, где знак
+        обратный. Не повторять: конвенцию углов проверять ЧИСЛЕННО, до правки.
+
+        `legacy` — лётная модель, на ней отлетаны серии E8-H2: наклон `cam_tilt + pitch`
+        вокруг оси x, затем крен вокруг ОПТИЧЕСКОЙ оси.
+        `rsign`  — то же, но крен на −φ. Изолирует ЗНАК КРЕНА: тангаж не трогает.
+        `exact`  — честная цепочка: точка (X вперёд, Y вправо, h вниз) → корпус
+                   `Rx(φ)·Ry(−θ)` (минус — перевод тангажа ROS→FRD) → камера матрицей
+                   крепления `M(cam_tilt)`. Отличается от `legacy` тем, что крен идёт
+                   вокруг ПРОДОЛЬНОЙ оси корпуса, наклонённой к оптической на `cam_tilt`,
+                   а не вокруг самой оптической.
+
+        ⚠️ `cam_tilt + pitch` живёт ещё в двух местах (наклонная поправка опоры и строка
+        горизонта для подгонки курса). Там знак НЕ трогали: это отдельные каналы, и
+        менять их надо своим замером, а не заодно."""
+        if self.ipm_model == 'exact':
+            cr, sr = math.cos(roll), math.sin(roll)
+            cp, sp = math.cos(-pitch), math.sin(-pitch)
+            ct, stl = math.cos(self.cam_tilt), math.sin(self.cam_tilt)
+            Rx = np.array([[1.0, 0.0, 0.0], [0.0, cr, sr], [0.0, -sr, cr]])
+            Ry = np.array([[cp, 0.0, -sp], [0.0, 1.0, 0.0], [sp, 0.0, cp]])
+            M = np.array([[0.0, 1.0, 0.0], [-stl, 0.0, ct], [ct, 0.0, stl]])
+            P = M @ (Rx @ (Ry @ np.array([X, Y, h], dtype=np.float64)))
+        else:
+            rs = -1.0 if self.ipm_model == 'rsign' else +1.0
+            a_down = self.cam_tilt + pitch
+            ca, sa = math.cos(a_down), math.sin(a_down)
+            cr, sr = math.cos(rs * roll), math.sin(rs * roll)
+            P = np.array([[cr, -sr, 0.0], [sr, cr, 0.0], [0.0, 0.0, 1.0]]) @ (
+                np.array([[1.0, 0.0, 0.0], [0.0, ca, -sa], [0.0, sa, ca]])
+                @ np.array([Y, h, X], dtype=np.float64))
         if P[2] <= 0.05:
             return None
         return [self.cx + self.fx * P[0] / P[2], self.cy + self.fy * P[1] / P[2]]
 
     def _ipm_rectify(self, gray, h, pitch, roll):
         """Полоса земли → метрический вид сверху (1 пиксель = ipm_res метров)."""
-        a = self.cam_tilt + pitch
         src = []
         for X, Y in ((self.ipm_x0, -self.ipm_yhalf), (self.ipm_x0, self.ipm_yhalf),
                      (self.ipm_x1, self.ipm_yhalf), (self.ipm_x1, -self.ipm_yhalf)):
-            p = self._ipm_px(X, Y, h, a, roll)
+            p = self._ipm_px(X, Y, h, pitch, roll)
             if p is None:
                 return None
             src.append(p)

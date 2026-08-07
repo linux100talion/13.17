@@ -60,7 +60,8 @@ class RosPerception:
                  kf_alt_max=None, kf_alt_hold=None, yaw_trans_fix=None,
                  kf_seg_min_sec=None, kf_seg_frac=None,
                  image_topic='/image_mono', imu_topic='/mavros/imu/data',
-                 gyro_topic=None, att_extrap=True, att_extrap_max=0.2):
+                 gyro_topic=None, att_extrap=True, att_extrap_max=0.2,
+                 ipm_model=None):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -102,6 +103,8 @@ class RosPerception:
             extra['kf_seg_min_sec'] = float(kf_seg_min_sec)
         if yaw_trans_fix is not None:
             extra['yaw_trans_fix'] = bool(yaw_trans_fix)
+        if ipm_model is not None:
+            extra['ipm_model'] = str(ipm_model)
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,
                                   roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
                                   yaw_smooth_n=yaw_smooth_n, **extra)

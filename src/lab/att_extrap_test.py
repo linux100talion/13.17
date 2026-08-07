@@ -52,6 +52,7 @@ import sys
 
 import numpy as np
 
+import cv2
 from nav_msgs.msg import Odometry
 from rclpy.serialization import deserialize_message
 from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
@@ -63,6 +64,12 @@ from control_pkg.perception.flow_estimator import FlowEstimator
 BAG = os.environ.get('AE_BAG', '/root/sim_ws/output/I1s1_bag')
 MAXF = int(os.environ.get('AE_MAXF', 0))
 EXTRAP_MAX = float(os.environ.get('AE_EXTRAP_MAX', 0.2))
+# Что перебираем. МОДЕЛЬ проекции земли в кадр (`ipm_model` в FlowEstimator) — это
+# ГЕОМЕТРИЯ, СПОСОБ взять угол на кадр — это ВРЕМЯ. Первый прогон стенда показал, что
+# время ни при чём (даже недостижимый `near` не убрал утечку), поэтому по умолчанию
+# свипаем модели при одном способе `hold`, а полный крест зовётся через env.
+MODELS = os.environ.get('AE_MODELS', 'legacy,signs,exact').split(',')
+MODES = os.environ.get('AE_MODES', 'hold').split(',')
 HOVER_Z = 2.0
 # ровно то, что кладёт в оценщик bootstrap_node (FLOW_R) и RosPerception (интринсики)
 CAM_W, CAM_H = 960, 540
@@ -85,12 +92,18 @@ def read(bag):
     frames, od, imu = [], [], []
     while r.has_next():
         topic, raw, _ = r.read_next()
-        if topic == '/image_mono':
+        # Кадры: живьём оценщик ест `/image_mono`, но в бэг пишется `/image_color`
+        # (mono8 не записывается — см. capture_scene.sh). Обе картинки выходят из одного
+        # дебайера, серый из bgr8 берём сами: cv_bridge тут не нужен и не зовётся,
+        # чтобы не тащить в стенд его ABI-привязку к системному OpenCV.
+        if topic in ('/image_mono', '/image_color'):
             m = deserialize_message(raw, Image)
+            buf = np.frombuffer(m.data, dtype=np.uint8)
             if m.encoding in ('mono8', '8UC1'):
-                frames.append((stamp(m),
-                               np.frombuffer(m.data,
-                                             dtype=np.uint8).reshape(m.height, m.width).copy()))
+                frames.append((stamp(m), buf.reshape(m.height, m.width).copy()))
+            elif m.encoding == 'bgr8':
+                frames.append((stamp(m), cv2.cvtColor(buf.reshape(m.height, m.width, 3),
+                                                      cv2.COLOR_BGR2GRAY)))
         elif topic == '/model/iris_cam/odometry':
             m = deserialize_message(raw, Odometry)
             p = m.pose.pose.position
@@ -119,9 +132,10 @@ def att_for(imu, t, mode):
                        extrap=(mode == 'extrap'), extrap_max=EXTRAP_MAX)
 
 
-def replay(frames, od, imu, mode):
+def replay(frames, od, imu, mode, model='legacy'):
     """Канал вида сверху БОЕВЫМ кодом. Возвращает (t, v_вперёд, v_вбок) по кадрам."""
-    est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, FLOW_R)
+    est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, FLOW_R,
+                        ipm_model=model)
     ts, vf, vl = [], [], []
     for t, gray in frames:
         pitch, roll = att_for(imu, t, mode)
@@ -161,12 +175,13 @@ def main():
     vt_fwd_all = np.gradient(fwd, hov[:, 0])
     vt_lat_all = np.gradient(lat, hov[:, 0])
 
-    print(f"\n{'способ':7s} | {'ось':10s} | {'масштаб a':>9s} | {'утечка b, м':>11s} | "
-          f"{'c, м':>6s} | {'R²':>5s} | {'R² без ω':>8s} | {'СКО ош':>6s}")
-    for mode in ('hold', 'extrap', 'near'):
-        ts, vf, vl = replay(frames, od, imu, mode)
+    print(f"\n{'модель':7s} | {'способ':7s} | {'ось':10s} | {'масштаб a':>9s} | "
+          f"{'утечка b, м':>11s} | {'c, м':>6s} | {'R²':>5s} | {'R² без ω':>8s} | {'СКО ош':>6s}")
+    for model in MODELS:
+      for mode in MODES:
+        ts, vf, vl = replay(frames, od, imu, mode, model)
         if len(ts) < 20:
-            print(f'{mode:7s} | измерений мало ({len(ts)})')
+            print(f'{model:7s} | {mode:7s} | измерений мало ({len(ts)})')
             continue
         wx = np.interp(ts, imu[:, 0], imu[:, 4])
         wy = np.interp(ts, imu[:, 0], imu[:, 5])
@@ -181,7 +196,7 @@ def main():
             A0 = np.column_stack([vt[ok], np.ones(int(ok.sum()))])
             c0, *_ = np.linalg.lstsq(A0, v[ok], rcond=None)
             r20 = 1 - (v[ok] - A0 @ c0).var() / v[ok].var()
-            print(f'{mode:7s} | {name:10s} | {c[0]:+9.2f} | {c[1]:+11.2f} | '
+            print(f'{model:7s} | {mode:7s} | {name:10s} | {c[0]:+9.2f} | {c[1]:+11.2f} | '
                   f'{c[2]:+6.2f} | {r2:5.2f} | {r20:8.2f} | {np.std(v[ok] - vt[ok]):6.2f}')
     print('\nПравка засчитана, если |b| у extrap заметно меньше, чем у hold, а масштаб a '
           'остался около 1.0.\nnear — недостижимый потолок (заглядывает вперёд), мерка '
