@@ -33,6 +33,7 @@ class RosDebugSink:
         self._pub3 = node.create_publisher(Vector3Stamped, '/flow_dbg3', 10)
         self._pub4 = node.create_publisher(Vector3Stamped, '/flow_dbg4', 10)
         self._pub5 = node.create_publisher(Vector3Stamped, '/flow_dbg5', 10)
+        self._pub8 = node.create_publisher(Vector3Stamped, '/flow_dbg8', 10)
         self._pub7 = node.create_publisher(Vector3Stamped, '/flow_dbg7', 10)
         # /flow_dbg6 = уставка КУРСА (DpYawHold в pos-режиме). Отдельный топик, а не
         # второй источник в /flow_dbg5: pos-осей стало две, и «первый ответивший»
@@ -127,3 +128,13 @@ class RosDebugSink:
         d4.vector.y = float(s.kf_reseeds)
         d4.vector.z = float(s.kf_rejects)
         self._pub4.publish(d4)
+        # /flow_dbg8 = КАНАЛ ВИДА СВЕРХУ: (путь вперёд М, продольная скорость М/С,
+        # достоверность кадра). Единственный канал в МЕТРАХ — остальные безразмерны,
+        # поэтому без него полёт на DpPitchRate нечем разбирать: и сигнал, и уставка
+        # оси живут здесь.
+        d8 = Vector3Stamped()
+        d8.header.stamp = t
+        d8.vector.x = float(s.ipm_fwd)
+        d8.vector.y = float(s.ipm_vfwd)
+        d8.vector.z = 1.0 if s.ipm_ok else 0.0
+        self._pub8.publish(d8)

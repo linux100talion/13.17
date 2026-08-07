@@ -23,7 +23,7 @@ import math
 from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.excitation import NoExcitation
 from control_pkg.domain.control.stabilization import (
-    DpHold, DpPitchBack, DpPitchHold, DpRollHold, DpYawHold, GzHold, GzPitchHold,
+    DpHold, DpPitchBack, DpPitchHold, DpPitchRate, DpRollHold, DpYawHold, GzHold, GzPitchHold,
     GzPosHold, GzRollHold, GzYawHold, VinsHold)
 from control_pkg.domain.control.trajectory import RcTransmitter, Shuttle
 
@@ -79,6 +79,14 @@ _STAB = {
     "DpHold":      lambda cfg: DpHold(_dp_roll(cfg), _dp_pitch(cfg), _dp_yaw(cfg)),
     "DpRollHold":  _dp_roll,
     "DpPitchHold": _dp_pitch,
+    # Продольная ось по СКОРОСТИ (вид сверху), а не по положению — см. DpPitchRate.
+    # Гейны у неё СВОИ (сигнал в м/с, а не в log): pitch_rate_*.
+    "DpPitchRate": lambda cfg: DpPitchRate(
+        cfg.pitch_rate_kp, cfg.pitch_rate_ki, cfg.pitch_rate_kd, cfg.pitch_imax,
+        cfg.pitch_max, cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign,
+        cfg.pitch_rate_cmd_gain),
+    # весь демпфер, но продольная ось по скорости
+    "DpHoldR": lambda cfg: DpHold(_dp_roll(cfg), _STAB["DpPitchRate"](cfg), _dp_yaw(cfg)),
     # ЗОНД канала: команда демпфера по такту/амплитуде, но выпрямлена назад (u=−|u|)
     "DpPitchBack": lambda cfg: _dp_pitch(cfg, DpPitchBack),
     "DpYawHold":   _dp_yaw,

@@ -54,7 +54,8 @@ class FlowEstimator:
                  kf_max_step=0.05, cam_tilt=0.26, kf_tilt_k=0.05, feat_lo=0.667,
                  kf_alt_max=0.06, kf_reject_max=10, kf_seg_max=0.027, kf_win=2.0,
                  kf_alt_hold=1.5, yaw_trans_fix=True, kf_seg_min_sec=0.3, kf_seg_frac=0.30,
-                 kf_seg_cap_sec=10.0):
+                 kf_seg_cap_sec=10.0, ipm=True, ipm_x0=3.0, ipm_x1=6.0,
+                 ipm_yhalf=2.0, ipm_res=0.02, ipm_win=0.5):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -63,6 +64,30 @@ class FlowEstimator:
         # Вычитать ли вклад сноса из канала курса (подгонка по строке кадра, см. process).
         # False возвращает прежний закон — медиану горизонтального потока целиком.
         self.yaw_trans_fix = bool(yaw_trans_fix)
+        # --- КАНАЛ ВИДА СВЕРХУ (IPM): МЕТРИЧЕСКОЕ смещение и скорость ---
+        # Масштабный канал (kf_logs) меряет log(масштаб) созвездия, и цена метра у него
+        # плавает в 14 раз: глубина точек не контролируется, точка на земле в 5 м даёт
+        # при ходе 0.25 м целых 0.05 log, точка у горизонта в 50 м — 0.005.
+        # Здесь полоса ЗЕМЛИ перед бортом выпрямляется в вид сверху по высоте и углам,
+        # и продольный ход становится равномерным сдвигом с ИЗВЕСТНОЙ ценой пикселя.
+        # Замер (ipm_flow_test.py, три бэга с кадрами), путь против истины:
+        #                продольная             боковая
+        #   E5f1         +1.00  corr +0.99      +0.91  corr +0.64
+        #   E6f1         +1.03  corr +1.00      +1.06  corr +0.96
+        #   E7f1         +0.97  corr +1.00      +1.09  corr +0.81
+        # То есть метры меряются метрами, без калибровки — из одной высоты.
+        # Скорость берётся наклоном МНК в окне ipm_win: покадровая производная непригодна
+        # (пиксель при 0.02 м/пкс и 30 Гц = 0.6 м/с), а на окне 0.5 с выходит крутизна
+        # 0.91-0.94 при corr 0.76-0.84 и ошибке 0.65-0.82 м/с (истинная СКО ~1.0).
+        self.ipm = bool(ipm)
+        self.ipm_x0, self.ipm_x1 = float(ipm_x0), float(ipm_x1)
+        self.ipm_yhalf, self.ipm_res = float(ipm_yhalf), float(ipm_res)
+        self.ipm_win = float(ipm_win)
+        self._ipm_prev = None
+        self._ipm_hist = []          # (t, путь вперёд, путь вбок) — окно для скорости
+        self.ipm_fwd = self.ipm_lat = 0.0
+        self.ipm_vfwd = self.ipm_vlat = 0.0
+        self.ipm_ok = False
         self.max_feats = max_feats
         # ВРЕМЕННОЕ СГЛАЖИВАНИЕ: медиана по N кадрам, СВОЁ N на КАЖДУЮ ось (roll=lateral,
         # pitch=longitudinal, yaw). Шум потока БЕЛЫЙ (автокорр≈0, см. flow_calib) →
@@ -330,6 +355,81 @@ class FlowEstimator:
         v_rot = self.fy * v_rot_n
         return np.column_stack([u_rot, v_rot])
 
+    # ------------------------------------------------------------- вид сверху
+    def _ipm_px(self, X, Y, h, a_down, roll):
+        """Точка земли (X вперёд, Y вправо, глубина h) → пиксель кадра. None вне кадра.
+
+        Оси камеры: x вправо, y вниз, z вперёд. Точка в горизонтной системе (0,h,X)
+        поворачивается НА +a вокруг оси x (проверено численно: при h=3 м и наклоне 15°
+        земля в 3.1 м ложится на нижний край кадра, в 12 м — на строку 358)."""
+        ca, sa = math.cos(a_down), math.sin(a_down)
+        cr, sr = math.cos(roll), math.sin(roll)
+        P = np.array([[cr, -sr, 0.0], [sr, cr, 0.0], [0.0, 0.0, 1.0]]) @ (
+            np.array([[1.0, 0.0, 0.0], [0.0, ca, -sa], [0.0, sa, ca]])
+            @ np.array([Y, h, X], dtype=np.float64))
+        if P[2] <= 0.05:
+            return None
+        return [self.cx + self.fx * P[0] / P[2], self.cy + self.fy * P[1] / P[2]]
+
+    def _ipm_rectify(self, gray, h, pitch, roll):
+        """Полоса земли → метрический вид сверху (1 пиксель = ipm_res метров)."""
+        a = self.cam_tilt + pitch
+        src = []
+        for X, Y in ((self.ipm_x0, -self.ipm_yhalf), (self.ipm_x0, self.ipm_yhalf),
+                     (self.ipm_x1, self.ipm_yhalf), (self.ipm_x1, -self.ipm_yhalf)):
+            p = self._ipm_px(X, Y, h, a, roll)
+            if p is None:
+                return None
+            src.append(p)
+        src = np.array(src, dtype=np.float32)
+        if src[:, 0].min() < -2 * self.cx or src[:, 0].max() > 4 * self.cx:
+            return None                     # полоса ушла далеко за кадр — доверять нечему
+        w = max(8, int(2 * self.ipm_yhalf / self.ipm_res))
+        hh = max(8, int((self.ipm_x1 - self.ipm_x0) / self.ipm_res))
+        dst = np.array([[0, hh - 1], [w - 1, hh - 1], [w - 1, 0], [0, 0]], dtype=np.float32)
+        return cv2.warpPerspective(gray, cv2.getPerspectiveTransform(src, dst), (w, hh))
+
+    def _ipm_update(self, gray, stamp, alt, pitch, roll):
+        """Шаг канала вида сверху: путь в метрах + скорость наклоном МНК в окне."""
+        self.ipm_ok = False
+        if not self.ipm or alt is None or alt < 0.5:
+            self._ipm_prev = None
+            return
+        rect = self._ipm_rectify(gray, alt, pitch, roll)
+        if rect is None:
+            self._ipm_prev = None
+            return
+        prev = self._ipm_prev
+        self._ipm_prev = rect
+        if prev is None or prev.shape != rect.shape:
+            return
+        pts = self._detect(prev)
+        if pts is None or len(pts) < 20:
+            return
+        pts = pts.reshape(-1, 1, 2).astype(np.float32)
+        p1, st, _ = cv2.calcOpticalFlowPyrLK(prev, rect, pts, None, **self._lk)
+        p0b, st2, _ = cv2.calcOpticalFlowPyrLK(rect, prev, p1, None, **self._lk)
+        ok = (st.reshape(-1) == 1) & (st2.reshape(-1) == 1)
+        ok &= np.linalg.norm(p0b.reshape(-1, 2) - pts.reshape(-1, 2), axis=1) < 1.0
+        if ok.sum() < 15:
+            return
+        d = (p1.reshape(-1, 2) - pts.reshape(-1, 2))[ok]
+        # столбец = Y вправо, строка = X вперёд (строка 0 — дальний край). Знаки сверены
+        # замером: продольная крутизна +1.00/+1.03/+0.97, боковая +0.91/+1.06/+1.09.
+        self.ipm_lat += float(np.median(d[:, 0])) * self.ipm_res
+        self.ipm_fwd += float(np.median(d[:, 1])) * self.ipm_res
+        self.ipm_ok = True
+        self._ipm_hist.append((stamp, self.ipm_fwd, self.ipm_lat))
+        while self._ipm_hist and stamp - self._ipm_hist[0][0] > self.ipm_win:
+            self._ipm_hist.pop(0)
+        if len(self._ipm_hist) >= 4:
+            a = np.array(self._ipm_hist)
+            tc = a[:, 0] - a[:, 0].mean()
+            den = float(np.dot(tc, tc))
+            if den > 0 and a[-1, 0] - a[0, 0] > 0.5 * self.ipm_win:
+                self.ipm_vfwd = float(np.dot(tc, a[:, 1] - a[:, 1].mean()) / den)
+                self.ipm_vlat = float(np.dot(tc, a[:, 2] - a[:, 2].mean()) / den)
+
     # ---------------------------------------------------------------- опора
     def reset_keyframe(self):   # noqa: D401 — накопитель тоже обнуляется, см. ниже
         """Сбросить опору: следующий кадр станет новым опорным (точка удержания).
@@ -342,6 +442,8 @@ class FlowEstimator:
         self.kf_segs = 0
         self._kf_hist = []      # положение отсчитывается заново → окно скорости тоже
         self.kf_vel = 0.0
+        self.ipm_fwd = self.ipm_lat = 0.0   # путь вида сверху — от новой точки удержания
+        self._ipm_hist = []
         self._alt_out = 0.0     # заморозка по высоте — тоже заново
 
     def _kf_vel_update(self, stamp, kf_logs, kf_ok):
@@ -407,7 +509,7 @@ class FlowEstimator:
             return 0.0
         return math.log(a1 / a0)
 
-    def process(self, gray, stamp, omega_imu, pitch=0.0, alt=None):
+    def process(self, gray, stamp, omega_imu, pitch=0.0, alt=None, roll=0.0):
         """gray: uint8 HxW; stamp: сек; omega_imu: ω в FLU (rad/s);
         pitch: тангаж борта, рад (>0 = нос ВНИЗ) — компенсация наклона;
         alt: высота (баро), м — опора действительна только пока она не ушла. → dict|None."""
@@ -418,6 +520,7 @@ class FlowEstimator:
         frozen = alt_drift > self.kf_alt_max
         dt_frame = 0.0 if self.prev_stamp is None else max(0.0, stamp - self.prev_stamp)
         self._alt_out = (self._alt_out + dt_frame) if frozen else 0.0
+        self._ipm_update(gray, stamp, alt, pitch, roll)
         out = None
         if self.prev_gray is not None and self.vel_pts is not None and len(self.vel_pts) > 0:
             dt = max(1e-3, stamp - self.prev_stamp)
@@ -572,6 +675,10 @@ class FlowEstimator:
                     kf_age=self.kf_age, kf_reseeds=self.kf_reseeds,
                     kf_segs=self.kf_segs, kf_rejects=self.kf_rejects,
                     kf_valid=kf_ok,
+                    # --- канал вида сверху: МЕТРЫ и м/с ---
+                    ipm_fwd=self.ipm_fwd, ipm_lat=self.ipm_lat,
+                    ipm_vfwd=self.ipm_vfwd, ipm_vlat=self.ipm_vlat,
+                    ipm_ok=self.ipm_ok,
                     # --- диагностика для flow_derotation_check ---
                     resid_rms=float(np.sqrt(np.mean(np.sum(tr ** 2, axis=1)))),
                     meas_rms=float(np.sqrt(np.mean(np.sum(flow ** 2, axis=1)))),

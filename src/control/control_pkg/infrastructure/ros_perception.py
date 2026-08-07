@@ -68,6 +68,9 @@ class RosPerception:
                                   roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
                                   yaw_smooth_n=yaw_smooth_n, **extra)
         self._omega = np.zeros(3)
+        self._ipm_fwd = self._ipm_lat = 0.0
+        self._ipm_vfwd = self._ipm_vlat = 0.0
+        self._ipm_ok = False
         # ω НЕ «последняя пришедшая», а СРЕДНЯЯ ЗА МЕЖКАДРОВЫЙ ИНТЕРВАЛ. Оценщик
         # умножает ω на dt, то есть ему нужен угол, повёрнутый МЕЖДУ кадрами, а не
         # мгновенная скорость в момент прихода сообщения. Телеметрия при этом реже
@@ -89,6 +92,7 @@ class RosPerception:
         self._gyro_own = False              # пришёл ли data_raw (иначе ATTITUDE-фолбэк)
         self._prev_img_stamp = None
         self._pitch = 0.0
+        self._roll = 0.0
         self._alt = None
         self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
         self._kf_dx = self._kf_dy = self._kf_logs = self._kf_rot = 0.0
@@ -119,6 +123,9 @@ class RosPerception:
         # что мало против рабочих ±10°)
         q = m.orientation
         self._pitch = math.asin(max(-1.0, min(1.0, 2.0 * (q.w * q.y - q.z * q.x))))
+        # крен — только для канала вида сверху (выпрямление полосы земли)
+        self._roll = math.atan2(2.0 * (q.w * q.x + q.y * q.z),
+                                1.0 - 2.0 * (q.x * q.x + q.y * q.y))
 
     def _on_gyro(self, m, own=False):
         if own and not self._gyro_own:
@@ -154,7 +161,8 @@ class RosPerception:
         stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
         omega = self._omega_for(stamp)
         self._prev_img_stamp = stamp
-        res = self._est.process(gray, stamp, omega, self._pitch, self._alt)
+        res = self._est.process(gray, stamp, omega, self._pitch, self._alt,
+                                roll=self._roll)
         if res is None:
             return
         self._lateral = res['lateral']
@@ -168,6 +176,9 @@ class RosPerception:
         self._kf_n, self._kf_age = res['kf_n'], res['kf_age']
         self._kf_reseeds, self._kf_valid = res['kf_reseeds'], res['kf_valid']
         self._kf_segs, self._kf_rejects = res['kf_segs'], res['kf_rejects']
+        self._ipm_fwd, self._ipm_lat = res['ipm_fwd'], res['ipm_lat']
+        self._ipm_vfwd, self._ipm_vlat = res['ipm_vfwd'], res['ipm_vlat']
+        self._ipm_ok = res['ipm_ok']
         self._dt = res['dt']
         self._seq += 1               # НОВЫЙ кадр → домен продвинет PID
 
@@ -185,6 +196,9 @@ class RosPerception:
         s.kf_n, s.kf_age = self._kf_n, self._kf_age
         s.kf_reseeds, s.kf_valid = self._kf_reseeds, self._kf_valid
         s.kf_segs, s.kf_rejects = self._kf_segs, self._kf_rejects
+        s.ipm_fwd, s.ipm_lat = self._ipm_fwd, self._ipm_lat
+        s.ipm_vfwd, s.ipm_vlat = self._ipm_vfwd, self._ipm_vlat
+        s.ipm_ok = self._ipm_ok
         return s
 
     def reset_keyframe(self):

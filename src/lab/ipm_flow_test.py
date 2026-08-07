@@ -179,6 +179,21 @@ def flow_step(prev, cur):
     return float(np.median(d[:, 0])), float(np.median(d[:, 1]))
 
 
+def lsq_vel(ts, xs, win):
+    """Скорость наклоном МНК в скользящем окне win секунд (как kf_vel в оценщике)."""
+    out = np.full(len(ts), np.nan)
+    for i in range(len(ts)):
+        j = np.searchsorted(ts, ts[i] - win)
+        if i - j + 1 < 4 or ts[i] - ts[j] < 0.5 * win:
+            continue
+        tc = ts[j:i + 1] - ts[j:i + 1].mean()
+        xc = xs[j:i + 1] - xs[j:i + 1].mean()
+        d = float(np.dot(tc, tc))
+        if d > 0:
+            out[i] = float(np.dot(tc, xc) / d)
+    return out
+
+
 def main():
     frames, od, imu, alt = read(BAG)
     print(f'бэг {BAG}: кадров {len(frames)}, одометрии {len(od)}, imu {len(imu)}, баро {len(alt)}')
@@ -238,15 +253,23 @@ def main():
     tl = np.interp(ts, h[:, 0], lat)
     print(f'измерений {len(ts)}, кадров пропущено {skipped}\n')
     # --- ГЛАВНОЕ: СКОРОСТЬ (её и будет отрабатывать демпфер) ---
-    vm_x, vm_y = np.gradient(mx, ts), np.gradient(my, ts)
+    # Покадровая производная непригодна по арифметике: пиксель при 0.02 м/пкс и 30 Гц
+    # даёт 0.6 м/с, а межкадровый сдвиг — единицы пикселей. Поэтому скорость берётся
+    # НАКЛОНОМ МНК в скользящем окне — так же, как kf_vel в боевом оценщике.
     vt_x = np.interp(ts, h[:, 0], np.gradient(fwd, h[:, 0]))
     vt_y = np.interp(ts, h[:, 0], np.gradient(lat, h[:, 0]))
-    print(f"{'ось':10s} | {'крутизна v':>10s} | {'corr v':>6s} | "
+    print(f"{'окно, с':>7s} | {'ось':10s} | {'крутизна v':>10s} | {'corr v':>6s} | "
           f"{'СКО ошибки':>10s} | {'v_ист СКО':>9s}")
-    for name, m, tr in (('продольная', vm_x, vt_x), ('боковая', vm_y, vt_y)):
-        k = np.polyfit(tr, m, 1)[0] if np.std(tr) > 0.05 else float('nan')
-        print(f'{name:10s} | {k:+10.2f} | {np.corrcoef(m, tr)[0, 1]:+6.2f} | '
-              f'{np.std(m - tr):10.2f} | {np.std(tr):9.2f}')
+    for win in (float(w) for w in os.environ.get('IPM_WINS', '0.0,0.3,0.5,1.0,2.0').split(',')):
+        for name, m, tr in (('продольная', mx, vt_x), ('боковая', my, vt_y)):
+            v = np.gradient(m, ts) if win <= 0 else lsq_vel(ts, m, win)
+            ok = np.isfinite(v)
+            if ok.sum() < 20 or np.std(tr[ok]) < 0.05:
+                continue
+            k = np.polyfit(tr[ok], v[ok], 1)[0]
+            print(f'{win:7.1f} | {name:10s} | {k:+10.2f} | '
+                  f'{np.corrcoef(v[ok], tr[ok])[0, 1]:+6.2f} | '
+                  f'{np.std(v[ok] - tr[ok]):10.2f} | {np.std(tr[ok]):9.2f}')
     print('крутизна 1.00 = скорость намерена верно; одинаковая по прогонам = масштаб стабилен\n')
     # --- контроль: тот же поток, проинтегрированный в путь ---
     print(f"{'ось':10s} | {'путь намерен':>12s} | {'путь истинный':>13s} | {'крутизна':>8s} | {'corr':>5s}")
