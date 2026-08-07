@@ -50,6 +50,8 @@ FLOW_R = [0.0, -1.0, 0.0, -0.25708, 0.0, -0.96639, 0.96639, 0.0, -0.25708]
 HOVER_Z = 2.0
 MIN_M = 0.3          # сегменты короче этого по истине не судим: делить на шум нельзя
 SEGMIN = float(os.environ.get('KS_SEGMIN', -1))   # kf_seg_min_sec; <0 = дефолт оценщика
+SEGFRAC = float(os.environ.get('KS_SEGFRAC', -1)) # kf_seg_frac; <0 = дефолт оценщика
+SEGCAP = float(os.environ.get('KS_SEGCAP', -1))   # kf_seg_cap_sec; <0 = дефолт
 QUIET = os.environ.get('KS_QUIET') == '1'         # печатать только итог (свип по сроку)
 
 
@@ -103,7 +105,13 @@ def main():
     fwd = np.concatenate([[0.0], np.cumsum(dx * np.cos(ym) + dy * np.sin(ym))])
     ft = h[:, 0]
 
-    kw = {} if SEGMIN < 0 else {'kf_seg_min_sec': SEGMIN}
+    kw = {}
+    if SEGMIN >= 0:
+        kw['kf_seg_min_sec'] = SEGMIN
+    if SEGFRAC >= 0:
+        kw['kf_seg_frac'] = SEGFRAC
+    if SEGCAP >= 0:
+        kw['kf_seg_cap_sec'] = SEGCAP
     est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, FLOW_R,
                         rotflow_sign=1.0, pitch_smooth_n=9, roll_smooth_n=25,
                         yaw_smooth_n=5, **kw)

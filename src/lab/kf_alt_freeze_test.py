@@ -65,8 +65,12 @@ def zoom(img, s):
     return cv2.warpAffine(img, M, (W, H), borderMode=cv2.BORDER_REFLECT)
 
 
-def run(alt_fn, n=180, zoom_per_frame=1.0015):
-    """Прогон n кадров: зум растёт равномерно, высота — по alt_fn(кадр). → (est, кадры)."""
+def run(alt_fn, n=360, zoom_per_frame=1.0015):
+    """Прогон n кадров: зум растёт равномерно, высота — по alt_fn(кадр). → (est, кадры).
+
+    360 кадров = 12 с при 30 Гц. Шесть секунд было мало: на идеальных кадрах точки
+    не теряются вовсе, сегмент закрывается только СТРАХОВКОЙ по возрасту
+    (kf_seg_cap_sec=10 с), и за 6 с не закрылся бы ни один."""
     est = FlowEstimator(FX, FY, CX, CY, R, rotflow_sign=1.0, pitch_smooth_n=9)
     img = base_frame()
     frames = []
