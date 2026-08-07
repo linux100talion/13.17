@@ -285,6 +285,10 @@ def _parse() -> tuple:
     p.add_argument('--kf-seg-min-sec', dest='kf_seg_min_sec', type=float,
                    default=_D.kf_seg_min_sec)
     p.add_argument('--kf-seg-frac', dest='kf_seg_frac', type=float, default=_D.kf_seg_frac)
+    p.add_argument('--pitch-rate-kp', dest='pitch_rate_kp', type=float,
+                   default=_D.pitch_rate_kp)
+    p.add_argument('--roll-rate-kp', dest='roll_rate_kp', type=float,
+                   default=_D.roll_rate_kp)
     p.add_argument('--pitch-osign', dest='pitch_osign', type=float, default=_D.pitch_osign)
     p.add_argument('--pitch-cmd-gain', dest='pitch_cmd_gain', type=float, default=_D.pitch_cmd_gain)
     p.add_argument('--pitch-smooth', dest='pitch_smooth', type=int, default=_D.pitch_smooth)
