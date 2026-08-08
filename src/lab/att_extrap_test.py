@@ -76,6 +76,10 @@ MODES = os.environ.get('AE_MODES', 'hold').split(',')
 # Вычитание разворота по гироскопу: 0 = выкл, ±1 = знак. Знак НЕ выводится, а выбирается
 # этим стендом — см. `ipm_derot` в FlowEstimator._ipm_update.
 DEROTS = [float(x) for x in os.environ.get('AE_DEROT', '0').split(',')]
+# ФВЧ по ω_z: постоянная времени в секундах, 0 = не снимать смещение нуля (см. `ipm_wz_tau`
+# в FlowEstimator). Смысл колонки — СДВИГ: вычитание разворота по СЫРОМУ гироскопу вливает
+# в боковую скорость постоянную составляющую ω_z × плечо полосы 4.5 м.
+WZTAUS = [float(x) for x in os.environ.get('AE_WZTAU', '0').split(',')]
 HOVER_Z = 2.0
 # ровно то, что кладёт в оценщик bootstrap_node (FLOW_R) и RosPerception (интринсики)
 CAM_W, CAM_H = 960, 540
@@ -147,10 +151,17 @@ def omega_for(imu, t, t_prev):
     return float(imu[int(np.argmin(np.abs(imu[:, 0] - t))), 6])
 
 
-def replay(frames, od, imu, mode, model='legacy', derot=0.0):
+def replay(frames, od, imu, mode, model='legacy', derot=0.0, wztau=0.0):
     """Канал вида сверху БОЕВЫМ кодом. Возвращает (t, v_вперёд, v_вбок) по кадрам."""
     est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, FLOW_R,
-                        ipm_model=model, ipm_derot=derot)
+                        ipm_model=model, ipm_derot=derot, ipm_wz_tau=wztau)
+    # ⚠️ ПРОГРЕВ ОЦЕНКИ СМЕЩЕНИЯ ω_z. Стенд гоняет только окно висения, а в полёте нода
+    # живёт с момента старта и к висению её ФВЧ уже сошёлся. Без прогрева стенд мерил бы
+    # не поправку, а её переходный процесс (при τ=30 и окне 24 с — почти только его).
+    # Кормим гироскопом всё, что в бэге ДО первого кадра окна — ровно как живьём.
+    if wztau > 0.0 and len(frames):
+        for row in imu[imu[:, 0] < frames[0][0]]:
+            est._wz_debias(float(row[0]), float(row[6]))
     ts, vf, vl, miss = [], [], [], 0
     t_prev = None
     for t, gray in frames:
@@ -186,6 +197,14 @@ def main():
     dta = float(np.median(np.diff(imu[:, 0])))
     print(f'висение {t1 - t0:.1f} с, кадров {len(frames)} ({1 / dtm:.1f} Гц), '
           f'ATTITUDE {1 / dta:.1f} Гц → ступенька до {dta * 1000:.0f} мс')
+    # ⚠️ КОЛЛИНЕАРНОСТЬ РЕГРЕССОРОВ. Утечка `b` (по ω_x) и колонка ω_z — коэффициенты ОДНОЙ
+    # регрессии. Если угловые скорости в прогоне связаны, МНК растащит общий эффект между
+    # ними произвольно, и «утечка ушла с крена на курс» окажется не физикой, а перекладкой.
+    # Печатаем связь явно: |corr| выше ~0.5 — колонки читать порознь нельзя.
+    warm = frames[0][0] - imu[0, 0]
+    print(f'прогрев ФВЧ до окна: {warm:.1f} с; corr(ω_x, ω_z) = '
+          f'{np.corrcoef(imu[:, 4], imu[:, 6])[0, 1]:+.2f}, '
+          f'ω_z: среднее {imu[:, 6].mean():+.4f} рад/с, СКО {imu[:, 6].std():.4f}')
 
     # истина: скорость в СВЯЗАННОЙ системе
     dx, dy = np.diff(hov[:, 1]), np.diff(hov[:, 2])
@@ -201,39 +220,39 @@ def main():
     # R², ни СКО ошибки сдвига НЕ ВИДЯТ — они меряют корреляцию и разброс, а константа
     # уходит в свободный член регрессии. Именно так серия L2s ушла вбок −4.78 ± 4.48 м
     # (все пять прогонов в одну сторону) при отличном R²=0.90 на стенде.
-    print(f"\n{'модель':7s} | {'derot':>5s} | {'способ':7s} | {'ось':10s} | {'масштаб a':>9s} | "
-          f"{'утечка b, м':>11s} | {'ωz, м':>6s} | {'сдвиг':>6s} | {'R²':>5s} | {'СКО ош':>6s}")
+    print(f"\n{'модель':7s} | {'derot':>5s} | {'τ ФВЧ':>5s} | {'способ':7s} | {'ось':10s} | "
+          f"{'масштаб a':>9s} | {'утечка b, м':>11s} | {'ωz, м':>6s} | {'сдвиг':>6s} | "
+          f"{'R²':>5s} | {'СКО ош':>6s}")
     for model in MODELS:
       for dr in DEROTS:
-       for mode in MODES:
-        ts, vf, vl, miss = replay(frames, od, imu, mode, model, dr)
-        if len(ts) < 20:
-            print(f'{model:7s} | {dr:+5.0f} | {mode:7s} | измерений мало ({len(ts)})')
-            continue
-        # ⚠️ СЛЕПАЯ ЗОНА СТЕНДА. Здесь печатается доля кадров, на которых канал НЕ дал
-        # измерения (не выпрямилось или сорвался шаг потока). На спокойном бэге она около
-        # нуля — и тогда стенд НЕ проверяет поведение при срывах. Ровно там пряталась
-        # рассинхронизация опорного кадра и его времени (серия K2s): офлайн 0 срывов,
-        # в полёте на трясущемся борту — вразнос. Доля заметно выше нуля = числа ниже
-        # описывают лишь спокойный режим.
-        print(f'{model:7s} | {dr:+5.0f} | {mode:7s} | без измерения {miss} кадров из '
-              f'{len(frames)} ({100.0 * miss / max(1, len(frames)):.1f}%)')
-        wx = np.interp(ts, imu[:, 0], imu[:, 4])
-        wy = np.interp(ts, imu[:, 0], imu[:, 6])   # ωz: разворот — его вычитает ipm_derot
-        for name, v, tr in (('продольная', vf, vt_fwd_all), ('боковая', vl, vt_lat_all)):
-            vt = np.interp(ts, hov[:, 0], tr)
-            ok = np.isfinite(v) & (np.abs(v) > 0)
-            if ok.sum() < 20:
-                continue
-            A = np.column_stack([vt[ok], wx[ok], wy[ok], np.ones(int(ok.sum()))])
-            c, *_ = np.linalg.lstsq(A, v[ok], rcond=None)
-            r2 = 1 - (v[ok] - A @ c).var() / v[ok].var()
-            A0 = np.column_stack([vt[ok], np.ones(int(ok.sum()))])
-            c0, *_ = np.linalg.lstsq(A0, v[ok], rcond=None)
-            r20 = 1 - (v[ok] - A0 @ c0).var() / v[ok].var()
-            print(f'{model:7s} | {dr:+5.0f} | {mode:7s} | {name:10s} | {c[0]:+9.2f} | '
-                  f'{c[1]:+11.2f} | {c[2]:+6.2f} | {np.mean(v[ok] - vt[ok]):+6.2f} | '
-                  f'{r2:5.2f} | {np.std(v[ok] - vt[ok]):6.2f}')
+       for tau in WZTAUS:
+        for mode in MODES:
+         head = f'{model:7s} | {dr:+5.0f} | {tau:5.1f} | {mode:7s}'
+         ts, vf, vl, miss = replay(frames, od, imu, mode, model, dr, tau)
+         if len(ts) < 20:
+             print(f'{head} | измерений мало ({len(ts)})')
+             continue
+         # ⚠️ СЛЕПАЯ ЗОНА СТЕНДА. Здесь печатается доля кадров, на которых канал НЕ дал
+         # измерения (не выпрямилось или сорвался шаг потока). На спокойном бэге она около
+         # нуля — и тогда стенд НЕ проверяет поведение при срывах. Ровно там пряталась
+         # рассинхронизация опорного кадра и его времени (серия K2s): офлайн 0 срывов,
+         # в полёте на трясущемся борту — вразнос. Доля заметно выше нуля = числа ниже
+         # описывают лишь спокойный режим.
+         print(f'{head} | без измерения {miss} кадров из '
+               f'{len(frames)} ({100.0 * miss / max(1, len(frames)):.1f}%)')
+         wx = np.interp(ts, imu[:, 0], imu[:, 4])
+         wy = np.interp(ts, imu[:, 0], imu[:, 6])   # ωz: разворот — его вычитает ipm_derot
+         for name, v, tr in (('продольная', vf, vt_fwd_all), ('боковая', vl, vt_lat_all)):
+             vt = np.interp(ts, hov[:, 0], tr)
+             ok = np.isfinite(v) & (np.abs(v) > 0)
+             if ok.sum() < 20:
+                 continue
+             A = np.column_stack([vt[ok], wx[ok], wy[ok], np.ones(int(ok.sum()))])
+             c, *_ = np.linalg.lstsq(A, v[ok], rcond=None)
+             r2 = 1 - (v[ok] - A @ c).var() / v[ok].var()
+             print(f'{head} | {name:10s} | {c[0]:+9.2f} | '
+                   f'{c[1]:+11.2f} | {c[2]:+6.2f} | {np.mean(v[ok] - vt[ok]):+6.2f} | '
+                   f'{r2:5.2f} | {np.std(v[ok] - vt[ok]):6.2f}')
     print('\nПравка засчитана, если |b| у extrap заметно меньше, чем у hold, а масштаб a '
           'остался около 1.0.\nnear — недостижимый потолок (заглядывает вперёд), мерка '
           'того, сколько вообще даёт синхронизация.')
