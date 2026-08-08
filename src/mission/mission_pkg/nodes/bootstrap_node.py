@@ -106,7 +106,8 @@ class BootstrapArch2Node(Node):
                                             kf_seg_min_sec=cfg.kf_seg_min_sec,
                                             kf_seg_frac=cfg.kf_seg_frac,
                                             att_extrap=cfg.att_extrap,
-                                            ipm_model=cfg.ipm_model)
+                                            ipm_model=cfg.ipm_model,
+                                            ipm_derot=cfg.ipm_derot)
 
         # рантайм switch Flow→Vins: флаг + флоу-стабилизатор (VinsHold на gz_* гейнах)
         handover = None
@@ -287,6 +288,7 @@ def _parse() -> tuple:
     p.add_argument('--att-extrap', dest='att_extrap', type=int, default=_D.att_extrap)
     p.add_argument('--ipm-model', dest='ipm_model', default=_D.ipm_model,
                    choices=['legacy', 'rsign', 'exact'])
+    p.add_argument('--ipm-derot', dest='ipm_derot', type=float, default=_D.ipm_derot)
     p.add_argument('--kf-seg-min-sec', dest='kf_seg_min_sec', type=float,
                    default=_D.kf_seg_min_sec)
     p.add_argument('--kf-seg-frac', dest='kf_seg_frac', type=float, default=_D.kf_seg_frac)

@@ -55,7 +55,8 @@ class FlowEstimator:
                  kf_alt_max=0.06, kf_reject_max=10, kf_seg_max=0.027, kf_win=2.0,
                  kf_alt_hold=1.5, yaw_trans_fix=True, kf_seg_min_sec=0.3, kf_seg_frac=0.30,
                  kf_seg_cap_sec=10.0, ipm=True, ipm_x0=3.0, ipm_x1=6.0,
-                 ipm_yhalf=2.0, ipm_res=0.02, ipm_win=0.5, ipm_model='legacy'):
+                 ipm_yhalf=2.0, ipm_res=0.02, ipm_win=0.5, ipm_model='legacy',
+                 ipm_derot=0.0):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -87,7 +88,10 @@ class FlowEstimator:
         # ⚠️ Дефолт `legacy` — ЛЁТНАЯ модель, на которой отлетаны серии E8-H2; менять
         # его можно только по замеру, иначе разом уедут все прежние числа кампании.
         self.ipm_model = str(ipm_model)
+        # Вычитать ли предсказанное по гироскопу вращательное поле: 0 = нет, ±1 = знак.
+        self.ipm_derot = float(ipm_derot)
         self._ipm_prev = None
+        self._ipm_prev_t = None
         self._ipm_hist = []          # (t, путь вперёд, путь вбок) — окно для скорости
         self.ipm_fwd = self.ipm_lat = 0.0
         self.ipm_vfwd = self.ipm_vlat = 0.0
@@ -423,15 +427,17 @@ class FlowEstimator:
         dst = np.array([[0, hh - 1], [w - 1, hh - 1], [w - 1, 0], [0, 0]], dtype=np.float32)
         return cv2.warpPerspective(gray, cv2.getPerspectiveTransform(src, dst), (w, hh))
 
-    def _ipm_update(self, gray, stamp, alt, pitch, roll):
+    def _ipm_update(self, gray, stamp, alt, pitch, roll, wz=0.0):
         """Шаг канала вида сверху: путь в метрах + скорость наклоном МНК в окне."""
         self.ipm_ok = False
         if not self.ipm or alt is None or alt < 0.5:
             self._ipm_prev = None
+            self._ipm_prev_t = None
             return
         rect = self._ipm_rectify(gray, alt, pitch, roll)
         if rect is None:
             self._ipm_prev = None
+            self._ipm_prev_t = None
             return
         prev = self._ipm_prev
         self._ipm_prev = rect
@@ -447,12 +453,35 @@ class FlowEstimator:
         ok &= np.linalg.norm(p0b.reshape(-1, 2) - pts.reshape(-1, 2), axis=1) < 1.0
         if ok.sum() < 15:
             return
-        d = (p1.reshape(-1, 2) - pts.reshape(-1, 2))[ok]
+        p0 = pts.reshape(-1, 2)[ok]
+        d = p1.reshape(-1, 2)[ok] - p0
+        # --- ВЫЧИТАНИЕ РАЗВОРОТА (ipm_derot) ---
+        # Медиана смещений считает поле «только сдвиг», поэтому разворот борта читается
+        # как боковой снос: полоса лежит ВПЕРЕДИ, и поворот на dψ двигает её вбок на
+        # X·dψ (X = 3…6 м), то есть на порядок сильнее, чем сам разворот виден в полосе.
+        # Оценивать dψ ЗДЕСЬ не надо и вредно: плечо 3→6 м слабое, а гироскоп даёт ω_up
+        # прямо и точно. Поэтому предсказанное вращательное поле ВЫЧИТАЕТСЯ поточечно,
+        # а медиана остаётся на месте со всей своей устойчивостью к выбросам (сцена не
+        # плоская: стены и здания дают параллакс, МНК бы на них поехал).
+        # Геометрия: точка сетки (столбец u, строка v) ↔ земля Y = u·res − yhalf (вправо),
+        # X = x1 − v·res (вперёд). Разворот влево на dψ: dX = −Y·dψ, dY = +X·dψ, значит
+        # в сетке d_столбец = +X·dψ/res, d_строка = +Y·dψ/res.
+        # ⚠️ ЗНАК ручкой, а не выводом. В этой кампании два знака подряд были выведены
+        # неверно (крен в проекции, тангаж в ROS-конвенции), оба поймал замер. `ipm_derot`
+        # = 0 (выкл) / +1 / −1, выбирается стендом att_extrap_test.py по одним кадрам.
+        if self.ipm_derot and self._ipm_prev_t is not None:
+            dpsi = self.ipm_derot * float(wz) * (stamp - self._ipm_prev_t)
+            if abs(dpsi) > 1e-9:
+                Yg = p0[:, 0] * self.ipm_res - self.ipm_yhalf
+                Xg = self.ipm_x1 - p0[:, 1] * self.ipm_res
+                d = d - np.column_stack([Xg * dpsi / self.ipm_res,
+                                         Yg * dpsi / self.ipm_res])
         # столбец = Y вправо, строка = X вперёд (строка 0 — дальний край). Знаки сверены
         # замером: продольная крутизна +1.00/+1.03/+0.97, боковая +0.91/+1.06/+1.09.
         self.ipm_lat += float(np.median(d[:, 0])) * self.ipm_res
         self.ipm_fwd += float(np.median(d[:, 1])) * self.ipm_res
         self.ipm_ok = True
+        self._ipm_prev_t = stamp
         self._ipm_hist.append((stamp, self.ipm_fwd, self.ipm_lat))
         while self._ipm_hist and stamp - self._ipm_hist[0][0] > self.ipm_win:
             self._ipm_hist.pop(0)
@@ -478,6 +507,7 @@ class FlowEstimator:
         self.kf_vel = 0.0
         self.ipm_fwd = self.ipm_lat = 0.0   # путь вида сверху — от новой точки удержания
         self._ipm_hist = []
+        self._ipm_prev_t = None
         self._alt_out = 0.0     # заморозка по высоте — тоже заново
 
     def _kf_vel_update(self, stamp, kf_logs, kf_ok):
@@ -554,7 +584,9 @@ class FlowEstimator:
         frozen = alt_drift > self.kf_alt_max
         dt_frame = 0.0 if self.prev_stamp is None else max(0.0, stamp - self.prev_stamp)
         self._alt_out = (self._alt_out + dt_frame) if frozen else 0.0
-        self._ipm_update(gray, stamp, alt, pitch, roll)
+        # ω в FLU: z — ось ВВЕРХ, то есть ω_z и есть скорость разворота (см. ipm_derot).
+        wz = float(np.asarray(omega_imu, dtype=np.float64).reshape(-1)[2])
+        self._ipm_update(gray, stamp, alt, pitch, roll, wz)
         out = None
         if self.prev_gray is not None and self.vel_pts is not None and len(self.vel_pts) > 0:
             dt = max(1e-3, stamp - self.prev_stamp)

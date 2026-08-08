@@ -70,6 +70,9 @@ EXTRAP_MAX = float(os.environ.get('AE_EXTRAP_MAX', 0.2))
 # свипаем модели при одном способе `hold`, а полный крест зовётся через env.
 MODELS = os.environ.get('AE_MODELS', 'legacy,signs,exact').split(',')
 MODES = os.environ.get('AE_MODES', 'hold').split(',')
+# Вычитание разворота по гироскопу: 0 = выкл, ±1 = знак. Знак НЕ выводится, а выбирается
+# этим стендом — см. `ipm_derot` в FlowEstimator._ipm_update.
+DEROTS = [float(x) for x in os.environ.get('AE_DEROT', '0').split(',')]
 HOVER_Z = 2.0
 # ровно то, что кладёт в оценщик bootstrap_node (FLOW_R) и RosPerception (интринсики)
 CAM_W, CAM_H = 960, 540
@@ -132,15 +135,27 @@ def att_for(imu, t, mode):
                        extrap=(mode == 'extrap'), extrap_max=EXTRAP_MAX)
 
 
-def replay(frames, od, imu, mode, model='legacy'):
+def omega_for(imu, t, t_prev):
+    """ω как её берёт нода: СРЕДНЯЯ за межкадровый интервал, иначе ближайшая."""
+    if t_prev is not None:
+        sel = (imu[:, 0] > t_prev) & (imu[:, 0] <= t)
+        if sel.sum():
+            return float(imu[sel, 6].mean())
+    return float(imu[int(np.argmin(np.abs(imu[:, 0] - t))), 6])
+
+
+def replay(frames, od, imu, mode, model='legacy', derot=0.0):
     """Канал вида сверху БОЕВЫМ кодом. Возвращает (t, v_вперёд, v_вбок) по кадрам."""
     est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, FLOW_R,
-                        ipm_model=model)
+                        ipm_model=model, ipm_derot=derot)
     ts, vf, vl = [], [], []
+    t_prev = None
     for t, gray in frames:
         pitch, roll = att_for(imu, t, mode)
         h = float(np.interp(t, od[:, 0], od[:, 3]))
-        est._ipm_update(gray, t, max(h, 0.5), pitch, roll)
+        wz = omega_for(imu, t, t_prev)
+        t_prev = t
+        est._ipm_update(gray, t, max(h, 0.5), pitch, roll, wz)
         if est.ipm_ok:
             ts.append(t)
             vf.append(est.ipm_vfwd)
@@ -175,16 +190,17 @@ def main():
     vt_fwd_all = np.gradient(fwd, hov[:, 0])
     vt_lat_all = np.gradient(lat, hov[:, 0])
 
-    print(f"\n{'модель':7s} | {'способ':7s} | {'ось':10s} | {'масштаб a':>9s} | "
-          f"{'утечка b, м':>11s} | {'c, м':>6s} | {'R²':>5s} | {'R² без ω':>8s} | {'СКО ош':>6s}")
+    print(f"\n{'модель':7s} | {'derot':>5s} | {'способ':7s} | {'ось':10s} | {'масштаб a':>9s} | "
+          f"{'утечка b, м':>11s} | {'ωz, м':>6s} | {'R²':>5s} | {'СКО ош':>6s}")
     for model in MODELS:
-      for mode in MODES:
-        ts, vf, vl = replay(frames, od, imu, mode, model)
+      for dr in DEROTS:
+       for mode in MODES:
+        ts, vf, vl = replay(frames, od, imu, mode, model, dr)
         if len(ts) < 20:
-            print(f'{model:7s} | {mode:7s} | измерений мало ({len(ts)})')
+            print(f'{model:7s} | {dr:+5.0f} | {mode:7s} | измерений мало ({len(ts)})')
             continue
         wx = np.interp(ts, imu[:, 0], imu[:, 4])
-        wy = np.interp(ts, imu[:, 0], imu[:, 5])
+        wy = np.interp(ts, imu[:, 0], imu[:, 6])   # ωz: разворот — его вычитает ipm_derot
         for name, v, tr in (('продольная', vf, vt_fwd_all), ('боковая', vl, vt_lat_all)):
             vt = np.interp(ts, hov[:, 0], tr)
             ok = np.isfinite(v) & (np.abs(v) > 0)
@@ -196,8 +212,9 @@ def main():
             A0 = np.column_stack([vt[ok], np.ones(int(ok.sum()))])
             c0, *_ = np.linalg.lstsq(A0, v[ok], rcond=None)
             r20 = 1 - (v[ok] - A0 @ c0).var() / v[ok].var()
-            print(f'{model:7s} | {mode:7s} | {name:10s} | {c[0]:+9.2f} | {c[1]:+11.2f} | '
-                  f'{c[2]:+6.2f} | {r2:5.2f} | {r20:8.2f} | {np.std(v[ok] - vt[ok]):6.2f}')
+            print(f'{model:7s} | {dr:+5.0f} | {mode:7s} | {name:10s} | {c[0]:+9.2f} | '
+                  f'{c[1]:+11.2f} | {c[2]:+6.2f} | {r2:5.2f} | '
+                  f'{np.std(v[ok] - vt[ok]):6.2f}')
     print('\nПравка засчитана, если |b| у extrap заметно меньше, чем у hold, а масштаб a '
           'остался около 1.0.\nnear — недостижимый потолок (заглядывает вперёд), мерка '
           'того, сколько вообще даёт синхронизация.')

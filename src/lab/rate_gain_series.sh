@@ -58,8 +58,13 @@ COMMON=(
     BS_STAB="$STAB" BS_MISSION="climb3,hover20,land"
     BS_FENCE=25 BS_FLOW_OBS=1 BS_SLEW=300 BS_THROTTLE_CLIMB=1800
     BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_MODE_BUDGET=80 BS_LAND_BUDGET=180
-    BS_ROLL_KP=48 BS_ROLL_KI=0 BS_ROLL_IMAX=150 BS_ROLL_SMOOTH=25
-    BS_ROLL_OSIGN=1 BS_ROLL_CMD_GAIN=10
+    # ⚠️ ТОЛЬКО ручки, которые ось РЕАЛЬНО читает. На DpHoldM крен — это DpRollRate:
+    # он берёт roll_rate_* + roll_imax/roll_max/roll_conf_*/roll_osign. А roll_kp / roll_ki /
+    # roll_kd / roll_cmd_gain принадлежат ПИКСЕЛЬНОМУ DpRollHold, которого в композите нет,
+    # и roll_smooth сглаживает flow_lateral — сигнал, ушедший из контура. Раньше они стояли
+    # тут с пиксельных времён и читались как «пиксельный канал ещё в игре». Убраны; значения
+    # у них совпадали с дефолтами конфига, поэтому прогоны до и после чистки идентичны.
+    BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1
     BS_PITCH_OSIGN=1
     BS_YAW_KP=20 BS_YAW_KI=0 BS_YAW_SMOOTH=5
 )
