@@ -55,7 +55,10 @@ cd /root/13.17/docker/sim
 
 # Конфиг ОДИН на все значения: меняется ровно одна ручка, остальное прибито.
 COMMON=(
-    BS_STAB="$STAB" BS_MISSION="climb3,hover20,land"
+    # Висение переопределяется снаружи (BS_MISSION="climb3,hover30,land"): длина окна —
+    # такой же предмет замера, как гейн. ⚠️ Менять её между сравниваемыми сериями нельзя,
+    # уход растёт со временем сам по себе.
+    BS_STAB="$STAB" BS_MISSION="${BS_MISSION:-climb3,hover20,land}"
     BS_FENCE=25 BS_FLOW_OBS=1 BS_SLEW=300 BS_THROTTLE_CLIMB=1800
     BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_MODE_BUDGET=80 BS_LAND_BUDGET=180
     # ⚠️ ТОЛЬКО ручки, которые ось РЕАЛЬНО читает. На DpHoldM крен — это DpRollRate:
