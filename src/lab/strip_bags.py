@@ -31,8 +31,14 @@ from rosbag2_py import (ConverterOptions, SequentialReader, SequentialWriter,
                         StorageOptions, TopicMetadata)
 
 # Телеметрия, на которой стоит весь разбор. Всё остальное (кадры) — за борт.
+#
+# ⚠️ ОТЛАДОЧНЫЕ СЛОТЫ БЕРУТСЯ ПО ПРЕФИКСУ, НЕ СПИСКОМ. Перечисление отставало от кода:
+# `/flow_dbg8` (продольная скорость канала вида сверху) публиковался, но в списке его не
+# было — и лёгкие бэги всех серий по J..N остались БЕЗ продольной оси. Обнаружилось на
+# N2s2, где 4 из 5.4 м ухода дала именно она, а `ipm_bias_check.py` печатал
+# «нет телеметрии». Слоты добавляются в ноде часто — фильтр должен ловить их сам.
+KEEP_PREFIX = ('/flow_dbg',)
 KEEP = {
-    '/flow_dbg', '/flow_dbg2', '/flow_dbg3', '/flow_dbg4', '/flow_dbg5', '/flow_dbg6', '/flow_dbg7',
     '/mavros/global_position/rel_alt', '/gz_imu/data_flu', '/mavros/imu/data_raw',
     '/model/iris_cam/odometry',
     '/mavros/imu/data', '/mavros/imu/data_raw',
@@ -54,7 +60,8 @@ def strip(bag):
 
     r = SequentialReader()
     r.open(StorageOptions(uri=bag, storage_id='sqlite3'), ConverterOptions('cdr', 'cdr'))
-    topics = [t for t in r.get_all_topics_and_types() if t.name in KEEP]
+    topics = [t for t in r.get_all_topics_and_types()
+              if t.name in KEEP or t.name.startswith(KEEP_PREFIX)]
     if not topics:
         return 0, f'{name}: нет ни одного топика телеметрии — ПРОПУСК'
     want = {t.name for t in topics}
