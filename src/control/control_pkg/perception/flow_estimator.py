@@ -84,9 +84,11 @@ class FlowEstimator:
         self.ipm_x0, self.ipm_x1 = float(ipm_x0), float(ipm_x1)
         self.ipm_yhalf, self.ipm_res = float(ipm_yhalf), float(ipm_res)
         self.ipm_win = float(ipm_win)
-        # Модель проекции земли в кадр: 'legacy' | 'signs' | 'exact' (см. `_ipm_px`).
-        # ⚠️ Дефолт `legacy` — ЛЁТНАЯ модель, на которой отлетаны серии E8-H2; менять
-        # его можно только по замеру, иначе разом уедут все прежние числа кампании.
+        # Модель проекции земли в кадр: 'legacy' | 'rsign' | 'exact' (см. `_ipm_px`).
+        # ⚠️ Дефолт КЛАССА — `legacy`, лётный дефолт — `exact` (config.ipm_model, серия
+        # J2s). Класс намеренно оставлен на прежней модели: по ней отлетаны серии E8-H2,
+        # и офлайн-инструменты, зовущие FlowEstimator напрямую, должны воспроизводить
+        # те прогоны, а не молча пересчитывать их новой геометрией.
         self.ipm_model = str(ipm_model)
         # Вычитать ли предсказанное по гироскопу вращательное поле: 0 = нет, ±1 = знак.
         self.ipm_derot = float(ipm_derot)
@@ -440,7 +442,16 @@ class FlowEstimator:
             self._ipm_prev_t = None
             return
         prev = self._ipm_prev
+        prev_t = self._ipm_prev_t
+        # ⚠️ ВРЕМЯ ОПОРНОГО КАДРА ОБНОВЛЯЕТСЯ ЗДЕСЬ ЖЕ, вместе с самим кадром. Раньше оно
+        # ставилось в конце, после успешного шага потока, и три ранних `return` ниже (мало
+        # точек, мало выживших, смена размера) сдвигали КАДР, но не ВРЕМЯ. Тогда `dpsi`
+        # считался по интервалу в несколько кадров вместо одного и вычитал разворот кратно
+        # сильнее нужного. Офлайн на спокойном бэге срывов почти нет — стенд это пропустил;
+        # в полёте на трясущемся борту канал уходил вразнос (серия K2s: продольная СКО
+        # 2.06-2.44 м/с в трёх прогонах из пяти против 0.11-0.23 в остальных).
         self._ipm_prev = rect
+        self._ipm_prev_t = stamp
         if prev is None or prev.shape != rect.shape:
             return
         pts = self._detect(prev)
@@ -469,8 +480,8 @@ class FlowEstimator:
         # ⚠️ ЗНАК ручкой, а не выводом. В этой кампании два знака подряд были выведены
         # неверно (крен в проекции, тангаж в ROS-конвенции), оба поймал замер. `ipm_derot`
         # = 0 (выкл) / +1 / −1, выбирается стендом att_extrap_test.py по одним кадрам.
-        if self.ipm_derot and self._ipm_prev_t is not None:
-            dpsi = self.ipm_derot * float(wz) * (stamp - self._ipm_prev_t)
+        if self.ipm_derot and prev_t is not None:
+            dpsi = self.ipm_derot * float(wz) * (stamp - prev_t)
             if abs(dpsi) > 1e-9:
                 Yg = p0[:, 0] * self.ipm_res - self.ipm_yhalf
                 Xg = self.ipm_x1 - p0[:, 1] * self.ipm_res
@@ -481,7 +492,6 @@ class FlowEstimator:
         self.ipm_lat += float(np.median(d[:, 0])) * self.ipm_res
         self.ipm_fwd += float(np.median(d[:, 1])) * self.ipm_res
         self.ipm_ok = True
-        self._ipm_prev_t = stamp
         self._ipm_hist.append((stamp, self.ipm_fwd, self.ipm_lat))
         while self._ipm_hist and stamp - self._ipm_hist[0][0] > self.ipm_win:
             self._ipm_hist.pop(0)

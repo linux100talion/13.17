@@ -148,7 +148,7 @@ def replay(frames, od, imu, mode, model='legacy', derot=0.0):
     """Канал вида сверху БОЕВЫМ кодом. Возвращает (t, v_вперёд, v_вбок) по кадрам."""
     est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, FLOW_R,
                         ipm_model=model, ipm_derot=derot)
-    ts, vf, vl = [], [], []
+    ts, vf, vl, miss = [], [], [], 0
     t_prev = None
     for t, gray in frames:
         pitch, roll = att_for(imu, t, mode)
@@ -160,7 +160,9 @@ def replay(frames, od, imu, mode, model='legacy', derot=0.0):
             ts.append(t)
             vf.append(est.ipm_vfwd)
             vl.append(est.ipm_vlat)
-    return np.array(ts), np.array(vf), np.array(vl)
+        else:
+            miss += 1
+    return np.array(ts), np.array(vf), np.array(vl), miss
 
 
 def main():
@@ -195,10 +197,18 @@ def main():
     for model in MODELS:
       for dr in DEROTS:
        for mode in MODES:
-        ts, vf, vl = replay(frames, od, imu, mode, model, dr)
+        ts, vf, vl, miss = replay(frames, od, imu, mode, model, dr)
         if len(ts) < 20:
             print(f'{model:7s} | {dr:+5.0f} | {mode:7s} | измерений мало ({len(ts)})')
             continue
+        # ⚠️ СЛЕПАЯ ЗОНА СТЕНДА. Здесь печатается доля кадров, на которых канал НЕ дал
+        # измерения (не выпрямилось или сорвался шаг потока). На спокойном бэге она около
+        # нуля — и тогда стенд НЕ проверяет поведение при срывах. Ровно там пряталась
+        # рассинхронизация опорного кадра и его времени (серия K2s): офлайн 0 срывов,
+        # в полёте на трясущемся борту — вразнос. Доля заметно выше нуля = числа ниже
+        # описывают лишь спокойный режим.
+        print(f'{model:7s} | {dr:+5.0f} | {mode:7s} | без измерения {miss} кадров из '
+              f'{len(frames)} ({100.0 * miss / max(1, len(frames)):.1f}%)')
         wx = np.interp(ts, imu[:, 0], imu[:, 4])
         wy = np.interp(ts, imu[:, 0], imu[:, 6])   # ωz: разворот — его вычитает ipm_derot
         for name, v, tr in (('продольная', vf, vt_fwd_all), ('боковая', vl, vt_lat_all)):
