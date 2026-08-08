@@ -80,6 +80,17 @@ DEROTS = [float(x) for x in os.environ.get('AE_DEROT', '0').split(',')]
 # в FlowEstimator). Смысл колонки — СДВИГ: вычитание разворота по СЫРОМУ гироскопу вливает
 # в боковую скорость постоянную составляющую ω_z × плечо полосы 4.5 м.
 WZTAUS = [float(x) for x in os.environ.get('AE_WZTAU', '0').split(',')]
+# ОТКУДА БРАТЬ ω_z ДЛЯ ВЫЧИТАНИЯ РАЗВОРОТА. У гироскопа есть смещение нуля (своё у каждого
+# прогона), и вычитание умножает его на плечо полосы 4.5 м. Три источника:
+#   gyro — как есть (плюс ФВЧ ipm_wz_tau внутри оценщика, если он включён);
+#   att  — скорость по КВАТЕРНИОНУ MAVROS (dψ/dt): нуля не имеет вовсе, но идёт 12.5 Гц
+#          против 30 Гц кадров, то есть ступенчатая и запаздывает;
+#   comp — гироскоп МИНУС оценка нуля, а ноль оценивается по разнице (гиро − кватернион):
+#          в разности настоящего разворота нет, остаётся только смещение датчика.
+#          Быстрая часть берётся у гироскопа, медленная — у кватерниона.
+# ⚠️ `comp` считается ЗДЕСЬ и подаётся готовым (ipm_wz_tau=0), чтобы сравнить источники,
+# не трогая лётный код посреди серии.
+WZSRC = os.environ.get('AE_WZSRC', 'gyro').split(',')
 HOVER_Z = 2.0
 # ровно то, что кладёт в оценщик bootstrap_node (FLOW_R) и RosPerception (интринсики)
 CAM_W, CAM_H = 960, 540
@@ -151,25 +162,61 @@ def omega_for(imu, t, t_prev):
     return float(imu[int(np.argmin(np.abs(imu[:, 0] - t))), 6])
 
 
-def replay(frames, od, imu, mode, model='legacy', derot=0.0, wztau=0.0):
+def wz_series(frames, imu, src, tau):
+    """ω_z на каждый кадр по выбранному источнику (см. WZSRC)."""
+    wa = np.gradient(np.unwrap(imu[:, 3]), imu[:, 0])       # разворот по кватерниону
+    raw, t_prev = [], None
+    for t, _ in frames:
+        if t_prev is not None:
+            sel = (imu[:, 0] > t_prev) & (imu[:, 0] <= t)
+            g = float(imu[sel, 6].mean()) if sel.sum() else float(
+                imu[int(np.argmin(np.abs(imu[:, 0] - t))), 6])
+            a = float(wa[sel].mean()) if sel.sum() else float(
+                wa[int(np.argmin(np.abs(imu[:, 0] - t)))])
+        else:
+            i = int(np.argmin(np.abs(imu[:, 0] - t)))
+            g, a = float(imu[i, 6]), float(wa[i])
+        raw.append((t, g, a))
+        t_prev = t
+    raw = np.array(raw)
+    if src == 'att':
+        return raw[:, 2]
+    if src != 'comp':
+        return raw[:, 1]
+    # оценка нуля по разнице, тем же весом max(1−e^(−dt/τ), 1/n), СТАРТ С ОКНА:
+    # до висения разность мусорная (полётник доводит курс по компасу — см. замер
+    # «до вис: гиро−ATT» +0.044 против −0.006 в висении).
+    out = np.empty(len(raw)); bias = None; n = 0; tp = None
+    for i in range(len(raw)):
+        d = raw[i, 1] - raw[i, 2]
+        if bias is None:
+            bias, tp, n = d, raw[i, 0], 1
+        else:
+            dt = raw[i, 0] - tp; tp = raw[i, 0]; n += 1
+            if dt > 0:
+                bias += max(1.0 - math.exp(-dt / max(tau, 1e-6)), 1.0 / n) * (d - bias)
+        out[i] = raw[i, 1] - bias
+    return out
+
+
+def replay(frames, od, imu, mode, model='legacy', derot=0.0, wztau=0.0, wzsrc='gyro'):
     """Канал вида сверху БОЕВЫМ кодом. Возвращает (t, v_вперёд, v_вбок) по кадрам."""
     est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, FLOW_R,
-                        ipm_model=model, ipm_derot=derot, ipm_wz_tau=wztau)
+                        ipm_model=model, ipm_derot=derot,
+                        ipm_wz_tau=(wztau if wzsrc == 'gyro' else 0.0))
+    wzs = wz_series(frames, imu, wzsrc, wztau)
     # ⚠️ ПРОГРЕВ ОЦЕНКИ СМЕЩЕНИЯ ω_z. Стенд гоняет только окно висения, а в полёте нода
     # живёт с момента старта и к висению её ФВЧ уже сошёлся. Без прогрева стенд мерил бы
     # не поправку, а её переходный процесс (при τ=30 и окне 24 с — почти только его).
     # Кормим гироскопом всё, что в бэге ДО первого кадра окна — ровно как живьём.
-    if wztau > 0.0 and len(frames):
+    if wzsrc == 'gyro' and wztau > 0.0 and len(frames):
         for row in imu[imu[:, 0] < frames[0][0]]:
             est._wz_debias(float(row[0]), float(row[6]))
     ts, vf, vl, miss = [], [], [], 0
-    t_prev = None
-    for t, gray in frames:
+    for i, (t, gray) in enumerate(frames):
         pitch, roll = att_for(imu, t, mode)
         h = float(np.interp(t, od[:, 0], od[:, 3]))
-        wz = omega_for(imu, t, t_prev)
-        t_prev = t
-        est._ipm_update(gray, t, max(h, 0.5), pitch, roll, wz)
+        est._ipm_update(gray, t, max(h, 0.5), pitch, roll, float(wzs[i]))
         if est.ipm_ok:
             ts.append(t)
             vf.append(est.ipm_vfwd)
@@ -220,39 +267,40 @@ def main():
     # R², ни СКО ошибки сдвига НЕ ВИДЯТ — они меряют корреляцию и разброс, а константа
     # уходит в свободный член регрессии. Именно так серия L2s ушла вбок −4.78 ± 4.48 м
     # (все пять прогонов в одну сторону) при отличном R²=0.90 на стенде.
-    print(f"\n{'модель':7s} | {'derot':>5s} | {'τ ФВЧ':>5s} | {'способ':7s} | {'ось':10s} | "
-          f"{'масштаб a':>9s} | {'утечка b, м':>11s} | {'ωz, м':>6s} | {'сдвиг':>6s} | "
+    print(f"\n{'модель':7s} | {'derot':>5s} | {'τ ФВЧ':>5s} | {'ист':4s} | {'способ':7s} | {'ось':10s} | "
+          f"{'ω_z':4s} | {'масштаб a':>9s} | {'утечка b, м':>11s} | {'ωz, м':>6s} | {'сдвиг':>6s} | "
           f"{'R²':>5s} | {'СКО ош':>6s}")
     for model in MODELS:
       for dr in DEROTS:
        for tau in WZTAUS:
-        for mode in MODES:
-         head = f'{model:7s} | {dr:+5.0f} | {tau:5.1f} | {mode:7s}'
-         ts, vf, vl, miss = replay(frames, od, imu, mode, model, dr, tau)
-         if len(ts) < 20:
-             print(f'{head} | измерений мало ({len(ts)})')
-             continue
-         # ⚠️ СЛЕПАЯ ЗОНА СТЕНДА. Здесь печатается доля кадров, на которых канал НЕ дал
-         # измерения (не выпрямилось или сорвался шаг потока). На спокойном бэге она около
-         # нуля — и тогда стенд НЕ проверяет поведение при срывах. Ровно там пряталась
-         # рассинхронизация опорного кадра и его времени (серия K2s): офлайн 0 срывов,
-         # в полёте на трясущемся борту — вразнос. Доля заметно выше нуля = числа ниже
-         # описывают лишь спокойный режим.
-         print(f'{head} | без измерения {miss} кадров из '
-               f'{len(frames)} ({100.0 * miss / max(1, len(frames)):.1f}%)')
-         wx = np.interp(ts, imu[:, 0], imu[:, 4])
-         wy = np.interp(ts, imu[:, 0], imu[:, 6])   # ωz: разворот — его вычитает ipm_derot
-         for name, v, tr in (('продольная', vf, vt_fwd_all), ('боковая', vl, vt_lat_all)):
-             vt = np.interp(ts, hov[:, 0], tr)
-             ok = np.isfinite(v) & (np.abs(v) > 0)
-             if ok.sum() < 20:
-                 continue
-             A = np.column_stack([vt[ok], wx[ok], wy[ok], np.ones(int(ok.sum()))])
-             c, *_ = np.linalg.lstsq(A, v[ok], rcond=None)
-             r2 = 1 - (v[ok] - A @ c).var() / v[ok].var()
-             print(f'{head} | {name:10s} | {c[0]:+9.2f} | '
-                   f'{c[1]:+11.2f} | {c[2]:+6.2f} | {np.mean(v[ok] - vt[ok]):+6.2f} | '
-                   f'{r2:5.2f} | {np.std(v[ok] - vt[ok]):6.2f}')
+        for src in WZSRC:
+         for mode in MODES:
+          head = f'{model:7s} | {dr:+5.0f} | {tau:5.1f} | {src:4s} | {mode:7s}'
+          ts, vf, vl, miss = replay(frames, od, imu, mode, model, dr, tau, src)
+          if len(ts) < 20:
+              print(f'{head} | измерений мало ({len(ts)})')
+              continue
+          # ⚠️ СЛЕПАЯ ЗОНА СТЕНДА. Здесь печатается доля кадров, на которых канал НЕ дал
+          # измерения (не выпрямилось или сорвался шаг потока). На спокойном бэге она около
+          # нуля — и тогда стенд НЕ проверяет поведение при срывах. Ровно там пряталась
+          # рассинхронизация опорного кадра и его времени (серия K2s): офлайн 0 срывов,
+          # в полёте на трясущемся борту — вразнос. Доля заметно выше нуля = числа ниже
+          # описывают лишь спокойный режим.
+          print(f'{head} | без измерения {miss} кадров из '
+                f'{len(frames)} ({100.0 * miss / max(1, len(frames)):.1f}%)')
+          wx = np.interp(ts, imu[:, 0], imu[:, 4])
+          wy = np.interp(ts, imu[:, 0], imu[:, 6])   # ωz: разворот — его вычитает ipm_derot
+          for name, v, tr in (('продольная', vf, vt_fwd_all), ('боковая', vl, vt_lat_all)):
+              vt = np.interp(ts, hov[:, 0], tr)
+              ok = np.isfinite(v) & (np.abs(v) > 0)
+              if ok.sum() < 20:
+                  continue
+              A = np.column_stack([vt[ok], wx[ok], wy[ok], np.ones(int(ok.sum()))])
+              c, *_ = np.linalg.lstsq(A, v[ok], rcond=None)
+              r2 = 1 - (v[ok] - A @ c).var() / v[ok].var()
+              print(f'{head} | {name:10s} | {c[0]:+9.2f} | '
+                    f'{c[1]:+11.2f} | {c[2]:+6.2f} | {np.mean(v[ok] - vt[ok]):+6.2f} | '
+                    f'{r2:5.2f} | {np.std(v[ok] - vt[ok]):6.2f}')
     print('\nПравка засчитана, если |b| у extrap заметно меньше, чем у hold, а масштаб a '
           'остался около 1.0.\nnear — недостижимый потолок (заглядывает вперёд), мерка '
           'того, сколько вообще даёт синхронизация.')
