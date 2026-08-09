@@ -63,7 +63,11 @@ DRY_RUN="${DRY_RUN:-0}"
 # свип Y2 пришлось восстанавливать офлайн интегрированием /flow_dbg2, а там неизвестен
 # покадровый fdt (сглаживание медианой по 5 кадрам склеивает соседние значения) —
 # калибровка градусов повисла на догадке о частоте кадров.
-TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /flow_dbg5 /flow_dbg6 /flow_dbg7 /flow_dbg8 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
+# ⚠️ СПИСОК ОТСТАЁТ ОТ КОДА — уже дважды. Добавил слот в ros_io.py → допиши сюда, иначе
+# прогон снимется без него молча (strip_bags теперь берёт /flow_dbg* префиксом, а вот
+# запись — нет). /flow_dbg9 = боковая скорость канала, единственный её источник в
+# прогоне без крен-контура.
+TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /flow_dbg5 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
 
 # Бюджеты фаз — как в эталонном прогоне bootstrap_arch2 (CPU-бокс, низкий RTF).
 export BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-1800}"
@@ -94,7 +98,9 @@ mkdir -p "$OUTPUT_DIR"
     echo "CMD=$CMD"
     echo "RES=$RES  FRESH=$FRESH  CPU=$CPU"
     echo "TOPICS_EXTRA=$TOPICS_EXTRA"
-    env | grep -E '^BS_' | sort
+    # ВЕТЕР в мету тоже: он живёт в env КОНТЕЙНЕРА (compose), а не в BS_*, и в разборе
+    # через неделю прогон с ветром неотличим от штилевого — а сравнивать их нельзя.
+    env | grep -E '^(BS_|WIND_)' | sort
 } > "$META"
 
 log "КАЛИБРОВОЧНЫЙ ПРОГОН '$NAME' | $CMD | res=$RES fresh=$FRESH Drive=$GDRIVE_UP"

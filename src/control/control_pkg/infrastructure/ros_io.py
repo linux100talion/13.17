@@ -35,6 +35,13 @@ class RosDebugSink:
         self._pub5 = node.create_publisher(Vector3Stamped, '/flow_dbg5', 10)
         self._pub8 = node.create_publisher(Vector3Stamped, '/flow_dbg8', 10)
         self._pub7 = node.create_publisher(Vector3Stamped, '/flow_dbg7', 10)
+        # /flow_dbg9 = БОКОВАЯ скорость канала вида сверху, в метрах. Своего слота у неё
+        # не было: она восстанавливалась из /flow_dbg7 как «цель − ошибка», то есть ЧЕРЕЗ
+        # крен-контур. Значит прогон БЕЗ демпфера крена (stab=none, наблюдение) оставался
+        # вовсе без бокового измерения — ровно та же болезнь, что съела продольную ось
+        # серий J..N. Меряется она именно там: под постоянным сносом размах истины велик,
+        # и наклон (масштаб) наконец отделим от сдвига.
+        self._pub9 = node.create_publisher(Vector3Stamped, '/flow_dbg9', 10)
         # /flow_dbg6 = уставка КУРСА (DpYawHold в pos-режиме). Отдельный топик, а не
         # второй источник в /flow_dbg5: pos-осей стало две, и «первый ответивший»
         # молча подменил бы диагностику тангажа рысканием.
@@ -138,3 +145,12 @@ class RosDebugSink:
         d8.vector.y = float(s.ipm_vfwd)
         d8.vector.z = 1.0 if s.ipm_ok else 0.0
         self._pub8.publish(d8)
+        # /flow_dbg9 = тот же канал, БОКОВАЯ ось: (боковая скорость М/С, продольная для
+        # пары, достоверность). Публикуется из СНАПШОТА, а не из контура — поэтому живёт
+        # и в чистом наблюдении, без единого стабилизатора в стеке.
+        d9 = Vector3Stamped()
+        d9.header.stamp = t
+        d9.vector.x = float(s.ipm_vlat)
+        d9.vector.y = float(s.ipm_vfwd)
+        d9.vector.z = 1.0 if s.ipm_ok else 0.0
+        self._pub9.publish(d9)
