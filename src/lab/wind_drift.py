@@ -23,8 +23,9 @@ from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
 st = lambda m: m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
 yaw = lambda q: math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
 
-print('%-6s| %5s | %7s | %7s | %7s | %7s | %6s | %6s'
-      % ('прогон', 'висел', 'уход м', 'v_уст', 'v_кон', 'курс°', 'PWMкр', 'PWMтг'))
+print('%-6s| %5s | %7s | %7s | %7s | %7s | %7s | %6s | %6s | %6s'
+      % ('прогон', 'висел', 'уход м', 'v_уст', 'vбок', 'vвпер', 'v_кон', 'курс°',
+         'PWMкр', 'PWMтг'))
 for b in sys.argv[1:]:
     u = '/out/%s_bag' % b
     if not os.path.isdir(u):
@@ -66,8 +67,16 @@ for b in sys.argv[1:]:
     # УСТАНОВИВШАЯСЯ скорость — по второй половине окна: первая занята разгоном от нуля
     # до равновесия, и среднее по всему окну её занижает.
     h = len(sp) // 2
+    # РАЗБИВКА ПО ОСЯМ БОРТА обязательна, когда свипится ручка ОДНОЙ оси: ветер задан в
+    # мировых осях, борт под ним разворачивается, и часть силы уезжает на соседнюю ось с
+    # другим гейном (у тангажа он втрое больше кренового). Полная скорость этого не
+    # показывает — по ней прогон V2s1 выглядел «хорошо настроенным», хотя держал тангаж.
+    vx, vy = np.gradient(xs, 0.05), np.gradient(ys, 0.05)
+    hr = np.radians(hd[S])
+    vfwd = vx * np.cos(hr) + vy * np.sin(hr)
+    vlat = -vx * np.sin(hr) + vy * np.cos(hr)
     pwm = lambda d: (np.mean(np.abs(np.interp(ts, np.array(d)[:, 0], np.array(d)[:, 1])))
                      if len(d) > 10 else float('nan'))
-    print('%-6s| %5.0f | %7.1f | %7.2f | %7.2f | %+7.1f | %6.1f | %6.1f'
-          % (b, ts[-1] - ts[0], dist[-1], sp[h:].mean(), sp[-20:].mean(),
-             hd[S][-1] - hd[S][0], pwm(d1), pwm(d2)))
+    print('%-6s| %5.0f | %7.1f | %7.2f | %+7.2f | %+7.2f | %7.2f | %+6.1f | %6.1f | %6.1f'
+          % (b, ts[-1] - ts[0], dist[-1], sp[h:].mean(), vlat[h:].mean(), vfwd[h:].mean(),
+             sp[-20:].mean(), hd[S][-1] - hd[S][0], pwm(d1), pwm(d2)))
