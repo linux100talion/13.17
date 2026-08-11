@@ -298,6 +298,19 @@ def _parse() -> tuple:
                    default=_D.pitch_rate_kp)
     p.add_argument('--roll-rate-kp', dest='roll_rate_kp', type=float,
                    default=_D.roll_rate_kp)
+    # ⚠️ ki/kd rate-осей ДОЛГО СУЩЕСТВОВАЛИ БЕЗ АРГУМЕНТА: поля были в BootstrapConfig и
+    # читались в recipes.py, но argparse их не знал, а BootstrapConfig(**vars(a)) собирается
+    # ровно из разобранных аргументов — значит поле МОЛЧА получало дефолт датакласса (0.0).
+    # Свип B3s (BS_ROLL_RATE_KI=5) из-за этого отлетел с ki=0 и выглядел как «интегратор не
+    # помогает». Ручка без аргумента не отсутствует — она врёт, и врёт молча.
+    p.add_argument('--roll-rate-ki', dest='roll_rate_ki', type=float,
+                   default=_D.roll_rate_ki)
+    p.add_argument('--roll-rate-kd', dest='roll_rate_kd', type=float,
+                   default=_D.roll_rate_kd)
+    p.add_argument('--pitch-rate-ki', dest='pitch_rate_ki', type=float,
+                   default=_D.pitch_rate_ki)
+    p.add_argument('--pitch-rate-kd', dest='pitch_rate_kd', type=float,
+                   default=_D.pitch_rate_kd)
     p.add_argument('--pitch-osign', dest='pitch_osign', type=float, default=_D.pitch_osign)
     p.add_argument('--pitch-cmd-gain', dest='pitch_cmd_gain', type=float, default=_D.pitch_cmd_gain)
     p.add_argument('--pitch-smooth', dest='pitch_smooth', type=int, default=_D.pitch_smooth)

@@ -84,6 +84,13 @@ ARGS=()
 [ -n "${BS_KF_SEG_FRAC:-}" ]    && ARGS+=(--kf-seg-frac "$BS_KF_SEG_FRAC")
 [ -n "${BS_PITCH_RATE_KP:-}" ] && ARGS+=(--pitch-rate-kp "$BS_PITCH_RATE_KP")
 [ -n "${BS_ROLL_RATE_KP:-}" ]  && ARGS+=(--roll-rate-kp "$BS_ROLL_RATE_KP")
+# ⚠️ Мост обязан идти В ПАРЕ с аргументом в bootstrap_node.py: BS_* без аргумента доезжает
+# до .env и меты прогона, но не до ноды — прогон выглядит настроенным, а летит на дефолте.
+# Так пропал свип B3s (ki=5 → фактически 0).
+[ -n "${BS_ROLL_RATE_KI:-}" ]  && ARGS+=(--roll-rate-ki "$BS_ROLL_RATE_KI")
+[ -n "${BS_ROLL_RATE_KD:-}" ]  && ARGS+=(--roll-rate-kd "$BS_ROLL_RATE_KD")
+[ -n "${BS_PITCH_RATE_KI:-}" ] && ARGS+=(--pitch-rate-ki "$BS_PITCH_RATE_KI")
+[ -n "${BS_PITCH_RATE_KD:-}" ] && ARGS+=(--pitch-rate-kd "$BS_PITCH_RATE_KD")
 [ -n "${BS_PITCH_OSIGN:-}" ]     && ARGS+=(--pitch-osign "$BS_PITCH_OSIGN")
 [ -n "${BS_PITCH_CMD_GAIN:-}" ]  && ARGS+=(--pitch-cmd-gain "$BS_PITCH_CMD_GAIN")
 [ -n "${BS_PITCH_SMOOTH:-}" ]    && ARGS+=(--pitch-smooth "$BS_PITCH_SMOOTH")

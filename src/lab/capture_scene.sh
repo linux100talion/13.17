@@ -194,55 +194,18 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
     # Проброс бюджетов ожидания (arm.sh/takeoff.sh) — таймауты, не sleep: на успехе
     # ничего не стоят, но спасают от гонки «бюджет арма vs прогрев EKF/GPS» (под
     # lockstep готовность позиции наступает чуть позже стандартных 40 sim-сек).
-    docker exec \
-      -e ARM_SIM_BUDGET="${ARM_SIM_BUDGET:-}" -e ARM_WALL_CAP="${ARM_WALL_CAP:-}" \
-      -e BS_ALT="${BS_ALT:-}" -e BS_HANDOVER="${BS_HANDOVER:-}" -e BS_EXCITE="${BS_EXCITE:-}" \
-      -e BS_YAW="${BS_YAW:-}" -e BS_YAW_DUR="${BS_YAW_DUR:-}" -e BS_EXCITE_PERIOD="${BS_EXCITE_PERIOD:-}" \
-      -e BS_OBSERVE="${BS_OBSERVE:-}" -e BS_VINS_TO="${BS_VINS_TO:-}" \
-      -e BS_HOLD_SEC="${BS_HOLD_SEC:-}" \
-      -e BS_GZHOLD="${BS_GZHOLD:-}" -e BS_GZ_KP="${BS_GZ_KP:-}" -e BS_GZ_KD="${BS_GZ_KD:-}" \
-      -e BS_GZ_KI="${BS_GZ_KI:-}" -e BS_GZ_IMAX="${BS_GZ_IMAX:-}" \
-      -e BS_GZ_MAX="${BS_GZ_MAX:-}" -e BS_GZ_PSIGN="${BS_GZ_PSIGN:-}" -e BS_GZ_RSIGN="${BS_GZ_RSIGN:-}" \
-      -e BS_GZ_TRAJ_R="${BS_GZ_TRAJ_R:-}" -e BS_GZ_TRAJ_T="${BS_GZ_TRAJ_T:-}" \
-      -e BS_GZ_YAW="${BS_GZ_YAW:-}" -e BS_GZ_YAW_PERIOD="${BS_GZ_YAW_PERIOD:-}" \
-      -e BS_GZ_SHUTTLE_A="${BS_GZ_SHUTTLE_A:-}" -e BS_GZ_SHUTTLE_V="${BS_GZ_SHUTTLE_V:-}" \
-      -e BS_GZ_SHUTTLE_PAUSE="${BS_GZ_SHUTTLE_PAUSE:-}" -e BS_GZ_SHUTTLE_FWD="${BS_GZ_SHUTTLE_FWD:-}" \
-      -e BS_FLOWHOLD="${BS_FLOWHOLD:-}" -e BS_FLOW_KP="${BS_FLOW_KP:-}" \
-      -e BS_FLOW_KI="${BS_FLOW_KI:-}" -e BS_FLOW_KD="${BS_FLOW_KD:-}" \
-      -e BS_FLOW_IMAX="${BS_FLOW_IMAX:-}" -e BS_FLOW_MAX="${BS_FLOW_MAX:-}" \
-      -e BS_FLOW_CONF_MIN="${BS_FLOW_CONF_MIN:-}" -e BS_FLOW_CONF_FULL="${BS_FLOW_CONF_FULL:-}" \
-      -e BS_FLOW_RSIGN="${BS_FLOW_RSIGN:-}" -e BS_FLOW_OSIGN="${BS_FLOW_OSIGN:-}" \
-      -e BS_FLOW_SMOOTH="${BS_FLOW_SMOOTH:-}" \
-      -e BS_YAWHOLD="${BS_YAWHOLD:-}" -e BS_YAWH_KP="${BS_YAWH_KP:-}" -e BS_YAWH_KI="${BS_YAWH_KI:-}" \
-      -e BS_YAWH_IMAX="${BS_YAWH_IMAX:-}" -e BS_YAWH_MAX="${BS_YAWH_MAX:-}" -e BS_YAWH_OSIGN="${BS_YAWH_OSIGN:-}" \
-      -e BS_YAWH_SMOOTH="${BS_YAWH_SMOOTH:-}" \
-      -e BS_ROLL_EXCITE="${BS_ROLL_EXCITE:-}" -e BS_PITCH_EXCITE="${BS_PITCH_EXCITE:-}" -e BS_RE_AMP="${BS_RE_AMP:-}" \
-      -e BS_RE_MODE="${BS_RE_MODE:-}" -e BS_RE_TAU="${BS_RE_TAU:-}" -e BS_RE_NREP="${BS_RE_NREP:-}" \
-      -e BS_RE_GAP="${BS_RE_GAP:-}" -e BS_RE_SETTLE="${BS_RE_SETTLE:-}" \
-      -e BS_RE_F0="${BS_RE_F0:-}" -e BS_RE_F1="${BS_RE_F1:-}" \
-      -e BS_RE_CHIRP="${BS_RE_CHIRP:-}" -e BS_RE_STEP="${BS_RE_STEP:-}" \
-      -e BS_MODE_BUDGET="${BS_MODE_BUDGET:-}" -e BS_ARM_BUDGET="${BS_ARM_BUDGET:-}" \
-      -e BS_CLIMB_BUDGET="${BS_CLIMB_BUDGET:-}" -e BS_LAND_BUDGET="${BS_LAND_BUDGET:-}" \
-      -e BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-}" \
-      -e BS_CONTROL_MODE="${BS_CONTROL_MODE:-}" -e BS_EXCITE_MAX="${BS_EXCITE_MAX:-}" \
-      -e BS_PILOT="${BS_PILOT:-}" -e BS_PILOT_VEL_GAIN="${BS_PILOT_VEL_GAIN:-}" \
-      -e BS_HANDOVER_VINS="${BS_HANDOVER_VINS:-}" -e BS_VINS_MIN="${BS_VINS_MIN:-}" \
-      -e BS_STAB="${BS_STAB:-}" -e BS_MISSION="${BS_MISSION:-}" -e BS_MV_LEVEL="${BS_MV_LEVEL:-}" \
-      -e BS_ROLL_KP="${BS_ROLL_KP:-}" -e BS_ROLL_KI="${BS_ROLL_KI:-}" -e BS_ROLL_KD="${BS_ROLL_KD:-}" \
-      -e BS_ROLL_OSIGN="${BS_ROLL_OSIGN:-}" -e BS_ROLL_CMD_GAIN="${BS_ROLL_CMD_GAIN:-}" \
-      -e BS_ROLL_SMOOTH="${BS_ROLL_SMOOTH:-}" \
-      -e BS_ALT_KP="${BS_ALT_KP:-}" -e BS_ALT_RATE_MAX="${BS_ALT_RATE_MAX:-}" -e BS_ALT_TOL="${BS_ALT_TOL:-}" \
-      -e BS_PITCH_KP="${BS_PITCH_KP:-}" -e BS_PITCH_KI="${BS_PITCH_KI:-}" -e BS_PITCH_KD="${BS_PITCH_KD:-}" \
-      -e BS_KF_ALT_MAX="${BS_KF_ALT_MAX:-}" -e BS_KF_ALT_HOLD="${BS_KF_ALT_HOLD:-}" \
-      -e BS_YAW_TRANS_FIX="${BS_YAW_TRANS_FIX:-}" -e BS_ATT_EXTRAP="${BS_ATT_EXTRAP:-}" -e BS_IPM_MODEL="${BS_IPM_MODEL:-}" -e BS_IPM_DEROT="${BS_IPM_DEROT:-}" -e BS_KF_SEG_MIN="${BS_KF_SEG_MIN:-}" -e BS_KF_SEG_FRAC="${BS_KF_SEG_FRAC:-}" \
-      -e BS_PITCH_RATE_KP="${BS_PITCH_RATE_KP:-}" -e BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-}" \
-      -e BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-}" -e BS_PITCH_CMD_GAIN="${BS_PITCH_CMD_GAIN:-}" \
-      -e BS_PITCH_SMOOTH="${BS_PITCH_SMOOTH:-}" \
-      -e BS_FLOW_OBS="${BS_FLOW_OBS:-}" \
-      -e BS_SLEW="${BS_SLEW:-}" \
-      -e BS_ROLL_IMAX="${BS_ROLL_IMAX:-}" -e BS_PITCH_IMAX="${BS_PITCH_IMAX:-}" \
-      -e BS_YAW_KP="${BS_YAW_KP:-}" -e BS_YAW_KI="${BS_YAW_KI:-}" -e BS_YAW_OSIGN="${BS_YAW_OSIGN:-}" \
-      -e BS_YAW_CMD_GAIN="${BS_YAW_CMD_GAIN:-}" -e BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-}" \
+    # ⚠️ ПРОБРОС BS_*/ARM_* — АВТОМАТИЧЕСКИЙ, не списком. Раньше тут висел рукописный
+    # белый список из ~90 `-e BS_…`, и ручка, забытая в нём, доезжала до .env и меты
+    # прогона, но НЕ до ноды: прогон выглядел настроенным, а летел на дефолте. Так молча
+    # пропал весь свип B3s (BS_ROLL_RATE_KI=5 → фактически 0), и так же не доезжали
+    # BS_IPM_WZ_TAU и BS_FENCE — их значения просто совпадали с дефолтами конфига.
+    # `docker exec -e ИМЯ` без `=` берёт значение из текущего окружения; неустановленные
+    # переменные не пробрасываются вовсе, что для `[ -n "${BS_X:-}" ]` в bootstrap_arch2.sh
+    # неотличимо от прежней пустой строки.
+    ENVS=()
+    while IFS= read -r k; do ENVS+=(-e "$k"); done \
+        < <(env | sed -n 's/^\(\(BS_\|ARM_\)[A-Z0-9_]*\)=.*/\1/p' | sort)
+    docker exec "${ENVS[@]}" \
       "$NAV" bash /lab/"$cmd".sh $arg
     i=$((i+1))
 done
