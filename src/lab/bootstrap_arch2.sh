@@ -21,7 +21,9 @@
 #   BS_ALT (3)                  — целевая высота, м
 #   BS_GZ_KP/KD/KI/IMAX/MAX     — гейны gz-hold (дефолты ноды 40/120/8/100/150)
 #   BS_GZ_PSIGN/RSIGN           — знаки коррекции (±1)
-#   BS_GZ_SHUTTLE_A (5)/V (1.5)/PAUSE (2) — челнок; BS_GZ_SHUTTLE_FWD=1 — продольный
+#   BS_GZ_SHUTTLE_LEVEL (0.3)/LEG (3)/PAUSE (2) — челнок: уровень стика [-1..1] на плече,
+#                                 длительность плеча и пауза, sim-сек;
+#                                 BS_GZ_SHUTTLE_FWD=1 — продольный
 #   BS_THROTTLE_CLIMB           — газ подъёма, PWM
 #   BS_MODE/ARM/CLIMB/LAND_BUDGET — бюджеты фаз, sim-сек
 set -e
@@ -114,8 +116,12 @@ ARGS=()
 [ -n "${BS_GZ_MAX:-}" ]          && ARGS+=(--gz-max "$BS_GZ_MAX")
 [ -n "${BS_GZ_PSIGN:-}" ]        && ARGS+=(--gz-psign "$BS_GZ_PSIGN")
 [ -n "${BS_GZ_RSIGN:-}" ]        && ARGS+=(--gz-rsign "$BS_GZ_RSIGN")
-[ -n "${BS_GZ_SHUTTLE_A:-}" ]     && ARGS+=(--gz-shuttle-a "$BS_GZ_SHUTTLE_A")
-[ -n "${BS_GZ_SHUTTLE_V:-}" ]     && ARGS+=(--gz-shuttle-v "$BS_GZ_SHUTTLE_V")
+# ⚠️ Были BS_GZ_SHUTTLE_A/V → --gz-shuttle-a/-v: челнок давно переписан с «амплитуда/
+# скорость» на «уровень стика/плечо», и этих флагов в ноде НЕТ — argparse на них падал.
+# Пересчитать A/V в level/leg нельзя (разные величины), поэтому мёртвые ручки убраны, а
+# не переименованы. Нашла их check_knobs.sh на первом же запуске.
+[ -n "${BS_GZ_SHUTTLE_LEVEL:-}" ] && ARGS+=(--gz-shuttle-level "$BS_GZ_SHUTTLE_LEVEL")
+[ -n "${BS_GZ_SHUTTLE_LEG:-}" ]   && ARGS+=(--gz-shuttle-leg "$BS_GZ_SHUTTLE_LEG")
 [ -n "${BS_GZ_SHUTTLE_PAUSE:-}" ] && ARGS+=(--gz-shuttle-pause "$BS_GZ_SHUTTLE_PAUSE")
 [ "${BS_GZ_SHUTTLE_FWD:-0}" = "1" ] && ARGS+=(--gz-shuttle-fwd)
 [ -n "${BS_THROTTLE_CLIMB:-}" ]  && ARGS+=(--throttle-climb "$BS_THROTTLE_CLIMB")
