@@ -6,8 +6,11 @@
 для этого нужен тяжёлый бэг (STRIP=0, ~2 ГБ) — такой снимается редко. Здесь то же число
 берётся из ЛЁГКОГО бэга любого прогона: канал сам кладёт своё измерение в телеметрию.
     /flow_dbg8 = (путь вперёд, ПРОДОЛЬНАЯ скорость, достоверность) — измерение напрямую;
+    /flow_dbg9 = (БОКОВАЯ скорость, продольная, достоверность) — тоже напрямую, из
+                 снапшота. Появился в коммите 1891720;
     /flow_dbg7 = (цель по скорости, ошибка до неё, PWM) у КРЕН-контура — боковая скорость
-                 восстанавливается как цель − ошибка (своего слота у неё нет).
+                 восстанавливается как цель − ошибка. ЛЕГАСИ-путь для бэгов до 1891720:
+                 идёт ЧЕРЕЗ контур, поэтому в прогоне без демпфера крена его нет вовсе.
 
 ЧТО СМОТРЕТЬ. `сдвиг` = среднее (измеренная − истинная). Для демпфера СКОРОСТИ это самое
 опасное число: демпфер зануляет то, что ВИДИТ, поэтому постоянный сдвиг измерения = ровно
@@ -47,7 +50,7 @@ for b in sys.argv[1:]:
         continue
     r = SequentialReader()
     r.open(StorageOptions(uri=u, storage_id='sqlite3'), ConverterOptions('cdr', 'cdr'))
-    od, d7, d8 = [], [], []
+    od, d7, d8, d9 = [], [], [], []
     while r.has_next():
         t, raw, _ = r.read_next()
         if t == '/model/iris_cam/odometry':
@@ -60,6 +63,9 @@ for b in sys.argv[1:]:
         elif t == '/flow_dbg8':
             m = deserialize_message(raw, Vector3Stamped)
             d8.append((st(m), m.vector.y, m.vector.z))
+        elif t == '/flow_dbg9':
+            m = deserialize_message(raw, Vector3Stamped)
+            d9.append((st(m), m.vector.x, m.vector.z))
     od = np.array(od)
     if not len(od):
         continue
@@ -78,12 +84,14 @@ for b in sys.argv[1:]:
     tl = -vx * np.sin(hd[S]) + vy * np.cos(hd[S])
     for name, src, meas in (('продольная', np.array(d8) if d8 else None,
                              lambda a: a[:, 1]),
-                            ('боковая', np.array(d7) if d7 else None,
+                            # ПРЯМОЙ слот приоритетнее восстановленного из контура: dbg9
+                            # пишется из снапшота и живёт даже без демпфера крена.
+                            ('боковая', np.array(d9) if d9 else (np.array(d7) if d7 else None),
                              # ⚠️ ошибка в стабилизаторе считается как СИГНАЛ − цель
                              # (stabilization.py: `err = self._signal(s) - self._target`),
                              # значит измерение = цель + ошибка. Обратный порядок даёт
                              # зеркальный сигнал и corr ≈ −0.8 с истиной — проверка на месте.
-                             lambda a: a[:, 1] + a[:, 2])):
+                             (lambda a: a[:, 1]) if d9 else (lambda a: a[:, 1] + a[:, 2]))):
         if src is None or len(src) < 50:
             print('%-7s| %-10s | нет телеметрии' % (b, name))
             continue
