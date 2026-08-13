@@ -24,6 +24,14 @@ def check(name, ok):
     print(f"  [{'OK ' if ok else 'FAIL'}] {name}")
 
 
+def _yh(**kw):
+    """DpYawHold БЕЗ ВЗВЕДЕНИЯ. Тесты ниже — про закон управления, и им нужен отклик на
+    ПЕРВОМ же кадре. Гейт достоверности (arm_frames, лечение YW1s1) держит ось молчащей
+    первые 5 хороших кадров и проверяется отдельно, в конце файла."""
+    kw.setdefault('arm_frames', 0)
+    return DpYawHold(**kw)
+
+
 def st(seq, lat=0.0, yaw=0.0, conf=0.5, dt=0.05, now=0.05):
     return DroneState(flow_seq=seq, flow_lateral=lat, flow_yaw=yaw,
                       flow_conf=conf, flow_dt=dt, now_sim=now)
@@ -67,13 +75,13 @@ check("DpRollHold conf<min → авторитет 0 (центр)", rc.roll == 15
 # ЭКВИВАЛЕНТНОСТЬ СТАРОМУ ЗАКОНУ. Был чистый rate-демпф yu = kp·flow_yaw при kp=6.
 # Стало: D-член pos-режима = kd·(flow_yaw − скорость уставки), kd=6. При kp=0 и нулевой
 # команде это ТО ЖЕ ЧИСЛО — победитель свипа [[yaw-hold-tuning]] не переигран.
-yh = DpYawHold(leak_sec=0.0)  # kp0 ki0 kd6, утечка выключена → u = 6·flow_yaw РОВНО
+yh = _yh(leak_sec=0.0)  # kp0 ki0 kd6, утечка выключена → u = 6·flow_yaw РОВНО
 yh.enter(st(-1))
 rc = yh.update(st(1, yaw=3.0, now=0.05), Setpoint(), 0.05)
 check("DpYawHold: старый закон сохранён ТОЧНО (yaw=1518)", rc.yaw == 1518)
 check("DpYawHold владеет только yaw", rc.roll == 1500 and rc.pitch == 1500)
 # с утечкой по умолчанию (T=8с) D-член слабее на fdt/T = 0.6% за кадр — в PWM не видно
-yhl = DpYawHold()
+yhl = _yh()
 yhl.enter(st(-1))
 rc = yhl.update(st(1, yaw=3.0, now=0.05), Setpoint(), 0.05)
 check("DpYawHold: утечка T=8с почти не трогает демпфер (1517..1518)",
@@ -83,7 +91,7 @@ check("DpYawHold: утечка T=8с почти не трогает демпфе
 # −21…−28°, yaw_r60 давал +70…+76°). `c_yaw>0` = стик ВПРАВО, и открытый контур на нём
 # даёт PWM ВЫШЕ центра (см. test_families). Холдер обязан выдавать ТУДА ЖЕ, иначе один
 # и тот же токен означает разные стороны с холдером и без него.
-yhs = DpYawHold(leak_sec=0.0)
+yhs = _yh(leak_sec=0.0)
 yhs.enter(st(-1))
 rc = yhs.update(st(1, yaw=0.0, now=0.05), Setpoint(c_yaw=0.3), 0.05)
 check("DpYawHold: c_yaw>0 (вправо) → PWM выше центра, как открытый контур",
@@ -94,7 +102,7 @@ check("DpYawHold: уставка курса едет в МИНУС (flow_yaw>0 =
 # КОМАНДА ЕДЕТ ЧЕРЕЗ УСТАВКУ, а не вычитается из сигнала. cmd_gain=1, c_yaw=3 →
 # скорость уставки −3 ед/с; за кадр 0.05с уставка уезжает на −0.15, и если борт
 # развернулся вправо ровно на столько (flow_yaw=−3) — ошибка ноль, и D-член тоже.
-yh2 = DpYawHold(cmd_gain=1.0, leak_sec=0.0)
+yh2 = _yh(cmd_gain=1.0, leak_sec=0.0)
 yh2.enter(st(-1))
 rc = yh2.update(st(1, yaw=-3.0, now=0.05), Setpoint(c_yaw=3.0), 0.05)
 check("DpYawHold: борт идёт за уставкой → yaw=центр", rc.yaw == 1500)
@@ -111,11 +119,11 @@ check("DpYawHold: скорость уставки обнулилась", rate2 =
 
 # УТЕЧКА накопителя: без неё смещение flow_yaw (−0.4°/с, замер Y1s) копится в фантомный
 # курс без предела — это тот механизм, которым свип отверг ki.
-leaky = DpYawHold(leak_sec=1.0)
+leaky = _yh(leak_sec=1.0)
 leaky.enter(st(-1))
 for k in range(1, 41):                       # 40 кадров по 0.05с = 2с постоянного смещения
     leaky.update(st(k, yaw=1.0, now=0.05 * k), Setpoint(), 0.05)
-tight = DpYawHold(leak_sec=0.0)
+tight = _yh(leak_sec=0.0)
 tight.enter(st(-1))
 for k in range(1, 41):
     tight.update(st(k, yaw=1.0, now=0.05 * k), Setpoint(), 0.05)
@@ -127,7 +135,7 @@ check("DpYawHold: с утечкой T=1с фантом насыщается (<1.
 # идущий за уставкой, для утечки неотличим от стоящего. Замер Y2 показал цену
 # прежней утечки-к-нулю: на токене 60° накопитель просел с 82° до 46°, и контур
 # добирал разницу разворотом — токен переворачивал на +25%.
-cmd = DpYawHold(cmd_gain=1.0, leak_sec=1.0)
+cmd = _yh(cmd_gain=1.0, leak_sec=1.0)
 cmd.enter(st(-1))
 for k in range(1, 41):                       # 2с команды, борт идёт РОВНО за уставкой
     cmd.update(st(k, yaw=-3.0, now=0.05 * k), Setpoint(c_yaw=3.0), 0.05)
@@ -138,7 +146,7 @@ check("DpYawHold: борт за уставкой → утечке нечего �
 # ШАГ ИНТЕГРИРОВАНИЯ = время С ПРОШЛОГО ПРОДВИЖЕНИЯ КОНТУРА, а не flow_dt. Домен тикает
 # 20 Гц, камера ~30 кадров/с → часть кадров контур не видит, и по flow_dt он засчитывал
 # 2/3 времени (замер Y3: уставка 20.0° за 3.5 с команды вместо 30°).
-fdt = DpYawHold(cmd_gain=1.0, leak_sec=0.0)
+fdt = _yh(cmd_gain=1.0, leak_sec=0.0)
 fdt.enter(st(-1))
 fdt.update(st(1, dt=1 / 30, now=0.05), Setpoint(c_yaw=-1.0), 0.05)   # 1-й кадр → flow_dt
 sp1 = fdt.hold_dbg()[0]
@@ -162,7 +170,7 @@ check("DpRollHold: ошибка = сигнал − цель (≈+3.0)", abs(dbg[
 check("DpRollHold: третий слот — PWM выхода", abs(dbg[2] - (rr.update(
     st(2, lat=0.0), Setpoint(c_right=0.3), 0.05).roll - RC_CENTER)) < 1e-6)
 check("DpYawHold (pos-ось) на rate_dbg молчит",
-      DpYawHold(cmd_gain=1.0).rate_dbg() is None)
+      _yh(cmd_gain=1.0).rate_dbg() is None)
 check("DpRollHold (rate-ось) на hold_dbg молчит", rr.hold_dbg() is None)
 
 # ЗНАК БОКОВОЙ КОМАНДЫ. Стик ВПРАВО обязан гнать борт вправо, то есть ставить
@@ -178,6 +186,57 @@ rs2 = DpRollHold(kp=8.0, ki=0.0, kd=0.0, cmd_gain=10.0)
 rs2.enter(st(-1))
 check("DpRollHold: стик ВЛЕВО → PWM ниже центра",
       rs2.update(st(1, lat=0.0), Setpoint(c_right=-0.3), 0.05).roll < RC_CENTER)
+
+# --- ЗАЩИТА НАКОПИТЕЛЯ КУРСА ОТ МУСОРНОГО КАДРА (лечение YW1s1) ---
+# Событие: на отрыве один кадр дал flow_yaw = −43.8 px/кадр (висенческие ±1) при
+# conf=0.18. Накопитель набрал −99° фантома, контур упёрся в потолок и физически
+# довернул борт на 95° влево. Проверяем оба гейта по отдельности и вместе.
+
+# 1. ОТСЕВ НЕВОЗМОЖНОГО. Кадр выше потолка не должен попасть в накопитель ВОВСЕ.
+rej = DpYawHold(kp=20.0, kd=0.0, leak_sec=0.0, max_step=32.4, arm_frames=0)
+rej.enter(st(-1))
+rc = rej.update(st(1, yaw=-43.8, conf=1.0, now=0.05), Setpoint(), 0.05)
+check("отсев: кадр 43.8 px/кадр выброшен → накопитель пуст, команды нет",
+      rc.yaw == RC_CENTER and abs(rej.hold_dbg()[1]) < 1e-9 and rej._rejects == 1)
+# ...а правдоподобный кадр проходит: потолок не должен глушить настоящий разворот
+ok_frame = DpYawHold(kp=20.0, kd=0.0, leak_sec=0.0, max_step=32.4, arm_frames=0)
+ok_frame.enter(st(-1))
+rc = ok_frame.update(st(1, yaw=-30.0, conf=1.0, now=0.05), Setpoint(), 0.05)
+check("отсев: кадр 30 px/кадр (ниже потолка) проходит и командует",
+      rc.yaw != RC_CENTER and ok_frame._rejects == 0)
+# ВЫБРАСЫВАЕТСЯ, а не подрезается: подрезка влила бы максимально допустимый фантом
+clamped = DpYawHold(kp=20.0, kd=0.0, leak_sec=0.0, max_step=32.4, arm_frames=0)
+clamped.enter(st(-1))
+clamped.update(st(1, yaw=-1000.0, conf=1.0, now=0.05), Setpoint(), 0.05)
+check("отсев: выброс, а не подрезка (накопитель ровно 0, не −32.4·dt)",
+      clamped.hold_dbg()[1] == 0.0)
+
+# 2. ВЗВЕДЕНИЕ. Гейт conf_min=0.05 взлётный выброс пропустил (conf там 0.18), поэтому
+# накопителю нужен свой порог: conf_full подряд arm_frames кадров.
+arm = DpYawHold(kp=20.0, kd=0.0, leak_sec=0.0, conf_full=0.20, arm_frames=5,
+                max_step=0.0)
+arm.enter(st(-1))
+rc = arm.update(st(1, yaw=-43.8, conf=0.18, now=0.05), Setpoint(), 0.05)
+check("взведение: conf 0.18 < conf_full → ни команды, ни накопления",
+      rc.yaw == RC_CENTER and abs(arm.hold_dbg()[1]) < 1e-9)
+# сигнал 5 px/кадр, а не 1: при kp=20 и шаге 0.05с единица даёт ровно 1.0 PWM, и
+# округление вниз (int) съело бы отклик — тест провалился бы на арифметике, а не на гейте
+for k in range(2, 7):                       # пять хороших кадров подряд — взводимся
+    rc = arm.update(st(k, yaw=5.0, conf=1.0, now=0.05 * k), Setpoint(), 0.05)
+check("взведение: 5 хороших кадров молчат (ось ещё не взведена)", rc.yaw == RC_CENTER)
+rc = arm.update(st(7, yaw=5.0, conf=1.0, now=0.35), Setpoint(), 0.05)
+check("взведение: 6-й хороший кадр — ось работает", rc.yaw != RC_CENTER)
+# срыв достоверности сбрасывает счётчик: одиночный хороший кадр посреди срыва не взводит
+arm.update(st(8, yaw=5.0, conf=0.0, now=0.40), Setpoint(), 0.05)
+rc = arm.update(st(9, yaw=5.0, conf=1.0, now=0.45), Setpoint(), 0.05)
+check("взведение: срыв conf сбрасывает счётчик (снова молчим)", rc.yaw == RC_CENTER)
+
+# 3. ВМЕСТЕ, НА ДЕФОЛТАХ: сценарий YW1s1 целиком не должен пройти.
+yw = DpYawHold(kp=20.0)
+yw.enter(st(-1))
+rc = yw.update(st(1, yaw=-43.8, conf=0.18, now=0.05), Setpoint(), 0.05)
+check("YW1s1 на дефолтах: взлётный кадр не разворачивает борт",
+      rc.yaw == RC_CENTER and abs(yw.hold_dbg()[1]) < 1e-9)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ФЛОУ-СТАБИЛИЗАТОРЫ OK" if ok_all else "❌ СБОЙ")

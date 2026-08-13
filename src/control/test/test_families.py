@@ -120,11 +120,15 @@ rc = dv.update(DroneState(flow_seq=2, kf_logs=+0.02, kf_vel=0.0, kf_valid=True,
 check("DpPitchHold: скачок положения БЕЗ скорости → kd молчит (pitch=1530)", rc.pitch == 1530)
 
 # --- DpHold: композит всех трёх осей (roll/yaw по потоку, pitch по опоре) ---
+# ⚠️ Курс молчит первые arm_frames хороших кадров (гейт достоверности, лечение YW1s1),
+# поэтому композит проверяется НЕ на первом кадре: иначе тест про владение осями
+# провалился бы на взведении, к которому он отношения не имеет.
 dh = DpHold()
 dh.enter(DroneState(flow_seq=-1))
-rc = dh.update(DroneState(flow_seq=1, flow_lateral=5.0, kf_logs=-0.02, kf_valid=True,
-                          flow_yaw=3.0, flow_conf=0.5, flow_dt=0.05, now_sim=0.05),
-               Setpoint(), 0.05)
+for k in range(1, 8):
+    rc = dh.update(DroneState(flow_seq=k, flow_lateral=5.0, kf_logs=-0.02, kf_valid=True,
+                              flow_yaw=3.0, flow_conf=0.5, flow_dt=0.05, now_sim=0.05 * k),
+                   Setpoint(), 0.05)
 check("DpHold командует roll+pitch+yaw", rc.roll != 1500 and rc.pitch != 1500 and rc.yaw != 1500)
 
 ok_all = all(ok for _, ok in results)

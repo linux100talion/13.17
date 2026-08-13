@@ -323,6 +323,10 @@ def _parse() -> tuple:
     p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=_D.yaw_osign)
     p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=_D.yaw_cmd_gain)
     p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=_D.yaw_smooth)
+    p.add_argument('--yaw-max-rate', dest='yaw_max_rate', type=float,
+                   default=_D.yaw_max_rate)
+    p.add_argument('--yaw-arm-frames', dest='yaw_arm_frames', type=int,
+                   default=_D.yaw_arm_frames)
     p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=_D.flow_hold_sec)
     p.add_argument('--flow-observe', dest='flow_observe', action='store_true',
                    help='поднять зрение без демпфера: писать /flow_dbg* для замера перцепта')
