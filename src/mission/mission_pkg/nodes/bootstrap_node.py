@@ -295,10 +295,12 @@ def _parse() -> tuple:
     p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
     p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,
                    default=_D.ipm_max_speed)
-    p.add_argument('--ipm-vz-max-fwd', dest='ipm_vz_max_fwd', type=float,
-                   default=_D.ipm_vz_max_fwd)
-    p.add_argument('--ipm-vz-max-lat', dest='ipm_vz_max_lat', type=float,
-                   default=_D.ipm_vz_max_lat)
+    p.add_argument('--ipm-alt-band-fwd', dest='ipm_alt_band_fwd', type=float,
+                   default=_D.ipm_alt_band_fwd)
+    p.add_argument('--ipm-alt-band-lat', dest='ipm_alt_band_lat', type=float,
+                   default=_D.ipm_alt_band_lat)
+    p.add_argument('--ipm-alt-still', dest='ipm_alt_still', type=float,
+                   default=_D.ipm_alt_still)
     p.add_argument('--ipm-arm-frames', dest='ipm_arm_frames', type=int,
                    default=_D.ipm_arm_frames)
     p.add_argument('--kf-seg-min-sec', dest='kf_seg_min_sec', type=float,
