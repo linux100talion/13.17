@@ -39,6 +39,12 @@ make fresh-start    # полный сброс (down→up, ephemeral state тер
 Лётные команды (после `wait`): `make arm takeoff hover land disarm`,
 `make fly` (облёт квадрата для инициализации VINS), `make vins-watch`.
 
+## Переезд на GPU-ноутбук — `laptop_move.md`
+
+Стенд жил на GPU-less боксе (`CPU=1`, llvmpipe, RTF ≈ 0.07). Чек-лист подъёма на
+машине с NVIDIA, что ломается при переходе к реальному времени (разрешение камеры,
+окна в КАДРАХ, wall-таймауты) и план проброса живого пульта — `docker/sim/laptop_move.md`.
+
 ## CPU-режим (ветка nn2_c3_cpu)
 
 GPU-less прогон на машине без NVIDIA-драйвера: добавляй **`CPU=1` к ЛЮБОМУ
