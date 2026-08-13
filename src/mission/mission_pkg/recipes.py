@@ -51,6 +51,15 @@ def _dp_pitch(cfg, klass=DpPitchHold):
                  cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign, cfg.pitch_cmd_gain)
 
 
+def _ipm_gates(cfg, vz_max):
+    """Гейты доверия к каналу вида сверху для оси по скорости (см. `_IpmGated`).
+
+    Потолок правдоподобия и взведение у осей ОБЩИЕ (природа отказа одна), а порог по
+    вертикальной скорости приходит РАЗНЫЙ: фантом набора продольный по геометрии."""
+    return dict(max_speed=cfg.ipm_max_speed, vz_max=vz_max,
+                arm_frames=cfg.ipm_arm_frames)
+
+
 def yaw_cmd_gain(cfg):
     """Гейн yaw-команды DpYawHold в ед. сигнала/с. Норма — вывод из общего темпа:
     сигнал = накопленный визуальный курс, значит ед./с = S · °/с."""
@@ -92,14 +101,14 @@ _STAB = {
     "DpPitchRate": lambda cfg: DpPitchRate(
         cfg.pitch_rate_kp, cfg.pitch_rate_ki, cfg.pitch_rate_kd, cfg.pitch_imax,
         cfg.pitch_max, cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign,
-        cfg.pitch_rate_cmd_gain),
+        cfg.pitch_rate_cmd_gain, **_ipm_gates(cfg, cfg.ipm_vz_max_fwd)),
     # весь демпфер, но продольная ось по скорости
     "DpHoldR": lambda cfg: DpHold(_dp_roll(cfg), _STAB["DpPitchRate"](cfg), _dp_yaw(cfg)),
     # Боковая ось тоже по МЕТРИЧЕСКОЙ скорости (гейны roll_rate_*), см. DpRollRate.
     "DpRollRate": lambda cfg: DpRollRate(
         cfg.roll_rate_kp, cfg.roll_rate_ki, cfg.roll_rate_kd, cfg.roll_imax,
         cfg.roll_max, cfg.roll_conf_min, cfg.roll_conf_full, cfg.roll_osign,
-        cfg.roll_rate_cmd_gain),
+        cfg.roll_rate_cmd_gain, **_ipm_gates(cfg, cfg.ipm_vz_max_lat)),
     # ОБЕ горизонтальные оси в метрах: демпфер целиком на виде сверху
     "DpHoldM": lambda cfg: DpHold(_STAB["DpRollRate"](cfg), _STAB["DpPitchRate"](cfg),
                                   _dp_yaw(cfg)),

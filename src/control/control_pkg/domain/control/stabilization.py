@@ -602,7 +602,103 @@ class DpYawHold(_FlowDamper1D):
         return -sp.c_yaw
 
 
-class DpPitchRate(_FlowDamper1D):
+class _ClimbRate:
+    """Вертикальная скорость по БАРО-высоте: наклон МНК в окне `win` секунд.
+
+    Своего поля в снапшоте у неё нет и не нужно: `rel_alt` есть и в симе, и на борту,
+    а окно тут ровно то же, что у канала вида сверху (0.5 с). Отдаёт None, пока окно
+    не набралось, — «не знаю» и «ноль» это разные ответы, и гейт обязан их различать.
+    """
+
+    def __init__(self, win=0.5):
+        self.win = win
+        self._h = []
+
+    def reset(self):
+        self._h = []
+
+    def update(self, t, alt):
+        if alt is None:
+            return None
+        self._h.append((t, alt))
+        while self._h and t - self._h[0][0] > self.win:
+            self._h.pop(0)
+        if len(self._h) < 4 or self._h[-1][0] - self._h[0][0] < 0.5 * self.win:
+            return None
+        n = len(self._h)
+        tm = sum(p[0] for p in self._h) / n
+        am = sum(p[1] for p in self._h) / n
+        den = sum((p[0] - tm) ** 2 for p in self._h)
+        if den <= 0.0:
+            return None
+        return sum((p[0] - tm) * (p[1] - am) for p in self._h) / den
+
+
+class _IpmGated(_FlowDamper1D):
+    """ГЕЙТ ДОВЕРИЯ к каналу вида сверху — то же лечение, что получил курс на YW1s1,
+    перенесённое на оси по скорости. Три независимых отказа, три разных гейта:
+
+    1. `max_speed` — ПРАВДОПОДОБИЕ кадра. Скорость выше физически возможной для рамы =
+       мусор, кадр не командует. Как и у курса, кадр ВЫБРАСЫВАЕТСЯ, а не подрезается:
+       подрезка выдала бы максимально допустимую команду по мусорному кадру.
+    2. `vz_max` — НАБОР/СНИЖЕНИЕ. Полоса земли лежит ВПЕРЕДИ борта (X≈3…6 м), поэтому
+       любая ошибка высоты двигает её вдоль X, и вертикальный ход читается каналом как
+       продольный. Замер по 8 прогонам (`ipm_out.py`/`ipm_vz.py`): в окне взлёта канал
+       показывал 4.5–7.2 м/с вперёд при истинных ≤1.3, наклон ошибки по vz +0.67 м/с
+       на м/с, и тангаж СИДЕЛ В НАСЫЩЕНИИ 22–43% первых трёх секунд — гонялся за
+       фантомом набора. Отдельный гейт нужен потому, что фантом ПЛАВНЫЙ: он проходит
+       весь диапазон от 0 до 7 м/с, и потолок правдоподобия его не ловит.
+    3. `arm_frames` — ВЗВЕДЕНИЕ. Ось не командует, пока не пришло N подряд кадров,
+       прошедших всё выше. Любой сбой обнуляет счётчик.
+
+    ⚠️ Метод МЕНЯЕТ СОСТОЯНИЕ — база зовёт его ровно раз на новый кадр
+    (`flow_seq != _last_seq`); False обнуляет команду и забывает производную.
+    ⚠️ Гейт по vz — ПО ОСЯМ РАЗНЫЙ, и это не забывчивость: боковая ось геометрически
+    почти не задета (полоса не смещается вбок при смене высоты — замер: наклон +0.25
+    против +0.67, насыщения крена нет ни в одном прогоне), а слепой крен на наборе
+    отдаёт борт ветру на все 4 секунды. Дефолт для крена — 0 (выключено).
+    """
+
+    def __init__(self, *a, max_speed=0.0, vz_max=0.0, arm_frames=0, **kw):
+        super().__init__(*a, **kw)
+        self.max_speed = max_speed
+        self.vz_max = vz_max
+        self.arm_frames = arm_frames
+        self._climb = _ClimbRate()
+        self._armed = 0
+        self._rejects = 0        # кадров отброшено (диагностика, не управление)
+        self._vz_blocks = 0      # кадров закрыто по вертикальной скорости
+
+    def enter(self, s: DroneState) -> None:
+        super().enter(s)
+        self._climb.reset()
+        self._armed = 0
+        self._rejects = 0
+        self._vz_blocks = 0
+
+    def _signal_ok(self, s) -> bool:
+        vz = self._climb.update(s.now_sim, s.rel_alt)
+        if not s.ipm_ok:
+            self._armed = 0
+            return False
+        if self.max_speed > 0.0 and (abs(s.ipm_vfwd) > self.max_speed
+                                     or abs(s.ipm_vlat) > self.max_speed):
+            self._rejects += 1
+            self._armed = 0
+            return False
+        # vz is None = окно ещё не набралось: судить не по чему, но и доверять рано —
+        # взведение всё равно держит ось молча первые кадры сегмента.
+        if self.vz_max > 0.0 and vz is not None and abs(vz) > self.vz_max:
+            self._vz_blocks += 1
+            self._armed = 0
+            return False
+        if self._armed < self.arm_frames:
+            self._armed += 1
+            return False
+        return True
+
+
+class DpPitchRate(_IpmGated):
     """ДЕМПФЕР продольной СКОРОСТИ по виду сверху → PITCH. Ось `rate`, как крен.
 
     Зачем вместо DpPitchHold. Задача пре-VINS слоя — ОСТАНОВИТЬ борт, а не вернуть его
@@ -638,8 +734,6 @@ class DpPitchRate(_FlowDamper1D):
 
     def _signal(self, s): return s.ipm_vfwd
 
-    def _signal_ok(self, s) -> bool: return bool(s.ipm_ok)
-
     def _cmd(self, sp):
         # знак — как у DpPitchHold: c_fwd>0 = стик ВПЕРЁД = борт должен ехать вперёд,
         # и продольная скорость по виду сверху при ходе вперёд ПОЛОЖИТЕЛЬНА (крутизна
@@ -647,7 +741,7 @@ class DpPitchRate(_FlowDamper1D):
         return sp.c_fwd
 
 
-class DpRollRate(_FlowDamper1D):
+class DpRollRate(_IpmGated):
     """ДЕМПФЕР бокового сноса по МЕТРИЧЕСКОЙ скорости вида сверху → ROLL.
 
     То же, что DpRollHold, но сигнал в М/С вместо px/кадр. Прежний `flow_lateral` —
@@ -676,8 +770,6 @@ class DpRollRate(_FlowDamper1D):
     _cmd_mode = "rate"
 
     def _signal(self, s): return s.ipm_vlat
-
-    def _signal_ok(self, s) -> bool: return bool(s.ipm_ok)
 
     def _cmd(self, sp):
         # ⚠️ БЕЗ МИНУСА, в отличие от DpRollHold. Там минус стоял потому, что flow_lateral
