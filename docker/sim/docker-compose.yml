@@ -77,6 +77,11 @@ services:
     build:
       context: ../..                        # корень репо: нужен доступ к src/
       dockerfile: docker/sim/nav/Dockerfile
+      args:
+        # Архитектуры CUDA для сборки OpenCV. Дефолт покрывает RTX 20/30/40, но
+        # собирает вчетверо дольше нужного: под конкретную карту задать ОДНУ через
+        # docker/sim/.env (Ada — RTX 40xx — это 8.9).
+        CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-7.5;8.0;8.6;8.9}"
     container_name: p1317_nav
     restart: unless-stopped
     network_mode: host

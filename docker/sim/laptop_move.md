@@ -30,10 +30,11 @@ echo "VINS_SRC=$VINS_SRC" > .env
 docker compose config | grep -A2 vins_oss   # проверить, что путь подставился
 
 make host-setup     # xhost + v4l2loopback (/dev/rawbayer), нужен sudo
+echo "CUDA_ARCH_BIN=8.9" >> .env   # RTX 4050/4060 (Ada); одна арка вместо четырёх
 make build          # долго: SITL + Gazebo + OpenCV с CUDA из исходников
-#   RTX 4050/4060 (Ada) = CUDA_ARCH_BIN 8.9. Дефолт в nav/Dockerfile ("7.5;8.0;8.6;8.9")
-#   её уже включает, так что соберётся и без правок — но сборку сильно ускорит
-#   --build-arg CUDA_ARCH_BIN=8.9 (одна арка вместо четырёх).
+#   Дефолт ("7.5;8.0;8.6;8.9", RTX 20/30/40) собирается и без правок, но вчетверо
+#   дольше нужного. `make build` аргументы НЕ пробрасывает — арка задаётся только
+#   через .env (compose подставляет её в build.args образа nav).
 make up && make wait
 make sitl-cal       # ОДНОРАЗОВО после первого подъёма/после make clean
 ```
