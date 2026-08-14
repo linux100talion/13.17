@@ -108,8 +108,12 @@ BAG_HOST="$OUTPUT_DIR/scene_bag"
 IMG_HOST="$OUTPUT_DIR/scene_img"      # кадры извлекаются сюда, отсюда же грузим на Drive
 
 # CPU=1 прокидывается в каждую make-цель (иначе часть пойдёт по базовому compose).
+# CPU_NOTE берётся из ТОЙ ЖЕ проверки, что и флаг: раньше лог печатал "(CPU=1)" по
+# ${CPU:+…}, то есть на любое непустое значение — включая CPU=0, когда прогон шёл
+# на GPU. В разборе кампании такой лог уводит в сторону.
 MK=(make -C "$SIM_DIR")
-[ "$CPU" = "1" ] && MK+=(CPU=1)
+CPU_NOTE=""
+[ "$CPU" = "1" ] && { MK+=(CPU=1); CPU_NOTE=" (CPU=1)"; }
 
 # окружение ROS внутри контейнера (overlay нужен для cv_bridge)
 SRC='source /opt/ros/humble/setup.bash; source /opt/overlay/install/setup.bash; source /root/sim_ws/install/setup.bash'
@@ -157,7 +161,7 @@ if [ "$RESTART" = "1" ]; then
         RESET_TARGET=restart-all
         RES_NOTE=""
     fi
-    log "перезапуск стека${CPU:+ (CPU=1)}${RES_NOTE}"
+    log "перезапуск стека${CPU_NOTE}${RES_NOTE}"
     "${MK[@]}" "$RESET_TARGET" 2>&1 | tail -3
     "${MK[@]}" wait
 else
