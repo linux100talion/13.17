@@ -57,5 +57,6 @@ idx  фаза       kp  ki    sm  СКО°    размах°  дрейф°   в�
 ВОСПРОИЗВЕСТИ
   bash src/lab/yaw_tune_sweep.sh                    # весь свип (перезапишет CSV/видео)
   # добор ceiling сглаживания (кастомный список конфигов):
+  REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
   YAW_CONFIGS="off:6:0:1 s5:6:0:5 s7:6:0:7 s9:6:0:9" YAW_GDIR=13.17/yaw_tune_refine \
-    YAW_CSV=/root/13.17/docker/sim/output/yaw_tune_refine.csv bash src/lab/yaw_tune_sweep.sh
+    YAW_CSV=$REPO/docker/sim/output/yaw_tune_refine.csv bash src/lab/yaw_tune_sweep.sh

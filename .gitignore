@@ -23,3 +23,5 @@ docker/sim/output/
 docker/sim/worlds/preview/*.bag
 # Персистентные калибровочные бэги (крупные, вне git; см. HowToFlow_PID_synth.md)
 docker/sim/bags/
+# Машинно-зависимые пути compose (VINS_SRC и т.п.) — у каждого бокса свои
+docker/sim/.env

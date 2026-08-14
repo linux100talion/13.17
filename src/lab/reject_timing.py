@@ -18,8 +18,9 @@
 предшествовать причине, но совпадение по времени может иметь и общий корень.
 
 Запуск:
-  docker run --rm -v /root/13.17/src/lab:/lab:ro \
-    -v /root/13.17/docker/sim/output:/out:ro ros:humble-ros-base bash -lc \
+  REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+  docker run --rm -v $REPO/src/lab:/lab:ro \
+    -v $REPO/docker/sim/output:/out:ro ros:humble-ros-base bash -lc \
     'source /opt/ros/humble/setup.bash; python3 /lab/reject_timing.py /out/E2s*_bag'
 """
 import math

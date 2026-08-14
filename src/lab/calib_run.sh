@@ -25,7 +25,8 @@
 #
 # Прогон ДОЛГИЙ (15–20 мин стенных на CPU-боксе) — запускать отвязанно, чтобы
 # пережил обрыв ssh:
-#   cd /root/13.17 && setsid nohup env NAME=A1_pitch_sign BS_STAB=none … \
+#   REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+#   cd $REPO && setsid nohup env NAME=A1_pitch_sign BS_STAB=none … \
 #     bash src/lab/calib_run.sh > /root/run_A1.log 2>&1 < /dev/null & disown
 #
 set -euo pipefail

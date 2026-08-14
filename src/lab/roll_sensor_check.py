@@ -16,8 +16,9 @@ S_lat=0.4 против 2.42 после, то есть замер слепого 
 бэга с `be8688f`.
 
 Запуск (контейнер nav не нужен поднятым):
-  docker run --rm --network none -v /root/13.17/docker/sim/output:/out:ro \
-    -v /root/13.17/src/lab:/lab:ro sim-nav:latest bash -lc \
+  REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+  docker run --rm --network none -v $REPO/docker/sim/output:/out:ro \
+    -v $REPO/src/lab:/lab:ro sim-nav:latest bash -lc \
     "source /opt/ros/humble/setup.bash; BAG=/out/L1_scale2ax_bag python3 /lab/roll_sensor_check.py"
 """
 import math, os

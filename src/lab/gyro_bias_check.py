@@ -19,8 +19,9 @@
 или скорости. Бэг подойдёт лёгкий (после strip_bags): нужны только одометрия и IMU.
 
 Запуск (контейнер одноразовый, монтировать АБСОЛЮТНЫМИ путями):
-  docker run --rm -v /root/13.17/src/lab:/lab:ro \
-    -v /root/13.17/docker/sim/output:/out:ro ros:humble-ros-base bash -lc \
+  REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+  docker run --rm -v $REPO/src/lab:/lab:ro \
+    -v $REPO/docker/sim/output:/out:ro ros:humble-ros-base bash -lc \
     'python3 /lab/gyro_bias_check.py J2s1 L2s1 L2s2'
 """
 import numpy as np, math, sys, os

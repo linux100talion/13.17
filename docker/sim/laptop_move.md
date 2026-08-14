@@ -14,26 +14,42 @@ llvmpipe, RTF ≈ 0.07). Цель переезда — реальное врем
 nvidia-smi
 docker run --rm --gpus all nvidia/cuda:12.2.2-base-ubuntu22.04 nvidia-smi
 
-git clone -b nn2_c3_control2 https://github.com/linux100talion/13.17 /root/13.17
-git clone --branch 1317_debug https://github.com/linux100talion/VINS-MONO-ROS2 \
-          /root/VINS-MONO-ROS2          # ⚠️ форк живёт ВНЕ репы, монтируется bind-mount'ом
+# Каталоги выбираются свободно — ниже они подставляются через переменные.
+# REPO может быть где угодно (не обязательно /root), VINS_SRC — тоже.
+REPO=~/13.17
+VINS_SRC=~/VINS-MONO-ROS2
 
-cd /root/13.17/docker/sim
+git clone -b nn2_c3_control2 https://github.com/linux100talion/13.17 "$REPO"
+git clone --branch 1317_debug https://github.com/linux100talion/VINS-MONO-ROS2 \
+          "$VINS_SRC"                   # ⚠️ форк живёт ВНЕ репы, монтируется bind-mount'ом
+
+cd "$REPO/docker/sim"
+# Путь к форку compose берёт из VINS_SRC (дефолт — /root/VINS-MONO-ROS2, раскладка
+# GCE-бокса). Если форк лежит не там — записать путь в docker/sim/.env (не коммитится):
+echo "VINS_SRC=$VINS_SRC" > .env
+docker compose config | grep -A2 vins_oss   # проверить, что путь подставился
+
 make host-setup     # xhost + v4l2loopback (/dev/rawbayer), нужен sudo
 make build          # долго: SITL + Gazebo + OpenCV с CUDA из исходников
-#   RTX 4060 (Ada) = CUDA_ARCH_BIN 8.9. Дефолт в nav/Dockerfile ("7.5;8.0;8.6;8.9")
+#   RTX 4050/4060 (Ada) = CUDA_ARCH_BIN 8.9. Дефолт в nav/Dockerfile ("7.5;8.0;8.6;8.9")
 #   её уже включает, так что соберётся и без правок — но сборку сильно ускорит
 #   --build-arg CUDA_ARCH_BIN=8.9 (одна арка вместо четырёх).
 make up && make wait
 make sitl-cal       # ОДНОРАЗОВО после первого подъёма/после make clean
 ```
 
+⚠️ **Нужен нативный Docker Engine, не Docker Desktop.** Desktop под Linux крутит
+контейнеры в виртуалке, а стенду это ломает всё сразу: `runtime: nvidia` там не
+поддерживается, `network_mode: host` станет хостом ВМ, а `/dev/rawbayer` — модуль
+ядра ХОСТА, которого ВМ не видит. Проверка — `docker context ls` (активным должен
+быть `default` → `/var/run/docker.sock`) и `systemctl is-active docker`.
+
 **`CPU=1` больше не нужен** — это флаг GPU-less бокса. Со всеми таргетами идём без него.
 
 Первый прогон-проверка (он же образец дисциплины: атомарно, целиком):
 
 ```bash
-NAME=L0 bash /root/13.17/src/lab/calib_run.sh
+NAME=L0 bash "$REPO/src/lab/calib_run.sh"
 ```
 
 ---

@@ -4,8 +4,15 @@
 скриптов (оно в шапках самих скриптов), а **готовые строки запуска** и правило, какую
 из них брать.
 
-Всё запускается **с хоста**, из `/root/13.17`. Ничего не запускается руками внутри
+Всё запускается **с хоста**, из корня репы. Ничего не запускается руками внутри
 контейнера — см. «Дисциплина».
+
+Строки ниже используют `$REPO` — корень репы; путь у каждого бокса свой (на GCE был
+`/root/13.17`). Задать один раз на сессию, из любого места внутри репы:
+
+```bash
+REPO=$(git rev-parse --show-toplevel)
+```
 
 ---
 
@@ -50,9 +57,9 @@
 ### Разовый именованный прогон
 
 ```bash
-cd /root/13.17 && setsid nohup env NAME=A1_pitch_sign \
+cd $REPO && setsid nohup env NAME=A1_pitch_sign \
   BS_STAB=none BS_MISSION="climb3,mv_bkwd6,land" BS_MV_LEVEL=0.375 \
-  bash src/lab/calib_run.sh > /root/run_A1.log 2>&1 < /dev/null &
+  bash src/lab/calib_run.sh > ~/run_A1.log 2>&1 < /dev/null &
 ```
 
 Результат: `docker/sim/output/A1_pitch_sign_bag` + `A1_pitch_sign.env` (все `BS_*` и
@@ -63,9 +70,9 @@ cd /root/13.17 && setsid nohup env NAME=A1_pitch_sign \
 ### Серия из N одинаковых (база: среднее и разброс)
 
 ```bash
-cd /root/13.17/docker/sim && setsid nohup env N=3 PREFIX=K1s \
+cd $REPO/docker/sim && setsid nohup env N=3 PREFIX=K1s \
   BS_STAB="DpRollHold+DpPitchHold" BS_MISSION="climb3,hover40,land" \
-  bash /root/13.17/src/lab/hover_series.sh > output/K1_series.log 2>&1 < /dev/null &
+  bash $REPO/src/lab/hover_series.sh > output/K1_series.log 2>&1 < /dev/null &
 ```
 
 ### Свип одной ручки (основной инструмент настройки)
@@ -74,13 +81,13 @@ cd /root/13.17/docker/sim && setsid nohup env N=3 PREFIX=K1s \
 интегратора крена под ветром:
 
 ```bash
-cd /root/13.17/docker/sim && setsid nohup env \
+cd $REPO/docker/sim && setsid nohup env \
   WIND_SPD=3 WIND_DIR_DEG=98 WIND_FACTOR=0.4 \
   BS_IPM_DEROT=1.0 BS_IPM_WZ_TAU=2.0 BS_ROLL_RATE_KP=30 \
   BS_MISSION="climb3,hover40,land" \
   KNOB_NAME=BS_ROLL_RATE_KI KP_LIST="0 5 15" I_START=2 N=3 \
   AXIS=roll STAB=DpHoldM PREFIX_BASE=B \
-  bash /root/13.17/src/lab/rate_gain_series.sh > output/B_ki_sweep.log 2>&1 < /dev/null &
+  bash $REPO/src/lab/rate_gain_series.sh > output/B_ki_sweep.log 2>&1 < /dev/null &
 ```
 
 Имена выйдут `B2s1..3` (ki=0), `B3s1..3` (ki=5), `B4s1..3` (ki=15) — номер серии растёт
@@ -191,8 +198,8 @@ docker logs p1317_simulator 2>&1 | grep -i ВЕТЕР | tail -1
 Все разборщики гоняются в одноразовом контейнере с **абсолютными** путями монтирования:
 
 ```bash
-docker run --rm -v /root/13.17/src/lab:/lab:ro \
-  -v /root/13.17/docker/sim/output:/out:ro ros:humble-ros-base bash -lc \
+docker run --rm -v $REPO/src/lab:/lab:ro \
+  -v $REPO/docker/sim/output:/out:ro ros:humble-ros-base bash -lc \
   'source /opt/ros/humble/setup.bash; python3 /lab/hold_quality.py /out/C1s1_bag /out/C1s2_bag'
 ```
 

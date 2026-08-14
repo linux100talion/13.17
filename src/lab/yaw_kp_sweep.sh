@@ -20,10 +20,11 @@
 # ставит их в очередь. Видео каждого уходит на Drive под своим именем.
 #
 # Запуск (отвязанно, чтобы переживал обрыв связи):
-#   cd /root/13.17/docker/sim && setsid nohup env PREFIX=Y2 KNOB=BS_YAW_KP \
+#   REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+#   cd $REPO/docker/sim && setsid nohup env PREFIX=Y2 KNOB=BS_YAW_KP \
 #     VALUES="0 10 20 40" BS_STAB="GzRollHold+GzPitchHold+DpYawHold" \
 #     BS_MISSION="climb3,hover5,yaw_l30,hover8,yaw_r60,hover8,land" ... \
-#     bash /root/13.17/src/lab/yaw_kp_sweep.sh > output/Y2_sweep.log 2>&1 < /dev/null &
+#     bash $REPO/src/lab/yaw_kp_sweep.sh > output/Y2_sweep.log 2>&1 < /dev/null &
 #
 # Env: PREFIX (имя-основа), KNOB (имя BS_*-переменной), VALUES (значения через
 #      пробел), STRIP (1 = потрошить бэг), остальное — как у calib_run.sh.
@@ -34,7 +35,8 @@ KNOB="${KNOB:-BS_YAW_KP}"
 VALUES="${VALUES:-0 10 20 40}"
 STRIP="${STRIP:-1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT="/root/13.17/docker/sim/output"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"   # корень репы — от места скрипта, не зашит
+OUT="$REPO_ROOT/docker/sim/output"
 
 i=0
 for v in $VALUES; do

@@ -21,8 +21,9 @@
 движение (демпфер гасит мнимую скорость реальной).
 
 Запуск (контейнер одноразовый, монтировать АБСОЛЮТНЫМИ путями):
-  docker run --rm -v /root/13.17/src/lab:/lab:ro \
-    -v /root/13.17/docker/sim/output:/out:ro ros:humble-ros-base bash -lc \
+  REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+  docker run --rm -v $REPO/src/lab:/lab:ro \
+    -v $REPO/docker/sim/output:/out:ro ros:humble-ros-base bash -lc \
     'python3 /lab/ipm_bias_check.py J2s1 L2s1 M2s1'
 """
 import math

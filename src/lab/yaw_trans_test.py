@@ -21,7 +21,8 @@
   C. разворот + снос вместе    → НОВЫЙ ближе к истине, чем СТАРЫЙ.
 
 Запуск (нужны только cv2+numpy):
-  docker run --rm -v /root/13.17/src:/src:ro sim-nav:latest \
+  REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+  docker run --rm -v $REPO/src:/src:ro sim-nav:latest \
     bash -lc 'python3 /src/lab/yaw_trans_test.py'
 """
 import math

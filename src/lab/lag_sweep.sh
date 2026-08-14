@@ -40,7 +40,8 @@
 # меряются ВНУТРИ прогона, поэтому разброс стенда (±40% по исходу) их не смазывает.
 #
 # Запуск (с хоста, отвязанно — 4 прогона по 7–15 мин):
-#   cd /root/13.17 && setsid nohup bash src/lab/lag_sweep.sh \
+#   REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+#   cd $REPO && setsid nohup bash src/lab/lag_sweep.sh \
 #     > /root/run_lagsweep.log 2>&1 < /dev/null & disown
 #
 #   DRY_RUN=1 bash src/lab/lag_sweep.sh    — показать план, стек не трогать

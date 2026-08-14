@@ -31,8 +31,9 @@
 #   python3 /lab/axis_split.py   /out/F2s1_bag   # уход по осям и форма
 #
 # Запуск (отвязанно, чтобы пережил обрыв связи):
-#   cd /root/13.17/docker/sim && setsid nohup env KP_LIST="100 50" N=5 \
-#     bash /root/13.17/src/lab/rate_gain_series.sh > output/F2.log 2>&1 < /dev/null & disown
+#   REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+#   cd $REPO/docker/sim && setsid nohup env KP_LIST="100 50" N=5 \
+#     bash $REPO/src/lab/rate_gain_series.sh > output/F2.log 2>&1 < /dev/null & disown
 #   # крен на метрическом канале (обе оси в метрах):
 #   ... env AXIS=roll STAB=DpHoldM KP_LIST="60 30" PREFIX_BASE=G N=5 ...
 # Env: KP_LIST (значения гейна через пробел, "100 50"), N (прогонов на значение, 5),
@@ -51,7 +52,8 @@ STAB="${STAB:-DpHoldR}"        # DpHoldR (крен пиксельный) | DpHol
 N="${N:-5}"
 PREFIX_BASE="${PREFIX_BASE:-F}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd /root/13.17/docker/sim
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"   # корень репы — от места скрипта, не зашит
+cd "$REPO_ROOT/docker/sim"
 
 # Конфиг ОДИН на все значения: меняется ровно одна ручка, остальное прибито.
 COMMON=(

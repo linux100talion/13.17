@@ -16,9 +16,10 @@
 # ставит их в очередь. Видео каждого уходит на Drive под своим именем.
 #
 # Запуск (отвязанно, чтобы переживал обрыв связи):
-#   cd /root/13.17/docker/sim && setsid nohup env N=3 PREFIX=K1s \
+#   REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+#   cd $REPO/docker/sim && setsid nohup env N=3 PREFIX=K1s \
 #     BS_STAB="DpRollHold+DpPitchHold" BS_MISSION="climb3,hover40,land" ... \
-#     bash /root/13.17/src/lab/hover_series.sh > output/K1_series.log 2>&1 < /dev/null &
+#     bash $REPO/src/lab/hover_series.sh > output/K1_series.log 2>&1 < /dev/null &
 #
 # Env: N (сколько прогонов, 3), PREFIX (имя-основа, series), STRIP (1 = потрошить),
 #      остальное — как у calib_run.sh (BS_*, GDRIVE_UP, CPU).
@@ -28,7 +29,8 @@ N="${N:-3}"
 PREFIX="${PREFIX:-series}"
 STRIP="${STRIP:-1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT="/root/13.17/docker/sim/output"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"   # корень репы — от места скрипта, не зашит
+OUT="$REPO_ROOT/docker/sim/output"
 
 # SEQ_START — ДОСНЯТЬ хвост серии, не переснимая готовое: серия прерывается ребутом или
 # нехваткой диска на середине, а прогон стоит 10 минут. Нумерация имён при этом не

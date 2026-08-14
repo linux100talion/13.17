@@ -14,7 +14,8 @@
   C. Ровная высота → поведение не изменилось (сегменты закрываются штатно).
 
 Запуск (нужен только cv2+numpy, ROS не нужен):
-  docker run --rm -v /root/13.17/src:/src:ro sim-nav:latest \
+  REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+  docker run --rm -v $REPO/src:/src:ro sim-nav:latest \
     bash -lc 'python3 /src/lab/kf_alt_freeze_test.py'
 """
 import math

@@ -11,7 +11,8 @@
 # `13.17/calib/<NAME><i>.mp4`. Ничего не перезатирается.
 #
 # Запуск (с хоста, отвязанно — серия идёт часами):
-#   cd /root/13.17 && setsid nohup env NAME=lift_stat N=5 CMD=liftland \
+#   REPO=$(git rev-parse --show-toplevel)   # корень репы (из любого места внутри)
+#   cd $REPO && setsid nohup env NAME=lift_stat N=5 CMD=liftland \
 #     bash src/lab/calib_series.sh > /root/run_series.log 2>&1 < /dev/null & disown
 #
 # Env: NAME (база имени), N (сколько повторов, 5), CMD (лётная команда, liftland),
