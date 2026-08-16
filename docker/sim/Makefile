@@ -68,6 +68,18 @@ sim:             ## (ручной) перезапустить ноды в simula
 nav:             ## (ручной) перезапустить ноды в nav (VINS+MAVROS)
 	docker exec -i $(NAV) bash -s < scripts/nav_up.sh
 
+gui:             ## окно Gazebo: GUI-клиент к работающему серверу (сервер не трогает — дисциплину не нарушает)
+	docker exec -d $(SIM) bash -c "gz sim -g --gui-config /root/worlds/gui_fpv.config > /root/output/gz_gui.log 2>&1"
+	@echo "gui: окно Gazebo запускается (первый раз ~10 c, лог output/gz_gui.log)."
+	@echo "gui: панель «Камера дрона» (вид с камеры) пристыкована справа — worlds/gui_fpv.config."
+	@echo "gui: после restart-all/fresh-start окно закрыть и снова make gui."
+
+fpv:             ## окно оператора: боевой поток openhd_streamer (H.264 UDP :5600, с рамками NN)
+	@echo "fpv: смотрю UDP :5600 (закрыть — Ctrl+C или закрыть окно; стек не трогает)."
+	gst-launch-1.0 -q udpsrc port=5600 \
+	    caps="application/x-rtp,media=video,encoding-name=H264,payload=96" \
+	    ! rtph264depay ! avdec_h264 ! videoconvert ! autovideosink sync=false
+
 run: up          ## псевдоним для up (скрипты стартуют сами при подъёме контейнеров)
 
 restart-all:     ## быстрый перезапуск: stop → start (контейнеры живут, ephemeral state сохраняется)

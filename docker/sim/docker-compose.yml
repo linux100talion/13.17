@@ -31,8 +31,10 @@ services:
     #   и выполнить на хосте: xhost +local:root
     runtime: nvidia
     environment:
-      # - DISPLAY=${DISPLAY}               # раскомментировать для GUI-режима
-      # - QT_X11_NO_MITSHM=1              # раскомментировать для GUI-режима
+      # GUI-режим (окно Gazebo на ноуте): сервер остаётся headless (EGL),
+      # окно — отдельный клиент `make gui` (gz sim -g). Нужен xhost из host-setup.
+      - DISPLAY=${DISPLAY:-:1}
+      - QT_X11_NO_MITSHM=1
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all      # graphics+compute: нужно для EGL/рендера
       - ROS_DOMAIN_ID=0
@@ -47,8 +49,15 @@ services:
       - WIND_DIR_DEG=${WIND_DIR_DEG:-98}
       - WIND_FACTOR=${WIND_FACTOR:-0.4}
 
+    # iGPU (Intel, DRI3) для ОКНА `make gui`: X-сервер гибридного ноута сидит на
+    # /dev/dri/card*, без проброса Mesa в контейнере падает на llvmpipe (софт-рендер,
+    # дёрганая картинка, ~150% CPU). Сервер Gazebo это не касается — он рендерит
+    # камеру через EGL на NVIDIA. Применяется при СОЗДАНИИ контейнера (fresh-start).
+    devices:
+      - /dev/dri:/dev/dri
+
     volumes:
-      # - /tmp/.X11-unix:/tmp/.X11-unix:rw  # раскомментировать для GUI-режима
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw    # X11 для окна Gazebo (make gui)
       - ./worlds:/root/worlds:rw            # SDF-миры и модели дрона
       - ./output:/root/output:rw
       - ./scripts:/scripts:ro               # sim_up.sh запускается автоматически
@@ -104,6 +113,13 @@ services:
     devices:
       - /dev/rawbayer:/dev/rawbayer
 
+    # Живой пульт (TX12 в режиме USB-джойстика) → joy_linux_node → /joy → JoyPilot.
+    # /dev/input монтируется КАТАЛОГОМ (volume ниже), а не через devices:, чтобы
+    # работал hotplug — пульт можно втыкать ПОСЛЕ старта контейнера. Доступ к
+    # char-устройствам input (major 13) даёт это cgroup-правило.
+    device_cgroup_rules:
+      - 'c 13:* rmw'
+
     # Монтируем исходники. build/ и install/ собираются внутри через colcon.
     # camera_pkg ТЕПЕРЬ монтируем — в симуляции нода работает "как есть",
     # читая Bayer-кадры из /dev/rawbayer вместо реального /dev/video0.
@@ -121,6 +137,7 @@ services:
       - ../../src/mission:/root/sim_ws/src/mission    # миссии mission_pkg — потребитель control_pkg
       - ../../src/lab:/lab:ro                    # управляющие скрипты (arm/takeoff/hover/land/disarm/fly/vins_watch)
       - ../../src/camera:/root/sim_ws/src/camera
+      - /dev/input:/dev/input                    # джойстик (hotplug; доступ — device_cgroup_rules выше)
       - nav_colcon_build:/root/sim_ws/build      # colcon build — выживает при fresh-start
       - nav_colcon_install:/root/sim_ws/install  # colcon install — выживает при fresh-start
       - ./output:/root/sim_ws/output

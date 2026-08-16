@@ -126,6 +126,15 @@ RUN pip3 install --no-cache-dir faiss-cpu
 # OpenCV собран против NumPy 1.x; torch/faiss тянут 2.x — пинуем обратно.
 RUN pip3 install --no-cache-dir "numpy<2"
 
+# --- 8. Живой пульт (TX12 USB-джойстиком → /joy → JoyPilot) ---
+# joy_linux (joydev, предсказуем в контейнере — SDL-версии нужен udev) + jstest
+# для наземной сверки знаков. Слой НАМЕРЕННО поздний: добавление в apt-блок
+# шага 2 инвалидировало бы кэш сборки OpenCV (часы).
+RUN apt-get update && apt-get install -y \
+    ros-humble-joy-linux \
+    joystick \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /root/sim_ws
 
 # Порядок source важен: сначала ROS, затем overlay (cv_bridge против CUDA-OpenCV),
