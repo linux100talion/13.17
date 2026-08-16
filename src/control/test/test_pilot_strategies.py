@@ -3,6 +3,7 @@
 - RcTransmitter: стик=скорость → интеграл смещения уставки; мёртвая зона; центр → стоп.
 - PilotPassthrough: сырые стики → RC 1:1.
 - Arbiter: тумблер MANUAL → сырые стики (incl throttle); AUTO → автономная команда без изменений.
+- joy_sticks (ядро JoyPilot): оси /joy [-1..1] → PWM 1500±400 + тумблер по порогу.
 
 Запуск:  python3 src/control/test/test_pilot_strategies.py
 """
@@ -17,6 +18,7 @@ from control_pkg.domain.control.trajectory import RcTransmitter        # noqa: E
 from control_pkg.domain.rc import RcCommand                            # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                       # noqa: E402
 from control_pkg.domain.state import DroneState                        # noqa: E402
+from control_pkg.infrastructure.ros_pilot import joy_sticks            # noqa: E402
 
 results = []
 
@@ -75,6 +77,36 @@ out = arb.resolve(sM, auto_cmd)
 check("Arbiter MANUAL → сырые стики (roll)", out.roll == 1111)
 check("Arbiter MANUAL → пилоту throttle", out.throttle == 1333)
 check("Arbiter MANUAL → last_manual=True", arb.last_manual)
+
+# --- joy_sticks: ядро JoyPilot (оси /joy → PWM, тумблер) ---
+# полный ход осей: +1 → 1900, −1 → 1100; тумблер CH6 (axes[5]) > 0.5 → MANUAL
+r, p, t, y, sw = joy_sticks([1.0, -1.0, 0.0, 0.5, 0.0, 1.0])
+check("joy_sticks roll +1 → 1900", r == 1900)
+check("joy_sticks pitch −1 → 1100", p == 1100)
+check("joy_sticks throttle 0 → центр", t == 1500)
+check("joy_sticks yaw +0.5 → 1700", y == 1700)
+check("joy_sticks тумблер >0.5 → MANUAL", sw == 1)
+# тумблер ниже порога → AUTO; ровно на пороге (0.5) — тоже AUTO (строгое >)
+_, _, _, _, sw = joy_sticks([0.0, 0.0, 0.0, 0.0, 0.0, 0.5])
+check("joy_sticks тумблер на пороге 0.5 → AUTO", sw == 0)
+# знак оси инвертируется параметром (наземная сверка знаков — по одному стику)
+r, _, _, _, _ = joy_sticks([1.0, 0.0, 0.0, 0.0], signs=(-1.0, 1.0, 1.0, 1.0))
+check("joy_sticks sign=−1 зеркалит ось", r == 1100)
+# выход за [-1..1] (драйвер/калибровка) клампится в 1100..1900
+r, _, _, _, _ = joy_sticks([1.7, 0.0, 0.0, 0.0])
+check("joy_sticks ось >1 клампится в 1900", r == 1900)
+# короткий axes (нет CH6): стики без тумблера → центр не трогаем, sw=0 (AUTO)
+r, p, t, y, sw = joy_sticks([0.25, 0.0])
+check("joy_sticks короткий axes → отсутствующие оси = центр", t == 1500 and y == 1500)
+check("joy_sticks без оси тумблера → AUTO", sw == 0)
+check("joy_sticks присутствующая ось при коротком axes работает", r == 1600)
+# боевые знаки TX12 (выверены первым живым полётом): roll/yaw зеркальны, pitch/thr прямые
+from control_pkg.infrastructure.ros_pilot import JOY_SIGNS_DEFAULT   # noqa: E402
+check("JOY_SIGNS_DEFAULT: roll/yaw зеркальны, pitch/thr прямые",
+      JOY_SIGNS_DEFAULT == (-1.0, 1.0, 1.0, -1.0))
+r, p, t, y, _ = joy_sticks([1.0, 1.0, 1.0, 1.0], signs=JOY_SIGNS_DEFAULT)
+check("joy_sticks с боевыми знаками: +1 по всем осям → 1100/1900/1900/1100",
+      (r, p, t, y) == (1100, 1900, 1900, 1100))
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ПИЛОТ-СТРАТЕГИИ OK" if ok_all else "❌ СБОЙ")

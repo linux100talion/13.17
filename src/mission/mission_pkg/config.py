@@ -34,6 +34,9 @@ class BootstrapConfig:
                                      # крону, где LAND не может засечь касание и висит до
                                      # исчерпания бюджета — при RTF 0.01 это часы.
     excite_max_sec: float = 0.0
+    # знаки осей живого пульта "r,p,t,y" (только --pilot joy); '' = JOY_SIGNS_DEFAULT
+    # из control_pkg (выверены полётом TX12). Переопределять при смене пульта/прошивки.
+    joy_signs: str = ""
     # фазы
     alt: float = 3.0
     throttle_climb: int = 1650

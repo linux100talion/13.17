@@ -18,6 +18,9 @@
 #   Пример: BS_STAB=GzPosHold BS_MISSION="climb3,mv_fwd2,mv_bkwd4,landing3" bash /lab/bootstrap_arch2.sh
 #
 # Параметры через env (подмножество BS_*, совместимое с liftland.sh):
+#   BS_PILOT (scripted)         — источник стиков: scripted | joy (живой TX12 по USB,
+#                                 поднимает joy_linux_node; устройство — JOY_DEV,
+#                                 default /dev/input/js0) | ros (ЛЕГАСИ, петля)
 #   BS_ALT (3)                  — целевая высота, м
 #   BS_GZ_KP/KD/KI/IMAX/MAX     — гейны gz-hold (дефолты ноды 40/120/8/100/150)
 #   BS_GZ_PSIGN/RSIGN           — знаки коррекции (±1)
@@ -35,6 +38,28 @@ if ! ros2 pkg list 2>/dev/null | grep -q '^mission_pkg$'; then
     echo "  сборку в nav_up.sh (colcon build --packages-select control_pkg mission_pkg)."
     echo "  Первый запуск после добавления mounts требует: make fresh-start."
     exit 1
+fi
+
+# ЖИВОЙ ПУЛЬТ (BS_PILOT=joy): TX12 в режиме USB-джойстика → joy_linux_node → /joy →
+# JoyPilot. Мимо FCU — под активным override /mavros/rc/in отдаёт эхо собственной
+# команды ноды (петля), поэтому rc/in для живых стиков НЕ используется.
+# Драйвер живёт только на время прогона (trap ниже). Устройство — JOY_DEV
+# (default /dev/input/js0; проброшен каталогом, hotplug работает).
+JOY_PID=""
+if [ "${BS_PILOT:-}" = "joy" ]; then
+    # BS_JOY_DEV — синоним под автопроброс env в capture_scene.sh (маска BS_*)
+    JOY_DEV="${BS_JOY_DEV:-${JOY_DEV:-/dev/input/js0}}"
+    if [ ! -e "$JOY_DEV" ]; then
+        echo "  ОШИБКА: BS_PILOT=joy, но $JOY_DEV нет. Пульт в USB-режиме воткнут?"
+        echo "  Проверка на хосте: ls /dev/input/js*; в контейнере: jstest $JOY_DEV"
+        exit 1
+    fi
+    ros2 run joy_linux joy_linux_node --ros-args \
+        -p dev:="$JOY_DEV" -p autorepeat_rate:=20.0 \
+        > /root/sim_ws/output/joy.log 2>&1 &
+    JOY_PID=$!
+    trap '[ -n "$JOY_PID" ] && kill "$JOY_PID" 2>/dev/null || true' EXIT
+    echo ">>> joy_linux_node запущен (dev=$JOY_DEV, pid=$JOY_PID, лог output/joy.log)"
 fi
 
 ARGS=()
@@ -59,6 +84,7 @@ ARGS=()
 [ -n "${BS_CONTROL_MODE:-}" ]    && ARGS+=(--control-mode "$BS_CONTROL_MODE")
 [ -n "${BS_EXCITE_MAX:-}" ]      && ARGS+=(--excite-max-sec "$BS_EXCITE_MAX")
 [ -n "${BS_PILOT:-}" ]           && ARGS+=(--pilot "$BS_PILOT")
+[ -n "${BS_JOY_SIGNS:-}" ]       && ARGS+=(--joy-signs "$BS_JOY_SIGNS")
 [ -n "${BS_GZ_CMD_GAIN:-}" ]     && ARGS+=(--gz-cmd-gain "$BS_GZ_CMD_GAIN")
 # Демпфер по потоку (пре-VINS): ТРИ НЕЗАВИСИМЫЕ ОСИ — roll, pitch, yaw.
 # У каждой свой полный набор, ничего не шарится. Старые BS_FLOW_*/BS_YAWH_* убраны:

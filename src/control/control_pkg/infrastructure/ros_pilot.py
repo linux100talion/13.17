@@ -1,18 +1,90 @@
 #!/usr/bin/env python3
 """Адаптеры порта PilotInput.
 
-- RosPilot — БОЕВОЙ/SITL: читает /mavros/rc/in (стики двигает человек). Тумблер
-  режима — на канале 6 (порог 1700). Это и есть «переключить управление на реальный
-  пульт»: домен (RcTransmitter/PilotPassthrough) не меняется, меняется только источник.
+- JoyPilot — ЖИВОЙ ПУЛЬТ: читает /joy (TX в режиме USB-джойстика → joy_linux_node),
+  МИМО FCU. Единственный корректный источник живых стиков, пока нода публикует
+  /mavros/rc/override (см. докстринг класса).
+- RosPilot — ЛЕГАСИ (⚠️ петля): читает /mavros/rc/in. Под активным override ArduPilot
+  отдаёт в RC_CHANNELS уже ПОДМЕНЁННЫЕ значения → нода читает СОБСТВЕННУЮ команду как
+  «стик пилота» (в assist — самораскачка, в MANUAL — защёлка). Годен только когда нода
+  НЕ оверрайдит ch1..4. Тумблер режима — канал 6, порог 1700.
 - ScriptedPilot — СИМ (headless, без живого пульта): детерминированный профиль стиков
-  по sim-времени. Валидирует пилот-пайплайн воспроизводимо. Drop-in замена RosPilot.
+  по sim-времени. Валидирует пилот-пайплайн воспроизводимо. Drop-in замена JoyPilot.
 
-Оба реализуют один порт: sticks()->RcCommand, mode_switch()->int.
+Все реализуют один порт: sticks()->RcCommand, mode_switch()->int.
 """
 from ..domain.rc import RC_CENTER, RcCommand
 
+# Карта /joy для EdgeTX (RadioMaster TX12/TX16S): в режиме USB-джойстика пульт отдаёт
+# ВЫХОДНЫЕ КАНАЛЫ МИКШЕРА как HID-оси → та же конвенция, что у RC_CHANNELS:
+# axes[0..3] = CH1..CH4 (roll/pitch/throttle/yaw при модели AETR),
+# axes[4]    = CH5 (FLTMODE_CH — не трогаем, это FCU-уровень safety),
+# axes[5]    = CH6 — тумблер MANUAL-seize Арбитра (назначить в микшере на SC/SD).
+# Порог 0.5 — зеркало «ch6 > 1700» у RosPilot: (1700−1500)/400 = 0.5.
+JOY_AXIS_ROLL, JOY_AXIS_PITCH, JOY_AXIS_THROTTLE, JOY_AXIS_YAW = 0, 1, 2, 3
+JOY_AXIS_SWITCH = 5
+JOY_SWITCH_THRESHOLD = 0.5
+_JOY_SPAN = 400          # ось ±1 → PWM 1500±400 (конвенция pilot_full)
+# Знаки осей TX12 (roll,pitch,throttle,yaw) — выверены ЖИВЫМИ ПОЛЁТАМИ
+# (assisted, 2026-08-16): roll и yaw в EdgeTX-HID зеркальны нашей RC-конвенции,
+# pitch и throttle прямые (pitch подтверждён вторым полётом по bag:
+# стик от себя → HID минус → PWM 1300 → vx вперёд).
+JOY_SIGNS_DEFAULT = (-1.0, 1.0, 1.0, -1.0)
+
+
+def joy_sticks(axes, signs=(1.0, 1.0, 1.0, 1.0)):
+    """Чистое ядро JoyPilot: axes [-1..1] → (roll, pitch, throttle, yaw, switch) PWM/бит.
+    Отсутствующая ось (короткий axes) → центр; тумблер без оси → 0 (AUTO)."""
+    def pwm(idx, sign):
+        if idx >= len(axes):
+            return RC_CENTER
+        v = max(-1.0, min(1.0, sign * axes[idx]))
+        return int(round(RC_CENTER + v * _JOY_SPAN))
+    sw = 0
+    if JOY_AXIS_SWITCH < len(axes):
+        sw = 1 if axes[JOY_AXIS_SWITCH] > JOY_SWITCH_THRESHOLD else 0
+    return (pwm(JOY_AXIS_ROLL, signs[0]), pwm(JOY_AXIS_PITCH, signs[1]),
+            pwm(JOY_AXIS_THROTTLE, signs[2]), pwm(JOY_AXIS_YAW, signs[3]), sw)
+
+
+class JoyPilot:
+    """PilotInput из /joy (sensor_msgs/Joy) — живые стики МИМО FCU.
+
+    Почему не /mavros/rc/in: пред-override RC в MAVLink-телеметрии НЕ СУЩЕСТВУЕТ —
+    пока нода пишет /mavros/rc/override, FCU в RC_CHANNELS отдаёт её же команду
+    (замкнутая петля). Поэтому живой пульт входит только напрямую:
+    TX (EdgeTX, USB-джойстик) → joy_linux_node → /joy → сюда. Нода остаётся
+    ЕДИНСТВЕННЫМ писателем override.
+
+    signs — знаки осей (roll,pitch,throttle,yaw): сверять НА ЗЕМЛЕ, по одному стику
+    за раз (у HID свои конвенции направлений; зеркальный знак уже стоил разбора).
+    Потеря джойстика: /joy замолкает → держим последние значения (как RosPilot при
+    потере радио); барьер на этот случай — FCU-уровень (FLTMODE_CH), не адаптер.
+    """
+
+    def __init__(self, node, signs=JOY_SIGNS_DEFAULT):
+        from rclpy.qos import qos_profile_sensor_data
+        from sensor_msgs.msg import Joy
+        self._signs = signs
+        self._r = self._p = self._t = self._y = RC_CENTER
+        self._sw = 0
+        node.create_subscription(Joy, '/joy', self._on, qos_profile_sensor_data)
+
+    def _on(self, m):
+        self._r, self._p, self._t, self._y, self._sw = joy_sticks(m.axes, self._signs)
+
+    def sticks(self) -> RcCommand:
+        return RcCommand(self._r, self._p, self._t, self._y)
+
+    def mode_switch(self) -> int:
+        return self._sw
+
 
 class RosPilot:
+    """⚠️ ЛЕГАСИ. /mavros/rc/in под активным override — эхо собственной команды ноды
+    (петля). Для живого пульта использовать JoyPilot; этот адаптер оставлен для
+    сценариев, где нода не оверрайдит ch1..4."""
+
     def __init__(self, node):
         from mavros_msgs.msg import RCIn
         from rclpy.qos import qos_profile_sensor_data

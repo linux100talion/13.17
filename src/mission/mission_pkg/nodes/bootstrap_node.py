@@ -3,7 +3,8 @@
 
 Срез 1: control-mode=shuttle (gz-hold + челнок). Срез 2: assisted (пульт=намерение +
 gz-hold) и manual (пилот полностью). Режим выбирает recipes.build_control_stack; пульт
-— адаптер PilotInput (ScriptedPilot в симе / RosPilot на борту). Arbiter в контуре:
+— адаптер PilotInput (ScriptedPilot headless / JoyPilot живой пульт через /joy /
+RosPilot легаси — см. ros_pilot.py про петлю rc/override→rc/in). Arbiter в контуре:
 тумблер MANUAL → сырые стики (safety-seize), что бы миссия ни командовала.
 
 Детерминизм override: точки СМЕНЫ значения задаёт sim-таймер (_tick, 20 Гц); wall-цикл
@@ -30,7 +31,7 @@ from control_pkg.infrastructure.mavros_actuator import MavrosActuator
 from control_pkg.infrastructure.ros_clock import RosClock
 from control_pkg.infrastructure.ros_io import RosDebugSink, RosLogger
 from control_pkg.infrastructure.ros_perception import RosPerception
-from control_pkg.infrastructure.ros_pilot import RosPilot, ScriptedPilot
+from control_pkg.infrastructure.ros_pilot import JoyPilot, RosPilot, ScriptedPilot
 from control_pkg.infrastructure.ros_telemetry import RosTelemetry
 
 from ..config import BootstrapConfig
@@ -139,6 +140,10 @@ class BootstrapArch2Node(Node):
             f"pilot={pilot_kind} excite_max={cfg.excite_max_sec}s (sim)")
 
     def _make_pilot(self, cfg, kind):
+        if kind == 'joy':
+            if cfg.joy_signs:
+                return JoyPilot(self, signs=tuple(float(x) for x in cfg.joy_signs.split(',')))
+            return JoyPilot(self)     # знаки — JOY_SIGNS_DEFAULT (выверены полётом TX12)
         if kind == 'ros':
             return RosPilot(self)
         # flow_assist — НЕЙТРАЛЬНЫЙ пилот (центр): флоу-демпфер держит снос сам;
@@ -232,8 +237,13 @@ def _parse() -> tuple:
                         "('' → легаси bootstrap по --control-mode)")
     p.add_argument('--mv-level', dest='mv_level', type=float, default=0.3,
                    help='глобальный уровень стика для mv_* профиль-сегментов [-1..1]')
-    p.add_argument('--pilot', default='scripted', choices=['scripted', 'ros'],
-                   help='источник стиков: scripted (sim-профиль) | ros (/mavros/rc/in)')
+    p.add_argument('--pilot', default='scripted', choices=['scripted', 'joy', 'ros'],
+                   help='источник стиков: scripted (sim-профиль) | joy (живой пульт '
+                        'через /joy, мимо FCU) | ros (ЛЕГАСИ /mavros/rc/in — под '
+                        'override это эхо собственной команды)')
+    p.add_argument('--joy-signs', dest='joy_signs', default=_D.joy_signs,
+                   help='знаки осей пульта "r,p,t,y", напр. "-1,1,1,-1" '
+                        '(пусто = JOY_SIGNS_DEFAULT, выверены полётом TX12)')
     p.add_argument('--fence', type=float, default=_D.fence,
                    help='геозабор, м от старта: ушли дальше — сразу на посадку (0=выкл)')
     p.add_argument('--excite-max-sec', dest='excite_max_sec', type=float, default=0.0,

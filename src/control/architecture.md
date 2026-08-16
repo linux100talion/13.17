@@ -110,8 +110,14 @@ gazebo (`GzPosHold` все оси / `GzRollHold` / `GzPitchHold` / `GzYawHold`);
 (и `Arbiter` для safety-seize).
 
 Плюс `Arbiter` (safety-supervisor поверх миссии): тумблер MANUAL → сырые стики (incl
-throttle) безусловно. Адаптер пилота (`/mavros/rc/in` → `RcCommand`) идентичен в симе
-(SITL/скрипт) и на борту (радио) — «переключить на реальный пульт» без изменения ядра.
+throttle) безусловно. Адаптеры пилота взаимозаменяемы за портом `PilotInput`
+(«переключить на реальный пульт» без изменения ядра): `ScriptedPilot` (headless-сим) /
+`JoyPilot` (живой пульт: TX USB-джойстиком → `/joy`, МИМО FCU). ⚠️ `RosPilot`
+(`/mavros/rc/in`) — ЛЕГАСИ: под активным override ArduPilot отдаёт в `RC_CHANNELS`
+подменённые значения → нода читала бы СВОЮ команду как стик (петля; в MANUAL —
+защёлка). Пред-override RC в MAVLink-телеметрии не существует, поэтому живые стики
+входят только мимо FCU; нода — единственный писатель `/mavros/rc/override`.
+Детали и наземный чек-лист — `docker/sim/laptop_move.md` §3.
 
 ## Слои и порты
 
@@ -301,7 +307,8 @@ src/mission/                       # ament_python пакет mission_pkg (пот
   Новое ядро — отдельная нода: `ros2 run mission_pkg bootstrap_arch2` (обёртка
   `src/lab/bootstrap_arch2.sh`, команда `bootstrap_arch2` в `capture_scene.sh`).
 - CLI-флаги новой ноды совместимы с монолитом (подмножество) + `--control-mode
-  {shuttle|assisted|manual|flow_assist}`, `--pilot {scripted|ros}`.
+  {shuttle|assisted|manual|flow_assist}`, `--pilot {scripted|joy|ros}` (joy = живой
+  пульт через `/joy`; ros — легаси, петля под override).
 - Сверка поведения — метрикой (`drift_check.py`/`yaw_check.py`/`scene.mp4`), не на глаз.
 
 ## Статус
@@ -351,6 +358,17 @@ d_*-модель монолита) снят → `test_profile_motion`. Любо�
 не меняется. Флаг `--handover-vins` (flow_assist). Это первый реальный вызов `switch_*`.
 ⚠️ Sim-демо самого switch требует сценария, где VINS СХОДИТСЯ (нужно движение/параллакс;
 нейтральный flow_assist его не даёт) — механизм готов, демо-прогон отдельно.
+
+**Живой пульт = `JoyPilot` — ЛЕТАЕТ (TX12, два живых полёта в симе 2026-08-16).**
+Петля `rc/override → rc/in` подтверждена как устройство ArduPilot (override замещает
+`radio_in`, `RC_CHANNELS` отдаёт его же) → `RosPilot` понижен до легаси, живые стики
+идут `/joy` → `joy_sticks()` (чистое ядро, покрыто `test_pilot_strategies`) →
+`JoyPilot`. Обвязка: `joy_linux_node` из `bootstrap_arch2.sh` (`BS_PILOT=joy`),
+`ros-humble-joy-linux` в образе `nav`, `/dev/input` hotplug-каталогом в compose.
+Знаки осей выверены полётами → `JOY_SIGNS_DEFAULT` (roll/yaw зеркальны).
+Осталось: газ пилота в assisted (сейчас — только MANUAL, без защёлки центра),
+MANUAL-seize в воздухе не испытан, доставка намерения на боевой Orin мимо FCU
+(открытая ветка — laptop_move.md §3).
 
 **Подтверждённые факты (drift_check в симе):**
 - `roll_osign = −1` — знак торможения флоу-демпфера. `+1` РАЗГОНЯЛ снос (метрика
