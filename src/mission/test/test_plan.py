@@ -121,6 +121,63 @@ clk.t += 0.05
 r.tick(S())
 check("FINISH: завершает не доходя до следующего", r.finished and log == [] and r.result == "DONE")
 
+# --- 5. Control + pilot_thr: газ живого пилота через ThrottleLatch ---
+from mission_pkg.plan.step import Control                              # noqa: E402
+
+
+class Ctx:
+    """Минимальный ctx для Control.tick (без PlanRunner)."""
+    def __init__(self): self.log = Log()
+    def keep_mode(self, s, m): pass
+    def reset_keyframe(self): pass
+    def elapsed(self): return 0.0
+
+
+class Stack:
+    """ControlStack-мок: r/p/y фиксированные, фаза не завершается."""
+    def enter(self, s): pass
+    def update(self, s): return RcCommand(roll=1600, pitch=1610, yaw=1620)
+    def motion_done(self): return False
+    def excite_done(self): return False
+
+
+class SP(S):
+    """Снапшот с газом пилота и высотой."""
+    def __init__(self, thr, alt=3.0):
+        self.pilot_throttle = thr
+        self.rel_alt = alt
+
+
+class AltHoldMock:
+    def __init__(self): self.target = None
+    def set_target(self, a): self.target = a
+    def throttle(self, s): return 1580        # «контур что-то командует»
+
+
+ctx = Ctx()
+c = Control("c", Stack(), 1500, pilot_thr=True)
+c.enter(ctx, SP(1700))
+rc = c.tick(ctx, SP(1700)).rc               # вход с ОТКЛОНЁННЫМ газом
+check("Control+latch: газ отклонён на входе → заперт (hold)", rc.throttle == 1500)
+check("Control+latch: r/p/y при этом от стека", rc.roll == 1600 and rc.yaw == 1620)
+c.tick(ctx, SP(1500))                        # стик побывал в центре
+rc = c.tick(ctx, SP(1700)).rc
+check("Control+latch: после центра газ пилота проходит", rc.throttle == 1700)
+rc = c.tick(ctx, SP(1500)).rc
+check("Control+latch: газ отпущен → снова hold", rc.throttle == 1500)
+
+# с контуром AltHold: отпускание газа перецеливает контур на ТЕКУЩУЮ высоту
+ah = AltHoldMock()
+c2 = Control("c2", Stack(), 1500, pilot_thr=True, alt_hold=ah, alt_target=3.0)
+c2.enter(ctx, SP(1500))
+check("Control+alt_hold: вход — уставка плана", ah.target == 3.0)
+c2.tick(ctx, SP(1500))                       # защёлка открыта
+rc = c2.tick(ctx, SP(1800, alt=4.6)).rc      # пилот набирает
+check("Control+alt_hold: газ пилота вытесняет контур", rc.throttle == 1800)
+rc = c2.tick(ctx, SP(1500, alt=5.2)).rc      # отпустил на 5.2 м
+check("Control+alt_hold: отпустил → контур снова в проводе", rc.throttle == 1580)
+check("Control+alt_hold: контур перецелен на текущую высоту", ah.target == 5.2)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ PLANRUNNER OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

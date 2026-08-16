@@ -13,7 +13,7 @@ from control_pkg.domain.rc import RC_MIN_THR
 from .step import Arm, AwaitMode, Climb, Control, Land
 
 
-def build_bootstrap_plan(cfg, stack, handover=None):
+def build_bootstrap_plan(cfg, stack, handover=None, live_pilot=False):
     hold = cfg.throttle_hold
     # gz-режимы держат ПОЗИЦИЮ по gt → ждём истинную позу перед стеком; флоу/manual — нет.
     wait_gt = cfg.control_mode in ('shuttle', 'assisted')
@@ -27,8 +27,11 @@ def build_bootstrap_plan(cfg, stack, handover=None):
         Arm("arm", RC_MIN_THR, cfg.arm_budget),
         Climb("climb", cfg.alt, cfg.throttle_climb, cfg.climb_budget, land_step="land",
               stack=_hold_stack(), wait_gt=wait_gt),
+        # live_pilot: газ живого пульта через защёлку (менять высоту в assisted);
+        # без alt_hold-контура отпущенный стик = hold-центр → ALT_HOLD держит сам.
         Control("control", stack, hold, handover=handover,
-                max_sec=cfg.excite_max_sec, wait_gt=wait_gt),
+                max_sec=cfg.excite_max_sec, wait_gt=wait_gt,
+                pilot_thr=live_pilot, pilot_deadzone=cfg.pilot_deadzone),
         Land("land", hold, cfg.ground_z, cfg.land_budget,
              stack=_hold_stack(), wait_gt=wait_gt),
     ]

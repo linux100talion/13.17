@@ -10,6 +10,7 @@ ctx.elapsed()/try_cmd()/keep_mode() — ни строчки rclpy.
 """
 import math
 
+from control_pkg.domain.control.throttle_latch import ThrottleLatch
 from control_pkg.domain.rc import RC_CENTER, RcCommand
 
 # статусы результата шага
@@ -153,6 +154,8 @@ class Control(Step):
     """Управляемая фаза: держит высоту (throttle=hold), roll/pitch/yaw — от ControlStack
     (trajectory-профиль + стабилизаторы). Опц. VinsHandover (Flow→Vins при VINS ready).
     wait_gt — ждать истинную позу перед активацией стека (gz-режимы; на борту/флоу — нет).
+    pilot_thr — газ ЖИВОГО пилота (через ThrottleLatch): стик вне центра = сырой газ
+    (вертикальная скорость в ALT_HOLD), в центре/до открытия защёлки = hold/контур.
     Завершается по traj.done / excite.done / max_sec."""
 
     # ГЕОЗАБОР задаётся планом (compile_mission); 0 = выкл. Проверяется по ИСТИННОЙ позе,
@@ -161,7 +164,7 @@ class Control(Step):
 
     def __init__(self, name, stack, throttle, keep="ALT_HOLD", handover=None,
                  max_sec=0.0, wait_gt=False, result="HOLD_DONE", alt_hold=None,
-                 alt_target=None):
+                 alt_target=None, pilot_thr=False, pilot_deadzone=30):
         self.name = name
         self.stack = stack
         self.throttle = throttle
@@ -177,14 +180,34 @@ class Control(Step):
         self.wait_gt = wait_gt
         self.result = result
         self._entered_stack = False
+        # Газ живого пилота (только --pilot joy/ros): защёлка = нельзя войти в фазу
+        # с отклонённым стиком; scripted-пилотам НЕ даётся, чтобы не менять
+        # воспроизводимость эталонных прогонов (там pilot_throttle всегда центр).
+        self._latch = ThrottleLatch(pilot_deadzone) if pilot_thr else None
+        self._pilot_flying_thr = False
 
     def enter(self, ctx, s) -> None:
         self._entered_stack = False
         if self.alt_hold is not None and self.alt_target is not None:
             self.alt_hold.set_target(self.alt_target)
+        if self._latch is not None:
+            self._latch.reset()
+            self._pilot_flying_thr = False
 
     def tick(self, ctx, s) -> StepResult:
         thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
+        if self._latch is not None:
+            p = self._latch.pass_through(s.pilot_throttle)
+            if p is not None:
+                thr = p                          # пилот командует вертикалью
+                self._pilot_flying_thr = True
+            elif self._pilot_flying_thr:
+                self._pilot_flying_thr = False
+                # пилот отпустил газ: контур перецеливается на ТЕКУЩУЮ высоту,
+                # иначе он потащит борт обратно на уставку, заданную до вмешательства
+                if self.alt_hold is not None and s.rel_alt is not None:
+                    self.alt_hold.set_target(s.rel_alt)
+                    ctx.log.info(f"    газ отпущен — держим {s.rel_alt:.1f}м")
         rc = RcCommand(throttle=thr)
         ctx.keep_mode(s, self.keep)
         if not self._entered_stack:

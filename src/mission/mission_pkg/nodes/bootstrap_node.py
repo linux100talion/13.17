@@ -121,14 +121,19 @@ class BootstrapArch2Node(Node):
             handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec)
             self.logger.info(f"handover Flow→Vins ВКЛ: ready при ≥{cfg.vins_min} odom")
 
-        # домен/приложение: план по выбранному пути
+        # домен/приложение: план по выбранному пути. live_pilot: газ живого пульта
+        # проходит в Control-фазе через ThrottleLatch (scripted — нет: эталонные
+        # прогоны не меняются, у них pilot_throttle всегда центр).
+        live_pilot = pilot_kind in ('joy', 'ros')
         if use_mission:
             tokens = resolve_mission(cfg, cfg.mission)
-            plan = compile_mission(cfg, tokens, stab_spec, handover)
+            plan = compile_mission(cfg, tokens, stab_spec, handover,
+                                   live_pilot=live_pilot)
             self.logger.info(f"MISSION={cfg.mission} stab={stab_spec} "
                              f"level={cfg.mv_level} токены={tokens}")
         else:
-            plan = build_bootstrap_plan(cfg, build_control_stack(cfg), handover)
+            plan = build_bootstrap_plan(cfg, build_control_stack(cfg), handover,
+                                        live_pilot=live_pilot)
         self.runner = PlanRunner(plan, self.clock, self.actuator, self.logger,
                                  perception=self.perception)
 

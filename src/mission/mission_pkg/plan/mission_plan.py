@@ -97,7 +97,8 @@ def resolve_mission(cfg, spec):
     return parse_tokens(spec)
 
 
-def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
+def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
+                    live_pilot=False):
     """mission: имя/список токенов; stab_spec: имя(+склейка) стабилизатора. → [Step]."""
     tokens = resolve_mission(cfg, mission)
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
@@ -117,9 +118,12 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD"):
     def _control(name, prof):
         stack = ControlStack(build_stabilizers(cfg, stab_spec), prof, NoExcitation(),
                              slew=cfg.slew)
+        # live_pilot: газ живого пульта через защёлку; при отпускании стика контур
+        # AltHold перецеливается на текущую высоту (см. Control.tick).
         st = Control(name, stack, hold, keep=keep, handover=handover,
                      wait_gt=wait_gt, result="MISSION_DONE",
-                     alt_hold=alt_hold, alt_target=alt_target[0])
+                     alt_hold=alt_hold, alt_target=alt_target[0],
+                     pilot_thr=live_pilot, pilot_deadzone=cfg.pilot_deadzone)
         st.fence = cfg.fence          # стендовая страховка: увод дальше fence → land
         return st
 

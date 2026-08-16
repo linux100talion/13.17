@@ -62,7 +62,18 @@ check("PilotPassthrough pitch 1:1", rc.pitch == 1600)
 check("PilotPassthrough yaw 1:1", rc.yaw == 1550)
 check("PilotPassthrough throttle=центр (миссия держит)", rc.throttle == 1500)
 
-# --- Arbiter ---
+# --- ThrottleLatch: газ заперт, пока стик не побывал в центре ---
+from control_pkg.domain.control.throttle_latch import ThrottleLatch   # noqa: E402
+tl = ThrottleLatch(deadzone=30)
+check("ThrottleLatch закрыта: отклонённый газ → None", tl.pass_through(1100) is None)
+check("ThrottleLatch: центр открывает защёлку (газа при этом нет)",
+      tl.pass_through(1500) is None and tl.is_open)
+check("ThrottleLatch открыта: газ проходит сырым", tl.pass_through(1900) == 1900)
+check("ThrottleLatch: стик в центре±deadzone → газа нет", tl.pass_through(1520) is None)
+tl.reset()
+check("ThrottleLatch reset снова запирает", tl.pass_through(1900) is None)
+
+# --- Arbiter (газ — через ThrottleLatch: seize с отклонённым стиком безопасен) ---
 arb = Arbiter()
 auto_cmd = RcCommand(roll=1600, pitch=1400, throttle=1500, yaw=1520)
 # AUTO (switch=0): автономная команда без изменений
@@ -70,13 +81,21 @@ sA = DroneState(pilot_switch=0, pilot_roll=1111, pilot_pitch=1222,
                 pilot_throttle=1333, pilot_yaw=1444)
 out = arb.resolve(sA, auto_cmd)
 check("Arbiter AUTO → автономная команда", out == auto_cmd and not arb.last_manual)
-# MANUAL (switch=1): сырые стики пилота, включая throttle
+# MANUAL (switch=1) с ОТКЛОНЁННЫМ газом: r/p/y сырые сразу, газ ЗАПЕРТ (центр)
 sM = DroneState(pilot_switch=1, pilot_roll=1111, pilot_pitch=1222,
                 pilot_throttle=1333, pilot_yaw=1444)
 out = arb.resolve(sM, auto_cmd)
 check("Arbiter MANUAL → сырые стики (roll)", out.roll == 1111)
-check("Arbiter MANUAL → пилоту throttle", out.throttle == 1333)
+check("Arbiter MANUAL: газ отклонён при seize → заперт (центр)", out.throttle == 1500)
 check("Arbiter MANUAL → last_manual=True", arb.last_manual)
+# газ побывал в центре → защёлка открыта → дальше проходит сырым
+arb.resolve(DroneState(pilot_switch=1, pilot_throttle=1500), auto_cmd)
+out = arb.resolve(DroneState(pilot_switch=1, pilot_throttle=1333), auto_cmd)
+check("Arbiter MANUAL: после центра газ проходит пилоту", out.throttle == 1333)
+# возврат в AUTO и новый seize → защёлка взводится заново
+arb.resolve(DroneState(pilot_switch=0), auto_cmd)
+out = arb.resolve(DroneState(pilot_switch=1, pilot_throttle=1900), auto_cmd)
+check("Arbiter: каждый новый seize запирает газ заново", out.throttle == 1500)
 
 # --- joy_sticks: ядро JoyPilot (оси /joy → PWM, тумблер) ---
 # полный ход осей: +1 → 1900, −1 → 1100; тумблер CH6 (axes[5]) > 0.5 → MANUAL
