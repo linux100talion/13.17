@@ -87,7 +87,9 @@ class DroneState:
     pilot_pitch: int = RC_CENTER
     pilot_throttle: int = RC_CENTER
     pilot_yaw: int = RC_CENTER
-    pilot_switch: int = 0                  # тумблер авто(0)/ручной(1) — для Arbiter
+    # Трёхпозиционник CH6: +1 = MANUAL (Arbiter, сырые стики); 0 = ALT_HOLD (Control-шаг
+    # убирает стабилизаторы, стики = наклоны); −1 = наш стабилизатор (BS_STAB-стек).
+    pilot_switch: int = 0
 
     # --- время ---
     now_sim: float = 0.0                   # проставляет адаптер из Clock (sim-время по /clock)

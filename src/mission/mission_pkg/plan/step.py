@@ -164,7 +164,8 @@ class Control(Step):
 
     def __init__(self, name, stack, throttle, keep="ALT_HOLD", handover=None,
                  max_sec=0.0, wait_gt=False, result="HOLD_DONE", alt_hold=None,
-                 alt_target=None, pilot_thr=False, pilot_deadzone=30):
+                 alt_target=None, pilot_thr=False, pilot_deadzone=30,
+                 pilot_stabs=None):
         self.name = name
         self.stack = stack
         self.throttle = throttle
@@ -185,6 +186,12 @@ class Control(Step):
         # воспроизводимость эталонных прогонов (там pilot_throttle всегда центр).
         self._latch = ThrottleLatch(pilot_deadzone) if pilot_thr else None
         self._pilot_flying_thr = False
+        # СЕЛЕКТОР СТАБИЛИЗАЦИИ трёхпозиционником CH6 (только живой пилот):
+        # −1 → pilot_stabs (наш стабилизатор, BS_STAB); 0 → [] (чистый ALT_HOLD:
+        # стики = наклоны); +1 → MANUAL перехватывает Арбитр ВЫШЕ шага, стек не
+        # трогаем. None = селектор выключен (scripted-миссии, стек фиксирован).
+        self._pilot_stabs = pilot_stabs
+        self._stab_pos = None            # применённое положение (−1/0)
 
     def enter(self, ctx, s) -> None:
         self._entered_stack = False
@@ -193,6 +200,7 @@ class Control(Step):
         if self._latch is not None:
             self._latch.reset()
             self._pilot_flying_thr = False
+        self._stab_pos = None
 
     def tick(self, ctx, s) -> StepResult:
         thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
@@ -222,6 +230,15 @@ class Control(Step):
             if d > self.fence:
                 ctx.log.warn(f"    ⛔ ГЕОЗАБОР: ушли на {d:.1f} м > {self.fence:.0f} — на посадку")
                 return _goto(rc, "land", result="FENCE")
+        if self._pilot_stabs is not None:
+            # применяем положение тумблера (−1/0); +1 игнорируем — там правит Арбитр
+            pos = s.pilot_switch if s.pilot_switch in (-1, 0) else self._stab_pos
+            if pos is not None and pos != self._stab_pos:
+                self._stab_pos = pos
+                self.stack.switch_stabilization(self._pilot_stabs if pos == -1 else [])
+                self.stack.enter(s)      # пересев опор: держим ОТ ТЕКУЩЕЙ точки
+                ctx.log.info("    тумблер: {}".format(
+                    "НАШ СТАБИЛИЗАТОР" if pos == -1 else "чистый ALT_HOLD (стики=наклоны)"))
         if self.handover is not None and self.handover.maybe_switch(self.stack, s):
             ctx.log.info(f"    ✅ VINS сошёлся ({s.vins_odom_count} odom) → Flow→Vins (hot-swap)")
         ctrl = self.stack.update(s)

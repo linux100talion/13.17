@@ -202,6 +202,20 @@ def main():
     checks.append(("compile: sk_fwd → Control со StationKeep",
                    type(sk_seg.stack.traj).__name__ == "StationKeep"))
 
+    # --- токен pilot<t>: живые стики + селектор стабилизации тумблером ---
+    pl = compile_mission(cfg, "climb3,pilot20,land", "DpRollHold+DpYawHold",
+                         live_pilot=True)
+    pseg = next(st for st in pl if st.name.startswith("pilot_"))
+    checks.append(("compile: pilot → Control с RcTransmitter",
+                   type(pseg.stack.traj).__name__ == "RcTransmitter"))
+    checks.append(("compile: pilot ограничен max_sec", pseg.max_sec == 20.0))
+    checks.append(("compile: pilot(live) получает селектор стабилизации",
+                   pseg._pilot_stabs is not None and len(pseg._pilot_stabs) == 2))
+    # со scripted-пилотом селектора НЕТ (стек BS_STAB фиксирован, токен = hover)
+    pl2 = compile_mission(cfg, "climb3,pilot20,land", "DpRollHold+DpYawHold")
+    pseg2 = next(st for st in pl2 if st.name.startswith("pilot_"))
+    checks.append(("compile: pilot(scripted) — без селектора", pseg2._pilot_stabs is None))
+
     # --- токен в ГРАДУСАХ (yaw_l/yaw_r) ---
     # Смысл токена: угол — величина, за которую отвечает контур. Держится на двух вещах:
     # (1) длительность считается из общего темпа, (2) команда и добор в ОДНОМ сегменте,

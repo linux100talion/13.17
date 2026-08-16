@@ -19,7 +19,10 @@ from ..domain.rc import RC_CENTER, RcCommand
 # ВЫХОДНЫЕ КАНАЛЫ МИКШЕРА как HID-оси → та же конвенция, что у RC_CHANNELS:
 # axes[0..3] = CH1..CH4 (roll/pitch/throttle/yaw при модели AETR),
 # axes[4]    = CH5 (FLTMODE_CH — не трогаем, это FCU-уровень safety),
-# axes[5]    = CH6 — тумблер MANUAL-seize Арбитра (назначить в микшере на SC/SD).
+# axes[5]    = CH6 — ТРЁХПОЗИЦИОННЫЙ селектор (в микшере на SC/SD):
+#   +1 (>0.5)  → MANUAL-seize Арбитра (сырые стики, миссия отстранена);
+#   −1 (<−0.5) → наш стабилизатор (Control-шаг ставит BS_STAB-стек);
+#    0 (центр) → чистый ALT_HOLD (стабилизаторов нет, стики = наклоны).
 # Порог 0.5 — зеркало «ch6 > 1700» у RosPilot: (1700−1500)/400 = 0.5.
 JOY_AXIS_ROLL, JOY_AXIS_PITCH, JOY_AXIS_THROTTLE, JOY_AXIS_YAW = 0, 1, 2, 3
 JOY_AXIS_SWITCH = 5
@@ -35,8 +38,9 @@ JOY_SIGNS_DEFAULT = (-1.0, 1.0, -1.0, -1.0)
 
 
 def joy_sticks(axes, signs=(1.0, 1.0, 1.0, 1.0)):
-    """Чистое ядро JoyPilot: axes [-1..1] → (roll, pitch, throttle, yaw, switch) PWM/бит.
-    Отсутствующая ось (короткий axes) → центр; тумблер без оси → 0 (AUTO)."""
+    """Чистое ядро JoyPilot: axes [-1..1] → (roll, pitch, throttle, yaw, switch) PWM/поз.
+    switch — трёхпозиционник: +1 MANUAL / 0 ALT_HOLD / −1 наш стабилизатор.
+    Отсутствующая ось (короткий axes) → центр; тумблер без оси → 0 (ALT_HOLD)."""
     def pwm(idx, sign):
         if idx >= len(axes):
             return RC_CENTER
@@ -44,7 +48,8 @@ def joy_sticks(axes, signs=(1.0, 1.0, 1.0, 1.0)):
         return int(round(RC_CENTER + v * _JOY_SPAN))
     sw = 0
     if JOY_AXIS_SWITCH < len(axes):
-        sw = 1 if axes[JOY_AXIS_SWITCH] > JOY_SWITCH_THRESHOLD else 0
+        v = axes[JOY_AXIS_SWITCH]
+        sw = 1 if v > JOY_SWITCH_THRESHOLD else (-1 if v < -JOY_SWITCH_THRESHOLD else 0)
     return (pwm(JOY_AXIS_ROLL, signs[0]), pwm(JOY_AXIS_PITCH, signs[1]),
             pwm(JOY_AXIS_THROTTLE, signs[2]), pwm(JOY_AXIS_YAW, signs[3]), sw)
 
@@ -99,7 +104,8 @@ class RosPilot:
         if len(ch) >= 4:
             self._r, self._p, self._t, self._y = ch[0], ch[1], ch[2], ch[3]
         if len(ch) >= 6:
-            self._sw = 1 if ch[5] > 1700 else 0   # тумблер авто/ручной на ch6
+            # трёхпозиционник ch6 (зеркало joy_sticks): >1700 MANUAL / <1300 стаб / центр ALT_HOLD
+            self._sw = 1 if ch[5] > 1700 else (-1 if ch[5] < 1300 else 0)
 
     def sticks(self) -> RcCommand:
         return RcCommand(self._r, self._p, self._t, self._y)

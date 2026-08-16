@@ -174,8 +174,30 @@ default `/dev/input/js0`; лог `output/joy.log`).
    (`6841c58`). Газ: РАБОТАЕТ и в assisted, и в MANUAL — через `ThrottleLatch`
    (газ заперт, пока стик не побывал в центре: вход в режим с отклонённым газом
    безопасен). Стик вне центра = вертикальная скорость (ALT_HOLD), отпустил =
-   держит текущую высоту. Тумблер SC: MANUAL только на стороне **+1** (порог
-   >0.5); если «ручное» положение даёт −1 — weight −100 в миксе CH6.
+   держит текущую высоту. Тумблер SC — ТРЁХПОЗИЦИОННЫЙ СЕЛЕКТОР (токен `pilot<t>`
+   в BS_MISSION, только живой пилот):
+   - **вверх (−1)** — наш стабилизатор (BS_STAB, напр. DpHoldM): стики = намерение,
+     демпфер держит; при щелчке опоры пересеиваются от текущей точки;
+   - **центр (0)** — чистый ALT_HOLD: стабилизаторов нет, стики = наклоны;
+   - **вниз (+1)** — MANUAL: Арбитр отдаёт пилоту сырые стики, миссия отстранена.
+   Сверка направлений: joy_check печатает STAB/ALTHOLD/MANUAL; если верх/низ
+   поменяны местами — weight −100 в миксе CH6, не код.
+
+Полетать с селектором (гейны DpHoldM — из tune.md, конфиг P2s):
+```bash
+BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="climb3,pilot60,land" \
+  BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_FENCE=25 BS_MODE_BUDGET=80 \
+  BS_IPM_DEROT=1.0 BS_IPM_WIN=0.5 BS_IPM_WZ_TAU=2.0 BS_LAND_BUDGET=180 \
+  BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=100 BS_PITCH_RATE_KP=100 \
+  BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KP=30 \
+  BS_SLEW=300 BS_THROTTLE_CLIMB=1800 \
+  BS_YAW_ARM_FRAMES=5 BS_YAW_KD=6 BS_YAW_KI=0 BS_YAW_KP=20 BS_YAW_LEAK=8 \
+  BS_YAW_MAX_RATE=100 BS_YAW_SMOOTH=5 \
+  TOPICS_EXTRA="/joy /model/iris_cam/odometry" GDRIVE_UP=0 MP4=1 \
+  bash src/lab/capture_scene.sh 960x540 bootstrap_arch2
+```
+`pilot60` = 60 сим-сек живого пилотирования между взлётом и посадкой; селектор
+щёлкается на лету сколько угодно раз.
 
 Боевой сценарий пре-VINS собран: `BS_PILOT=joy` + `control_mode=flow_assist` (демпфер
 крена+курса, тангаж — сырой стик) либо `BS_STAB=DpRollHold+DpYawHold` с миссией.

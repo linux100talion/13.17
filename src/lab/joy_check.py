@@ -6,7 +6,9 @@
 Порядок сверки (двигать по ОДНОМУ стику за раз, полёт не нужен):
   roll вправо → roll растёт к 1900; pitch ОТ СЕБЯ → ? (записать факт);
   throttle вверх → thr к 1900; yaw вправо → yaw к 1900;
-  тумблер CH6 → MANUAL/AUTO щёлкает.
+  тумблер CH6 (3 позиции): ВНИЗ → MANUAL (+1), ЦЕНТР → ALTHOLD (0),
+  ВВЕРХ → STAB (−1, наш стабилизатор). Если верх/низ поменяны местами —
+  инвертировать weight в миксе CH6 (−100), не код.
 PWM печатается УЖЕ с боевыми знаками (JOY_SIGNS_DEFAULT: roll/yaw/throttle в
 EdgeTX-HID зеркальны, выверено полётами) — т.е. «вправо → 1900» и «газ вверх →
 1900» должны выполняться буквально.
@@ -39,8 +41,9 @@ class JoyCheck(Node):
         self._n += 1
         r, p, t, y, sw = joy_sticks(m.axes, JOY_SIGNS_DEFAULT)
         ax = " ".join(f"{a:+.2f}" for a in m.axes)
+        mode = {1: 'MANUAL ', 0: 'ALTHOLD', -1: 'STAB   '}[sw]
         print(f"\raxes[{len(m.axes)}]: {ax} | roll={r} pitch={p} thr={t} yaw={y} "
-              f"| {'MANUAL' if sw else 'AUTO  '} (#{self._n})    ",
+              f"| {mode} (#{self._n})    ",
               end="", flush=True)
 
 

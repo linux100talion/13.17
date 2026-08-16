@@ -21,6 +21,11 @@ ControlStack(build_stabilizers(spec) + профиль-сегмент): один 
   sk_fwd/bkwd<τ>        — station-keeping оператор на pitch: +τ/−2τ/+τ, дрон У ТОЧКИ (не уносит)
   sk_right/left<τ>      — то же на roll
   hover<t>              — держать t сек (стик центр; стабилизатор гасит снос/держит)
+  pilot<t>              — ЖИВОЙ ПИЛОТ t сек: стики = намерение (RcTransmitter), а
+                          трёхпозиционник CH6 на лету выбирает стабилизацию:
+                          −1 = BS_STAB (наш), 0 = чистый ALT_HOLD (стики-наклоны),
+                          +1 = MANUAL (Арбитр, сырые стики). Требует --pilot joy/ros;
+                          со scripted-пилотом токен = hover (центр, стек BS_STAB).
   land | landing<x>     — посадка (Step Land; число игнорируется)
 
 Реестр именованных заданий — MISSIONS (значение = список токенов или callable(cfg)).
@@ -31,8 +36,8 @@ import re
 from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.altitude import AltHold
 from control_pkg.domain.control.excitation import NoExcitation
-from control_pkg.domain.control.trajectory import (ConstProfile, StationKeep,
-                                                   StaticSetpoint, YawTurn)
+from control_pkg.domain.control.trajectory import (ConstProfile, RcTransmitter,
+                                                   StationKeep, StaticSetpoint, YawTurn)
 from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
@@ -115,15 +120,16 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         Arm("arm", RC_MIN_THR, cfg.arm_budget),
     ]
 
-    def _control(name, prof):
+    def _control(name, prof, max_sec=0.0, pilot_stabs=None):
         stack = ControlStack(build_stabilizers(cfg, stab_spec), prof, NoExcitation(),
                              slew=cfg.slew)
         # live_pilot: газ живого пульта через защёлку; при отпускании стика контур
         # AltHold перецеливается на текущую высоту (см. Control.tick).
         st = Control(name, stack, hold, keep=keep, handover=handover,
-                     wait_gt=wait_gt, result="MISSION_DONE",
+                     wait_gt=wait_gt, result="MISSION_DONE", max_sec=max_sec,
                      alt_hold=alt_hold, alt_target=alt_target[0],
-                     pilot_thr=live_pilot, pilot_deadzone=cfg.pilot_deadzone)
+                     pilot_thr=live_pilot, pilot_deadzone=cfg.pilot_deadzone,
+                     pilot_stabs=pilot_stabs)
         st.fence = cfg.fence          # стендовая страховка: увод дальше fence → land
         return st
 
@@ -175,13 +181,24 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
             if num is None:
                 raise ValueError(f"hover требует длительность(сек): {tok!r}")
             steps.append(_control(f"hover_{i}", ConstProfile(num)))
+        elif verb == "pilot":
+            if num is None:
+                raise ValueError(f"pilot требует длительность(сек): {tok!r}")
+            # живые стики = намерение; селектор стабилизации — ТОЛЬКО живому пилоту
+            # (scripted держит центр → фактически hover со стеком BS_STAB)
+            steps.append(_control(
+                f"pilot_{i}",
+                RcTransmitter(cfg.pilot_deadzone, cfg.pilot_full,
+                              cfg.pilot_pitch_sign, cfg.pilot_roll_sign),
+                max_sec=num,
+                pilot_stabs=build_stabilizers(cfg, stab_spec) if live_pilot else None))
         elif verb in ("land", "landing"):
             steps.append(Land("land", hold, cfg.ground_z, cfg.land_budget,
                               stack=_hold_stack(), wait_gt=wait_gt))
         else:
             raise ValueError(f"неизвестный глагол миссии {verb!r} (токен {tok!r}); допустимо: "
                              f"climb, {', '.join(_MV)}, {', '.join(_YAW)}, "
-                             f"{', '.join(_SK)}, hover, land")
+                             f"{', '.join(_SK)}, hover, pilot, land")
 
     # гарантируем посадочный шаг 'land' (Climb абортит на него; и эпилог, если не задан)
     if not any(st.name == "land" for st in steps):

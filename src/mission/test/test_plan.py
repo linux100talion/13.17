@@ -142,10 +142,11 @@ class Stack:
 
 
 class SP(S):
-    """Снапшот с газом пилота и высотой."""
-    def __init__(self, thr, alt=3.0):
+    """Снапшот с газом пилота, высотой и тумблером."""
+    def __init__(self, thr, alt=3.0, sw=0):
         self.pilot_throttle = thr
         self.rel_alt = alt
+        self.pilot_switch = sw
 
 
 class AltHoldMock:
@@ -177,6 +178,31 @@ check("Control+alt_hold: газ пилота вытесняет контур", r
 rc = c2.tick(ctx, SP(1500, alt=5.2)).rc      # отпустил на 5.2 м
 check("Control+alt_hold: отпустил → контур снова в проводе", rc.throttle == 1580)
 check("Control+alt_hold: контур перецелен на текущую высоту", ah.target == 5.2)
+
+# --- 6. Control + pilot_stabs: трёхпозиционник выбирает стабилизацию на лету ---
+class Stack2(Stack):
+    def __init__(self):
+        self.stabs = ['BS_STAB']      # чем стек собран изначально
+        self.enters = 0
+    def switch_stabilization(self, st): self.stabs = st
+    def enter(self, s): self.enters += 1
+
+
+stk = Stack2()
+c3 = Control("c3", stk, 1500, pilot_stabs=['ours'])
+c3.enter(ctx, SP(1500))
+c3.tick(ctx, SP(1500, sw=0))                 # вход при тумблере в центре
+check("селектор: центр → стабилизаторов нет (чистый ALT_HOLD)",
+      stk.stabs == [] and stk.enters == 2)   # вход шага + пересев на переключении
+c3.tick(ctx, SP(1500, sw=-1))                # тумблер вверх
+check("селектор: −1 → наш стабилизатор + пересев опор",
+      stk.stabs == ['ours'] and stk.enters == 3)
+c3.tick(ctx, SP(1500, sw=-1))                # без изменений — не дёргаем
+check("селектор: то же положение → стек не пересеивается", stk.enters == 3)
+c3.tick(ctx, SP(1500, sw=1))                 # MANUAL: правит Арбитр, стек не трогаем
+check("селектор: MANUAL (+1) стек не трогает", stk.stabs == ['ours'] and stk.enters == 3)
+c3.tick(ctx, SP(1500, sw=0))
+check("селектор: возврат в центр → снова без стабилизаторов", stk.stabs == [])
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ PLANRUNNER OK" if ok_all else "❌ СБОЙ")

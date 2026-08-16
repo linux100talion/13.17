@@ -96,6 +96,10 @@ check("Arbiter MANUAL: после центра газ проходит пило�
 arb.resolve(DroneState(pilot_switch=0), auto_cmd)
 out = arb.resolve(DroneState(pilot_switch=1, pilot_throttle=1900), auto_cmd)
 check("Arbiter: каждый новый seize запирает газ заново", out.throttle == 1500)
+# позиция −1 (наш стабилизатор) — НЕ manual: Арбитр отдаёт автономную команду
+out = arb.resolve(DroneState(pilot_switch=-1, pilot_throttle=1900), auto_cmd)
+check("Arbiter: тумблер −1 (стабилизатор) → автономная команда",
+      out == auto_cmd and not arb.last_manual)
 
 # --- joy_sticks: ядро JoyPilot (оси /joy → PWM, тумблер) ---
 # полный ход осей: +1 → 1900, −1 → 1100; тумблер CH6 (axes[5]) > 0.5 → MANUAL
@@ -105,9 +109,12 @@ check("joy_sticks pitch −1 → 1100", p == 1100)
 check("joy_sticks throttle 0 → центр", t == 1500)
 check("joy_sticks yaw +0.5 → 1700", y == 1700)
 check("joy_sticks тумблер >0.5 → MANUAL", sw == 1)
-# тумблер ниже порога → AUTO; ровно на пороге (0.5) — тоже AUTO (строгое >)
+# тумблер ниже порога → центр (ALT_HOLD); ровно на пороге (0.5) — тоже (строгое >)
 _, _, _, _, sw = joy_sticks([0.0, 0.0, 0.0, 0.0, 0.0, 0.5])
-check("joy_sticks тумблер на пороге 0.5 → AUTO", sw == 0)
+check("joy_sticks тумблер на пороге 0.5 → центр (ALT_HOLD)", sw == 0)
+# третья позиция: < −0.5 → наш стабилизатор (−1)
+_, _, _, _, sw = joy_sticks([0.0, 0.0, 0.0, 0.0, 0.0, -1.0])
+check("joy_sticks тумблер < −0.5 → СТАБИЛИЗАТОР (−1)", sw == -1)
 # знак оси инвертируется параметром (наземная сверка знаков — по одному стику)
 r, _, _, _, _ = joy_sticks([1.0, 0.0, 0.0, 0.0], signs=(-1.0, 1.0, 1.0, 1.0))
 check("joy_sticks sign=−1 зеркалит ось", r == 1100)
