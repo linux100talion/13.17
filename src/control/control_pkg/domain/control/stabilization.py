@@ -44,21 +44,22 @@ class GzHold(StabilizationStrategy):
         self.cmd_gain, self.yaw_cmd_gain = cmd_gain, yaw_cmd_gain
         self._ix = self._iy = 0.0          # интеграл ошибки позиции (world)
         self._it = None
-        self._yaw0 = 0.0                   # курс входа (фрейм проекции стик-команды)
         self._spx = self._spy = 0.0        # ИНТЕГРАЛ стик-команды → уставка (своя опора)
         self._yawsp = 0.0                  # интеграл yaw-стика → командный курс
 
     def enter(self, s: DroneState) -> None:
         self._ix = self._iy = 0.0
         self._it = s.now_sim
-        self._yaw0 = s.gt_yaw
         self._spx, self._spy = s.gt_x, s.gt_y   # уставка стартует в опоре (gt на входе)
         self._yawsp = s.gt_yaw
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
-        # стик-команду интегрируем в движущуюся уставку (в своём фрейме от опоры)
-        c0 = math.cos(self._yaw0)
-        s0 = math.sin(self._yaw0)
+        # Стик-команду интегрируем в движущуюся уставку. Проекция — по ТЕКУЩЕМУ
+        # курсу (тело): «стик от себя» = туда, куда СЕЙЧАС смотрит нос/камера, как
+        # в Loiter реального ArduPilot. Была по курсу ВХОДА в фазу — после разворота
+        # на 180° «вперёд» оставалось прибито к старому курсу (полёт 2026-08-16).
+        c0 = math.cos(s.gt_yaw)
+        s0 = math.sin(s.gt_yaw)
         self._spx += (sp.c_fwd * c0 + sp.c_right * s0) * self.cmd_gain * dt
         self._spy += (sp.c_fwd * s0 - sp.c_right * c0) * self.cmd_gain * dt
         # ⚠️ МИНУС, а не плюс. `c_yaw` — стик-конвенция (c_yaw>0 = стик вправо = разворот
@@ -153,20 +154,20 @@ class VinsHold(StabilizationStrategy):
         self.imax, self.max = imax, max_pwm
         self.psign, self.rsign = psign, rsign
         self.cmd_gain = cmd_gain
-        self._yaw0 = 0.0                   # фрейм проекции стик-команды (vins-курс входа)
         self._spx = self._spy = 0.0        # интеграл стик-команды → уставка (vins-опора)
         self._ix = self._iy = 0.0
         self._it = None
 
     def enter(self, s: DroneState) -> None:
         self._spx, self._spy = s.vins_x, s.vins_y
-        self._yaw0 = s.vins_yaw
         self._ix = self._iy = 0.0
         self._it = s.now_sim
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
-        c0 = math.cos(self._yaw0)
-        s0 = math.sin(self._yaw0)
+        # проекция стик-команды по ТЕКУЩЕМУ vins-курсу (тело) — как в GzHold:
+        # «вперёд» = куда сейчас смотрит нос, а не куда смотрел на входе в фазу
+        c0 = math.cos(s.vins_yaw)
+        s0 = math.sin(s.vins_yaw)
         self._spx += (sp.c_fwd * c0 + sp.c_right * s0) * self.cmd_gain * dt
         self._spy += (sp.c_fwd * s0 - sp.c_right * c0) * self.cmd_gain * dt
         ex = s.vins_x - self._spx

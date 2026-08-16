@@ -131,6 +131,24 @@ for k in range(1, 8):
                    Setpoint(), 0.05)
 check("DpHold командует roll+pitch+yaw", rc.roll != 1500 and rc.pitch != 1500 and rc.yaw != 1500)
 
+# --- проекция стик-команды по ТЕКУЩЕМУ курсу: «вперёд» = куда смотрит нос СЕЙЧАС ---
+# Живой полёт 2026-08-16: проекция шла по курсу ВХОДА в фазу → после разворота на 180°
+# «стик вперёд» продолжал везти по старому курсу. Уставка обязана ехать по носу.
+import math                                                          # noqa: E402
+
+g1 = GzPosHold()
+g1.enter(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.0, now_sim=0.0))
+g1.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.0, now_sim=0.05),
+          Setpoint(c_fwd=1.0), 0.05)
+fwd0 = g1._spx
+check("курс 0: стик вперёд двигает уставку в +x", fwd0 > 0)
+g2 = GzPosHold()
+g2.enter(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.0, now_sim=0.0))
+g2.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=math.pi, now_sim=0.05),
+          Setpoint(c_fwd=1.0), 0.05)
+check("после разворота на 180° стик вперёд двигает уставку в −x (по носу)",
+      g2._spx < 0 and abs(g2._spx + fwd0) < 1e-9)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ СЕМЕЙСТВА Gz*/Dp* OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
