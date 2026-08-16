@@ -138,7 +138,20 @@ fi
 # прогона создаются ниже.
 log "очистка артефактов прошлого прогона"
 echo "  хост: rm $OUTPUT_DIR/scene_bag*  +  $IMG_HOST (кадры + scene.mp4)"
-rm -rf "$OUTPUT_DIR"/scene_bag* "$IMG_HOST"
+# Бэг/кадры пишет root ВНУТРИ контейнера; на хосте под обычным юзером (ноут, в
+# отличие от root-бокса GCE) rm упирается в права. Остатки добиваем через
+# контейнер (root); output/ — общий bind mount, путь в контейнере фиксирован.
+rm -rf "$OUTPUT_DIR"/scene_bag* "$IMG_HOST" 2>/dev/null || true
+if compgen -G "$OUTPUT_DIR/scene_bag*" >/dev/null || [ -e "$IMG_HOST" ]; then
+    echo "  хост: артефакты принадлежат root — удаляю через контейнер $NAV"
+    docker start "$NAV" >/dev/null 2>&1 || true
+    docker exec "$NAV" bash -c \
+        'rm -rf /root/sim_ws/output/scene_bag* /root/sim_ws/output/scene_img' || {
+        echo "ОШИБКА: не смог удалить root-артефакты (контейнер $NAV недоступен)." >&2
+        echo "  вручную: docker exec $NAV rm -rf /root/sim_ws/output/scene_bag* /root/sim_ws/output/scene_img" >&2
+        exit 1
+    }
+fi
 mkdir -p "$IMG_HOST"        # каталог нужен make_video.py (пишет сюда scene.mp4)
 if [ "$GDRIVE_UP" = "1" ] && [ -n "$GDRIVE_ROOT" ] && [ "$GDRIVE_ROOT" != "/" ]; then
     if rclone listremotes 2>/dev/null | grep -qx "${GDRIVE_REMOTE}:"; then
