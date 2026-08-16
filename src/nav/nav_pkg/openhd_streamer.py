@@ -51,7 +51,9 @@ class OpenHDStreamer(Node):
         pipeline = (
             "appsrc ! videoconvert ! "
             f"openh264enc bitrate={bitrate * 1000} ! "
-            f"rtph264pay ! udpsink host={host} port={port} sync=false"
+            # config-interval=1: SPS/PPS каждую секунду, иначе зритель, подключившийся
+            # ПОСРЕДИ потока (make fpv, наземка после взлёта), не сможет декодировать.
+            f"rtph264pay config-interval=1 ! udpsink host={host} port={port} sync=false"
         )
         self.writer = cv2.VideoWriter(
             pipeline, cv2.CAP_GSTREAMER, 0, 15.0, (self.ow, self.oh), True

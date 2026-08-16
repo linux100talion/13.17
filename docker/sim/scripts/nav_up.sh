@@ -47,14 +47,14 @@ if [ ! -f install/setup.bash ]; then
 fi
 source install/setup.bash
 
-# 1f. control_pkg + mission_pkg (рефактор управления, ветка nn2_c3_control).
+# 1f. control_pkg + mission_pkg + nav_pkg (правятся на хосте через bind mount).
 #     ИНКРЕМЕНТАЛЬНО и ВСЕГДА: полная сборка выше идёт только при пустом install/,
 #     но install/ живёт в персистентном volume (выживает fresh-start) → новые
 #     пакеты иначе не подхватятся. colcon пропускает неизменённое (быстро),
 #     собирает новое/правленое. Домен чистый (без rclpy) — build лишь ставит модули.
 if [ -d src/control ] || [ -d src/mission ]; then
-    echo "  colcon build (control_pkg, mission_pkg) ..."
-    if colcon build --packages-select control_pkg mission_pkg 2>&1 | tail -3; then
+    echo "  colcon build (control_pkg, mission_pkg, nav_pkg) ..."
+    if colcon build --packages-select control_pkg mission_pkg nav_pkg 2>&1 | tail -3; then
         source install/setup.bash
     else
         echo "  ⚠️ сборка control_pkg/mission_pkg не удалась (см. выше) — ARCH2 недоступен"
