@@ -365,7 +365,8 @@ d_*-модель монолита) снят → `test_profile_motion`. Любо�
 идут `/joy` → `joy_sticks()` (чистое ядро, покрыто `test_pilot_strategies`) →
 `JoyPilot`. Обвязка: `joy_linux_node` из `bootstrap_arch2.sh` (`BS_PILOT=joy`),
 `ros-humble-joy-linux` в образе `nav`, `/dev/input` hotplug-каталогом в compose.
-Знаки осей выверены полётами → `JOY_SIGNS_DEFAULT` (roll/yaw зеркальны).
+Знаки осей выверены полётами → `JOY_SIGNS_DEFAULT` (зеркальны roll/yaw/throttle,
+прямой только pitch — провод RC2 сам инвертирован).
 
 **Газ живого пилота = `ThrottleLatch`** (домен, `throttle_latch.py`): газ ЗАПЕРТ,
 пока стик впервые не побывал в центре — вход в режим с отклонённым газом не
