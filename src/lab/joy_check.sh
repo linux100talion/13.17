@@ -18,8 +18,11 @@ if [ ! -e "$JOY_DEV" ]; then
     exit 1
 fi
 
+# default_trig_val — публиковать НАЧАЛЬНОЕ состояние осей (JS_EVENT_INIT): без него
+# тумблер, выставленный ДО старта ноды, невидим (ось 0.00 до первого щелчка) —
+# полёт 2026-08-17: CH6 вверх до взлёта → нода видела «центр» → летели без стабилизатора.
 ros2 run joy_linux joy_linux_node --ros-args \
-    -p dev:="$JOY_DEV" -p autorepeat_rate:=20.0 \
+    -p dev:="$JOY_DEV" -p autorepeat_rate:=20.0 -p default_trig_val:=true \
     > /tmp/joy_check_driver.log 2>&1 &
 JOY_PID=$!
 trap 'kill "$JOY_PID" 2>/dev/null || true' EXIT
