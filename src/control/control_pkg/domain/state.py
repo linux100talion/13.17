@@ -90,6 +90,10 @@ class DroneState:
     # Трёхпозиционник CH6: +1 = MANUAL (Arbiter, сырые стики); 0 = ALT_HOLD (Control-шаг
     # убирает стабилизаторы, стики = наклоны); −1 = наш стабилизатор (BS_STAB-стек).
     pilot_switch: int = 0
+    # «Хватит летать»: one-shot от оператора (/mission/pilot_done, make pilot-done) —
+    # завершает БЕССРОЧНЫЙ pilot-сегмент (токен `pilot` без числа) → миссия идёт дальше
+    # (land). Узел выставляет на ОДИН тик; вне живого пилот-сегмента игнорируется.
+    pilot_done: bool = False
 
     # --- время ---
     now_sim: float = 0.0                   # проставляет адаптер из Clock (sim-время по /clock)

@@ -215,6 +215,19 @@ def main():
     pl2 = compile_mission(cfg, "climb3,pilot20,land", "DpRollHold+DpYawHold")
     pseg2 = next(st for st in pl2 if st.name.startswith("pilot_"))
     checks.append(("compile: pilot(scripted) — без селектора", pseg2._pilot_stabs is None))
+    # `pilot` БЕЗ числа: живому пилоту — бессрочно (max_sec=0, конец по pilot_done)
+    pl3 = compile_mission(cfg, "climb3,pilot,land", "DpRollHold+DpYawHold",
+                          live_pilot=True)
+    pseg3 = next(st for st in pl3 if st.name.startswith("pilot_"))
+    checks.append(("compile: pilot без числа (live) → бессрочно (max_sec=0)",
+                   pseg3.max_sec == 0.0))
+    # scripted'у бессрочная форма запрещена (центр-стики → никогда не кончится)
+    try:
+        compile_mission(cfg, "climb3,pilot,land", "DpRollHold+DpYawHold")
+        endless_bad = False
+    except ValueError:
+        endless_bad = True
+    checks.append(("compile: pilot без числа (scripted) → ValueError", endless_bad))
 
     # --- токен в ГРАДУСАХ (yaw_l/yaw_r) ---
     # Смысл токена: угол — величина, за которую отвечает контур. Держится на двух вещах:

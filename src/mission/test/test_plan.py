@@ -45,6 +45,7 @@ class Log:
 class S:
     """Минимальный dummy-снапшот (лог финиша PlanRunner читает эти поля)."""
     mode = None; armed = False; rel_alt = None; vins_odom_count = 0
+    pilot_done = False
 
 
 class Once(Step):
@@ -203,6 +204,26 @@ c3.tick(ctx, SP(1500, sw=1))                 # MANUAL: правит Арбитр
 check("селектор: MANUAL (+1) стек не трогает", stk.stabs == ['ours'] and stk.enters == 3)
 c3.tick(ctx, SP(1500, sw=0))
 check("селектор: возврат в центр → снова без стабилизаторов", stk.stabs == [])
+
+# --- 7. pilot_done: оператор завершает бессрочный живой сегмент (make pilot-done) ---
+from mission_pkg.plan.step import NEXT, RUN                            # noqa: E402
+
+
+class SD(SP):
+    def __init__(self, done=False):
+        super().__init__(1500)
+        self.pilot_done = done
+
+
+c4 = Control("c4", Stack(), 1500, pilot_thr=True)     # живой пилот, max_sec=0 (бессрочно)
+c4.enter(ctx, SD())
+check("pilot_done: без сигнала сегмент живёт", c4.tick(ctx, SD()).status == RUN)
+check("pilot_done: сигнал оператора завершает сегмент",
+      c4.tick(ctx, SD(done=True)).status == NEXT)
+c5 = Control("c5", Stack(), 1500)                     # scripted (без latch) — игнор
+c5.enter(ctx, SD())
+check("pilot_done: scripted-сегмент сигнал игнорирует",
+      c5.tick(ctx, SD(done=True)).status == RUN)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ PLANRUNNER OK" if ok_all else "❌ СБОЙ")

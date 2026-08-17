@@ -21,11 +21,14 @@ ControlStack(build_stabilizers(spec) + профиль-сегмент): один 
   sk_fwd/bkwd<τ>        — station-keeping оператор на pitch: +τ/−2τ/+τ, дрон У ТОЧКИ (не уносит)
   sk_right/left<τ>      — то же на roll
   hover<t>              — держать t сек (стик центр; стабилизатор гасит снос/держит)
-  pilot<t>              — ЖИВОЙ ПИЛОТ t сек: стики = намерение (RcTransmitter), а
+  pilot[t]              — ЖИВОЙ ПИЛОТ t сек: стики = намерение (RcTransmitter), а
                           трёхпозиционник CH6 на лету выбирает стабилизацию:
                           −1 = BS_STAB (наш), 0 = чистый ALT_HOLD (стики-наклоны),
-                          +1 = MANUAL (Арбитр, сырые стики). Требует --pilot joy/ros;
-                          со scripted-пилотом токен = hover (центр, стек BS_STAB).
+                          +1 = MANUAL (Арбитр, сырые стики). БЕЗ числа — бессрочно:
+                          летаем до `make pilot-done` (топик /mission/pilot_done →
+                          s.pilot_done), затем миссия идёт дальше (land). Требует
+                          --pilot joy/ros; со scripted-пилотом токен = hover (центр,
+                          стек BS_STAB), бессрочная форма scripted'у запрещена.
   land | landing<x>     — посадка (Step Land; число игнорируется)
 
 Реестр именованных заданий — MISSIONS (значение = список токенов или callable(cfg)).
@@ -182,15 +185,18 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                 raise ValueError(f"hover требует длительность(сек): {tok!r}")
             steps.append(_control(f"hover_{i}", ConstProfile(num)))
         elif verb == "pilot":
-            if num is None:
-                raise ValueError(f"pilot требует длительность(сек): {tok!r}")
+            if num is None and not live_pilot:
+                # scripted держит центр → бессрочный сегмент никогда не кончится
+                raise ValueError(f"pilot без длительности — только живой пилот "
+                                 f"(--pilot joy/ros): {tok!r}")
             # живые стики = намерение; селектор стабилизации — ТОЛЬКО живому пилоту
-            # (scripted держит центр → фактически hover со стеком BS_STAB)
+            # (scripted держит центр → фактически hover со стеком BS_STAB).
+            # Без числа — БЕССРОЧНО: летаем до `make pilot-done` (s.pilot_done).
             steps.append(_control(
                 f"pilot_{i}",
                 RcTransmitter(cfg.pilot_deadzone, cfg.pilot_full,
                               cfg.pilot_pitch_sign, cfg.pilot_roll_sign),
-                max_sec=num,
+                max_sec=num if num is not None else 0.0,
                 pilot_stabs=build_stabilizers(cfg, stab_spec) if live_pilot else None))
         elif verb in ("land", "landing"):
             steps.append(Land("land", hold, cfg.ground_z, cfg.land_budget,

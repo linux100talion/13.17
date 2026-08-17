@@ -145,6 +145,9 @@ hover:           ## висение SEC секунд sim-времени (SEC=10 �
 land:            ## посадка (режим LAND)
 	docker exec $(NAV) bash /lab/land.sh
 
+pilot-done:      ## живой полёт: завершить бессрочный pilot-сегмент (миссия идёт дальше → land)
+	docker exec $(NAV) bash -lc 'source /opt/ros/humble/setup.bash; ros2 topic pub --once /mission/pilot_done std_msgs/msg/Empty "{}"'
+
 disarm:          ## дизарм
 	docker exec $(NAV) bash /lab/disarm.sh
 

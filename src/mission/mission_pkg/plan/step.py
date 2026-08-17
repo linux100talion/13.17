@@ -246,6 +246,11 @@ class Control(Step):
         done = self.stack.motion_done() or self.stack.excite_done()
         if not done and self.max_sec > 0 and ctx.elapsed() > self.max_sec:
             done = True
+        # «хватит летать» от оператора (make pilot-done) — только живому пилоту
+        # (_latch как маркер live): бессрочный `pilot` иначе не завершить штатно
+        if not done and self._latch is not None and s.pilot_done:
+            ctx.log.info("    оператор завершил pilot-сегмент (pilot_done)")
+            done = True
         if done:
             ctx.log.info(f"    {self.name} завершён — дальше")
             return _next(rc, self.result)

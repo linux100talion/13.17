@@ -22,6 +22,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from std_msgs.msg import Empty
 
 from control_pkg.application.arbiter import Arbiter
 from control_pkg.application.handover import VinsHandover
@@ -139,6 +140,11 @@ class BootstrapArch2Node(Node):
 
         self._last_rc = RcCommand()
         self._arb_seized = False
+        # «хватит летать»: make pilot-done → one-shot в снапшот (завершает бессрочный
+        # pilot-сегмент). Слать ВО ВРЕМЯ pilot-сегмента: в других фазах тик его съест.
+        self._pilot_done = False
+        self.create_subscription(Empty, '/mission/pilot_done',
+                                 lambda _m: setattr(self, '_pilot_done', True), 1)
         self.timer = self.create_timer(0.05, self._tick)
         self.logger.info(
             f"alt_hold_bootstrap ARCH2: mode={cfg.control_mode} alt={cfg.alt}м "
@@ -165,6 +171,7 @@ class BootstrapArch2Node(Node):
         s.pilot_roll, s.pilot_pitch = sticks.roll, sticks.pitch
         s.pilot_throttle, s.pilot_yaw = sticks.throttle, sticks.yaw
         s.pilot_switch = self.pilot.mode_switch()
+        s.pilot_done, self._pilot_done = self._pilot_done, False   # one-shot
 
         rc = self.runner.tick(s)
         rc = self.arbiter.resolve(s, rc)          # safety-seize: MANUAL → сырые стики
