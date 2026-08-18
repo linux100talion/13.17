@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Юнит-тест АДАПТИВНОЙ ПОЛОСЫ IPM (`ipm_adapt`).
+
+Зачем. У статичной полосы 3-6 м есть потолок высоты x1·tan(cam_tilt+vfov/2) ≈ 5.85 м:
+выше полоса целиком уходит под нижний край кадра, ipm_ok=0, демпферы крена/тангажа
+слепы, стики пилота на этих осях мертвы. Полёт 2026-08-18: провал ipm_ok длиной
+63.7 с — набор на 10 м, зависание на 6.0 м (15 см выше потолка), канал ожил на 5.2 м.
+
+Адаптив сдвигает начало окна за границу видимости (длина окна та же), а известный
+сдвиг окна между кадрами вычитает из продольного накопителя — иначе скольжение окна
+на наборе читалось бы как ход вперёд.
+
+Сцена — ЧЕСТНЫЙ синтетический рендер: текстура земли проецируется в кадр гомографией,
+построенной через тот же `_ipm_px`, что и выпрямление. Значит тест проверяет реальную
+геометрию канала, а не согласие функции с самой собой по одной ветке.
+
+Запуск:  python3 src/control/test/test_ipm_adapt.py
+"""
+import math
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import cv2                                                            # noqa: E402
+import numpy as np                                                    # noqa: E402
+
+from control_pkg.perception.flow_estimator import FlowEstimator       # noqa: E402
+
+results = []
+
+
+def check(name, ok):
+    results.append((name, ok))
+    print(f"  [{'OK ' if ok else 'FAIL'}] {name}")
+
+
+FX = FY = 640.0
+CX, CY = 640.0, 360.0
+FPS_DT = 1.0 / 30.0
+
+# Земля: 1 см/пиксель, X 0..22 м (строки), Y ±8.5 м (столбцы) — все окна внутри
+rng = np.random.default_rng(1317)
+GROUND = rng.integers(0, 255, (2200, 1700), dtype=np.uint8)
+GROUND = cv2.GaussianBlur(GROUND, (3, 3), 0)    # LK любит градиенты, не соль-перец
+
+
+def g_px(X, Y):
+    return [(Y + 8.5) / 0.01, (22.0 - X) / 0.01]
+
+
+def make(adapt):
+    return FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=adapt)
+
+
+def render(e, h, dx=0.0):
+    """Кадр камеры на высоте h над землёй; dx — уход борта вперёд (сцена назад)."""
+    src, dst = [], []
+    for X, Y in ((3.0, -8.0), (3.0, 8.0), (20.0, 8.0), (20.0, -8.0)):
+        dst.append(e._ipm_px(X, Y, h, 0.0, 0.0))
+        src.append(g_px(X + dx, Y))
+    M = cv2.getPerspectiveTransform(np.float32(src), np.float32(dst))
+    return cv2.warpPerspective(GROUND, M, (1280, 720))
+
+
+def feed(e, h, t, dx=0.0):
+    e._ipm_update(render(e, h, dx), t, h, 0.0, 0.0)
+
+
+# --- 1. ПОТОЛОК: на 6.5 м статичная полоса мертва, адаптивная жива ---
+e0 = make(0.0)
+feed(e0, 6.5, 0.0)
+feed(e0, 6.5, FPS_DT)
+check("статичная полоса на 6.5 м мертва (полоса под кадром, ipm_ok=False)",
+      not e0.ipm_ok)
+ea = make(1.05)
+feed(ea, 6.5, 0.0)
+feed(ea, 6.5, FPS_DT)
+check("адаптивная полоса на 6.5 м жива (ipm_ok=True)", ea.ipm_ok)
+check("окно отодвинуто за базовое (x0 > 6 м)", ea._ipm_prev_x0 > 6.0)
+check("неподвижный борт → путь ~0",
+      abs(ea.ipm_fwd) < 0.05 and abs(ea.ipm_lat) < 0.05)
+
+# --- 2. РЕГРЕСС на рабочей высоте 3 м: оба режима живы, окно почти на месте ---
+for adapt, name in ((0.0, "статичная"), (1.05, "адаптивная")):
+    e = make(adapt)
+    feed(e, 3.0, 0.0)
+    feed(e, 3.0, FPS_DT)
+    check(f"{name} полоса на 3 м жива, путь ~0",
+          e.ipm_ok and abs(e.ipm_fwd) < 0.05)
+ea3 = make(1.05)
+feed(ea3, 3.0, 0.0)
+check("на 3 м адаптив сдвигает окно лишь на сантиметры (<0.4 м)",
+      3.0 <= ea3._ipm_prev_x0 < 3.4)
+
+# --- 3. КОМПЕНСАЦИЯ СДВИГА ОКНА: честный набор 5→6 м на месте не рождает хода ---
+# 30 кадров по 3.3 см набора (1 м/с). Окно уезжает на ~1.07 м; без вычитания
+# (x0 − prev_x0) накопитель показал бы ровно этот фантом «вперёд».
+ec = make(1.05)
+t, h = 0.0, 5.0
+for k in range(31):
+    feed(ec, h, t)
+    t += FPS_DT
+    h += 1.0 * FPS_DT
+drift = ec.ipm_fwd
+check(f"набор 5→6 м на месте: фантом хода |{drift:+.3f}| < 0.2 м (без вычитания ~1.07)",
+      abs(drift) < 0.2)
+
+# --- 4. МЕТРИКА НА ВЫСОТЕ: на 6.5 м (выше старого потолка) ход меряется метрами ---
+em = make(1.05)
+t, dx = 0.0, 0.0
+for k in range(16):
+    feed(em, 6.5, t, dx)
+    t += FPS_DT
+    dx += 1.0 * FPS_DT          # 1 м/с вперёд, итог 0.5 м
+check(f"ход 0.50 м на 6.5 м высоты: намеряно {em.ipm_fwd:+.3f} (±30%)",
+      0.35 < em.ipm_fwd < 0.65)
+check("боковой канал при этом молчит", abs(em.ipm_lat) < 0.1)
+
+ok_all = all(ok for _, ok in results)
+print("ИТОГ:", "✅ АДАПТИВНАЯ ПОЛОСА IPM OK" if ok_all else "❌ СБОЙ")
+sys.exit(0 if ok_all else 1)

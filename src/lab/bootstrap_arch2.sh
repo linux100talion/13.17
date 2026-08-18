@@ -113,6 +113,8 @@ ARGS=()
 [ -n "${BS_IPM_DEROT:-}" ]     && ARGS+=(--ipm-derot "$BS_IPM_DEROT")
 [ -n "${BS_IPM_WZ_TAU:-}" ]    && ARGS+=(--ipm-wz-tau "$BS_IPM_WZ_TAU")
 [ -n "${BS_IPM_WIN:-}" ]       && ARGS+=(--ipm-win "$BS_IPM_WIN")
+# адаптивная полоса IPM: 0 = статичная 3-6 м (потолок ~5.85 м), >0 = запас к границе видимости
+[ -n "${BS_IPM_ADAPT:-}" ]     && ARGS+=(--ipm-adapt "$BS_IPM_ADAPT")
 [ -n "${BS_IPM_MAX_SPEED:-}" ] && ARGS+=(--ipm-max-speed "$BS_IPM_MAX_SPEED")
 [ -n "${BS_IPM_ALT_FWD:-}" ]   && ARGS+=(--ipm-alt-band-fwd "$BS_IPM_ALT_FWD")
 [ -n "${BS_IPM_ALT_LAT:-}" ]   && ARGS+=(--ipm-alt-band-lat "$BS_IPM_ALT_LAT")

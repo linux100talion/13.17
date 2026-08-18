@@ -111,7 +111,8 @@ class BootstrapArch2Node(Node):
                                             ipm_model=cfg.ipm_model,
                                             ipm_derot=cfg.ipm_derot,
                                             ipm_wz_tau=cfg.ipm_wz_tau,
-                                            ipm_win=cfg.ipm_win)
+                                            ipm_win=cfg.ipm_win,
+                                            ipm_adapt=cfg.ipm_adapt)
 
         # рантайм switch Flow→Vins: флаг + флоу-стабилизатор (VinsHold на gz_* гейнах)
         handover = None
@@ -313,6 +314,7 @@ def _parse() -> tuple:
     p.add_argument('--ipm-model', dest='ipm_model', default=_D.ipm_model,
                    choices=['legacy', 'rsign', 'exact'])
     p.add_argument('--ipm-derot', dest='ipm_derot', type=float, default=_D.ipm_derot)
+    p.add_argument('--ipm-adapt', dest='ipm_adapt', type=float, default=_D.ipm_adapt)
     p.add_argument('--ipm-wz-tau', dest='ipm_wz_tau', type=float, default=_D.ipm_wz_tau)
     p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
     p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,
