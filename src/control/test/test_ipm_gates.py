@@ -195,6 +195,35 @@ rc = rs.update(f.step(ipm_vlat=-1.0), Setpoint(c_right=0.5), f.dt)
 check("знак команды: борт едет вправо 1 м/с по цели → ошибка 0, roll в центре",
       rc.roll == RC_CENTER)
 
+# --- 7. СТАНЦИЯ-КИПИНГ (pos_kp): стик в центре держит точку, стик живой — скорость ---
+ps = DpPitchRate(kp=100.0, ki=0.0, kd=0.0, cmd_gain=2.0, pos_kp=0.5, pos_vmax=1.0,
+                 max_speed=0.0, alt_band=0.0, arm_frames=0)
+f = Fly()
+ps.enter(DroneState(flow_seq=-1))
+ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=2.0, att_yaw=0.0), Setpoint(), f.dt)
+check("станция: первый кадр с центральным стиком захватил точку (цель 0)",
+      ps.rate_dbg()[0] == 0.0 and ps._pos_sp == (2.0, 0.0))
+rc = ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=3.0, att_yaw=0.0), Setpoint(), f.dt)
+check("станция: снесло на метр → цель −0.5 м/с (назад к точке), PWM тормозит",
+      ps.rate_dbg()[0] == -0.5 and rc.pitch == RC_CENTER + 50)
+rc = ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=3.0, att_yaw=0.0), Setpoint(c_fwd=0.5), f.dt)
+check("станция: стик живой → точка отпущена, цель = стик·cmd_gain (+1.0)",
+      ps._pos_sp is None and ps.rate_dbg()[0] == 1.0)
+ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=5.0, att_yaw=0.0), Setpoint(), f.dt)
+check("станция: стик отпущен → НОВАЯ точка там, где отпустили (5.0)",
+      ps._pos_sp == (5.0, 0.0) and ps.rate_dbg()[0] == 0.0)
+ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=6.0, att_yaw=0.4), Setpoint(), f.dt)
+check("станция: развернулись на 0.4 рад — точка перезахвачена (путь в body-осях)",
+      ps._pos_sp == (6.0, 0.4) and ps.rate_dbg()[0] == 0.0)
+psat = DpPitchRate(kp=100.0, ki=0.0, kd=0.0, cmd_gain=2.0, pos_kp=0.5, pos_vmax=1.0,
+                   max_speed=0.0, alt_band=0.0, arm_frames=0)
+f = Fly()
+psat.enter(DroneState(flow_seq=-1))
+psat.update(f.step(ipm_vfwd=0.0, ipm_fwd=0.0), Setpoint(), f.dt)
+psat.update(f.step(ipm_vfwd=0.0, ipm_fwd=8.0), Setpoint(), f.dt)
+check("станция: далеко от точки → цель клампится в ±pos_vmax (−1.0)",
+      psat.rate_dbg()[0] == -1.0)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ГЕЙТЫ ВИДА СВЕРХУ OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

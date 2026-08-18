@@ -130,6 +130,9 @@ class BootstrapConfig:
                                      # НЕизмеренный контур.
     roll_kd: float = 0.0
     roll_imax: float = 150.0
+    roll_pos_kp: float = 0.0         # станция-кипинг боковой оси (путь ipm_lat), см.
+                                     # pitch_pos_kp. BS_ROLL_POS_KP / --roll-pos-kp
+    roll_pos_vmax: float = 1.0       # BS_ROLL_POS_VMAX / --roll-pos-vmax
     roll_max: float = 150.0
     # --- боковая ось ПО МЕТРИЧЕСКОЙ СКОРОСТИ (DpRollRate, сигнал ipm_vlat в М/С) ---
     # 30 — ИЗМЕРЕННЫЙ дефолт по свипу G (n=5 на точку, DpHoldM, `rate_gain_series.sh`):
@@ -222,6 +225,14 @@ class BootstrapConfig:
                                       # 2026-08-17: полный «на себя» не тормозил).
                                       # BS_PITCH_RATE_CMD_GAIN / --pitch-rate-cmd-gain
     pitch_imax: float = 120.0
+    pitch_pos_kp: float = 0.0        # СТАНЦИЯ-КИПИНГ продольной оси: стик в центре →
+                                     # цель скорости = pos_kp·(точка − путь ipm_fwd), м/с
+                                     # на метр ошибки; стик живой → точка отпущена (пульт
+                                     # всегда главный, как LOITER). 0 = выкл (чистый
+                                     # демпфер, остаточный снос 0.2-0.5 м/с копится в
+                                     # метры). BS_PITCH_POS_KP / --pitch-pos-kp
+    pitch_pos_vmax: float = 1.0      # потолок скорости возврата к точке, м/с.
+                                     # BS_PITCH_POS_VMAX / --pitch-pos-vmax
     pitch_max: float = 150.0
     pitch_conf_min: float = 0.05
     pitch_conf_full: float = 0.20

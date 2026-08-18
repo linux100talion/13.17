@@ -244,11 +244,22 @@ class _FlowDamper1D(StabilizationStrategy):
     _cmd_mode = "rate"       # rate: c_* = цель скорости | pos: c_* = скорость уставки
 
     def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_pwm=150.0,
-                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5):
+                 conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5,
+                 pos_kp=0.0, pos_vmax=1.0):
         self.kp, self.ki, self.kd = kp, ki, kd
         self.imax, self.max = imax, max_pwm
         self.conf_min, self.conf_full = conf_min, conf_full
         self.osign, self.cmd_gain, self.stale = osign, cmd_gain, stale_sec
+        # --- СТАНЦИЯ-КИПИНГ поверх rate-оси (внешний P-контур по накопленному пути) ---
+        # Скоростной демпфер не возвращает в точку: остаточные 0.2-0.5 м/с превращаются
+        # в метры сноса, пока пилот не трогает стик. pos_kp > 0: стик В ЦЕНТРЕ →
+        # захватывается текущий путь (_pos_signal) и цель скорости = pos_kp·(точка −
+        # путь), кламп ±pos_vmax; стик ЖИВОЙ → точка отпускается, обычный velocity-
+        # режим (пульт всегда главный, как LOITER). Точка живёт в BODY-осях пути —
+        # при развороте на месте она поехала бы с курсом, поэтому уход курса больше
+        # _POS_YAW_TOL от курса захвата перезахватывает точку (снос за время разворота
+        # прощаем — честнее, чем тянуть в повёрнутую сторону). 0 = выкл (как было).
+        self.pos_kp, self.pos_vmax = pos_kp, pos_vmax
         self._i = 0.0
         self._prev_err = 0.0
         self._last_seq = -1
@@ -259,13 +270,20 @@ class _FlowDamper1D(StabilizationStrategy):
                                   # задаёт шаг интегрирования), эти часы — нет
         self._sp = 0.0           # pos-режим: точка удержания (0 = опорный кадр)
         self._sp_rate = 0.0      # её текущая скорость — для D-члена и отладки
+        self._pos_sp = None      # станция rate-оси: (путь в точке захвата, курс захвата)
         self._target = 0.0       # ЦЕЛЬ rate-оси (c_*·cmd_gain) — записи команды у этих
                                  # осей не было вовсе: /flow_dbg5 шлёт только pos-оси, и
                                  # калибровку R1 пришлось резать по истинной скорости,
                                  # где откат после торможения неотличим от команды
 
+    _POS_YAW_TOL = 0.3       # рад (~17°): дальше точка станции перезахватывается
+
     def _signal(self, s): raise NotImplementedError
     def _cmd(self, sp): raise NotImplementedError
+
+    def _pos_signal(self, s):
+        """Накопленный ПУТЬ вдоль оси (для станции-кипинга) — None, если оси нечем."""
+        return None
 
     def _advance(self, s, fdt) -> None:
         """Хук: продвинуть внутреннее состояние сигнала РОВНО раз на новый кадр.
@@ -297,6 +315,7 @@ class _FlowDamper1D(StabilizationStrategy):
         # Захват текущего сигнала здесь был бы гонкой со сбросом — см. docstring класса.
         self._sp = 0.0
         self._sp_rate = 0.0
+        self._pos_sp = None
 
     def _signal_ok(self, s) -> bool:
         """Годен ли сигнал этой оси в этом кадре (переопределяется, где есть чем judge)."""
@@ -354,7 +373,23 @@ class _FlowDamper1D(StabilizationStrategy):
             else:
                 self._sp_rate = 0.0
                 self._advance(s, fdt)
-                self._target = self._cmd(sp) * self.cmd_gain
+                cmd = self._cmd(sp)
+                pos = self._pos_signal(s) if self.pos_kp > 0.0 else None
+                if pos is not None and cmd == 0.0:
+                    # СТАНЦИЯ: стик в мёртвой зоне → держим точку захвата.
+                    # Перезахват при уходе курса: путь копится в body-осях.
+                    if (self._pos_sp is not None
+                            and abs(math.atan2(math.sin(s.att_yaw - self._pos_sp[1]),
+                                               math.cos(s.att_yaw - self._pos_sp[1])))
+                            > self._POS_YAW_TOL):
+                        self._pos_sp = None
+                    if self._pos_sp is None:
+                        self._pos_sp = (pos, s.att_yaw)
+                    self._target = clamp(self.pos_kp * (self._pos_sp[0] - pos),
+                                         -self.pos_vmax, self.pos_vmax)
+                else:
+                    self._pos_sp = None       # стик живой → точка отпущена
+                    self._target = cmd * self.cmd_gain
                 err = self._signal(s) - self._target                    # velocity-assist
             self._i = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
             dot = self._signal_dot(s)
@@ -797,6 +832,11 @@ class DpPitchRate(_IpmGated):
 
     def _signal(self, s): return s.ipm_vfwd
 
+    def _pos_signal(self, s):
+        # путь вперёд, М (та же лево/вперёд-конвенция, что у скорости → знаки
+        # станции сходятся автоматически: цель = pos_kp·(точка − путь))
+        return s.ipm_fwd
+
     def _cmd(self, sp):
         # знак — как у DpPitchHold: c_fwd>0 = стик ВПЕРЁД = борт должен ехать вперёд,
         # и продольная скорость по виду сверху при ходе вперёд ПОЛОЖИТЕЛЬНА (крутизна
@@ -835,6 +875,9 @@ class DpRollRate(_IpmGated):
     _cmd_mode = "rate"
 
     def _signal(self, s): return s.ipm_vlat
+
+    def _pos_signal(self, s):
+        return s.ipm_lat        # путь вбок, М (лево+, как ipm_vlat)
 
     def _cmd(self, sp):
         # ⚠️ МИНУС — тот же, что у DpRollHold, и по той же геометрии: ipm_vlat
