@@ -209,9 +209,26 @@ check("станция: снесло на метр → цель −0.5 м/с (н�
 rc = ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=3.0, att_yaw=0.0), Setpoint(c_fwd=0.5), f.dt)
 check("станция: стик живой → точка отпущена, цель = стик·cmd_gain (+1.0)",
       ps._pos_sp is None and ps.rate_dbg()[0] == 1.0)
-ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=5.0, att_yaw=0.0), Setpoint(), f.dt)
-check("станция: стик отпущен → НОВАЯ точка там, где отпустили (5.0)",
+# «СНАЧАЛА ТОРМОЗИ, ПОТОМ ГВОЗДЬ»: отпустили на скорости → гвоздя нет, цель 0
+ps.update(f.step(ipm_vfwd=2.0, ipm_fwd=4.0, att_yaw=0.0), Setpoint(), f.dt)
+check("станция: отпущен на 2 м/с → гвоздя НЕТ, цель 0 (чистое торможение)",
+      ps._pos_sp is None and ps.rate_dbg()[0] == 0.0)
+ps.update(f.step(ipm_vfwd=0.2, ipm_fwd=5.0, att_yaw=0.0), Setpoint(), f.dt)
+check("станция: затормозил (<0.3 м/с) → гвоздь там, где остановился (5.0)",
       ps._pos_sp == (5.0, 0.0) and ps.rate_dbg()[0] == 0.0)
+# страховка: злая рампа не даёт затормозить → через _POS_PIN_T гвоздь принудительно
+pf = DpPitchRate(kp=100.0, ki=0.0, kd=0.0, cmd_gain=2.0, pos_kp=0.5, pos_vmax=1.0,
+                 max_speed=0.0, alt_band=0.0, arm_frames=0)
+f2 = Fly()
+pf.enter(DroneState(flow_seq=-1))
+for _ in range(58):                    # 2.9 с на скорости — гвоздя ещё нет
+    pf.update(f2.step(ipm_vfwd=1.5, ipm_fwd=10.0), Setpoint(), f2.dt)
+check("станция: 2.9 с не тормозится → гвоздя ещё нет (честно тормозим)",
+      pf._pos_sp is None)
+for _ in range(4):                     # перевалили 3 с
+    pf.update(f2.step(ipm_vfwd=1.5, ipm_fwd=11.0), Setpoint(), f2.dt)
+check("станция: не затормозил за 3 с → гвоздь принудительно (рампа не съест)",
+      pf._pos_sp is not None)
 ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=6.0, att_yaw=0.4), Setpoint(), f.dt)
 check("станция: развернулись на 0.4 рад — точка перезахвачена (путь в body-осях)",
       ps._pos_sp == (6.0, 0.4) and ps.rate_dbg()[0] == 0.0)

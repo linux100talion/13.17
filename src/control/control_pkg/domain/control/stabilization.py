@@ -271,12 +271,18 @@ class _FlowDamper1D(StabilizationStrategy):
         self._sp = 0.0           # pos-режим: точка удержания (0 = опорный кадр)
         self._sp_rate = 0.0      # её текущая скорость — для D-члена и отладки
         self._pos_sp = None      # станция rate-оси: (путь в точке захвата, курс захвата)
+        self._pos_wait_t = None  # начало торможения (для принудительного гвоздя)
         self._target = 0.0       # ЦЕЛЬ rate-оси (c_*·cmd_gain) — записи команды у этих
                                  # осей не было вовсе: /flow_dbg5 шлёт только pos-оси, и
                                  # калибровку R1 пришлось резать по истинной скорости,
                                  # где откат после торможения неотличим от команды
 
     _POS_YAW_TOL = 0.3       # рад (~17°): дальше точка станции перезахватывается
+    _POS_PIN_V = 0.3         # м/с: гвоздь вяжется только когда борт затормозил
+    _POS_PIN_T = 3.0         # с: не затормозил за столько — гвоздь принудительно
+                             # (иначе на злой рампе скорость никогда не падает ниже
+                             # порога, гвоздь не вяжется вовсе и станция вырождается
+                             # в чистый демпфер: прогон 2026-08-18 — fence за 18 с)
 
     def _signal(self, s): raise NotImplementedError
     def _cmd(self, sp): raise NotImplementedError
@@ -316,6 +322,7 @@ class _FlowDamper1D(StabilizationStrategy):
         self._sp = 0.0
         self._sp_rate = 0.0
         self._pos_sp = None
+        self._pos_wait_t = None
 
     def _signal_ok(self, s) -> bool:
         """Годен ли сигнал этой оси в этом кадре (переопределяется, где есть чем judge)."""
@@ -376,7 +383,12 @@ class _FlowDamper1D(StabilizationStrategy):
                 cmd = self._cmd(sp)
                 pos = self._pos_signal(s) if self.pos_kp > 0.0 else None
                 if pos is not None and cmd == 0.0:
-                    # СТАНЦИЯ: стик в мёртвой зоне → держим точку захвата.
+                    # СТАНЦИЯ: «СНАЧАЛА ТОРМОЗИ, ПОТОМ ГВОЗДЬ» (механика LOITER).
+                    # Точка вяжется НЕ в момент отпускания стика: борт ещё несёт
+                    # 2-3 м/с, выбег ~9 м, и станция тянула бы его назад к месту,
+                    # которое пилот уже мысленно покинул — «рулю против резинки»
+                    # (полёт 2026-08-18). Пока |скорость| ≥ _POS_PIN_V — цель 0
+                    # (чистое торможение демпфером), гвоздь — где остановился.
                     # Перезахват при уходе курса: путь копится в body-осях.
                     if (self._pos_sp is not None
                             and abs(math.atan2(math.sin(s.att_yaw - self._pos_sp[1]),
@@ -384,11 +396,20 @@ class _FlowDamper1D(StabilizationStrategy):
                             > self._POS_YAW_TOL):
                         self._pos_sp = None
                     if self._pos_sp is None:
-                        self._pos_sp = (pos, s.att_yaw)
-                    self._target = clamp(self.pos_kp * (self._pos_sp[0] - pos),
-                                         -self.pos_vmax, self.pos_vmax)
+                        if self._pos_wait_t is None:
+                            self._pos_wait_t = s.now_sim
+                        if (abs(self._signal(s)) < self._POS_PIN_V
+                                or s.now_sim - self._pos_wait_t > self._POS_PIN_T):
+                            self._pos_sp = (pos, s.att_yaw)
+                            self._pos_wait_t = None
+                    if self._pos_sp is not None:
+                        self._target = clamp(self.pos_kp * (self._pos_sp[0] - pos),
+                                             -self.pos_vmax, self.pos_vmax)
+                    else:
+                        self._target = 0.0    # ещё тормозим — гвоздь позже
                 else:
                     self._pos_sp = None       # стик живой → точка отпущена
+                    self._pos_wait_t = None
                     self._target = cmd * self.cmd_gain
                 err = self._signal(s) - self._target                    # velocity-assist
             self._i = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
