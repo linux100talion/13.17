@@ -205,7 +205,7 @@ default `/dev/input/js0`; лог `output/joy.log`).
 BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="climb3,pilot60,land" \
   BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_FENCE=25 BS_MODE_BUDGET=80 \
   BS_IPM_DEROT=1.0 BS_IPM_WIN=0.5 BS_IPM_WZ_TAU=2.0 BS_LAND_BUDGET=180 \
-  BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=100 BS_PITCH_RATE_KP=100 \
+  BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=100 BS_PITCH_RATE_KP=30 \
   BS_PITCH_RATE_CMD_GAIN=2 BS_ROLL_RATE_CMD_GAIN=2 \
   BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KP=30 \
   BS_SLEW=300 BS_THROTTLE_CLIMB=1800 \
@@ -214,6 +214,13 @@ BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="climb3,pilot60,land" \
   TOPICS_EXTRA="/joy /model/iris_cam/odometry" GDRIVE_UP=0 MP4=1 \
   bash src/lab/capture_scene.sh 960x540 bootstrap_arch2
 ```
+⚠️ `BS_PITCH_RATE_KP=30` (был 100): свип PTkp30/50/100 (hover40, 2026-08-18) —
+kp=100 звенел (26 смен знака/мин, качели ±1.5-2 м/с), kp=30 выиграл по всем
+метрикам (СКО vfwd 0.45 против 0.61-1.02, ср|PWM| 20 против 53-69, уход 4.5 м).
+Симметрично крену, у которого 30 стояло всегда. Плюс с этого дня по умолчанию
+включён комплементарный фильтр скорости IPM (`ipm_vel_tau=0.4` в config):
+провалы кадров мостятся прогнозом наклона тяги, ipm_ok в воздухе 100%.
+
 `pilot60` = 60 сим-сек живого пилотирования между взлётом и посадкой; селектор
 щёлкается на лету сколько угодно раз. **`pilot` БЕЗ числа** (`BS_MISSION=
 "climb3,pilot,land"`) = летаем БЕССРОЧНО; закончил — из второго терминала

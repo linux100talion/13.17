@@ -56,7 +56,7 @@ class FlowEstimator:
                  kf_alt_hold=1.5, yaw_trans_fix=True, kf_seg_min_sec=0.3, kf_seg_frac=0.30,
                  kf_seg_cap_sec=10.0, ipm=True, ipm_x0=3.0, ipm_x1=6.0,
                  ipm_yhalf=2.0, ipm_res=0.02, ipm_win=0.5, ipm_model='legacy',
-                 ipm_derot=0.0, ipm_wz_tau=0.0, ipm_adapt=0.0):
+                 ipm_derot=0.0, ipm_wz_tau=0.0, ipm_adapt=0.0, ipm_vel_tau=0.0):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -108,6 +108,25 @@ class FlowEstimator:
         self.ipm_adapt = float(ipm_adapt)
         self._ipm_prev_x0 = None    # начало окна ПРОШЛОГО кадра (дельта сдвига);
                                     # живёт строго парой с _ipm_prev
+        # --- КОМПЛЕМЕНТАРНЫЙ ФИЛЬТР СКОРОСТИ (наклон тяги + коррекция МНК-наклоном) ---
+        # Чем болеет чистый МНК-наклон (замеры полётов 2026-08-18): лаг ~ipm_win/2
+        # (0.25 с — на нём kp=100 звенит), провал кадров = слепота (демпфер получает
+        # протухший сигнал), на скорости занижение в 2-4 раза. Физика даёт прогноз
+        # ДАРОМ: горизонтальное ускорение коптера ≈ наклон вектора тяги (g·sin θ), а
+        # наклон уже приходит в _ipm_update. Прогноз тикает КАЖДЫЙ кадр (в т.ч.
+        # бракованный — провалы мостятся), МНК-наклон корректирует к себе с
+        # постоянной времени ipm_vel_tau. Смещение прогноза от ошибки горизонта EKF
+        # (A4: 2-5° → 0.3-0.9 м/с²) за окно провала ≤1 с даёт ≤0.9 м/с — терпимо,
+        # дольше _VEL_HOLD без измерений фильтр признаётся слепым (ipm_ok=False).
+        # ⚠️ С ФИЛЬТРОМ МЕНЯЕТСЯ СЕМАНТИКА ipm_ok: не «этот кадр посчитан», а
+        # «скорости можно верить» (измерения не старше _VEL_HOLD) — демпферы больше
+        # не глохнут на каждом браке кадра.
+        # 0 = выкл (класс- и лётный дефолт до полётной валидации знаков наклона:
+        # «конвенцию углов проверять ЧИСЛЕННО, до правки» — см. _ipm_px).
+        self.ipm_vel_tau = float(ipm_vel_tau)
+        self._ipm_v = [0.0, 0.0]     # [vfwd, vlat(влево+)] — состояние фильтра
+        self._ipm_v_t = None
+        self._ipm_meas_t = -1e9      # время последнего ГОДНОГО кадра (свежесть)
         # --- СНЯТИЕ ПОСТОЯННОЙ СОСТАВЛЯЮЩЕЙ ω_z (ФВЧ), сек; 0 = не снимать ---
         # Гироскоп даёт ω_z со СМЕЩЕНИЕМ НУЛЯ: замер против одометрии, рад/с — I1s1 −0.0236,
         # J2s1 −0.0060, L2s1 −0.0282, L2s2 −0.0242. Пока зрение гироскоп не использовало,
@@ -447,6 +466,37 @@ class FlowEstimator:
             return None
         return [self.cx + self.fx * P[0] / P[2], self.cy + self.fy * P[1] / P[2]]
 
+    _VEL_HOLD = 1.0     # сек: сколько мостим провал измерений чистым прогнозом
+
+    def _vel_reset(self):
+        """Скорость с фильтром — только в воздухе: на земле/без баро состояние 0."""
+        self._ipm_v = [0.0, 0.0]
+        self._ipm_v_t = None
+        self._ipm_meas_t = -1e9
+
+    def _vel_predict(self, stamp, pitch, roll, wz):
+        """Прогноз скорости на кадр: наклон тяги + поворот body-осей рысканием.
+
+        Знаки — в конвенции канала (см. _ipm_px): pitch>0 = нос ВНИЗ → разгон
+        вперёд (+vfwd); roll>0 = правое крыло вниз → разгон вправо, а vlat у нас
+        ЛЕВО-положителен → минус. wz>0 = разворот влево: продольная и боковая
+        компоненты скорости перетекают друг в друга (−ω×v).
+        ⚠️ Оба знака наклона подлежат ЧИСЛЕННОЙ полётной проверке до включения
+        лётного дефолта — печальный опыт выведенных знаков задокументирован
+        в _ipm_px."""
+        if self._ipm_v_t is None:
+            self._ipm_v_t = stamp
+            return
+        dt = min(max(stamp - self._ipm_v_t, 0.0), 0.2)
+        self._ipm_v_t = stamp
+        vf, vl = self._ipm_v
+        af = 9.81 * math.sin(pitch)
+        al = -9.81 * math.sin(roll)
+        self._ipm_v[0] = vf + (af + wz * vl) * dt
+        self._ipm_v[1] = vl + (al - wz * vf) * dt
+        if stamp - self._ipm_meas_t <= self._VEL_HOLD:
+            self.ipm_vfwd, self.ipm_vlat = self._ipm_v
+
     def _ipm_window(self, h, pitch):
         """Начало полосы ЭТОГО кадра: базовое x0 или отодвинутое до границы видимости.
 
@@ -524,7 +574,13 @@ class FlowEstimator:
             self._ipm_prev = None
             self._ipm_prev_t = None
             self._ipm_prev_x0 = None
+            self._vel_reset()
             return
+        if self.ipm_vel_tau > 0.0:
+            # прогноз тикает на КАЖДОМ кадре, включая бракованные — провалы мостятся;
+            # ipm_ok при фильтре = «скорости можно верить» (измерения свежее _VEL_HOLD)
+            self._vel_predict(stamp, pitch, roll, wz)
+            self.ipm_ok = (stamp - self._ipm_meas_t) <= self._VEL_HOLD
         x0 = self._ipm_window(alt, pitch)
         if x0 is None:
             self._ipm_prev = None
@@ -601,6 +657,7 @@ class FlowEstimator:
         # но он известен ТОЧНО — вычитаем. При ipm_adapt=0 окна совпадают, дельта 0.
         self.ipm_fwd += float(np.median(d[:, 1])) * self.ipm_res - (x0 - prev_x0)
         self.ipm_ok = True
+        self._ipm_meas_t = stamp
         self._ipm_hist.append((stamp, self.ipm_fwd, self.ipm_lat))
         while self._ipm_hist and stamp - self._ipm_hist[0][0] > self.ipm_win:
             self._ipm_hist.pop(0)
@@ -609,8 +666,19 @@ class FlowEstimator:
             tc = a[:, 0] - a[:, 0].mean()
             den = float(np.dot(tc, tc))
             if den > 0 and a[-1, 0] - a[0, 0] > 0.5 * self.ipm_win:
-                self.ipm_vfwd = float(np.dot(tc, a[:, 1] - a[:, 1].mean()) / den)
-                self.ipm_vlat = float(np.dot(tc, a[:, 2] - a[:, 2].mean()) / den)
+                sf = float(np.dot(tc, a[:, 1] - a[:, 1].mean()) / den)
+                sl = float(np.dot(tc, a[:, 2] - a[:, 2].mean()) / den)
+                if self.ipm_vel_tau > 0.0:
+                    # комплементарная коррекция прогноза к МНК-наклону: быстрые
+                    # движения несёт прогноз (без лага), постоянную составляющую —
+                    # измерение (без дрейфа наклонного смещения EKF)
+                    k = (min(1.0, max(0.0, stamp - prev_t) / self.ipm_vel_tau)
+                         if prev_t is not None else 1.0)
+                    self._ipm_v[0] += k * (sf - self._ipm_v[0])
+                    self._ipm_v[1] += k * (sl - self._ipm_v[1])
+                    self.ipm_vfwd, self.ipm_vlat = self._ipm_v
+                else:
+                    self.ipm_vfwd, self.ipm_vlat = sf, sl
 
     # ---------------------------------------------------------------- опора
     def reset_keyframe(self):   # noqa: D401 — накопитель тоже обнуляется, см. ниже

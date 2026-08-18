@@ -117,6 +117,37 @@ check(f"ход 0.50 м на 6.5 м высоты: намеряно {em.ipm_fwd:+.
       0.35 < em.ipm_fwd < 0.65)
 check("боковой канал при этом молчит", abs(em.ipm_lat) < 0.1)
 
+# --- 5. КОМПЛЕМЕНТАРНЫЙ ФИЛЬТР СКОРОСТИ (ipm_vel_tau) ---
+# Прогноз наклоном тяги тикает каждый кадр (мостит провалы), МНК-наклон корректирует.
+# Знаки наклона здесь НЕ проверяются (это полётная валидация) — проверяется механика:
+# провал мостится, свежесть держится _VEL_HOLD, коррекция стягивает к измерению.
+BLACK = np.zeros((720, 1280), dtype=np.uint8)
+ef = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05, ipm_vel_tau=0.4)
+t = 0.0
+for _ in range(20):                                   # разгон фильтра на годных кадрах
+    ef._ipm_update(render(ef, 5.0), t, 5.0, 0.0, 0.0)
+    t += FPS_DT
+check("фильтр: статичная сцена → скорость ~0", ef.ipm_ok and abs(ef.ipm_vfwd) < 0.1)
+for _ in range(18):                                   # провал 0.6с + наклон нос-вниз 0.05
+    ef._ipm_update(BLACK, t, 5.0, 0.05, 0.0)
+    t += FPS_DT
+check(f"фильтр: провал 0.6с мостится прогнозом (ipm_ok=True, v={ef.ipm_vfwd:+.2f})",
+      ef.ipm_ok and 0.15 < ef.ipm_vfwd < 0.45)
+for _ in range(18):                                   # провал тянется дальше 1.0с
+    ef._ipm_update(BLACK, t, 5.0, 0.05, 0.0)
+    t += FPS_DT
+check("фильтр: провал дольше _VEL_HOLD → ipm_ok=False (слепые не командуют)",
+      not ef.ipm_ok)
+v_drift = ef._ipm_v[0]
+for _ in range(45):                                   # измерения вернулись, наклон 0
+    ef._ipm_update(render(ef, 5.0), t, 5.0, 0.0, 0.0)
+    t += FPS_DT
+check(f"фильтр: коррекция стянула дрейф {v_drift:+.2f} → {ef.ipm_vfwd:+.2f} (<0.15)",
+      ef.ipm_ok and abs(ef.ipm_vfwd) < 0.15)
+ef._ipm_update(BLACK, t, 0.3, 0.0, 0.0)              # сели: alt < 0.5
+check("фильтр: на земле состояние сброшено в 0", ef._ipm_v == [0.0, 0.0])
+# tau=0 (дефолт) — прежнее поведение: все тесты выше по файлу шли без фильтра
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ АДАПТИВНАЯ ПОЛОСА IPM OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
