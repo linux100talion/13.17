@@ -152,6 +152,7 @@ class RosPerception:
         self._att_extrap_max = float(att_extrap_max)
         self._alt = None
         self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
+        self._att_yaw = 0.0
         self._kf_dx = self._kf_dy = self._kf_logs = self._kf_rot = 0.0
         self._kf_vel = 0.0
         self._kf_n = self._kf_age = self._kf_reseeds = 0
@@ -183,6 +184,9 @@ class RosPerception:
         # крен — только для канала вида сверху (выпрямление полосы земли)
         self._roll = math.atan2(2.0 * (q.w * q.x + q.y * q.z),
                                 1.0 - 2.0 * (q.x * q.x + q.y * q.y))
+        # ENU-курс — для поворота body→ENU при отдаче скорости IPM в EKF
+        self._att_yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                                   1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         self._att_t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
 
     def _on_gyro(self, m, own=False):
@@ -265,6 +269,7 @@ class RosPerception:
         s.ipm_fwd, s.ipm_lat = self._ipm_fwd, self._ipm_lat
         s.ipm_vfwd, s.ipm_vlat = self._ipm_vfwd, self._ipm_vlat
         s.ipm_ok = self._ipm_ok
+        s.att_yaw = self._att_yaw
         return s
 
     def reset_keyframe(self):

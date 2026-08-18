@@ -16,6 +16,7 @@ RosPilot легаси — см. ros_pilot.py про петлю rc/override→rc/
     ros2 run mission_pkg bootstrap_arch2 --control-mode manual              # срез 2 (ручной)
 """
 import argparse
+import math
 import os
 import time
 
@@ -93,7 +94,7 @@ class BootstrapArch2Node(Node):
         # flow_observe — зрение БЕЗ демпфера: сигнал пишется в /flow_dbg*, но управление
         # не трогает (замер перцепта при заданном движении).
         need_flow = (cfg.control_mode == 'flow_assist') or cfg.flow_observe or \
-                    (use_mission and 'Dp' in stab_spec)
+                    (use_mission and 'Dp' in stab_spec) or cfg.vision_vel > 0
         self.perception = None
         if need_flow:
             w = float(os.environ.get('CAMERA_W', 1280))
@@ -140,6 +141,19 @@ class BootstrapArch2Node(Node):
         self.runner = PlanRunner(plan, self.clock, self.actuator, self.logger,
                                  perception=self.perception)
 
+        # --- отдача скорости IPM в EKF (vision_vel, см. config) ---
+        self._vision_pub = None
+        self._ekf_src_ok = False
+        self._ekf_src_last_try = 0.0
+        if cfg.vision_vel > 0 and self.perception is not None:
+            from geometry_msgs.msg import TwistStamped
+            self._vision_pub = self.create_publisher(
+                TwistStamped, '/mavros/vision_speed/speed_twist', 10)
+            from mavros_msgs.srv import ParamSetV2
+            self._param_cli = self.create_client(ParamSetV2, '/mavros/param/set')
+            self.logger.info("vision_vel: скорость IPM → EKF (VISION_SPEED_ESTIMATE); "
+                             "ставлю EK3_SRC1_VELXY=6 по готовности MAVROS")
+
         self._last_rc = RcCommand()
         self._arb_seized = False
         # «хватит летать»: make pilot-done → one-shot в снапшот (завершает бессрочный
@@ -183,12 +197,65 @@ class BootstrapArch2Node(Node):
                              else "возврат в АВТО")
         self._last_rc = rc
         self._publish(rc)
+        self._vision_feed(s)             # скорость IPM → EKF (если vision_vel включён)
         self.debug.publish_axes(s, rc)   # флоу-дамп в bag: /flow_dbg + /flow_dbg2 (sim-штамп)
         self.debug.publish_hold(self._hold_dbg('pitch'))       # /flow_dbg5: уставка тангажа
         # /flow_dbg7: цель крена по скорости + PWM (единственная запись roll-команды)
         self.debug.publish_rate_roll(self._rate_dbg('roll'))
         # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
+
+    def _vision_feed(self, s):
+        """Скорость IPM → EKF (VISION_SPEED_ESTIMATE): лечим ПРИЧИНУ A4-рампы.
+
+        Публикуем только при живом фильтре (ipm_ok): слепые измерения хуже их
+        отсутствия — EKF без данных просто не корректирует скорость (как сейчас),
+        а с мусором уехал бы. Поворот body→ENU курсом самого EKF (att_yaw) —
+        измерение согласовано с тем, кто его потребляет. Штамп WALL-временем:
+        FCU в SITL живёт по wall (JSON no_time_sync), sim-штамп уехал бы на часы.
+        EK3_SRC1_VELXY=6 ставится отсюда же (ретраи до успеха): рантайм-смена
+        источника EKF штатная (механизм EK3_SRC_OPTIONS/RC-switch)."""
+        if self._vision_pub is None:
+            return
+        if not self._ekf_src_ok and time.time() - self._ekf_src_last_try > 2.0:
+            self._ekf_src_last_try = time.time()
+            if self._param_cli.service_is_ready():
+                from mavros_msgs.srv import ParamSetV2
+                from rcl_interfaces.msg import ParameterValue
+                req = ParamSetV2.Request()
+                req.param_id = 'EK3_SRC1_VELXY'
+                req.value = ParameterValue(type=3, double_value=6.0)
+                fut = self._param_cli.call_async(req)
+
+                def _done(f):
+                    ok = f.result() is not None and f.result().success
+                    self._ekf_src_ok = ok
+                    (self.logger.info if ok else self.logger.warn)(
+                        "EK3_SRC1_VELXY=6: " + ("установлен" if ok else
+                                                "отказ — ретраю"))
+                fut.add_done_callback(_done)
+        if s.ipm_ok:
+            vf, vl = s.ipm_vfwd, s.ipm_vlat
+        elif s.rel_alt is not None and s.rel_alt >= 0.5:
+            return    # в воздухе со слепым фильтром молчим: нули были бы ложью
+        else:
+            # на земле/отрыве стоим — нулевая скорость ЧЕСТНАЯ. И обязательная:
+            # без данных AP_VisualOdom не даёт заармиться («Arm: VisOdom: not
+            # healthy», прогон 2026-08-18 — ARM_FAIL весь бюджет), а IPM на земле
+            # закрыт гейтом alt<0.5 — яйцо и курица рвутся именно здесь.
+            vf = vl = 0.0
+        from geometry_msgs.msg import TwistStamped
+        m = TwistStamped()
+        wall = time.time()
+        m.header.stamp.sec = int(wall)
+        m.header.stamp.nanosec = int((wall % 1.0) * 1e9)
+        m.header.frame_id = 'map'
+        cy, sy = math.cos(s.att_yaw), math.sin(s.att_yaw)
+        # body: vfwd вперёд, vlat ВЛЕВО-положителен; ENU: fwd=(cy,sy), left=(-sy,cy)
+        m.twist.linear.x = vf * cy - vl * sy
+        m.twist.linear.y = vf * sy + vl * cy
+        m.twist.linear.z = 0.0           # вертикаль не меряем: EK3_SRC1_VELZ не наш
+        self._vision_pub.publish(m)
 
     def _rate_dbg(self, axis):
         """Цель rate-оси (режим `rate`) — или None. Зеркало `_hold_dbg`."""
@@ -318,6 +385,8 @@ def _parse() -> tuple:
     p.add_argument('--ipm-adapt', dest='ipm_adapt', type=float, default=_D.ipm_adapt)
     p.add_argument('--ipm-vel-tau', dest='ipm_vel_tau', type=float,
                    default=_D.ipm_vel_tau)
+    p.add_argument('--vision-vel', dest='vision_vel', type=float,
+                   default=_D.vision_vel)
     p.add_argument('--ipm-wz-tau', dest='ipm_wz_tau', type=float, default=_D.ipm_wz_tau)
     p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
     p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,

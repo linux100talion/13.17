@@ -42,6 +42,12 @@ class DroneState:
     gt_vx: float = 0.0                     # world-скорость (конечная разность в адаптере)
     gt_vy: float = 0.0
 
+    # --- Ориентация FCU ---
+    att_yaw: float = 0.0             # ENU-курс из /mavros/imu/data (кватернион EKF);
+                                     # для поворота body→ENU при отдаче скорости IPM
+                                     # обратно в EKF (vision_speed) — та же ориентация,
+                                     # которой EKF сам и пользуется → поворот согласован
+
     # --- Поток (FlowEstimator): СЫРЫЕ агрегаты, PID теперь в домене ---
     flow_lateral: float = 0.0        # боковой поток (DpRollHold)
     flow_longitudinal: float = 0.0   # продольный/looming (DpPitchHold)
