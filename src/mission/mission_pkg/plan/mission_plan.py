@@ -30,6 +30,12 @@ ControlStack(build_stabilizers(spec) + профиль-сегмент): один 
                           --pilot joy/ros; со scripted-пилотом токен = hover (центр,
                           стек BS_STAB), бессрочная форма scripted'у запрещена.
   land | landing<x>     — посадка (Step Land; число игнорируется)
+  freefly               — СВОБОДНЫЙ ПОЛЁТ, миссия-одиночка ПО ОПРЕДЕЛЕНИЮ (другие
+                          токены рядом — ошибка). Борт просто спавнится; пилот с
+                          пульта сам армит (руддером), взлетает, летает, садится и
+                          дизармит. Газ СЫРОЙ (без защёлки и AltHold), ГЕОЗАБОР
+                          ИГНОРИРУЕТСЯ, селектор CH6 работает как в pilot.
+                          Завершение миссии = дизарм. Требует --pilot joy/ros.
 
 Реестр именованных заданий — MISSIONS (значение = список токенов или callable(cfg)).
 Инлайн-список ('climb3,mv_fwd2 …') парсится напрямую (запятые/пробелы).
@@ -44,7 +50,7 @@ from control_pkg.domain.control.trajectory import (ConstProfile, RcTransmitter,
 from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
-from .step import Arm, AwaitMode, Climb, Control, Land
+from .step import Arm, AwaitMode, Climb, Control, Freefly, Land
 
 _TOKEN = re.compile(r'^([a-z_]+?)(-?\d+(?:\.\d+)?)?$')
 
@@ -109,6 +115,21 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                     live_pilot=False):
     """mission: имя/список токенов; stab_spec: имя(+склейка) стабилизатора. → [Step]."""
     tokens = resolve_mission(cfg, mission)
+    # --- freefly: миссия-одиночка, весь цикл руками пилота (см. грамматику) ---
+    if any(_parse(t)[0] == "freefly" for t in tokens):
+        if len(tokens) != 1:
+            raise ValueError(f"freefly — миссия-одиночка по определению, другие "
+                             f"токены рядом не имеют смысла: {tokens!r}")
+        if not live_pilot:
+            raise ValueError("freefly требует живого пилота (--pilot joy/ros): "
+                             "арм/взлёт/посадка/дизарм — руками с пульта")
+        stack = ControlStack(build_stabilizers(cfg, stab_spec),
+                             RcTransmitter(cfg.pilot_deadzone, cfg.pilot_full,
+                                           cfg.pilot_pitch_sign, cfg.pilot_roll_sign),
+                             NoExcitation(), slew=cfg.slew)
+        return [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget),
+                Freefly("freefly", stack, keep=keep,
+                        pilot_stabs=build_stabilizers(cfg, stab_spec))]
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold
     lvl = cfg.mv_level
@@ -204,7 +225,7 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         else:
             raise ValueError(f"неизвестный глагол миссии {verb!r} (токен {tok!r}); допустимо: "
                              f"climb, {', '.join(_MV)}, {', '.join(_YAW)}, "
-                             f"{', '.join(_SK)}, hover, pilot, land")
+                             f"{', '.join(_SK)}, hover, pilot, land, freefly")
 
     # гарантируем посадочный шаг 'land' (Climb абортит на него; и эпилог, если не задан)
     if not any(st.name == "land" for st in steps):

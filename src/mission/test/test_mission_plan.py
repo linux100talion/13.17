@@ -229,6 +229,58 @@ def main():
         endless_bad = True
     checks.append(("compile: pilot без числа (scripted) → ValueError", endless_bad))
 
+    # --- миссия freefly: весь цикл руками пилота, миссия-одиночка ---
+    ff = compile_mission(cfg, "freefly", "DpRollHold+DpYawHold", live_pilot=True)
+    ff_names = [st.name for st in ff]
+    checks.append(("freefly: план = prearm + freefly, БЕЗ Arm и Land",
+                   ff_names == ["prearm", "freefly"]))
+    ffs = ff[-1]
+    checks.append(("freefly: стек с RcTransmitter и селектором",
+                   type(ffs.stack.traj).__name__ == "RcTransmitter"
+                   and ffs._pilot_stabs is not None))
+    checks.append(("freefly: геозабора нет вовсе (нет атрибута fence-проверки)",
+                   getattr(ffs, "fence", 0) == 0))
+    # одиночество по определению: с другими токенами — ошибка
+    try:
+        compile_mission(cfg, "climb3,freefly", "DpRollHold+DpYawHold", live_pilot=True)
+        ff_bad = False
+    except ValueError:
+        ff_bad = True
+    checks.append(("freefly: с другими токенами → ValueError", ff_bad))
+    # scripted-пилоту запрещена: армить/сажать некому
+    try:
+        compile_mission(cfg, "freefly", "DpRollHold+DpYawHold")
+        ff_scripted = False
+    except ValueError:
+        ff_scripted = True
+    checks.append(("freefly: scripted → ValueError", ff_scripted))
+    # прогон шага: до арма — сырые стики (руддер-арм возможен), дизарм завершает
+    class _FCtx:
+        class _M:
+            def set_mode(self, m): pass
+        mode = _M()
+        log = FakeLog()
+        def try_cmd(self, fn): fn()
+        def elapsed(self): return 0.0
+        def keep_mode(self, s, m): pass
+        def reset_keyframe(self): pass
+    fctx = _FCtx()
+    ffs.enter(fctx, None)
+    s_pre = DroneState(armed=False, pilot_roll=1600, pilot_pitch=1400,
+                       pilot_yaw=1900, pilot_throttle=1100, now_sim=1.0)
+    r_pre = ffs.tick(fctx, s_pre)
+    checks.append(("freefly: до арма сырые оси + сырой газ (руддер-арм возможен)",
+                   r_pre.status == RUN and r_pre.rc.yaw == 1900
+                   and r_pre.rc.throttle == 1100 and r_pre.rc.roll == 1600))
+    s_fly = DroneState(armed=True, pilot_throttle=1650, now_sim=2.0, flow_seq=1)
+    r_fly = ffs.tick(fctx, s_fly)
+    checks.append(("freefly: после арма газ сырой, полёт продолжается",
+                   r_fly.status == RUN and r_fly.rc.throttle == 1650))
+    s_dis = DroneState(armed=False, pilot_throttle=1100, now_sim=99.0, flow_seq=2)
+    r_dis = ffs.tick(fctx, s_dis)
+    checks.append(("freefly: дизарм после арма → FINISH FREEFLY_DONE",
+                   r_dis.status == FINISH and r_dis.result == "FREEFLY_DONE"))
+
     # --- токен в ГРАДУСАХ (yaw_l/yaw_r) ---
     # Смысл токена: угол — величина, за которую отвечает контур. Держится на двух вещах:
     # (1) длительность считается из общего темпа, (2) команда и добор в ОДНОМ сегменте,

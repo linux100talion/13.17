@@ -257,6 +257,72 @@ class Control(Step):
         return _run(rc)
 
 
+class Freefly(Step):
+    """СВОБОДНЫЙ ПОЛЁТ: полный ручной цикл с пульта — арм (руддером), взлёт, полёт,
+    посадка, дизарм. Миссия-одиночка по определению (гейт в compile_mission).
+
+    Отличия от pilot-сегмента Control — осознанные, по одному на строку:
+    - ГАЗ СЫРОЙ, без ThrottleLatch и AltHold: пилот владеет вертикалью с нулевой
+      секунды. Защёлка заводилась против ОПАСНОГО МОМЕНТА ПЕРЕДАЧИ управления в
+      воздухе — здесь такого момента не существует (модель «обычного пульта»), а
+      руддер-арм требует честного НИЗКОГО газа, защёлка держала бы центр.
+    - ГЕОЗАБОР НЕ ПРОВЕРЯЕТСЯ ВОВСЕ — по определению миссии.
+    - ДО ПЕРВОГО АРМА все оси сырые независимо от тумблера: руддер-арм требует
+      живого yaw, а демпферы на земле выдают центр (сигналов нет).
+    - Завершение = ДИЗАРМ после хотя бы одного арма; make pilot-done не нужен,
+      auto-Land эпилога нет — сажает пилот.
+    Селектор CH6 после арма работает как в pilot-сегменте (−1 = наш стек, 0 = чистый
+    ALT_HOLD; +1 = MANUAL правит Арбитр выше шага).
+    ⚠️ Тумблер +1 (MANUAL) до арма: газ идёт через защёлку АРБИТРА (центр, пока стик
+    не побывал в центре) — армить проще с тумблером вверх/в центре, либо сперва
+    качнуть газ через центр."""
+
+    def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None):
+        self.name = name
+        self.stack = stack
+        self.keep = keep
+        self._pilot_stabs = pilot_stabs
+        self._greeted = False
+        self._was_armed = False
+        self._stab_pos = None
+
+    def enter(self, ctx, s) -> None:
+        self._greeted = False
+        self._was_armed = False
+        self._stab_pos = None
+
+    def tick(self, ctx, s) -> StepResult:
+        rc = RcCommand(throttle=s.pilot_throttle)
+        ctx.keep_mode(s, self.keep)
+        if not self._greeted:
+            self._greeted = True
+            ctx.log.info(f"    {self.name}: борт у пилота — арм руддером (газ вниз + "
+                         f"yaw вправо); дизарм завершает миссию, геозабора нет")
+        if s.armed and not self._was_armed:
+            self._was_armed = True
+            # опора и стек — с момента арма: точка отсчёта там, где армили
+            ctx.reset_keyframe()
+            self.stack.enter(s)
+            ctx.log.info("    пилот заармил — свободный полёт")
+        if not self._was_armed:
+            rc.roll, rc.pitch, rc.yaw = s.pilot_roll, s.pilot_pitch, s.pilot_yaw
+            return _run(rc)
+        if self._pilot_stabs is not None:
+            pos = s.pilot_switch if s.pilot_switch in (-1, 0) else self._stab_pos
+            if pos is not None and pos != self._stab_pos:
+                self._stab_pos = pos
+                self.stack.switch_stabilization(self._pilot_stabs if pos == -1 else [])
+                self.stack.enter(s)      # пересев опор: держим ОТ ТЕКУЩЕЙ точки
+                ctx.log.info("    тумблер: {}".format(
+                    "НАШ СТАБИЛИЗАТОР" if pos == -1 else "чистый ALT_HOLD (стики=наклоны)"))
+        ctrl = self.stack.update(s)
+        rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
+        if not s.armed:
+            ctx.log.info("    пилот дизармил — freefly завершён")
+            return _finish(rc, "FREEFLY_DONE")
+        return _run(rc)
+
+
 class Land(Step):
     """Посадка: режим LAND, ждём касание ПО ФАКТУ. Касание = баро rel_alt<=ground_z ИЛИ
     истинная высота gt_z<=ground_z (сим-оракул: ловит посадку ГДЕ УГОДНО, в т.ч. за краем
