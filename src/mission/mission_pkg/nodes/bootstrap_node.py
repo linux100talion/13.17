@@ -141,18 +141,27 @@ class BootstrapArch2Node(Node):
         self.runner = PlanRunner(plan, self.clock, self.actuator, self.logger,
                                  perception=self.perception)
 
-        # --- отдача скорости IPM в EKF (vision_vel, см. config) ---
+        # --- отдача скорости+позиции IPM в EKF (vision_vel, см. config) ---
         self._vision_pub = None
-        self._ekf_src_ok = False
+        self._vis_pose_pub = None
+        self._vis_pos = [0.0, 0.0]       # интеграл фида → относительная ENU-позиция
+        self._vis_pos_t = None
+        # EK3-источники ставятся ПАРОЙ: прогон C (2026-08-18) показал, что без
+        # позиционного источника EK3 вовсе не начинает aiding — фид честно говорил
+        # «летишь 15 м/с» (corr +0.96, наклон +0.95 с истинной world-скоростью),
+        # а EKF держал ложный горизонт до самого fence (уход 110 м).
+        self._ekf_pending = [('EK3_SRC1_VELXY', 6.0), ('EK3_SRC1_POSXY', 6.0)]
         self._ekf_src_last_try = 0.0
         if cfg.vision_vel > 0 and self.perception is not None:
-            from geometry_msgs.msg import TwistStamped
+            from geometry_msgs.msg import PoseStamped, TwistStamped
             self._vision_pub = self.create_publisher(
                 TwistStamped, '/mavros/vision_speed/speed_twist', 10)
+            self._vis_pose_pub = self.create_publisher(
+                PoseStamped, '/mavros/vision_pose/pose', 10)
             from mavros_msgs.srv import ParamSetV2
             self._param_cli = self.create_client(ParamSetV2, '/mavros/param/set')
-            self.logger.info("vision_vel: скорость IPM → EKF (VISION_SPEED_ESTIMATE); "
-                             "ставлю EK3_SRC1_VELXY=6 по готовности MAVROS")
+            self.logger.info("vision_vel: скорость+позиция IPM → EKF (external nav); "
+                             "ставлю EK3_SRC1_VELXY=6, POSXY=6 по готовности MAVROS")
 
         self._last_rc = RcCommand()
         self._arb_seized = False
@@ -206,7 +215,7 @@ class BootstrapArch2Node(Node):
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
 
     def _vision_feed(self, s):
-        """Скорость IPM → EKF (VISION_SPEED_ESTIMATE): лечим ПРИЧИНУ A4-рампы.
+        """Скорость+позиция IPM → EKF (external nav): лечим ПРИЧИНУ A4-рампы.
 
         Публикуем только при живом фильтре (ipm_ok): слепые измерения хуже их
         отсутствия — EKF без данных просто не корректирует скорость (как сейчас),
@@ -217,22 +226,23 @@ class BootstrapArch2Node(Node):
         источника EKF штатная (механизм EK3_SRC_OPTIONS/RC-switch)."""
         if self._vision_pub is None:
             return
-        if not self._ekf_src_ok and time.time() - self._ekf_src_last_try > 2.0:
+        if self._ekf_pending and time.time() - self._ekf_src_last_try > 2.0:
             self._ekf_src_last_try = time.time()
             if self._param_cli.service_is_ready():
                 from mavros_msgs.srv import ParamSetV2
                 from rcl_interfaces.msg import ParameterValue
+                name, val = self._ekf_pending[0]
                 req = ParamSetV2.Request()
-                req.param_id = 'EK3_SRC1_VELXY'
-                req.value = ParameterValue(type=3, double_value=6.0)
+                req.param_id = name
+                req.value = ParameterValue(type=3, double_value=val)
                 fut = self._param_cli.call_async(req)
 
-                def _done(f):
+                def _done(f, name=name):
                     ok = f.result() is not None and f.result().success
-                    self._ekf_src_ok = ok
+                    if ok and self._ekf_pending and self._ekf_pending[0][0] == name:
+                        self._ekf_pending.pop(0)
                     (self.logger.info if ok else self.logger.warn)(
-                        "EK3_SRC1_VELXY=6: " + ("установлен" if ok else
-                                                "отказ — ретраю"))
+                        f"{name}: " + ("установлен" if ok else "отказ — ретраю"))
                 fut.add_done_callback(_done)
         if s.ipm_ok:
             vf, vl = s.ipm_vfwd, s.ipm_vlat
@@ -252,10 +262,32 @@ class BootstrapArch2Node(Node):
         m.header.frame_id = 'map'
         cy, sy = math.cos(s.att_yaw), math.sin(s.att_yaw)
         # body: vfwd вперёд, vlat ВЛЕВО-положителен; ENU: fwd=(cy,sy), left=(-sy,cy)
-        m.twist.linear.x = vf * cy - vl * sy
-        m.twist.linear.y = vf * sy + vl * cy
+        ve = vf * cy - vl * sy
+        vn = vf * sy + vl * cy
+        m.twist.linear.x = ve
+        m.twist.linear.y = vn
         m.twist.linear.z = 0.0           # вертикаль не меряем: EK3_SRC1_VELZ не наш
         self._vision_pub.publish(m)
+        # Позиция = интеграл фида (относительная ENU, старт в нуле). Дрейфует —
+        # и пусть: EKF нужен ХОТЬ КАКОЙ-ТО позиционный источник, чтобы вообще
+        # начать aiding (прогон C: без позиции скоростной источник игнорируется).
+        # z = баро (EK3_SRC1_POSZ остаётся баро и это не потребляет).
+        from geometry_msgs.msg import PoseStamped
+        dt = 0.0 if self._vis_pos_t is None else min(0.2, wall - self._vis_pos_t)
+        self._vis_pos_t = wall
+        self._vis_pos[0] += ve * dt
+        self._vis_pos[1] += vn * dt
+        pm = PoseStamped()
+        pm.header.stamp = m.header.stamp
+        pm.header.frame_id = 'map'
+        pm.pose.position.x = self._vis_pos[0]
+        pm.pose.position.y = self._vis_pos[1]
+        pm.pose.position.z = float(s.rel_alt or 0.0)
+        # ориентация — текущий курс EKF (кватернион вокруг z): yaw-источник EKF
+        # остаётся компасом (EK3_SRC1_YAW не трогаем), эти углы он не потребляет
+        pm.pose.orientation.z = math.sin(0.5 * s.att_yaw)
+        pm.pose.orientation.w = math.cos(0.5 * s.att_yaw)
+        self._vis_pose_pub.publish(pm)
 
     def _rate_dbg(self, axis):
         """Цель rate-оси (режим `rate`) — или None. Зеркало `_hold_dbg`."""
