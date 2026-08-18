@@ -146,7 +146,9 @@ class BootstrapConfig:
     roll_rate_kp: float = 30.0
     roll_rate_ki: float = 0.0
     roll_rate_kd: float = 0.0
-    roll_rate_cmd_gain: float = 0.0   # м/с при полном стике (0 = чистое удержание)
+    roll_rate_cmd_gain: float = 0.0   # м/с при полном стике (0 = чистое удержание:
+                                      # стик roll в DpHoldM игнорируется). Ручка —
+                                      # BS_ROLL_RATE_CMD_GAIN / --roll-rate-cmd-gain
     roll_conf_min: float = 0.05
     roll_conf_full: float = 0.20
     roll_osign: float = +1.0         # ⚠️ БЫЛО −1 и это оказалось ЗНАКОМ РАЗГОНА.
@@ -215,7 +217,10 @@ class BootstrapConfig:
     pitch_rate_kp: float = 100.0
     pitch_rate_ki: float = 0.0
     pitch_rate_kd: float = 0.0       # производная скорости = ускорение, шумно; пока 0
-    pitch_rate_cmd_gain: float = 0.0  # м/с при полном стике (0 = чистое удержание)
+    pitch_rate_cmd_gain: float = 0.0  # м/с при полном стике (0 = чистое удержание:
+                                      # стик pitch в DpHoldM игнорируется — полёт
+                                      # 2026-08-17: полный «на себя» не тормозил).
+                                      # BS_PITCH_RATE_CMD_GAIN / --pitch-rate-cmd-gain
     pitch_imax: float = 120.0
     pitch_max: float = 150.0
     pitch_conf_min: float = 0.05

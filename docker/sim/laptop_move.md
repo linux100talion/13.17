@@ -177,7 +177,11 @@ default `/dev/input/js0`; лог `output/joy.log`).
    держит текущую высоту. Тумблер SC — ТРЁХПОЗИЦИОННЫЙ СЕЛЕКТОР (токен `pilot<t>`
    в BS_MISSION, только живой пилот):
    - **вверх (−1)** — наш стабилизатор (BS_STAB, напр. DpHoldM): стики = намерение,
-     демпфер держит; при щелчке опоры пересеиваются от текущей точки;
+     демпфер держит; при щелчке опоры пересеиваются от текущей точки.
+     ⚠️ Намерение на roll/pitch проходит ТОЛЬКО при `BS_*_RATE_CMD_GAIN > 0`
+     (м/с при полном стике); при дефолте 0 демпфер целит нулевую скорость и
+     СТИКИ ИГНОРИРУЕТ (полёт 2026-08-17: полный «на себя» не тормозил разгон —
+     пилот пассажир до fence). Живыми остаются газ (латч) и yaw;
    - **центр (0)** — чистый ALT_HOLD: стабилизаторов нет, стики = наклоны;
    - **вниз (+1)** — MANUAL: Арбитр отдаёт пилоту сырые стики, миссия отстранена.
    Сверка направлений: joy_check печатает STAB/ALTHOLD/MANUAL; если верх/низ
@@ -202,6 +206,7 @@ BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="climb3,pilot60,land" \
   BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_FENCE=25 BS_MODE_BUDGET=80 \
   BS_IPM_DEROT=1.0 BS_IPM_WIN=0.5 BS_IPM_WZ_TAU=2.0 BS_LAND_BUDGET=180 \
   BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=100 BS_PITCH_RATE_KP=100 \
+  BS_PITCH_RATE_CMD_GAIN=2 BS_ROLL_RATE_CMD_GAIN=2 \
   BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KP=30 \
   BS_SLEW=300 BS_THROTTLE_CLIMB=1800 \
   BS_YAW_ARM_FRAMES=5 BS_YAW_KD=6 BS_YAW_KI=0 BS_YAW_KP=20 BS_YAW_LEAK=8 \
