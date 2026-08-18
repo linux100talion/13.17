@@ -177,6 +177,24 @@ tail = [p.update(f.step(vz=0.0, wobble=0.2, ipm_vfwd=0.2), Setpoint(), f.dt).pit
 check("взлёт: после набора ось возвращается в работу (20 PWM на 0.2 м/с)",
       tail[-1] != RC_CENTER)
 
+# --- 6. ЗНАК КОМАНДЫ КРЕНА: стик ВПРАВО обязан везти борт ВПРАВО ---
+# ipm_vlat ЛЕВО-положителен (полёт 2026-08-18: ipm_vlat ≈ −v_right по производной
+# мировой позиции; и демпфирование с osign=+1 устойчиво только при таком знаке),
+# поэтому c_right>0 ставит ОТРИЦАТЕЛЬНУЮ цель и даёт PWM выше центра (крен вправо).
+# Без минуса в _cmd стик вправо вёз борт ВЛЕВО: контур сходился к цели идеально,
+# но зеркальной — поймано пилотом, не стендом.
+rs = DpRollRate(kp=30.0, ki=0.0, kd=0.0, cmd_gain=2.0,
+                max_speed=0.0, alt_band=0.0, arm_frames=0)
+f = Fly()
+rs.enter(DroneState(flow_seq=-1))
+rc = rs.update(f.step(ipm_vlat=0.0), Setpoint(c_right=0.5), f.dt)
+# цель = −0.5·2 = −1.0 (лево-полож. единицы) → err = 0 − (−1) = +1 → kp·err = +30
+check("знак команды: стик ВПРАВО → цель отрицательна, PWM выше центра (крен вправо)",
+      rs.rate_dbg()[0] == -1.0 and rc.roll == RC_CENTER + 30)
+rc = rs.update(f.step(ipm_vlat=-1.0), Setpoint(c_right=0.5), f.dt)
+check("знак команды: борт едет вправо 1 м/с по цели → ошибка 0, roll в центре",
+      rc.roll == RC_CENTER)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ГЕЙТЫ ВИДА СВЕРХУ OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
