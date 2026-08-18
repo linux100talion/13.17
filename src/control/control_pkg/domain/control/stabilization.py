@@ -8,7 +8,8 @@
 - **Dp\\*** — ДЕМПФЕР: гонит СКОРОСТЬ к нулю по ОПТИЧЕСКОМУ ПОТОКУ (scale-free, боевой +
   sim через камеру), позицию НЕ держит. Источник — flow_lateral(roll)/flow_longitudinal(
   pitch)/flow_yaw(yaw) из FlowEstimator. Velocity-assist: цель = c_*·cmd_gain (стик).
-  Покадровая интеграция (flow_seq), conf/stale-fade. DpRollHold/DpPitchHold/DpYawHold +
+  Покадровая интеграция (flow_seq), conf-blend, hold+fade на провалах сигнала.
+  DpRollHold/DpPitchHold/DpYawHold +
   DpHold (композит всех трёх). Законы roll/yaw — порт flow_hold/yaw_hold монолита.
   `DpPitchBack` — ЗОНД: та же команда, но выпрямленная назад (проверка канала, не holds).
 - `VinsHold` — position-hold по VINS (после init, своя опора). `PilotPassthrough` — легаси.
@@ -206,7 +207,9 @@ def _blend(conf, conf_min, conf_full):
 
 class _FlowDamper1D(StabilizationStrategy):
     """Общий одноосевой флоу-демпфер: гасит визуальную скорость к цели по ОДНОЙ оси.
-    Покадровая интеграция (flow_seq), conf/stale-fade. Подклассы задают: какой сигнал
+    Покадровая интеграция (flow_seq), conf-blend; провал/протухание сигнала НЕ
+    обнуляет выход — он держится stale и гаснет к нулю за ещё stale (см. update).
+    Подклассы задают: какой сигнал
     потока читать (_signal), какую c_* брать целью (_cmd), какую ось выдавать (_axis).
 
     КАК ОСЬ ЧИТАЕТ КОМАНДУ ПИЛОТА (`_cmd_mode`) — по ПОРЯДКУ сигнала, не по вкусу:
@@ -251,6 +254,9 @@ class _FlowDamper1D(StabilizationStrategy):
         self._last_seq = -1
         self._out = 0.0
         self._last_frame_sim = -1e9
+        self._last_ok_sim = -1e9  # последний ГОДНЫЙ кадр — часы удержания выхода;
+                                  # _last_frame_sim двигают и негодные кадры (он
+                                  # задаёт шаг интегрирования), эти часы — нет
         self._sp = 0.0           # pos-режим: точка удержания (0 = опорный кадр)
         self._sp_rate = 0.0      # её текущая скорость — для D-члена и отладки
         self._target = 0.0       # ЦЕЛЬ rate-оси (c_*·cmd_gain) — записи команды у этих
@@ -286,6 +292,7 @@ class _FlowDamper1D(StabilizationStrategy):
         self._last_seq = -1
         self._out = 0.0
         self._last_frame_sim = -1e9
+        self._last_ok_sim = -1e9
         # Уставка = опорный кадр (0), который шаг только что назначил сбросом опоры.
         # Захват текущего сигнала здесь был бы гонкой со сбросом — см. docstring класса.
         self._sp = 0.0
@@ -320,11 +327,16 @@ class _FlowDamper1D(StabilizationStrategy):
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
         if s.flow_seq != self._last_seq and not self._signal_ok(s):
-            # сигнал протух (у опоры — ушла высота): НЕ командуем и забываем производную,
-            # иначе на возврате она даст пинок на всю накопленную разницу
+            # сигнал негоден (у опоры — ушла высота): PID не двигаем и забываем
+            # производную, иначе на возврате она даст пинок на всю накопленную разницу.
+            # ВЫХОД ПРИ ЭТОМ ДЕРЖИМ, а не сбрасываем в 0. Сброс превращал команду в
+            # пилу: полёт 2026-08-18 — на 3.5+ м/с провалы ipm_ok шли по 0.4–0.5 с
+            # один за другим, каждый обнулял выход, slew=300 в ControlStack не успевал
+            # вернуть его до следующего провала, и средний тормоз выходил ~30 PWM
+            # вместо упора 150 при истинных 2.6 м/с — механизм всех разгонов STAB.
+            # Гниение стоячей команды ограничено часами _last_ok_sim (см. ниже).
             self._last_seq = s.flow_seq
             self._prev_err = 0.0
-            self._out = 0.0
             self._last_frame_sim = s.now_sim
         elif s.flow_seq != self._last_seq:          # НОВЫЙ кадр → продвигаем PID
             self._last_seq = s.flow_seq
@@ -354,8 +366,15 @@ class _FlowDamper1D(StabilizationStrategy):
             u = clamp(self.kp * err + self._i + d, -self.max, self.max)
             self._out = self.osign * blend * u
             self._last_frame_sim = s.now_sim
-        fresh = (s.now_sim - self._last_frame_sim) < self.stale
-        off = int(self._out) if fresh else 0         # протух → fade в центр
+            self._last_ok_sim = s.now_sim
+        # Удержание выхода: полный авторитет `stale` секунд с последнего ГОДНОГО кадра
+        # (типовой провал ipm_ok на скорости 0.3–0.5 с — переживается без потерь),
+        # дальше линейный fade к нулю за ещё `stale` — команда старше 2·stale мертва.
+        # Резать раньше нельзя (пила, см. выше), держать дольше — слепой полёт по
+        # устаревшей команде.
+        age = s.now_sim - self._last_ok_sim
+        k = 1.0 if age < self.stale else clamp(2.0 - age / self.stale, 0.0, 1.0)
+        off = int(self._out * k)
         rc = RcCommand(throttle=RC_CENTER)
         setattr(rc, self._axis, RC_CENTER + off)
         return rc
@@ -559,9 +578,10 @@ class DpYawHold(_FlowDamper1D):
 
         ⚠️ Метод МЕНЯЕТ СОСТОЯНИЕ — в отличие от чистого `DpPitchHold._signal_ok`. Так
         можно потому, что база зовёт его ровно раз на новый кадр (`flow_seq != _last_seq`),
-        и это единственное место, где счётчику видно, что кадр НОВЫЙ. False здесь и
-        обнуляет команду, и не даёт вызвать `_advance` — то есть фантом не попадает
-        в накопитель вовсе, а не гасится потом.
+        и это единственное место, где счётчику видно, что кадр НОВЫЙ. False здесь
+        не даёт вызвать `_advance` — фантом не попадает в накопитель вовсе, а не
+        гасится потом; НОВОЙ команды такой кадр тоже не рождает (старая держится и
+        гаснет по часам `_last_ok_sim`, на отрыве она — ноль: ось ещё не взведена).
         """
         if s.flow_conf < self.conf_full:
             self._armed = 0
@@ -660,7 +680,17 @@ class _AltSettled:
             return False
         self._quiet += dt
         self.moving = False
-        return self._quiet >= self.still
+        # СТРОГОЕ сравнение — не арифметическая мелочь. На монотонном наборе quiet
+        # копится, пока высота ИДЁТ сквозь полосу, и при v = band/still (ровно 1 м/с
+        # на дефолтах) добегает до порога В ТОМ ЖЕ кадре, где полоса ещё не пробита:
+        # `>=` открывало гейт на один кадр каждые band/v секунд. Пока провал сигнала
+        # обнулял выход, это был блип в 50 мс; с hold+fade такой кадр командовал бы
+        # фантомом набора по полсекунды. Наборы МЕДЛЕННЕЕ band/still гейт не видит
+        # по конструкции (порог корридора), это документированная цена.
+        # Эпсилон — потому что quiet СУММА кадровых dt: десять сложений по 0.05
+        # дают 0.5000000000000001, и голое строгое сравнение пробивается на тех же
+        # кадрах, что и `>=`.
+        return self._quiet > self.still + 1e-9
 
 
 class _IpmGated(_FlowDamper1D):
@@ -683,7 +713,8 @@ class _IpmGated(_FlowDamper1D):
        прошедших всё выше. Любой сбой обнуляет счётчик.
 
     ⚠️ Метод МЕНЯЕТ СОСТОЯНИЕ — база зовёт его ровно раз на новый кадр
-    (`flow_seq != _last_seq`); False обнуляет команду и забывает производную.
+    (`flow_seq != _last_seq`); False замораживает PID (команда держится по часам
+    `_last_ok_sim` и гаснет к 2·stale) и забывает производную.
     ⚠️ Гейт по высоте — ПО ОСЯМ РАЗНЫЙ, и это не забывчивость: боковая ось геометрически
     почти не задета (полоса не смещается вбок при смене высоты — замер: наклон +0.25
     против +0.67, насыщения крена нет ни в одном прогоне), а слепой крен на наборе

@@ -97,12 +97,19 @@ rc = dp.update(DroneState(flow_seq=4, kf_logs=+0.02, kf_valid=True, flow_conf=0.
                           flow_dt=0.05, now_sim=0.20), Setpoint(), 0.05)
 check("DpPitchHold: ушли вперёд → нос вверх (pitch=1540)", rc.pitch == 1540)
 
-# Опора протухла (ушла высота — оценщик снял kf_valid): НЕ командуем. Иначе на наборе
-# kd берёт производную дребезга и кладёт раму на 7° (замер H6_kd: вся скорость на входе
-# в висение, 1.5 м/с, оказалась самодельной).
-rc = dp.update(DroneState(flow_seq=5, kf_logs=+0.02, kf_valid=False, flow_conf=0.5,
+# Опора протухла (ушла высота — оценщик снял kf_valid): PID СТОИТ — kd не берёт
+# производную дребезга (замер H6_kd: та производная клала раму на 7°; вся скорость на
+# входе в висение, 1.5 м/с, оказалась самодельной). Выход при этом ДЕРЖИТСЯ, а не
+# рубится в ноль (hold+fade, см. _FlowDamper1D.update): сигнал протухшего кадра
+# нарочно перевёрнут (−0.02 дал бы 1460) — видно, что новой команды он не родил.
+rc = dp.update(DroneState(flow_seq=5, kf_logs=-0.02, kf_valid=False, flow_conf=0.5,
                           flow_dt=0.05, now_sim=0.25), Setpoint(), 0.05)
-check("DpPitchHold: опора протухла → команда в центр", rc.pitch == RC_CENTER)
+check("DpPitchHold: опора протухла → новой команды нет, держится старая (1540)",
+      rc.pitch == 1540)
+rc = dp.update(DroneState(flow_seq=6, kf_logs=-0.02, kf_valid=False, flow_conf=0.5,
+                          flow_dt=0.05, now_sim=1.25), Setpoint(), 0.05)
+check("DpPitchHold: протухла дольше 2·stale → команда угасла в центр",
+      rc.pitch == RC_CENTER)
 
 # D-член берётся из ОКОННОЙ скорости опоры (s.kf_vel), а не разностью кадров: та
 # коррелирует с истинной скоростью на +0.27 против +0.80 у окна (замер J1b, где

@@ -58,12 +58,20 @@ fd2.enter(st(-1))
 rc = fd2.update(st(1, lat=5.0, now=0.05), Setpoint(c_right=-5.0), 0.05)
 check("DpRollHold velocity-assist: стик=поток → roll=центр", rc.roll == 1500)
 
-# stale: кадр протух (>0.5с без нового seq) → fade в центр
+# ПРОТУХАНИЕ: hold+fade, а не мгновенный ноль. Сброс в 0 на каждом провале превращал
+# команду в пилу (полёт 2026-08-18: провалы ipm_ok по 0.4-0.5 с на скорости + slew=300
+# давали средний тормоз ~30 PWM вместо упора 150 — механизм всех разгонов STAB).
+# Контракт: полный выход stale (0.5с) с последнего годного кадра, затем линейный fade
+# к нулю за ещё stale — команда старше 1.0с мертва.
 fd3 = DpRollHold()
 fd3.enter(st(-1))
-fd3.update(st(1, lat=5.0, now=0.05), Setpoint(), 0.05)
-rc = fd3.update(st(1, lat=5.0, now=1.0), Setpoint(), 0.05)   # тот же seq, время ушло
-check("DpRollHold stale → fade в центр", rc.roll == 1500)
+fd3.update(st(1, lat=5.0, now=0.05), Setpoint(), 0.05)       # выход 40.5 (см. выше)
+rc = fd3.update(st(1, lat=5.0, now=0.40), Setpoint(), 0.05)  # 0.35с без кадра < stale
+check("DpRollHold провал < stale → выход ДЕРЖИТСЯ полностью", rc.roll == 1540)
+rc = fd3.update(st(1, lat=5.0, now=0.80), Setpoint(), 0.05)  # 0.75с = середина fade
+check("DpRollHold провал 1.5·stale → выход угас наполовину (1520)", rc.roll == 1520)
+rc = fd3.update(st(1, lat=5.0, now=1.10), Setpoint(), 0.05)  # >2·stale
+check("DpRollHold провал > 2·stale → центр", rc.roll == 1500)
 
 # confidence ниже порога → авторитет 0
 fd4 = DpRollHold()
@@ -226,10 +234,16 @@ for k in range(2, 7):                       # пять хороших кадро
 check("взведение: 5 хороших кадров молчат (ось ещё не взведена)", rc.yaw == RC_CENTER)
 rc = arm.update(st(7, yaw=5.0, conf=1.0, now=0.35), Setpoint(), 0.05)
 check("взведение: 6-й хороший кадр — ось работает", rc.yaw != RC_CENTER)
-# срыв достоверности сбрасывает счётчик: одиночный хороший кадр посреди срыва не взводит
+# срыв достоверности сбрасывает счётчик: одиночный хороший кадр посреди срыва не
+# рождает НОВОЙ команды — но и старую не убивает (hold+fade): держится команда
+# последнего годного кадра и гаснет к 2·stale
+held = rc.yaw                                            # команда годного кадра (seq 7)
 arm.update(st(8, yaw=5.0, conf=0.0, now=0.40), Setpoint(), 0.05)
 rc = arm.update(st(9, yaw=5.0, conf=1.0, now=0.45), Setpoint(), 0.05)
-check("взведение: срыв conf сбрасывает счётчик (снова молчим)", rc.yaw == RC_CENTER)
+check("взведение: срыв conf сбросил счётчик — новой команды нет, держится старая",
+      rc.yaw == held and arm._armed == 1)
+rc = arm.update(st(10, yaw=5.0, conf=0.0, now=1.40), Setpoint(), 0.05)
+check("взведение: срыв дольше 2·stale — команда угасла в центр", rc.yaw == RC_CENTER)
 
 # 3. ВМЕСТЕ, НА ДЕФОЛТАХ: сценарий YW1s1 целиком не должен пройти.
 yw = DpYawHold(kp=20.0)
