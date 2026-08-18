@@ -469,6 +469,11 @@ def _parse() -> tuple:
     p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=_D.yaw_osign)
     p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=_D.yaw_cmd_gain)
     p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=_D.yaw_smooth)
+    # °/с при ПОЛНОМ стике — общий темп рыскания (гейн DpYawHold через S, темп
+    # Gz-холдера и длительность yaw_l/r-токенов). Поле было недостижимо снаружи —
+    # полный стик крутил только 28.65°/с (жалоба пилота freefly 2026-08-18).
+    p.add_argument('--yaw-rate-full', dest='yaw_rate_full', type=float,
+                   default=_D.yaw_rate_full)
     p.add_argument('--yaw-max-rate', dest='yaw_max_rate', type=float,
                    default=_D.yaw_max_rate)
     p.add_argument('--yaw-arm-frames', dest='yaw_arm_frames', type=int,
