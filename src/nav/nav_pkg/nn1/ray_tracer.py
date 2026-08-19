@@ -48,7 +48,10 @@ class RayTracer(Node):
         self.declare_parameter("camera_info_topic", "/camera_info")
         self.declare_parameter("attitude_topic", "/mavros/imu/data")
         self.declare_parameter("rel_alt_topic", "/mavros/global_position/rel_alt")
-        self.declare_parameter("vins_odom_topic", "/vins_estimator/odometry")
+        # Форк VINS-MONO-ROS2 публикует "odometry" ОТ КОРНЯ (в ROS2 нет
+        # приватного пространства ноды как в ROS1) → фактический топик /odometry.
+        # Старый дефолт /vins_estimator/odometry не имел издателя — мост молчал.
+        self.declare_parameter("vins_odom_topic", "/odometry")
         # интринсики-fallback, если /camera_info не пришёл (sim.yaml)
         self.declare_parameter("fx", 640.0)
         self.declare_parameter("fy", 640.0)

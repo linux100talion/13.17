@@ -33,7 +33,8 @@ class VisionPoseBridge(Node):
         super().__init__("vision_pose_bridge")
         # Топики/кадр зеркалят дефолты ray_tracer → поведение идентично его
         # passthrough-режиму (offset=0), переключение прозрачно для EKF.
-        self.declare_parameter("vins_odom_topic", "/vins_estimator/odometry")
+        # /odometry — фактический топик форка VINS-MONO-ROS2 (см. ray_tracer).
+        self.declare_parameter("vins_odom_topic", "/odometry")
         self.declare_parameter("vision_pose_topic", "/mavros/vision_pose/pose")
         self.declare_parameter("vision_pose_frame", "map")
 

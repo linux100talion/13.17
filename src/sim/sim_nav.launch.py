@@ -101,8 +101,12 @@ def generate_launch_description():
                 package="camera_pkg",
                 executable=CAMERA_EXECUTABLE,
                 output="screen",
+                # stamp_from_frame — честный штамп рендера Gazebo из трейлера
+                # bayerizer (иначе при RTF≈1 смещение ~60 мс + джиттер ±30 мс
+                # относительно IMU разваливает VINS). Только для симуляции.
                 parameters=[use_sim_time, {"device": DEVICE,
-                                           "width": CAMERA_W, "height": CAMERA_H}],
+                                           "width": CAMERA_W, "height": CAMERA_H,
+                                           "stamp_from_frame": True}],
             ),
 
             # VINS feature tracker.

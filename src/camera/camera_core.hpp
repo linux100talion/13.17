@@ -29,6 +29,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <regex>
 #include <string>
@@ -63,6 +64,16 @@ public:
         width_  = this->declare_parameter("width", 1280);
         height_ = this->declare_parameter("height", 720);
         RCLCPP_INFO(this->get_logger(), "Разрешение: %dx%d", width_, height_);
+
+        // Симуляция: брать штамп кадра из трейлера в паддинге (bayerizer кладёт
+        // sim-время рендера Gazebo за bayer-данными: 'TS17' + sec + nsec, LE).
+        // Штамповка моментом чтения при RTF≈1 даёт смещение камера↔IMU ~60 мс
+        // + джиттер ±30 мс — VINS от этого разваливается. На железе паддинга и
+        // magic нет — параметр остаётся false, путь не меняется.
+        stamp_from_frame_ = this->declare_parameter("stamp_from_frame", false);
+        if (stamp_from_frame_) {
+            RCLCPP_INFO(this->get_logger(), "Штамп кадра — из трейлера bayerizer (stamp_from_frame:=true)");
+        }
 
         // 3. CameraInfo (интринсики из конфига).
         setup_camera_info();
@@ -133,6 +144,7 @@ private:
     std::atomic<bool> running_;
     std::thread capture_thread_;
     bool stream_openhd_ = false;
+    bool stamp_from_frame_ = false;
     bool init_ok_ = false;
 
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_pub_;
@@ -251,8 +263,21 @@ private:
                 cv::Mat img_color, img_mono;
                 process_frame(img8_gamma, c_gain, c_r, c_g, c_b, img_mono, img_color);
 
-                // Единый TimeStamp на все три топика.
+                // Единый TimeStamp на все три топика. В симуляции — честное
+                // время рендера Gazebo из трейлера bayerizer (если включено и
+                // magic на месте), иначе момент чтения.
                 auto current_time = this->get_clock()->now();
+                if (stamp_from_frame_) {
+                    const size_t off = static_cast<size_t>(width_) * height_ * 2;
+                    if (frame_size_ >= off + 12 &&
+                        std::memcmp(raw_data.data() + off, "TS17", 4) == 0) {
+                        uint32_t sec, nsec;
+                        std::memcpy(&sec,  raw_data.data() + off + 4, 4);
+                        std::memcpy(&nsec, raw_data.data() + off + 8, 4);
+                        current_time = rclcpp::Time(sec, nsec,
+                                                    this->get_clock()->get_clock_type());
+                    }
+                }
 
                 std_msgs::msg::Header header;
                 header.stamp = current_time;

@@ -60,18 +60,21 @@ td: 0.0                 # стартовое значение; VINS оценит
 # estimate_extrinsic: 0 — фиксированный (не оцениваем онлайн).
 # В этом форке VINS: 0=fix, 1=optimize around initial guess, 2=no prior/calibrate.
 #
-# Конвенция: RIC — матрица поворота из тела (FLU: X вперёд, Y влево, Z вверх)
-# в camera-optical frame (Z вперёд в сцену, X вправо в кадре, Y вниз).
-# Камера в Gazebo смотрит вдоль +X camera_link (Classic-конвенция).
-# Вправо в кадре = -Y_link (Y_link = Y_body = влево), вниз = -Z_link.
-# Поза SDF: pitch=0.26 рад → X_link=[cos,0,-sin], Z_link=[sin,0,cos] в теле.
+# Конвенция VINS-Mono (как в euroc_config): extrinsicRotation = imu^R_cam —
+# поворот ИЗ camera-optical frame (X вправо в кадре, Y вниз, Z вперёд в сцену)
+# В тело (FLU: X вперёд, Y влево, Z вверх). СТОЛБЦЫ матрицы — оси камеры,
+# выраженные в теле. Камера в Gazebo смотрит вдоль +X camera_link
+# (Classic-конвенция), наклон pitch=0.26 рад вниз:
 #
-#   X_cam (вправо) = -Y_link = [0, -1, 0]
-#   Y_cam (вниз)   = -Z_link = [-sin(0.26), 0, -cos(0.26)] = [-0.257, 0, -0.966]
-#   Z_cam (вперёд) = +X_link = [cos(0.26), 0, -sin(0.26)] = [0.966, 0, -0.257]
+#   X_cam (вправо) = -Y_body                            = [0, -1, 0]
+#   Y_cam (вниз)   = [-sin(0.26), 0, -cos(0.26)]        = [-0.257, 0, -0.966]
+#   Z_cam (вперёд) = [cos(0.26), 0, -sin(0.26)]         = [0.966, 0, -0.257]
 #
-# Проверка: RIC * g_body = RIC * [0,0,-9.81] = [0, 9.48, 2.52] — гравитация
-# указывает в +Y_cam (вниз в кадре), и чуть +Z_cam (вперёд, т.к. наклон 15°). ✓
+# Проверка: R^T * g_body = g в камере = [0, 9.48, 2.52] — гравитация смотрит
+# в +Y_cam (вниз в кадре) и чуть +Z_cam (вперёд, т.к. наклон 15°). ✓
+# ⚠️ До 2026-08-19 здесь лежала ТРАНСПОНИРОВАННАЯ матрица (тело→камера, как и
+# гласил старый комментарий) — при estimate_extrinsic: 0 VINS верил ей слепо,
+# IMU и зрение систематически спорили → «big (z) translation» каждые 5-13 с.
 estimate_extrinsic: 0
 ex_calib_result_path: "/root/sim_ws/output/extrinsic.yaml"
 
@@ -79,9 +82,9 @@ extrinsicRotation: !!opencv-matrix
    rows: 3
    cols: 3
    dt: d
-   data: [0, -1, 0,
-          -0.25708, 0, -0.96639,
-          0.96639, 0, -0.25708]
+   data: [0, -0.25708, 0.96639,
+          -1, 0, 0,
+          0, -0.96639, -0.25708]
 
 # Из позы камеры в model.sdf: pose="0.15 0 0.05 ..." => [X, Y, Z] в теле FLU.
 extrinsicTranslation: !!opencv-matrix
@@ -89,6 +92,15 @@ extrinsicTranslation: !!opencv-matrix
    cols: 1
    dt: d
    data: [0.15, 0.0, 0.05]
+
+# Настройки оптимизатора (ceres). ⚠️ КРИТИЧНО: до 2026-08-19 этих ключей не
+# было ВООБЩЕ → OpenCV FileStorage возвращал 0 → ceres получал лимит 0 итераций
+# → солвер-пустышка: estimator был чистым IMU-счислением, td/ric/шумы ни на что
+# не влияли, масштаб свободно дрейфовал → «big (z) translation» каждые 5-13 с.
+# Значения — дефолты VINS-Mono (euroc_config.yaml).
+max_solver_time: 0.04    # с, бюджет одного солва
+max_num_iterations: 8
+keyframe_parallax: 10.0  # пикс (при виртуальном фокусе 460) — порог кейфрейма
 
 # Настройки трекера фич
 max_cnt: 150

@@ -20,10 +20,20 @@
 #   - каждый кадр = bayer16 (width*height*2 байт) + нули до sizeimage байт
 #   - camera_node проверяет frame_size_ >= w*h*2, берёт первые w*h*2 байт
 #     как CV_16UC1 и дальше дебайеризует на CUDA.
+#
+# Штамп рендера сквозь loopback: V4L2 не переносит timestamp продюсера, а
+# перештамповка кадра моментом ЧТЕНИЯ в camera_node при RTF≈1 даёт смещение
+# камера↔IMU ~60 мс + джиттер ±30 мс (измерено кросс-корреляцией потока фич с
+# гироскопом) → VINS разваливает выравнивание масштаба («big z translation»).
+# Поэтому в паддинг за bayer-данными кладётся трейлер с sim-временем рендера
+# Gazebo (штамп входного /camera/image_raw):
+#   offset w*h*2: magic b'TS17' + sec (uint32 LE) + nsec (uint32 LE)
+# camera_node достаёт его при stamp_from_frame:=true (sim_nav.launch.py).
 # ============================================================================
 import ctypes
 import fcntl
 import os
+import struct
 
 import numpy as np
 import rclpy
@@ -187,9 +197,13 @@ class Bayerizer(Node):
             # tobytes() на x86 — little-endian, как и ожидает CV_16UC1.
             bayer16 = bayer8.astype(np.uint16)
             data = bayer16.tobytes()                          # width*height*2 байт
+            # Трейлер со штампом рендера Gazebo — в начало паддинга (см. шапку).
+            trailer = b'TS17' + struct.pack('<II', msg.header.stamp.sec,
+                                            msg.header.stamp.nanosec)
+            data = data + trailer
             if len(data) < self.sizeimage:
                 data = data + bytes(self.sizeimage - len(data))  # zero-pad до sizeimage
-            os.write(self.fd, data)
+            os.write(self.fd, data[:self.sizeimage])
         except BrokenPipeError:
             self.get_logger().warn('Потребитель отключился, переоткрываю устройство')
             try:

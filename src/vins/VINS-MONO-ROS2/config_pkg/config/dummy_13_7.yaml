@@ -54,6 +54,12 @@ extrinsicTranslation: !!opencv-matrix
    data: [0.14, 0.0, -0.06]
 
 # Настройки трекера фич
+# Настройки оптимизатора (ceres). КРИТИЧНО: без этих ключей FileStorage даёт 0
+# → ceres 0 итераций → солвер-пустышка (найдено 2026-08-19 в симуляции).
+max_solver_time: 0.04
+max_num_iterations: 8
+keyframe_parallax: 10.0
+
 max_cnt: 150
 min_dist: 30
 freq: 15
