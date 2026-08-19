@@ -205,6 +205,19 @@ class BootstrapArch2Node(Node):
                              f"{cfg.vision_pose_src}; "
                              "ставлю EK3_SRC1_VELXY=6, POSXY=6 по готовности MAVROS")
 
+        # --- SET_GPS_GLOBAL_ORIGIN (безжпсный бут, см. config.set_origin) ---
+        self._origin_pub = None
+        self._origin_ok = False
+        self._origin_last = 0.0
+        if cfg.set_origin > 0:
+            from geographic_msgs.msg import GeoPointStamped
+            self._origin_pub = self.create_publisher(
+                GeoPointStamped, '/mavros/global_position/set_gp_origin', 1)
+            self.create_subscription(
+                GeoPointStamped, '/mavros/global_position/gp_origin',
+                self._on_gp_origin, 1)
+            self.logger.info("set_origin: шлю SET_GPS_GLOBAL_ORIGIN до подтверждения")
+
         self._last_rc = RcCommand()
         self._arb_seized = False
         # «хватит летать»: make pilot-done → one-shot в снапшот (завершает бессрочный
@@ -240,6 +253,7 @@ class BootstrapArch2Node(Node):
         s.pilot_switch = self.pilot.mode_switch()
         s.pilot_done, self._pilot_done = self._pilot_done, False   # one-shot
 
+        self._send_origin()              # безжпсный бут: origin до подтверждения
         rc = self.runner.tick(s)
         rc = self.arbiter.resolve(s, rc)          # safety-seize: MANUAL → сырые стики
         if self.arbiter.last_manual != self._arb_seized:
@@ -255,6 +269,27 @@ class BootstrapArch2Node(Node):
         self.debug.publish_rate_roll(self._rate_dbg('roll'))
         # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
+
+    def _on_gp_origin(self, _m):
+        if not self._origin_ok:
+            self._origin_ok = True
+            self.logger.info("set_origin: EKF-origin подтверждён (gp_origin)")
+
+    def _send_origin(self):
+        """SET_GPS_GLOBAL_ORIGIN раз в 2 с до подтверждения. Координаты условные
+        (борт без GPS всё равно живёт в локальном фрейме от этой точки)."""
+        if self._origin_pub is None or self._origin_ok:
+            return
+        if time.time() - self._origin_last < 2.0:
+            return
+        self._origin_last = time.time()
+        from geographic_msgs.msg import GeoPointStamped
+        m = GeoPointStamped()
+        m.header.frame_id = 'map'
+        m.position.latitude = 50.4501
+        m.position.longitude = 30.5234
+        m.position.altitude = 179.0
+        self._origin_pub.publish(m)
 
     def _vision_feed(self, s):
         """Скорость+позиция IPM → EKF (external nav): лечим ПРИЧИНУ A4-рампы.
@@ -470,6 +505,8 @@ def _parse() -> tuple:
                    default=_D.gps_disable)
     p.add_argument('--alt-src', dest='alt_src',
                    default=_D.alt_src, choices=['global', 'baro'])
+    p.add_argument('--set-origin', dest='set_origin', type=float,
+                   default=_D.set_origin)
     p.add_argument('--ipm-wz-tau', dest='ipm_wz_tau', type=float, default=_D.ipm_wz_tau)
     p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
     p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,

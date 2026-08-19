@@ -434,6 +434,11 @@ class BootstrapConfig:
                                      # едет → AltHold (газ по EKF-z) сам сажает дрон.
                                      # Если VINS не ожил — GPS остаётся (безопасно).
                                      # BS_GPS_DISABLE / --gps-disable
+    set_origin: float = 0.0          # слать SET_GPS_GLOBAL_ORIGIN до подтверждения
+                                     # (боевой безжпсный бут: без origin EKF не даёт
+                                     # локальный фрейм и не принимает extnav; с GPS
+                                     # origin ставится сам — опт-ин не нужен).
+                                     # BS_SET_ORIGIN / --set-origin
     alt_src: str = 'global'          # источник rel_alt для миссии И перцепции:
                                      # 'global' — /mavros/global_position/rel_alt
                                      # (GLOBAL_POSITION_INT; БЕЗ GPS ЗАМЕРЗАЕТ:
