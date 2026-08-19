@@ -285,6 +285,14 @@ pos_kp·(точка−путь), кламп ±vmax; стик живой → то
 в ALT_HOLD, а вход в LOITER гейтится: `extnav_ready` (очередь `EK3_SRC1_*` пар
 3→6 пройдена) + свежий VINS + в воздухе (>1.5 м). Гейт закрыт → честный ALT_HOLD.
 
+⚠️ **Пререквизит: `VISO_TYPE 1` в `config/sitl-extra.parm` (раскомментировать).**
+LV — vision-серия: без VISO_TYPE полётник игнорирует vision_pose/vision_speed,
+EKF после GPS-kill остаётся без позиции и отвечает «Mode change to Loiter failed:
+requires position» (урок LV1_loiter: вся цепочка до гейта отработала, LOITER —
+REFUSED; заодно за 80 с попыток z-оценка EKF уехала и AltHold притёр борт к
+земле). После серии вернуть назад — с VISO_TYPE=1 любой прогон БЕЗ vision-фида
+перестаёт армиться («VisOdom: not healthy», см. комментарий в parm).
+
 Две ручки (обе требуют vision-фида — `BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern`,
 профиль GPS-denied серии):
 

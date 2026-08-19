@@ -168,4 +168,8 @@ EK3_GBIAS_P_NSE 0.00001
 # BS_SET_ORIGIN=1 + BS_VISION_VEL=1 + BS_VISION_POSE_SRC=extern + BS_ALT_SRC=baro).
 # Для новой серии: раскомментировать + env выше; после серии — назад и вернуть
 # SIM_GPS1_ENABLE=1 в eeprom руками (персистится).
-#VISO_TYPE 1
+# ВКЛЮЧЁН для LV-серии (штатный LOITER-на-VINS, laptop_move.md §3): без него
+# FCU игнорирует vision_pose/vision_speed → EKF без позиции → «Mode change to
+# Loiter failed: requires position» (прогон LV1_loiter, LOITER_REFUSED).
+# После серии — закомментировать обратно.
+VISO_TYPE 1
