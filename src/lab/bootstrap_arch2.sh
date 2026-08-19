@@ -119,6 +119,7 @@ ARGS=()
 [ -n "${BS_IPM_VEL_TAU:-}" ]   && ARGS+=(--ipm-vel-tau "$BS_IPM_VEL_TAU")
 # скорость IPM в EKF (VISION_SPEED_ESTIMATE): 1 = вкл; лечит A4-рампу в корне
 [ -n "${BS_VISION_VEL:-}" ]    && ARGS+=(--vision-vel "$BS_VISION_VEL")
+[ -n "${BS_VISION_POSE_SRC:-}" ] && ARGS+=(--vision-pose-src "$BS_VISION_POSE_SRC")
 [ -n "${BS_IPM_MAX_SPEED:-}" ] && ARGS+=(--ipm-max-speed "$BS_IPM_MAX_SPEED")
 [ -n "${BS_IPM_ALT_FWD:-}" ]   && ARGS+=(--ipm-alt-band-fwd "$BS_IPM_ALT_FWD")
 [ -n "${BS_IPM_ALT_LAT:-}" ]   && ARGS+=(--ipm-alt-band-lat "$BS_IPM_ALT_LAT")

@@ -156,11 +156,17 @@ class BootstrapArch2Node(Node):
             from geometry_msgs.msg import PoseStamped, TwistStamped
             self._vision_pub = self.create_publisher(
                 TwistStamped, '/mavros/vision_speed/speed_twist', 10)
-            self._vis_pose_pub = self.create_publisher(
-                PoseStamped, '/mavros/vision_pose/pose', 10)
+            # Поза: 'integral' — наш интеграл IPM (суррогат); 'extern' — позу
+            # публикует ray_tracer (VINS, боевая архитектура), мы её НЕ дублируем
+            # (два издателя vision_pose ломают фьюжн). Скорость+нули на земле
+            # для арма шлём в любом случае.
+            if cfg.vision_pose_src != 'extern':
+                self._vis_pose_pub = self.create_publisher(
+                    PoseStamped, '/mavros/vision_pose/pose', 10)
             from mavros_msgs.srv import ParamSetV2
             self._param_cli = self.create_client(ParamSetV2, '/mavros/param/set')
-            self.logger.info("vision_vel: скорость+позиция IPM → EKF (external nav); "
+            self.logger.info("vision_vel: скорость IPM → EKF (external nav), поза: "
+                             f"{cfg.vision_pose_src}; "
                              "ставлю EK3_SRC1_VELXY=6, POSXY=6 по готовности MAVROS")
 
         self._last_rc = RcCommand()
@@ -272,6 +278,9 @@ class BootstrapArch2Node(Node):
         # и пусть: EKF нужен ХОТЬ КАКОЙ-ТО позиционный источник, чтобы вообще
         # начать aiding (прогон C: без позиции скоростной источник игнорируется).
         # z = баро (EK3_SRC1_POSZ остаётся баро и это не потребляет).
+        # При vision_pose_src='extern' позу даёт ray_tracer — блок ниже молчит.
+        if self._vis_pose_pub is None:
+            return
         from geometry_msgs.msg import PoseStamped
         dt = 0.0 if self._vis_pos_t is None else min(0.2, wall - self._vis_pos_t)
         self._vis_pos_t = wall
@@ -419,6 +428,8 @@ def _parse() -> tuple:
                    default=_D.ipm_vel_tau)
     p.add_argument('--vision-vel', dest='vision_vel', type=float,
                    default=_D.vision_vel)
+    p.add_argument('--vision-pose-src', dest='vision_pose_src',
+                   default=_D.vision_pose_src, choices=['integral', 'extern'])
     p.add_argument('--ipm-wz-tau', dest='ipm_wz_tau', type=float, default=_D.ipm_wz_tau)
     p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
     p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,

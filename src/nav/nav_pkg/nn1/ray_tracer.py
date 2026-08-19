@@ -20,6 +20,7 @@
 # ============================================================================
 import json
 import os
+import time
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -162,6 +163,12 @@ class RayTracer(Node):
             vp = PoseStamped()
             vp.header = msg.header
             vp.header.frame_id = self.vp_frame
+            # Штамп — WALL-временем: FCU в SITL живёт по wall (JSON no_time_sync),
+            # sim-штамп VINS уехал бы на часы AP_VisualOdom (см. vision-фид
+            # бутстрапа). На боевом Orin ROS-время = wall → поведение идентично.
+            wall = time.time()
+            vp.header.stamp.sec = int(wall)
+            vp.header.stamp.nanosec = int((wall % 1.0) * 1e9)
             vp.pose = corr.pose.pose
             self.pub_vision.publish(vp)
 
