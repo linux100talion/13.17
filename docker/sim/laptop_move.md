@@ -275,6 +275,65 @@ pos_kp·(точка−путь), кламп ±vmax; стик живой → то
 Завершение живого полёта: тумблер MANUAL → посадка руками (Control-фаза без
 `BS_EXCITE_MAX` не ограничена по времени — это контракт живого пилота).
 
+### Штатный LOITER-на-VINS (серия LV)
+
+Канонический ArduPilot-маршрут «VINS → vision_pose → EK3 extnav → Loiter»: позицию
+держит контроллер САМОГО полётника, наш override для него — стики пилота (в Loiter
+стик = уставка скорости). Оракул и фолбэк для `VinsHold`: тот же VINS, держит
+прошивка. ⚠️ Loiter'у нужна не GPS, а ПОЗИЦИОННАЯ ОЦЕНКА на FCU — без GPS она
+появляется только ПОСЛЕ init VINS и перевода EK3 на extnav, поэтому взлёт всегда
+в ALT_HOLD, а вход в LOITER гейтится: `extnav_ready` (очередь `EK3_SRC1_*` пар
+3→6 пройдена) + свежий VINS + в воздухе (>1.5 м). Гейт закрыт → честный ALT_HOLD.
+
+Две ручки (обе требуют vision-фида — `BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern`,
+профиль GPS-denied серии):
+
+- **Токен `loiter<t>`** (scripted, атомарная метрика): стабилизированный hover до
+  открытия гейта (бюджет `BS_LOITER_GATE_BUDGET`, дефолт 60 с; не открылся —
+  LOITER_SKIP, миссия продолжается) → LOITER t сек со стиками в центре (держит
+  FCU) → дальше по плану. FCU выпал из LOITER сам (failsafe) — уважаем и выходим
+  (LOITER_EJECT); VINS протух — LOITER_STALE. Эталонная команда серии (sk-токены
+  дают параллакс для init VINS, hover — спокойную фазу для смены источников):
+
+  ```bash
+  REPO=$(git rev-parse --show-toplevel)
+  cd $REPO && setsid nohup env NAME=LV1_loiter GDRIVE_UP=1 MP4=1 \
+    BS_PILOT=scripted BS_STAB=DpHoldM BS_HANDOVER_VINS=1 \
+    BS_MISSION="climb3,sk_fwd3,sk_fwd3,hover10,loiter40,land" \
+    BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern BS_GPS_DISABLE=1 \
+    BS_THROTTLE_CLIMB=1800 BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 \
+    BS_CLIMB_BUDGET=120 BS_LAND_BUDGET=180 BS_SLEW=300 \
+    TOPICS_EXTRA="/model/iris_cam/odometry /odometry" \
+    bash src/lab/calib_run.sh > docker/sim/output/LV1_loiter.log 2>&1 < /dev/null & disown
+  ```
+
+  Успех = `ИТОГ: LOITER_DONE`. Бейслайн для сравнения — тот же прогон с
+  `hover40` вместо `loiter40` (то же окно, но держит `VinsHold` после хэндовера);
+  метрика удержания — по истинной позе `/model/iris_cam/odometry` в обоих bag.
+  `BS_GPS_DISABLE=1` — чтобы LOITER жил на VINS, а не на GPS; первый прогон можно
+  сделать БЕЗ него (инкремент: сперва latch/удержание, потом GPS-denied).
+
+- **Freefly-селектор `BS_FF_LOITER=1`** (живой пилот): центр CH6 = штатный LOITER
+  вместо чистого ALT_HOLD. Три позиции превращаются в лесенку опор: вверх = наш
+  стек (демпфер → VinsHold после хэндовера), центр = штатный LOITER (когда гейт
+  открыт; до того — чистый ALT_HOLD с одним предупреждением в лог), вниз = MANUAL
+  (всегда ALT_HOLD — seize отдаёт стики в предсказуемой семантике «наклон»).
+  A/B «наш VinsHold против Loiter полётника» — одним щелчком в одном полёте.
+  Выход из LOITER при протухании VINS — автоматический откат в ALT_HOLD
+  (гистерезис 3×fresh, режим не дёргается на мигании свежести). Команда — та же
+  P2s-freefly плюс:
+
+  ```bash
+  BS_FF_LOITER=1 BS_HANDOVER_VINS=1 BS_GZ_CMD_GAIN=4 \
+  BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern BS_GPS_DISABLE=1 \
+  BS_MISSION="freefly" BS_PILOT=joy BS_STAB=DpHoldM ...
+  ```
+
+  В Loiter живость стиков задаёт САМ полётник (`LOIT_SPEED`/`PILOT_SPEED_UP`, не
+  наши гейны) — ощущения «вверх» и «центр» будут разными, это и есть предмет
+  сравнения. Дисциплина из GPS-denied серии действует: щёлкать в центр — в
+  спокойном ховере, не на старте манёвра.
+
 ⚠️ **Открытая ветка (боевой борт).** На Orin то же самое: пока нода оверрайдит ch1..4,
 стики радио исчезают из телеметрии. Намерение на борт нужно доставлять мимо FCU
 (второй приёмник на Orin / форвардинг каналов OpenHD/ELRS) — решить до боевого

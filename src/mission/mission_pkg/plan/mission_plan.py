@@ -21,6 +21,12 @@ ControlStack(build_stabilizers(spec) + профиль-сегмент): один 
   sk_fwd/bkwd<τ>        — station-keeping оператор на pitch: +τ/−2τ/+τ, дрон У ТОЧКИ (не уносит)
   sk_right/left<τ>      — то же на roll
   hover<t>              — держать t сек (стик центр; стабилизатор гасит снос/держит)
+  loiter<t>             — ШТАТНЫЙ LOITER t сек: позицию держит контроллер САМОГО FCU
+                          по EKF-от-VINS (extnav), стики центр. Гейт входа: extnav_ready
+                          (очередь EK3_SRC1_*=6 пройдена) + свежий VINS + в воздухе;
+                          пока закрыт — стабилизированный hover, не открылся за
+                          cfg.loiter_gate_budget → шаг пропускается (LOITER_SKIP).
+                          Требует vision-фида (BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern)
   pilot[t]              — ЖИВОЙ ПИЛОТ t сек: стики = намерение (RcTransmitter), а
                           трёхпозиционник CH6 на лету выбирает стабилизацию:
                           −1 = BS_STAB (наш), 0 = чистый ALT_HOLD (стики-наклоны),
@@ -50,7 +56,7 @@ from control_pkg.domain.control.trajectory import (ConstProfile, RcTransmitter,
 from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
-from .step import Arm, AwaitMode, Climb, Control, Freefly, Land
+from .step import Arm, AwaitMode, Climb, Control, Freefly, Land, LoiterHold
 
 _TOKEN = re.compile(r'^([a-z_]+?)(-?\d+(?:\.\d+)?)?$')
 
@@ -130,7 +136,9 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         return [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget),
                 Freefly("freefly", stack, keep=keep,
                         pilot_stabs=build_stabilizers(cfg, stab_spec),
-                        handover=handover)]
+                        handover=handover,
+                        loiter_center=cfg.ff_loiter > 0,
+                        vins_fresh=cfg.vins_fresh_sec)]
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold
     lvl = cfg.mv_level
@@ -206,6 +214,15 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
             if num is None:
                 raise ValueError(f"hover требует длительность(сек): {tok!r}")
             steps.append(_control(f"hover_{i}", ConstProfile(num)))
+        elif verb == "loiter":
+            if num is None:
+                raise ValueError(f"loiter требует длительность(сек): {tok!r}")
+            steps.append(LoiterHold(f"loiter_{i}", num, hold,
+                                    cfg.loiter_gate_budget, keep=keep,
+                                    stack=_hold_stack(), wait_gt=wait_gt,
+                                    alt_hold=alt_hold, alt_target=alt_target[0],
+                                    fresh_sec=cfg.vins_fresh_sec,
+                                    mode_budget=cfg.mode_budget))
         elif verb == "pilot":
             if num is None and not live_pilot:
                 # scripted держит центр → бессрочный сегмент никогда не кончится
@@ -226,7 +243,7 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         else:
             raise ValueError(f"неизвестный глагол миссии {verb!r} (токен {tok!r}); допустимо: "
                              f"climb, {', '.join(_MV)}, {', '.join(_YAW)}, "
-                             f"{', '.join(_SK)}, hover, pilot, land, freefly")
+                             f"{', '.join(_SK)}, hover, loiter, pilot, land, freefly")
 
     # гарантируем посадочный шаг 'land' (Climb абортит на него; и эпилог, если не задан)
     if not any(st.name == "land" for st in steps):

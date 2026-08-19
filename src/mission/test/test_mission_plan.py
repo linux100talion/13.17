@@ -24,7 +24,7 @@ from mission_pkg.config import BootstrapConfig                         # noqa: E
 from mission_pkg.plan.mission_plan import (                            # noqa: E402
     _parse, compile_mission, resolve_mission)
 from mission_pkg.plan.runner import PlanRunner                         # noqa: E402
-from mission_pkg.plan.step import FINISH, RUN, Land                    # noqa: E402
+from mission_pkg.plan.step import FINISH, NEXT, RUN, Land, LoiterHold  # noqa: E402
 from mission_pkg.recipes import build_stabilizers                     # noqa: E402
 
 
@@ -280,6 +280,111 @@ def main():
     r_dis = ffs.tick(fctx, s_dis)
     checks.append(("freefly: дизарм после арма → FINISH FREEFLY_DONE",
                    r_dis.status == FINISH and r_dis.result == "FREEFLY_DONE"))
+
+    # --- токен loiter<t>: ШТАТНЫЙ LOITER-на-VINS (позицию держит сам FCU) ---
+    lt = compile_mission(cfg, "climb3,hover5,loiter40,land", "DpRollHold+DpYawHold")
+    lseg = next(st for st in lt if st.name.startswith("loiter_"))
+    checks.append(("compile: loiter40 → LoiterHold(sec=40)",
+                   isinstance(lseg, LoiterHold) and lseg.sec == 40.0))
+    checks.append(("compile: loiter несёт hold-стек (ожидание гейта стабилизировано)",
+                   lseg.stack is not None and len(lseg.stack.stabs) >= 1))
+    try:
+        compile_mission(cfg, "climb3,loiter,land", "DpRollHold+DpYawHold")
+        lt_bad = False
+    except ValueError:
+        lt_bad = True
+    checks.append(("compile: loiter без длительности → ValueError", lt_bad))
+
+    # прогон шага на фейках: WAIT (гейт закрыт) → LATCH (шлём LOITER) → HOLD → DONE
+    class _LCtx:
+        def __init__(self):
+            self.t = 0.0
+            self.modes = []
+            self.kept = None
+            self.log = FakeLog()
+            _c = self
+            class _M:                                        # noqa: E306
+                def set_mode(self, m): _c.modes.append(m)
+            self.mode = _M()
+        def try_cmd(self, fn): fn()
+        def elapsed(self): return self.t
+        def keep_mode(self, s, m): self.kept = m
+        def reset_keyframe(self): pass
+    lctx = _LCtx()
+    lh = LoiterHold("loiter", 40.0, 1500, 60.0, fresh_sec=2.0, mode_budget=20.0)
+    lh.enter(lctx, None)
+    s_wait = DroneState(mode="ALT_HOLD", armed=True, rel_alt=3.0, extnav_ready=False,
+                        vins_odom_count=80, vins_last_sim=9.9, now_sim=10.0)
+    r_w = lh.tick(lctx, s_wait)
+    checks.append(("loiter: гейт закрыт (нет extnav) → RUN в ALT_HOLD, LOITER не шлётся",
+                   r_w.status == RUN and "LOITER" not in lctx.modes
+                   and lctx.kept == "ALT_HOLD"))
+    s_gate = DroneState(mode="ALT_HOLD", armed=True, rel_alt=3.0, extnav_ready=True,
+                        vins_odom_count=80, vins_last_sim=10.0, now_sim=10.1)
+    lh.tick(lctx, s_gate)                      # WAIT: гейт открылся (_gated)
+    r_l = lh.tick(lctx, s_gate)                # LATCH: команда LOITER пошла
+    checks.append(("loiter: гейт открыт → шлётся set_mode LOITER (FCU ещё ALT_HOLD)",
+                   r_l.status == RUN and "LOITER" in lctx.modes))
+    s_hold = DroneState(mode="LOITER", armed=True, rel_alt=3.0, extnav_ready=True,
+                        vins_odom_count=90, vins_last_sim=10.2, now_sim=10.2)
+    r_h = lh.tick(lctx, s_hold)
+    checks.append(("loiter: LOITER залатчен → все стики центр (держит FCU)",
+                   r_h.status == RUN and r_h.rc.roll == 1500 and r_h.rc.pitch == 1500
+                   and r_h.rc.yaw == 1500 and r_h.rc.throttle == 1500))
+    s_done = DroneState(mode="LOITER", armed=True, rel_alt=3.0, extnav_ready=True,
+                        vins_odom_count=900, vins_last_sim=50.1, now_sim=50.3)
+    r_d = lh.tick(lctx, s_done)
+    checks.append(("loiter: отлетали sec → NEXT LOITER_DONE",
+                   r_d.status == NEXT and r_d.result == "LOITER_DONE"))
+    # гейт не открылся за бюджет → пропуск (безопасная деградация, миссия идёт дальше)
+    lctx2 = _LCtx(); lctx2.t = 61.0
+    lh2 = LoiterHold("loiter", 40.0, 1500, 60.0)
+    lh2.enter(lctx2, None)
+    r_s = lh2.tick(lctx2, s_wait)
+    checks.append(("loiter: гейт не открылся за бюджет → NEXT LOITER_SKIP",
+                   r_s.status == NEXT and r_s.result == "LOITER_SKIP"))
+    # FCU сам выпал из LOITER (failsafe) → уважаем, выходим
+    lctx3 = _LCtx()
+    lh3 = LoiterHold("loiter", 40.0, 1500, 60.0)
+    lh3.enter(lctx3, None)
+    lh3.tick(lctx3, s_gate)
+    lh3.tick(lctx3, s_hold)                    # вошли в HOLD
+    s_eject = DroneState(mode="LAND", armed=True, rel_alt=3.0, extnav_ready=True,
+                         vins_odom_count=95, vins_last_sim=11.0, now_sim=11.0)
+    r_e = lh3.tick(lctx3, s_eject)
+    checks.append(("loiter: FCU выпал из LOITER → NEXT LOITER_EJECT (не ре-ассертим)",
+                   r_e.status == NEXT and r_e.result == "LOITER_EJECT"))
+
+    # --- freefly + BS_FF_LOITER: центр CH6 = штатный LOITER (гейт + гистерезис) ---
+    checks.append(("freefly: без BS_FF_LOITER центр = чистый ALT_HOLD (как раньше)",
+                   ffs.loiter_center is False))
+    cfg_lo = BootstrapConfig(mv_level=0.3, ff_loiter=1.0)
+    ffl = compile_mission(cfg_lo, "freefly", "DpRollHold+DpYawHold", live_pilot=True)
+    ffls = ffl[-1]
+    checks.append(("freefly+ff_loiter: loiter_center включён", ffls.loiter_center))
+    fctx2 = _LCtx()
+    ffls.enter(fctx2, None)
+    s_arm2 = DroneState(armed=True, now_sim=1.0)            # гейт закрыт (нет extnav)
+    ffls.tick(fctx2, s_arm2)
+    checks.append(("freefly+ff_loiter: центр при закрытом гейте → ALT_HOLD",
+                   fctx2.kept == "ALT_HOLD"))
+    s_ctr = DroneState(armed=True, rel_alt=3.0, pilot_switch=0, extnav_ready=True,
+                       vins_odom_count=80, vins_last_sim=2.0, now_sim=2.0, flow_seq=1)
+    ffls.tick(fctx2, s_ctr)
+    checks.append(("freefly+ff_loiter: центр при готовом extnav+VINS → LOITER",
+                   fctx2.kept == "LOITER"))
+    s_up = DroneState(armed=True, rel_alt=3.0, pilot_switch=-1, extnav_ready=True,
+                      vins_odom_count=90, vins_last_sim=3.0, now_sim=3.0, flow_seq=2)
+    ffls.tick(fctx2, s_up)
+    checks.append(("freefly+ff_loiter: селектор вверх → возврат ALT_HOLD (наш стек)",
+                   fctx2.kept == "ALT_HOLD"))
+    s_man = DroneState(armed=True, rel_alt=3.0, pilot_switch=1, extnav_ready=True,
+                       vins_odom_count=95, vins_last_sim=4.0, now_sim=4.0, flow_seq=3)
+    ffls._stab_pos = 0                          # пилот был в центре (LOITER)…
+    ffls._in_loiter = True
+    ffls.tick(fctx2, s_man)
+    checks.append(("freefly+ff_loiter: MANUAL-seize (+1) всегда возвращает ALT_HOLD",
+                   fctx2.kept == "ALT_HOLD"))
 
     # --- токен в ГРАДУСАХ (yaw_l/yaw_r) ---
     # Смысл токена: угол — величина, за которую отвечает контур. Держится на двух вещах:

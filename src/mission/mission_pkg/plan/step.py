@@ -257,6 +257,106 @@ class Control(Step):
         return _run(rc)
 
 
+class LoiterHold(Step):
+    """ШТАТНЫЙ LOITER на sec sim-сек: позицию держит контроллер САМОГО FCU по EKF,
+    скормленному VINS через vision_pose (extnav). Оракул/фолбэк для VinsHold:
+    тот же VINS, но держит прошивка, а не наш стек.
+
+    Три фазы, по одной причине на каждую:
+      WAIT  — гейт закрыт: ведём себя как стабилизированный hover (ALT_HOLD,
+              hold-стек держит горизонт, газ — контур высоты). Гейт: extnav_ready
+              (пара EK3_SRC1_*=6 применена очередью ноды) + свежий VINS + в воздухе
+              (>1.5 м — на земле без GPS позиции нет, VINS без параллакса не
+              инитится, latch невозможен по построению). Не открылся за
+              gate_budget → шаг ПРОПУСКАЕТСЯ (LOITER_SKIP): деградация безопасная,
+              миссия продолжается на нашем стеке.
+      LATCH — шлём LOITER; пока FCU не подтвердил mode, продолжаем стабилизировать
+              как в WAIT: наши законы живут в семантике ALT_HOLD (стик = наклон),
+              бросать их ДО фактической смены режима нельзя — центр-стики в
+              ALT_HOLD никого не держат. Отказ за mode_budget → LOITER_REFUSED.
+      HOLD  — mode=LOITER: ВСЕ стики в центр (центр в Loiter = «стоять», override
+              ch1..4 для FCU и есть стики пилота), позицию и высоту держит FCU.
+              Режим НЕ ре-ассертим: выпал из LOITER — это решение полётника
+              (EKF-failsafe), уважаем и выходим (LOITER_EJECT). VINS протух
+              дольше 3×fresh → выходим сами (LOITER_STALE), не дожидаясь
+              расхождения EKF. Отлетали sec → LOITER_DONE.
+    """
+
+    def __init__(self, name, sec, throttle, gate_budget, keep="ALT_HOLD",
+                 stack=None, wait_gt=False, alt_hold=None, alt_target=None,
+                 fresh_sec=2.0, mode_budget=20.0):
+        self.name = name
+        self.sec = sec
+        self.throttle = throttle
+        self.gate_budget = gate_budget
+        self.keep = keep
+        self.stack = stack            # hold-стек: держит горизонт, пока ждём гейт
+        self.wait_gt = wait_gt
+        self.alt_hold = alt_hold
+        self.alt_target = alt_target
+        self.fresh_sec = fresh_sec
+        self.mode_budget = mode_budget
+        self._entered_stack = False
+        self._gated = False
+        self._t_gate = None
+        self._t_loiter = None
+
+    def enter(self, ctx, s) -> None:
+        self._entered_stack = False
+        self._gated = False
+        self._t_gate = None
+        self._t_loiter = None
+        if self.alt_hold is not None and self.alt_target is not None:
+            self.alt_hold.set_target(self.alt_target)
+
+    def tick(self, ctx, s) -> StepResult:
+        if self._t_loiter is not None or (self._gated and s.mode == "LOITER"):
+            # --- HOLD: держит FCU, мы только считаем время и следим за VINS ---
+            if self._t_loiter is None:
+                self._t_loiter = s.now_sim
+                ctx.log.info(f"    {self.name}: LOITER залатчен — стики центр, "
+                             f"позицию держит FCU (extnav)")
+            rc = RcCommand()                       # всё в центре = «стоять»
+            if s.mode != "LOITER":
+                ctx.log.warn(f"    {self.name}: FCU вышел из LOITER (mode={s.mode}) "
+                             f"— уважаем, дальше")
+                return _next(rc, "LOITER_EJECT")
+            if (s.now_sim - s.vins_last_sim) > 3.0 * self.fresh_sec:
+                ctx.log.warn(f"    {self.name}: VINS протух — выходим из LOITER")
+                return _next(rc, "LOITER_STALE")
+            if s.now_sim - self._t_loiter >= self.sec:
+                ctx.log.info(f"    {self.name}: {self.sec:g} с в LOITER — дальше")
+                return _next(rc, "LOITER_DONE")
+            return _run(rc)
+        # --- WAIT / LATCH: стабилизированный hover в семантике ALT_HOLD ---
+        thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
+        rc = RcCommand(throttle=thr)
+        if not self._gated:
+            ctx.keep_mode(s, self.keep)
+            _overlay_stack(self, ctx, s, rc)
+            gate = (s.extnav_ready
+                    and (s.now_sim - s.vins_last_sim) < self.fresh_sec
+                    and (s.rel_alt or 0.0) > 1.5)
+            if gate:
+                self._gated = True
+                self._t_gate = s.now_sim
+                ctx.log.info(f"    {self.name}: extnav+VINS готовы "
+                             f"({s.vins_odom_count} odom) — шлю LOITER")
+            elif ctx.elapsed() > self.gate_budget:
+                ctx.log.warn(f"    {self.name}: гейт не открылся за "
+                             f"{self.gate_budget:g} с (extnav_ready={s.extnav_ready}, "
+                             f"odom={s.vins_odom_count}) — пропуск")
+                return _next(rc, "LOITER_SKIP")
+            return _run(rc)
+        ctx.try_cmd(lambda: ctx.mode.set_mode("LOITER"))
+        _overlay_stack(self, ctx, s, rc)   # до подтверждения режима держим по-старому
+        if s.now_sim - self._t_gate > self.mode_budget:
+            ctx.log.warn(f"    {self.name}: LOITER не залатчился (mode={s.mode}) "
+                         f"— пропуск")
+            return _next(rc, "LOITER_REFUSED")
+        return _run(rc)
+
+
 class Freefly(Step):
     """СВОБОДНЫЙ ПОЛЁТ: полный ручной цикл с пульта — арм (руддером), взлёт, полёт,
     посадка, дизарм. Миссия-одиночка по определению (гейт в compile_mission).
@@ -275,10 +375,19 @@ class Freefly(Step):
     ALT_HOLD; +1 = MANUAL правит Арбитр выше шага).
     ⚠️ Тумблер +1 (MANUAL) до арма: газ идёт через защёлку АРБИТРА (центр, пока стик
     не побывал в центре) — армить проще с тумблером вверх/в центре, либо сперва
-    качнуть газ через центр."""
+    качнуть газ через центр.
+
+    loiter_center (BS_FF_LOITER): центр CH6 = ШТАТНЫЙ LOITER-на-VINS вместо чистого
+    ALT_HOLD — позицию держит контроллер FCU по EKF-от-VINS, стики (наш passthrough-
+    override) для него уставки скорости. Гейт тот же, что у LoiterHold: extnav_ready
+    + свежий VINS + в воздухе; закрыт → честный ALT_HOLD с одним предупреждением.
+    Выход из LOITER — с гистерезисом (3×fresh): мигание свежести у порога не должно
+    дёргать режим под пилотом. MANUAL (+1) всегда возвращает ALT_HOLD — safety-seize
+    отдаёт сырые стики в предсказуемой семантике «стик = наклон», а не «стик =
+    скорость». Стек селектора не меняется (центр и так = пустой список)."""
 
     def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
-                 handover=None):
+                 handover=None, loiter_center=False, vins_fresh=2.0):
         self.name = name
         self.stack = stack
         self.keep = keep
@@ -287,18 +396,49 @@ class Freefly(Step):
         # (−1 или тумблер не трогали) — «вверх» = лучший доступный стек (демпфер
         # до готовности VINS, VinsHold после); центр/MANUAL свапом не трогаем.
         self.handover = handover
+        self.loiter_center = loiter_center
+        self.vins_fresh = vins_fresh
         self._greeted = False
         self._was_armed = False
         self._stab_pos = None
+        self._in_loiter = False
+        self._loiter_warned = False
 
     def enter(self, ctx, s) -> None:
         self._greeted = False
         self._was_armed = False
         self._stab_pos = None
+        self._in_loiter = False
+        self._loiter_warned = False
+
+    def _mode_target(self, ctx, s) -> str:
+        """Режим FCU под селектор (см. docstring про loiter_center)."""
+        if (not self.loiter_center or self._stab_pos != 0
+                or s.pilot_switch == 1):        # MANUAL-seize всегда в ALT_HOLD
+            self._in_loiter = False
+            self._loiter_warned = False
+            return self.keep
+        fresh_age = s.now_sim - s.vins_last_sim
+        if self._in_loiter:
+            if not s.extnav_ready or fresh_age > 3.0 * self.vins_fresh:
+                self._in_loiter = False
+                ctx.log.warn("    LOITER: VINS/extnav протух — откат в ALT_HOLD "
+                             "(стики = наклоны)")
+        elif (s.extnav_ready and fresh_age < self.vins_fresh
+                and (s.rel_alt or 0.0) > 1.5):
+            self._in_loiter = True
+            self._loiter_warned = False
+            ctx.log.info("    селектор-центр: ШТАТНЫЙ LOITER — позицию держит FCU "
+                         "(extnav), стики = уставки скорости")
+        elif not self._loiter_warned:
+            self._loiter_warned = True
+            ctx.log.info(f"    селектор-центр: LOITER не готов (extnav_ready="
+                         f"{s.extnav_ready}, odom={s.vins_odom_count}) — "
+                         f"чистый ALT_HOLD")
+        return "LOITER" if self._in_loiter else self.keep
 
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=s.pilot_throttle)
-        ctx.keep_mode(s, self.keep)
         if not self._greeted:
             self._greeted = True
             ctx.log.info(f"    {self.name}: борт у пилота — арм руддером (газ вниз + "
@@ -310,6 +450,7 @@ class Freefly(Step):
             self.stack.enter(s)
             ctx.log.info("    пилот заармил — свободный полёт")
         if not self._was_armed:
+            ctx.keep_mode(s, self.keep)
             rc.roll, rc.pitch, rc.yaw = s.pilot_roll, s.pilot_pitch, s.pilot_yaw
             return _run(rc)
         if self._pilot_stabs is not None:
@@ -320,6 +461,8 @@ class Freefly(Step):
                 self.stack.enter(s)      # пересев опор: держим ОТ ТЕКУЩЕЙ точки
                 ctx.log.info("    тумблер: {}".format(
                     "НАШ СТАБИЛИЗАТОР" if pos == -1 else "чистый ALT_HOLD (стики=наклоны)"))
+        # режим — ПОСЛЕ селектора (loiter_center читает свежий _stab_pos)
+        ctx.keep_mode(s, self._mode_target(ctx, s))
         if (self.handover is not None and self._stab_pos in (None, -1)
                 and self.handover.maybe_switch(self.stack, s)):
             ctx.log.info("    ✅ VINS сошёлся → Flow→Vins (hot-swap); стики двигают "

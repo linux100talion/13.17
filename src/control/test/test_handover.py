@@ -48,11 +48,16 @@ check("стек держит флоу (2 стабилизатора)", len(stack
 # 2. Мало odom (<min) → не готов
 check("3 odom (<5) → не готов", not ho.maybe_switch(stack, s(3, 10.5, 10.5)))
 
-# 3. Достаточно odom + свежо → switch РОВНО раз, опора захвачена (vins_x=0)
+# 3. Достаточно odom + свежо → switch РОВНО раз, опора захвачена (vins_x=0).
+# Свап меняет ТОЛЬКО оси VinsHold (roll/pitch): yaw-холд переживает свап (4a8fd39) —
+# иначе после переключения рыскание замирало в центр и живой пилот терял yaw-стик.
 st_ready = s(odom=5, last_sim=11.0, now=11.0, vins_x=0.0)
 sw = ho.maybe_switch(stack, st_ready)
 check("5 odom + свежо → switch сработал", sw and ho.switched)
-check("стек → VinsHold (1 стабилизатор)", len(stack.stabs) == 1 and isinstance(stack.stabs[0], VinsHold))
+check("стек → VinsHold + yaw-холд ПЕРЕЖИЛ свап (Flow-roll снят)",
+      isinstance(stack.stabs[0], VinsHold)
+      and any(isinstance(st, DpYawHold) for st in stack.stabs)
+      and not any(isinstance(st, DpRollHold) for st in stack.stabs))
 
 # 4. Повторно не срабатывает
 check("повторный switch не срабатывает", not ho.maybe_switch(stack, s(6, 11.05, 11.05)))

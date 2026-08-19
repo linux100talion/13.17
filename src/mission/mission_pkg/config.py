@@ -582,3 +582,15 @@ class BootstrapConfig:
     handover_vins: bool = False
     vins_min: int = 40               # сколько odom-сообщений считать сходимостью
     vins_fresh_sec: float = 2.0      # свежесть потока odom для «ready»
+    # --- ШТАТНЫЙ LOITER-на-VINS (позицию держит контроллер FCU по EKF-от-extnav) ---
+    ff_loiter: float = 0.0           # freefly: центр CH6 = штатный LOITER вместо чистого
+                                     # ALT_HOLD (гейт: extnav_ready + свежий VINS + в
+                                     # воздухе; закрыт → честный ALT_HOLD). Вверх остаётся
+                                     # нашим стеком (VinsHold) → A/B одним щелчком.
+                                     # Требует vision-фида (vision_vel>0, pose extern).
+                                     # BS_FF_LOITER / --ff-loiter
+    loiter_gate_budget: float = 60.0 # токен loiter<t>: сколько ждать готовности
+                                     # extnav+VINS (sim-сек) в стабилизированном hover;
+                                     # вышел — шаг пропускается (LOITER_SKIP, миссия
+                                     # продолжается). BS_LOITER_GATE_BUDGET /
+                                     # --loiter-gate-budget

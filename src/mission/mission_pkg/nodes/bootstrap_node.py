@@ -252,6 +252,7 @@ class BootstrapArch2Node(Node):
         s.pilot_throttle, s.pilot_yaw = sticks.throttle, sticks.yaw
         s.pilot_switch = self.pilot.mode_switch()
         s.pilot_done, self._pilot_done = self._pilot_done, False   # one-shot
+        s.extnav_ready = self._extnav_ready()    # гейт штатного LOITER-на-VINS
 
         self._send_origin()              # безжпсный бут: origin до подтверждения
         rc = self.runner.tick(s)
@@ -269,6 +270,15 @@ class BootstrapArch2Node(Node):
         self.debug.publish_rate_roll(self._rate_dbg('roll'))
         # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
+
+    def _extnav_ready(self) -> bool:
+        """EKF переведён на extnav: очередь EK3_SRC1_* пройдена (пары 3→6 применены
+        по зрелости VINS). Гейт входа в штатный LOITER (токен loiter<t>, freefly-центр
+        при ff_loiter): без extnav LOITER жил бы на GPS — не тот опыт. Вне vision-фида
+        (vision_vel=0) очередь не обрабатывается вовсе → честный False."""
+        if self._vision_pub is None:
+            return False
+        return not any(n.startswith('EK3_SRC1_') for n, _v, _r in self._ekf_pending)
 
     def _on_gp_origin(self, _m):
         if not self._origin_ok:
@@ -582,6 +592,10 @@ def _parse() -> tuple:
     p.add_argument('--handover-vins', dest='handover_vins', action='store_true')
     p.add_argument('--vins-min', dest='vins_min', type=int, default=40)
     p.add_argument('--vins-fresh-sec', dest='vins_fresh_sec', type=float, default=2.0)
+    # штатный LOITER-на-VINS: freefly-селектор (центр CH6) и бюджет гейта loiter<t>
+    p.add_argument('--ff-loiter', dest='ff_loiter', type=float, default=_D.ff_loiter)
+    p.add_argument('--loiter-gate-budget', dest='loiter_gate_budget', type=float,
+                   default=_D.loiter_gate_budget)
     a = p.parse_args()
     pilot_kind = a.pilot
     d = vars(a)

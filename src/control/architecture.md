@@ -372,7 +372,13 @@ d_*-модель монолита) снят → `test_profile_motion`. Любо�
 живой пилот): −1 → BS_STAB-стек (hot-swap через `ControlStack.switch_stabilization`
 + пересев опор от текущей точки), 0 → пустой список (чистый ALT_HOLD, стики =
 наклоны через `RcTransmitter`), +1 → MANUAL-seize Арбитра (как раньше; `Arbiter`
-смотрит строго на +1, промежуточные положения для него — AUTO). `pilot` БЕЗ числа —
+смотрит строго на +1, промежуточные положения для него — AUTO). В freefly при
+`BS_FF_LOITER=1` центр = **ШТАТНЫЙ LOITER-на-VINS** (позицию держит контроллер
+самого FCU по EKF-от-extnav, наш passthrough-override для него — стики-уставки
+скорости; гейт `extnav_ready`+свежий VINS+в воздухе, иначе честный ALT_HOLD) —
+A/B «VinsHold против Loiter прошивки» одним щелчком. Scripted-аналог — токен
+миссии `loiter<t>` (шаг `LoiterHold`, mission_pkg). Серия LV —
+`docker/sim/laptop_move.md` §3. `pilot` БЕЗ числа —
 БЕССРОЧНЫЙ сегмент: завершается one-shot-сигналом `s.pilot_done` (топик
 `/mission/pilot_done` ← `make pilot-done`; scripted'у бессрочная форма запрещена
 на компиляции — центр-стики никогда не кончатся).

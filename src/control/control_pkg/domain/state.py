@@ -32,6 +32,11 @@ class DroneState:
     vins_yaw: float = 0.0
     vins_vx: float = 0.0
     vins_vy: float = 0.0
+    # EKF полётника переведён на ExternalNav: очередь EK3_SRC1_* в ноде пройдена
+    # (пары 3→6 применены по зрелости VINS). Гейт входа в ШТАТНЫЙ LOITER-на-VINS
+    # (токен loiter<t>, freefly-центр CH6 при BS_FF_LOITER): Loiter'у нужна
+    # позиционная оценка на FCU, и без extnav он жил бы на GPS — не тот опыт.
+    extnav_ready: bool = False
 
     # --- Ground-truth Gazebo (СИМ; на Orin gt_valid=False) ---
     gt_valid: bool = False
