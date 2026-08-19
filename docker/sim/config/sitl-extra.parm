@@ -169,8 +169,9 @@ EK3_GBIAS_P_NSE 0.00001
 # Для новой серии: раскомментировать + env выше; после серии — назад и вернуть
 # SIM_GPS1_ENABLE=1 в eeprom руками (персистится).
 # LV-серия (штатный LOITER-на-VINS) закрыта 2026-08-19: LOITER_DONE (LV5) +
-# A/B против VinsHold (LV7), итоги — laptop_move.md §3. Для повторных
-# LV-прогонов раскомментировать (без него «Loiter failed: requires position»,
-# урок LV1); ПОСЛЕ — назад: с VISO_TYPE=1 прогон без vision-фида не армится
+# A/B против VinsHold (LV7), итоги — laptop_move.md §3. Для LV-прогонов
+# раскомментировать (без него «Loiter failed: requires position», урок LV1);
+# ПОСЛЕ — назад: с VISO_TYPE=1 прогон без vision-фида не армится
 # («VisOdom: not healthy» — поймано freefly-полётом сразу после серии).
-#VISO_TYPE 1
+# ВКЛЮЧЁН для freefly-LV (живой пилот, BS_FF_LOITER=1: центр CH6 = LOITER).
+VISO_TYPE 1
