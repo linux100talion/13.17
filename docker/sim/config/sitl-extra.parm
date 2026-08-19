@@ -163,6 +163,7 @@ EK3_GBIAS_P_NSE 0.00001
 # ⚠️ EK3_SRC1_VELXY, выставленный нодой, ПЕРСИСТИТСЯ в eeprom — нода при
 # BS_VISION_VEL=0... не трогает его; после vision-серии вернуть 3 руками
 # (pymavlink param_set) или make sitl-cal-заново.
-# ВКЛЮЧЁН для vision-серии 2026-08-19 (проверка фьюжна VINS-позы через
-# ray_tracer, BS_VISION_VEL=1 + BS_VISION_POSE_SRC=extern). После серии — закомментировать.
-VISO_TYPE 1
+# Vision-серия 2026-08-19 закрыта (фьюжн VINS-позы + GPS-denied доказаны,
+# см. коммиты 514ee72/3042cc2). Для новой vision-серии: раскомментировать +
+# BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern (+BS_GPS_DISABLE=1), после — назад.
+#VISO_TYPE 1
