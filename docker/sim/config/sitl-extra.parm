@@ -174,4 +174,10 @@ EK3_GBIAS_P_NSE 0.00001
 # ПОСЛЕ — назад: с VISO_TYPE=1 прогон без vision-фида не армится
 # («VisOdom: not healthy» — поймано freefly-полётом сразу после серии).
 # ВКЛЮЧЁН для freefly-LV (живой пилот, BS_FF_LOITER=1: центр CH6 = LOITER).
+# ⚠️ VISO_TYPE теперь ЖИВЁТ В EEPROM (записан param_set'ом 2026-08-19, при
+# уборке после LV-серии) — а eeprom СИЛЬНЕЕ этой строки: --defaults применяется
+# только к параметрам, которых в eeprom НЕТ (freefly-полёт с parm=1 отлетал с
+# фактическим 0: FCU не получил ни одной vision-позы, «requires position»).
+# Переключать VISO_TYPE отныне через pymavlink param_set + ребут SITL
+# (fresh-start); строка ниже — документация желаемого состояния, не механизм.
 VISO_TYPE 1
