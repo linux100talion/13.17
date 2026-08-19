@@ -305,14 +305,14 @@ REFUSED; заодно за 80 с попыток z-оценка EKF уехала 
 
   ```bash
   REPO=$(git rev-parse --show-toplevel)
-  cd $REPO && setsid nohup env NAME=LV1_loiter GDRIVE_UP=1 MP4=1 \
-    BS_PILOT=scripted BS_STAB=DpHoldM BS_HANDOVER_VINS=1 \
+  cd $REPO && setsid nohup env NAME=LV_loiter GDRIVE_UP=1 MP4=1 \
+    BS_PILOT=scripted BS_STAB=DpHoldM BS_HANDOVER_VINS=1 BS_VINS_MIN=300 \
     BS_MISSION="climb3,sk_fwd3,sk_fwd3,hover10,loiter40,land" \
     BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern BS_GPS_DISABLE=1 \
     BS_THROTTLE_CLIMB=1800 BS_MODE_BUDGET=80 BS_ARM_BUDGET=80 \
     BS_CLIMB_BUDGET=120 BS_LAND_BUDGET=180 BS_SLEW=300 \
     TOPICS_EXTRA="/model/iris_cam/odometry /odometry" \
-    bash src/lab/calib_run.sh > docker/sim/output/LV1_loiter.log 2>&1 < /dev/null & disown
+    bash src/lab/calib_run.sh > docker/sim/output/LV_loiter.log 2>&1 < /dev/null & disown
   ```
 
   Успех = `ИТОГ: LOITER_DONE`. Бейслайн для сравнения — тот же прогон с
@@ -321,6 +321,35 @@ REFUSED; заодно за 80 с попыток z-оценка EKF уехала 
   Пара `EK3_SRC1_*→6` в mission-планах уходит ТОЛЬКО в hover/loiter-фазе
   (гейт `_calm_phase` в ноде — урок LV2: свап посреди sk-манёвра = разгон-улёт
   за fence за 3.5 с; в freefly гейта фазы нет — щёлкать в спокойном ховере).
+
+  ⚠️ **`BS_VINS_MIN=300` — обязательная часть профиля** (дефолт 40 для
+  VinsHold-под-манёвром мал). Урок LV6 против LV5/LV7: свап на VINS возрастом
+  1.5 с от init (40 odom) посреди sk-манёвра дал ускоряющийся разгон до fence
+  при ЧЕСТНОЙ опоре (поза 41.16 против истинных 41.0 м, курс ±3°) — скорость/
+  масштаб свежего VIO ещё плывут; свап на зрелом VINS (300+ odom) чист даже
+  посреди манёвра (LV5). Дефолт `vins_min` не переигран (n=1, дисциплина
+  tune.md) — для LV-профиля ручка обязательна.
+
+  **Результаты серии LV (2026-08-19, прогоны LV5/LV7, окно 40 с по gt):**
+
+  | | Loiter полётника (LV5, LOITER_DONE) | VinsHold (LV7, MISSION_DONE) |
+  |---|---|---|
+  | ср. отклонение от центра | 0.85 м (СКО 0.44) | **0.07 м** (СКО 0.05) |
+  | макс. отклонение | 1.69 м | 0.24 м |
+  | размах x×y | 2.1 × 3.3 м | 0.19 × 0.29 м |
+  | дрейф начало→конец | 0.30 м | 0.11 м |
+  | размах z | 0.84 м (alt держит FCU) | 0.62 м (наш AltHold-контур) |
+
+  Оба — на чистом VINS (GPS заглушен в ховере). Разница ×10 — это не «плохой
+  Loiter»: он честно держит ОЦЕНКУ EKF, а та блуждает относительно истины
+  (инновации 1.6/2.5 м, серия №8); VinsHold ест сырую VINS-позу напрямую,
+  которая в симе почти идеальна. На реальном борте с шумным VINS зазор
+  сожмётся: EKF сглаживает, прямой путь наследует шум опоры как есть.
+  Хронология отказов серии (каждый — закоммиченный фикс): LV1 VISO_TYPE выкл →
+  REFUSED; LV2 свап EKF-источников на манёвре → FENCE (→ _calm_phase);
+  LV3 композит DpHoldM обезвреживал VinsHold → FENCE (→ порядок keep+[vins]);
+  LV4 арм до захвата позиции EKF, гонка бута → REFUSED (→ шаг ekf_warmup);
+  LV6 свап на незрелый VINS → FENCE (→ BS_VINS_MIN=300).
   `BS_GPS_DISABLE=1` — чтобы LOITER жил на VINS, а не на GPS; первый прогон можно
   сделать БЕЗ него (инкремент: сперва latch/удержание, потом GPS-denied).
 
