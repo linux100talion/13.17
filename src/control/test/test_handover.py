@@ -55,9 +55,11 @@ st_ready = s(odom=5, last_sim=11.0, now=11.0, vins_x=0.0)
 sw = ho.maybe_switch(stack, st_ready)
 check("5 odom + свежо → switch сработал", sw and ho.switched)
 check("стек → VinsHold + yaw-холд ПЕРЕЖИЛ свап (Flow-roll снят)",
-      isinstance(stack.stabs[0], VinsHold)
+      any(isinstance(st, VinsHold) for st in stack.stabs)
       and any(isinstance(st, DpYawHold) for st in stack.stabs)
       and not any(isinstance(st, DpRollHold) for st in stack.stabs))
+check("VinsHold ПОСЛЕДНИЙ в стеке (в per-axis композиции его оси побеждают)",
+      isinstance(stack.stabs[-1], VinsHold))
 
 # 4. Повторно не срабатывает
 check("повторный switch не срабатывает", not ho.maybe_switch(stack, s(6, 11.05, 11.05)))
@@ -72,6 +74,24 @@ stack2 = ControlStack([DpRollHold()], StaticSetpoint(), NoExcitation())
 stack2.enter(s(0, 10.0, 10.0))
 check("odom есть, но stale (Δ>fresh) → не ready",
       not ho2.maybe_switch(stack2, s(odom=50, last_sim=10.0, now=15.0)))
+
+# 7. КОМПОЗИТ (DpHold/DpHoldM: ОДИН стаб с осями roll+pitch+yaw). Ловушка LV1/LV3:
+# «есть yaw» сохранял композит ЦЕЛИКОМ, тот стоял ПОСЛЕ VinsHold и перезаписывал
+# roll/pitch — VinsHold обезврежен, борт дрейфовал 1.3 м/с до fence при здоровом
+# VINS. Порядок keep+[vins]: композит пишет все оси, VinsHold поверх — roll/pitch.
+from control_pkg.domain.control.stabilization import DpHold                # noqa: E402
+comp = DpHold()
+stack3 = ControlStack([comp], StaticSetpoint(), NoExcitation())
+stack3.enter(s(0, 10.0, 10.0))
+ho3 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0)
+sw3 = ho3.maybe_switch(stack3, s(5, 11.0, 11.0))
+check("композит: switch сработал, композит сохранён (yaw жив)",
+      sw3 and comp in stack3.stabs)
+check("композит: VinsHold ПОСЛЕДНИЙ → его roll/pitch перезаписывают композит",
+      isinstance(stack3.stabs[-1], VinsHold))
+rc3 = stack3.update(s(odom=6, last_sim=11.1, now=11.1, vins_x=1.5))
+check("композит: на форвард-дрейфе vins команда тангажа — от VinsHold (≠1500)",
+      rc3.pitch != 1500)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HANDOVER Flow→Vins OK" if ok_all else "❌ СБОЙ")

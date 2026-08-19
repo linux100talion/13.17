@@ -37,7 +37,17 @@ class VinsHandover:
         """Если VINS сошёлся, а ЭТОТ стек ещё на демпфере — заменить roll/pitch-
         стабилизаторы на VinsHold, СОХРАНИВ стабы других осей (yaw-холд остаётся
         жив — иначе после свапа рыскание замирало в центр, а живой пилот терял
-        yaw-стик). Возвращает True на тике переключения (лог)."""
+        yaw-стик). Возвращает True на тике переключения (лог).
+
+        ⚠️ VinsHold идёт ПОСЛЕДНИМ в списке — в per-axis композиции ControlStack
+        поздний стабилизатор перезаписывает свои оси у раннего. Порядок
+        [vins]+keep ломался на КОМПОЗИТЕ (DpHoldM: один стаб с осями
+        roll+pitch+yaw): «есть yaw» сохранял его целиком, композит стоял после
+        VinsHold и перезаписывал roll/pitch — VinsHold обезврежен, борт летел
+        на голом демпфере (прогоны LV1/LV3 2026-08-19: дрейф 1.3 м/с до fence
+        при ЗДОРОВОМ VINS). С keep+[vins] композит пишет все три оси, VinsHold
+        поверх забирает roll/pitch, yaw остаётся демпферу — верно и для
+        раздельных стабов (оси не пересекаются, порядок безразличен)."""
         if not self.vins_ready(s):
             return False
         if self._vins in stack.stabs:
@@ -45,7 +55,7 @@ class VinsHandover:
         keep = [st for st in stack.stabs
                 if "yaw" in getattr(st, "axes", frozenset())]
         self._vins.enter(s)                        # опора = текущая точка (семантика шага)
-        stack.switch_stabilization([self._vins] + keep)   # Flow → Vins, Yaw остаётся
+        stack.switch_stabilization(keep + [self._vins])   # VinsHold ПОСЛЕДНИМ (см. выше)
         self._done = True
         return True
 
