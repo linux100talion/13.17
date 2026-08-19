@@ -34,14 +34,18 @@ class VinsHandover:
                 (s.now_sim - s.vins_last_sim) < self.fresh_sec)
 
     def maybe_switch(self, stack, s) -> bool:
-        """Если VINS сошёлся, а ЭТОТ стек ещё на демпфере — заменить его
-        стабилизаторы на VinsHold. Возвращает True на тике переключения (лог)."""
+        """Если VINS сошёлся, а ЭТОТ стек ещё на демпфере — заменить roll/pitch-
+        стабилизаторы на VinsHold, СОХРАНИВ стабы других осей (yaw-холд остаётся
+        жив — иначе после свапа рыскание замирало в центр, а живой пилот терял
+        yaw-стик). Возвращает True на тике переключения (лог)."""
         if not self.vins_ready(s):
             return False
-        if stack.stabs == [self._vins]:
+        if self._vins in stack.stabs:
             return False                           # этот стек уже на VinsHold
+        keep = [st for st in stack.stabs
+                if "yaw" in getattr(st, "axes", frozenset())]
         self._vins.enter(s)                        # опора = текущая точка (семантика шага)
-        stack.switch_stabilization(self._vins)     # Flow+Yaw → VinsHold
+        stack.switch_stabilization([self._vins] + keep)   # Flow → Vins, Yaw остаётся
         self._done = True
         return True
 

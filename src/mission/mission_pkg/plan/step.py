@@ -277,11 +277,16 @@ class Freefly(Step):
     не побывал в центре) — армить проще с тумблером вверх/в центре, либо сперва
     качнуть газ через центр."""
 
-    def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None):
+    def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
+                 handover=None):
         self.name = name
         self.stack = stack
         self.keep = keep
         self._pilot_stabs = pilot_stabs
+        # handover Flow→Vins: срабатывает ТОЛЬКО в позиции селектора «наш стек»
+        # (−1 или тумблер не трогали) — «вверх» = лучший доступный стек (демпфер
+        # до готовности VINS, VinsHold после); центр/MANUAL свапом не трогаем.
+        self.handover = handover
         self._greeted = False
         self._was_armed = False
         self._stab_pos = None
@@ -315,6 +320,10 @@ class Freefly(Step):
                 self.stack.enter(s)      # пересев опор: держим ОТ ТЕКУЩЕЙ точки
                 ctx.log.info("    тумблер: {}".format(
                     "НАШ СТАБИЛИЗАТОР" if pos == -1 else "чистый ALT_HOLD (стики=наклоны)"))
+        if (self.handover is not None and self._stab_pos in (None, -1)
+                and self.handover.maybe_switch(self.stack, s)):
+            ctx.log.info("    ✅ VINS сошёлся → Flow→Vins (hot-swap); стики двигают "
+                         "точку, отпустил — держит")
         ctrl = self.stack.update(s)
         rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
         if not s.armed:

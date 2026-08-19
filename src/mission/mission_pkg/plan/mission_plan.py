@@ -129,7 +129,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                              NoExcitation(), slew=cfg.slew)
         return [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget),
                 Freefly("freefly", stack, keep=keep,
-                        pilot_stabs=build_stabilizers(cfg, stab_spec))]
+                        pilot_stabs=build_stabilizers(cfg, stab_spec),
+                        handover=handover)]
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold
     lvl = cfg.mv_level
