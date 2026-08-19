@@ -164,9 +164,18 @@ class BootstrapArch2Node(Node):
         # ЗРЕЛОСТЬ VINS (>50 сообщений ≈ 5 с после init): прогон 2026-08-19 —
         # переключение через 1.6 с после init, ровно на старте mv_fwd, дало
         # разгон-улёт (транзиент EKF на сыром масштабе + горизонтальный манёвр).
-        # Ставить пару в спокойной фазе: в миссии после climb нужен hover.
+        # ⚠️ Зрелости МАЛО — нужна ещё СПОКОЙНАЯ ФАЗА, и её проверяет _calm_phase:
+        # прогон LV2 (2026-08-19) — odom>50 наступил ПОСРЕДИ манёвра sk_fwd, пара
+        # ушла 6 на манёвре → разгон-улёт за fence за 3.5 с (LV1 в том же месте
+        # просто повезло). Комментарий «в миссии после climb нужен hover» был
+        # знанием в голове, а не в коде — очередь фазу не спрашивала. Теперь
+        # спрашивает: hover/loiter-шаг (ожидание гейта LoiterHold — тот же
+        # стабилизированный ховер). В планах без hover/loiter (freefly, легаси)
+        # гейт фазы выключен — там дисциплина на пилоте/операторе.
         # С интегралом IPM гейт не нужен — интеграл жив с земли (проверено).
-        _vins_ripe = (lambda s: s.vins_odom_count > 50) \
+        self._has_calm_steps = any(st.name.startswith(('hover', 'loiter'))
+                                   for st in plan)
+        _vins_ripe = (lambda s: s.vins_odom_count > 50 and self._calm_phase()) \
             if cfg.vision_pose_src == 'extern' else None
         # ⚠️ САМОВОССТАНОВЛЕНИЕ eeprom ПЕРЕД АРМОМ: EK3_SRC1_* персистятся, и
         # после vision-прогона следующий бут стартует с extnav-источниками БЕЗ
@@ -270,6 +279,16 @@ class BootstrapArch2Node(Node):
         self.debug.publish_rate_roll(self._rate_dbg('roll'))
         # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
+
+    def _calm_phase(self) -> bool:
+        """Спокойная фаза для переключения источников EKF (урок LV2, см. очередь):
+        текущий шаг плана — hover/loiter. В планах без таких шагов не гейтим."""
+        if not self._has_calm_steps:
+            return True
+        r = self.runner
+        if r.finished:
+            return False
+        return r.steps[r.i].name.startswith(('hover', 'loiter'))
 
     def _extnav_ready(self) -> bool:
         """EKF переведён на extnav: очередь EK3_SRC1_* пройдена (пары 3→6 применены
