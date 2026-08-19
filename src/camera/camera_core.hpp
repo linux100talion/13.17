@@ -263,6 +263,17 @@ private:
                 cv::Mat img_color, img_mono;
                 process_frame(img8_gamma, c_gain, c_r, c_g, c_b, img_mono, img_color);
 
+                // Кадр неожиданного размера не публикуем: downstream (VINS
+                // feature_tracker) падает на rowRange и не перезапускается.
+                if (img_mono.rows != height_ || img_mono.cols != width_ ||
+                    img_color.rows != height_ || img_color.cols != width_) {
+                    RCLCPP_WARN(this->get_logger(),
+                                "Кадр %dx%d/%dx%d вместо %dx%d — пропущен",
+                                img_mono.cols, img_mono.rows,
+                                img_color.cols, img_color.rows, width_, height_);
+                    continue;
+                }
+
                 // Единый TimeStamp на все три топика. В симуляции — честное
                 // время рендера Gazebo из трейлера bayerizer (если включено и
                 // magic на месте), иначе момент чтения.
