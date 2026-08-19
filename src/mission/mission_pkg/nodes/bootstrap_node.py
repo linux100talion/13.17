@@ -193,6 +193,12 @@ class BootstrapArch2Node(Node):
         # EKF-z) сам сажает дрон. Если VINS так и не оживёт — GPS не глушится
         # вовсе (миссия остаётся на GPS, безопасная деградация).
         if cfg.gps_disable > 0:
+            # Самовосстановление GPS ДО арма (голова очереди): SIM_GPS1_ENABLE=0
+            # прошлого прогона ПЕРСИСТИТСЯ в eeprom — следующий бут остался бы
+            # без GPS с земли (climb по замёрзшему global не видит взлёта).
+            # Симметрично самовосстановлению EK3_SRC1_* выше; убирает ручной
+            # pymavlink-шаг между прогонами (LV-серия делала его трижды).
+            self._ekf_pending.insert(0, ('SIM_GPS1_ENABLE', 1.0, None))
             self._ekf_pending.append(
                 ('SIM_GPS1_ENABLE', 0.0,
                  lambda s: s.vins_odom_count > 50 and (s.rel_alt or 0.0) > 1.5))
