@@ -80,7 +80,7 @@ class BootstrapArch2Node(Node):
 
         # адаптеры (инфраструктура)
         self.clock = RosClock(self)
-        self.telemetry = RosTelemetry(self, self.clock)
+        self.telemetry = RosTelemetry(self, self.clock, alt_src=cfg.alt_src)
         self.actuator = MavrosActuator(self)     # RcOutput + FlightMode
         self.logger = RosLogger(self)
         self.debug = RosDebugSink(self)
@@ -115,6 +115,13 @@ class BootstrapArch2Node(Node):
                                             ipm_win=cfg.ipm_win,
                                             ipm_adapt=cfg.ipm_adapt,
                                             ipm_vel_tau=cfg.ipm_vel_tau)
+            # ⚠️ ПЕРЦЕПЦИЯ ВСЕГДА НА GLOBAL rel_alt (cfg.alt_src сюда НЕ прокидываем):
+            # 4 прогона 2026-08-19 с баро-высотой в перцепции (сырой И EMA) дали
+            # горизонтальный улёт при наборе (15-59 м, демпфер срывается — логика
+            # опоры/гейтов IPM заточена под характер global-канала). С global —
+            # чисто. После GPS-kill global замерзает НА ВЫСОТЕ ХОВЕРА — масштаб
+            # IPM остаётся валидным для ховер-фазы (деградация терпима). Перевод
+            # перцепции на баро — отдельная кампания (для борта без GPS нужен).
 
         # рантайм switch Flow→Vins: флаг + флоу-стабилизатор (VinsHold на gz_* гейнах)
         handover = None
@@ -150,7 +157,36 @@ class BootstrapArch2Node(Node):
         # позиционного источника EK3 вовсе не начинает aiding — фид честно говорил
         # «летишь 15 м/с» (corr +0.96, наклон +0.95 с истинной world-скоростью),
         # а EKF держал ложный горизонт до самого fence (уход 110 м).
-        self._ekf_pending = [('EK3_SRC1_VELXY', 6.0), ('EK3_SRC1_POSXY', 6.0)]
+        # Очередь параметров: (имя, значение, готовность|None). Готовность —
+        # предикат по снапшоту; пока не истинен, запись НЕ отправляется (и
+        # блокирует хвост очереди — порядок строгий).
+        # При позе от VINS (extern) переключение источников EKF гейтится на
+        # ЗРЕЛОСТЬ VINS (>50 сообщений ≈ 5 с после init): прогон 2026-08-19 —
+        # переключение через 1.6 с после init, ровно на старте mv_fwd, дало
+        # разгон-улёт (транзиент EKF на сыром масштабе + горизонтальный манёвр).
+        # Ставить пару в спокойной фазе: в миссии после climb нужен hover.
+        # С интегралом IPM гейт не нужен — интеграл жив с земли (проверено).
+        _vins_ripe = (lambda s: s.vins_odom_count > 50) \
+            if cfg.vision_pose_src == 'extern' else None
+        # ⚠️ САМОВОССТАНОВЛЕНИЕ eeprom ПЕРЕД АРМОМ: EK3_SRC1_* персистятся, и
+        # после vision-прогона следующий бут стартует с extnav-источниками БЕЗ
+        # якоря VINS — EKF фьюзит климб-фантом IPM-скорости → улёт на наборе
+        # (серия 2026-08-19: 6 прогонов до диагноза). Возвращаем GPS до арма,
+        # на extnav переходим по зрелости VINS (гейт выше).
+        self._ekf_pending = [('EK3_SRC1_VELXY', 3.0, None),
+                             ('EK3_SRC1_POSXY', 3.0, None),
+                             ('EK3_SRC1_VELXY', 6.0, _vins_ripe),
+                             ('EK3_SRC1_POSXY', 6.0, _vins_ripe)]
+        # GPS-denied профиль «GPS теряется В ПОЛЁТЕ»: глушим GPS только когда
+        # VINS реально публикует одометрию И дрон в воздухе. Попытка глушить на
+        # земле (прогон 2026-08-19) провалилась: VINS без параллакса не инитится,
+        # EKF минуты без позиционных данных → z-оценка едет → AltHold (газ по
+        # EKF-z) сам сажает дрон. Если VINS так и не оживёт — GPS не глушится
+        # вовсе (миссия остаётся на GPS, безопасная деградация).
+        if cfg.gps_disable > 0:
+            self._ekf_pending.append(
+                ('SIM_GPS1_ENABLE', 0.0,
+                 lambda s: s.vins_odom_count > 50 and (s.rel_alt or 0.0) > 1.5))
         self._ekf_src_last_try = 0.0
         if cfg.vision_vel > 0 and self.perception is not None:
             from geometry_msgs.msg import PoseStamped, TwistStamped
@@ -234,10 +270,10 @@ class BootstrapArch2Node(Node):
             return
         if self._ekf_pending and time.time() - self._ekf_src_last_try > 2.0:
             self._ekf_src_last_try = time.time()
-            if self._param_cli.service_is_ready():
+            name, val, ready = self._ekf_pending[0]
+            if (ready is None or ready(s)) and self._param_cli.service_is_ready():
                 from mavros_msgs.srv import ParamSetV2
                 from rcl_interfaces.msg import ParameterValue
-                name, val = self._ekf_pending[0]
                 req = ParamSetV2.Request()
                 req.param_id = name
                 req.value = ParameterValue(type=3, double_value=val)
@@ -430,6 +466,10 @@ def _parse() -> tuple:
                    default=_D.vision_vel)
     p.add_argument('--vision-pose-src', dest='vision_pose_src',
                    default=_D.vision_pose_src, choices=['integral', 'extern'])
+    p.add_argument('--gps-disable', dest='gps_disable', type=float,
+                   default=_D.gps_disable)
+    p.add_argument('--alt-src', dest='alt_src',
+                   default=_D.alt_src, choices=['global', 'baro'])
     p.add_argument('--ipm-wz-tau', dest='ipm_wz_tau', type=float, default=_D.ipm_wz_tau)
     p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
     p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,

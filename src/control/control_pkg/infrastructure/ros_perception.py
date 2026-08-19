@@ -64,7 +64,7 @@ class RosPerception:
                  image_topic='/image_mono', imu_topic='/mavros/imu/data',
                  gyro_topic=None, att_extrap=True, att_extrap_max=0.2,
                  ipm_model=None, ipm_derot=None, ipm_wz_tau=None, ipm_win=None,
-                 ipm_adapt=None, ipm_vel_tau=None):
+                 ipm_adapt=None, ipm_vel_tau=None, alt_src='global'):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -165,9 +165,16 @@ class RosPerception:
             node.create_subscription(Imu, gyro_topic,
                                      lambda m: self._on_gyro(m, own=True),
                                      qos_profile_sensor_data)
-        # баро-высота: опора действительна только пока высота не ушла (см. flow_estimator)
-        node.create_subscription(Float64, '/mavros/global_position/rel_alt',
-                                 self._on_alt, qos_profile_sensor_data)
+        # Высота для масштаба IPM/гейтов: 'global' — rel_alt из GLOBAL_POSITION_INT
+        # (замерзает без GPS!); 'baro' — сырой барометр (GPS-denied / боевой борт,
+        # см. baro_alt.py). Опора действительна только пока высота не ушла
+        # (см. flow_estimator).
+        if alt_src == 'baro':
+            from .baro_alt import BaroAlt
+            self._baro = BaroAlt(node, self._set_alt)
+        else:
+            node.create_subscription(Float64, '/mavros/global_position/rel_alt',
+                                     self._on_alt, qos_profile_sensor_data)
         node.create_subscription(Image, image_topic, self._on_image, qos_profile_sensor_data)
 
     def _on_imu(self, m):
@@ -222,6 +229,9 @@ class RosPerception:
 
     def _on_alt(self, m):
         self._alt = float(m.data)
+
+    def _set_alt(self, alt):
+        self._alt = float(alt)
 
     def _on_image(self, m):
         if m.encoding not in ('mono8', '8UC1'):

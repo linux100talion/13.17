@@ -17,7 +17,7 @@ from ..domain.state import DroneState
 
 
 class RosTelemetry:
-    def __init__(self, node, clock):
+    def __init__(self, node, clock, alt_src='global'):
         self._clock = clock
         self._s = DroneState()
         self._gt_px = self._gt_py = None
@@ -25,9 +25,17 @@ class RosTelemetry:
         self._vins_px = self._vins_py = None
         self._vins_pt = None
         node.create_subscription(State, '/mavros/state', self._on_state, 10)
-        node.create_subscription(Float64, '/mavros/global_position/rel_alt',
-                                 self._on_relalt, qos_profile_sensor_data)
-        node.create_subscription(Odometry, '/vins_estimator/odometry', self._on_odom, 10)
+        # Источник rel_alt: 'global' — GLOBAL_POSITION_INT (замерзает без GPS);
+        # 'baro' — сырой барометр (GPS-denied / боевой борт). См. baro_alt.py.
+        if alt_src == 'baro':
+            from .baro_alt import BaroAlt
+            self._baro = BaroAlt(node, self._set_relalt)
+        else:
+            node.create_subscription(Float64, '/mavros/global_position/rel_alt',
+                                     self._on_relalt, qos_profile_sensor_data)
+        # /odometry — фактический топик форка VINS-MONO-ROS2 (в ROS2 нет приватного
+        # пространства ноды; старый /vins_estimator/odometry не имел издателя).
+        node.create_subscription(Odometry, '/odometry', self._on_odom, 10)
         node.create_subscription(RCIn, '/mavros/rc/in', self._on_rcin, qos_profile_sensor_data)
         node.create_subscription(Odometry, '/model/iris_cam/odometry', self._on_gt, 10)
 
@@ -37,6 +45,9 @@ class RosTelemetry:
 
     def _on_relalt(self, m):
         self._s.rel_alt = float(m.data)
+
+    def _set_relalt(self, alt):
+        self._s.rel_alt = float(alt)
 
     def _on_odom(self, m):
         self._s.vins_odom_count += 1
