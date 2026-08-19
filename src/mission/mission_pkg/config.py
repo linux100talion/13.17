@@ -594,3 +594,9 @@ class BootstrapConfig:
                                      # вышел — шаг пропускается (LOITER_SKIP, миссия
                                      # продолжается). BS_LOITER_GATE_BUDGET /
                                      # --loiter-gate-budget
+    ekf_pos_budget: float = 120.0    # шаг ekf_warmup (миссии с loiter): ждать до арма,
+                                     # пока EKF захватит позицию (свежий local_position),
+                                     # sim-сек. По таблице бюджетов «is using GPS»
+                                     # ~+85 с от старта MAVROS. Вышел — warn и дальше
+                                     # (loiter потом пропустится своим гейтом).
+                                     # BS_EKF_POS_BUDGET / --ekf-pos-budget

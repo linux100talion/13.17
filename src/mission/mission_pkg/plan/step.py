@@ -257,6 +257,40 @@ class Control(Step):
         return _run(rc)
 
 
+class WaitEkfPos(Step):
+    """Ждать, пока EKF полётника ДЕРЖИТ позицию (свежий /mavros/local_position),
+    ПЕРЕД армом. Профиль «взлёт на GPS → Loiter» (вставляется compile_mission
+    только при loiter-токене в миссии).
+
+    Урок LV4 против LV3 (dataflash XKF4.SS): арм с ARMING_CHECK=0 проходит ДО
+    того, как EK3 захватил GPS — гонка бута (LV3: aiding на t=11.7, за 4 с до
+    арма; LV4: EKF замешкался на выравнивании яу, борт оторвался без позиции,
+    и начать aiding уже в воздухе на манёврах EK3 не смог — const_pos весь
+    полёт, Loiter refused). Старый GUIDED-флоу ждал НЕЯВНО (GUIDED не латчится
+    без позиции) — ALT_HOLD-флоу должен ждать явно. Бюджет вышел → warn и
+    дальше (как AwaitMode): миссия продолжается, но loiter потом честно
+    пропустится своим гейтом."""
+
+    def __init__(self, name, throttle, budget, fresh_sec=2.0, keep="ALT_HOLD"):
+        self.name = name
+        self.throttle = throttle
+        self.budget = budget
+        self.fresh_sec = fresh_sec
+        self.keep = keep
+
+    def tick(self, ctx, s) -> StepResult:
+        rc = RcCommand(throttle=self.throttle)
+        ctx.keep_mode(s, self.keep)
+        if (s.now_sim - s.ekf_pos_last_sim) < self.fresh_sec:
+            ctx.log.info(f"    {self.name}: EKF держит позицию — к арму")
+            return _next(rc)
+        if ctx.elapsed() > self.budget:
+            ctx.log.warn(f"⚠️ {self.name}: EKF не захватил позицию за "
+                         f"{self.budget:g} с — дальше (loiter пропустится гейтом)")
+            return _next(rc)
+        return _run(rc)
+
+
 class LoiterHold(Step):
     """ШТАТНЫЙ LOITER на sec sim-сек: позицию держит контроллер САМОГО FCU по EKF,
     скормленному VINS через vision_pose (extnav). Оракул/фолбэк для VinsHold:

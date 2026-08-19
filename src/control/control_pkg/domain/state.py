@@ -37,6 +37,12 @@ class DroneState:
     # (токен loiter<t>, freefly-центр CH6 при BS_FF_LOITER): Loiter'у нужна
     # позиционная оценка на FCU, и без extnav он жил бы на GPS — не тот опыт.
     extnav_ready: bool = False
+    # Sim-время последнего /mavros/local_position/pose: топик публикуется РОВНО
+    # пока EKF держит позицию (после GPS-kill замолкает — поэтому годится только
+    # как ДО-полётный гейт WaitEkfPos, не как гейт LoiterHold). Урок LV4: арм с
+    # ARMING_CHECK=0 проходит до захвата GPS EKF'ом, а начать aiding в воздухе
+    # на манёврах EK3 не смог — полёт без позиции, Loiter refused.
+    ekf_pos_last_sim: float = -1e9
 
     # --- Ground-truth Gazebo (СИМ; на Orin gt_valid=False) ---
     gt_valid: bool = False

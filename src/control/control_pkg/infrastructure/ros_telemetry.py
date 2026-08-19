@@ -8,6 +8,7 @@ RELIABLE-подписка их НЕ получает. Ground-truth скорос�
 """
 import math
 
+from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import RCIn, State
 from nav_msgs.msg import Odometry
 from rclpy.qos import qos_profile_sensor_data
@@ -38,6 +39,11 @@ class RosTelemetry:
         node.create_subscription(Odometry, '/odometry', self._on_odom, 10)
         node.create_subscription(RCIn, '/mavros/rc/in', self._on_rcin, qos_profile_sensor_data)
         node.create_subscription(Odometry, '/model/iris_cam/odometry', self._on_gt, 10)
+        # Пульс позиции EKF: local_position публикуется, ПОКА у EKF есть позиция
+        # (после GPS-kill замолкает). Содержимое не нужно — только свежесть
+        # (гейт WaitEkfPos перед армом, урок LV4). QoS sensor: совместим с любым.
+        node.create_subscription(PoseStamped, '/mavros/local_position/pose',
+                                 self._on_lpos, qos_profile_sensor_data)
 
     def _on_state(self, m):
         self._s.mode = m.mode
@@ -71,6 +77,9 @@ class RosTelemetry:
     def _on_rcin(self, m):
         if len(m.channels) >= 3:
             self._s.rcin_throttle = m.channels[2]
+
+    def _on_lpos(self, _m):
+        self._s.ekf_pos_last_sim = self._clock.now_sim()
 
     def _on_gt(self, m):
         x = m.pose.pose.position.x

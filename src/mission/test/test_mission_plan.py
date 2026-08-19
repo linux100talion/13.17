@@ -24,7 +24,8 @@ from mission_pkg.config import BootstrapConfig                         # noqa: E
 from mission_pkg.plan.mission_plan import (                            # noqa: E402
     _parse, compile_mission, resolve_mission)
 from mission_pkg.plan.runner import PlanRunner                         # noqa: E402
-from mission_pkg.plan.step import FINISH, NEXT, RUN, Land, LoiterHold  # noqa: E402
+from mission_pkg.plan.step import (FINISH, NEXT, RUN, Land, LoiterHold,  # noqa: E402
+                                   WaitEkfPos)
 from mission_pkg.recipes import build_stabilizers                     # noqa: E402
 
 
@@ -354,6 +355,25 @@ def main():
     r_e = lh3.tick(lctx3, s_eject)
     checks.append(("loiter: FCU выпал из LOITER → NEXT LOITER_EJECT (не ре-ассертим)",
                    r_e.status == NEXT and r_e.result == "LOITER_EJECT"))
+
+    # --- ekf_warmup: миссия с loiter ждёт позицию EKF ДО арма (урок LV4) ---
+    lt_names = [st.name for st in lt]
+    checks.append(("compile: loiter-миссия несёт ekf_warmup МЕЖДУ prearm и arm",
+                   lt_names[:3] == ["prearm", "ekf_warmup", "arm"]))
+    no_loiter = compile_mission(cfg, "climb3,hover5,land", "DpRollHold+DpYawHold")
+    checks.append(("compile: миссия БЕЗ loiter НЕ ждёт EKF (пре-VINS профиль цел)",
+                   not any(st.name == "ekf_warmup" for st in no_loiter)))
+    wctx = _LCtx()
+    we = WaitEkfPos("ekf_warmup", 1000, budget=120.0, fresh_sec=2.0)
+    s_noekf = DroneState(mode="ALT_HOLD", now_sim=10.0)          # ekf_pos_last_sim=-1e9
+    checks.append(("ekf_warmup: позиции нет → RUN (ждём)",
+                   we.tick(wctx, s_noekf).status == RUN))
+    s_ekf = DroneState(mode="ALT_HOLD", now_sim=11.0, ekf_pos_last_sim=10.5)
+    checks.append(("ekf_warmup: свежий local_position → NEXT (к арму)",
+                   we.tick(wctx, s_ekf).status == NEXT))
+    wctx2 = _LCtx(); wctx2.t = 121.0
+    checks.append(("ekf_warmup: бюджет вышел → NEXT с warn (миссия не блокируется)",
+                   we.tick(wctx2, s_noekf).status == NEXT))
 
     # --- freefly + BS_FF_LOITER: центр CH6 = штатный LOITER (гейт + гистерезис) ---
     checks.append(("freefly: без BS_FF_LOITER центр = чистый ALT_HOLD (как раньше)",

@@ -615,6 +615,8 @@ def _parse() -> tuple:
     p.add_argument('--ff-loiter', dest='ff_loiter', type=float, default=_D.ff_loiter)
     p.add_argument('--loiter-gate-budget', dest='loiter_gate_budget', type=float,
                    default=_D.loiter_gate_budget)
+    p.add_argument('--ekf-pos-budget', dest='ekf_pos_budget', type=float,
+                   default=_D.ekf_pos_budget)
     a = p.parse_args()
     pilot_kind = a.pilot
     d = vars(a)

@@ -56,7 +56,8 @@ from control_pkg.domain.control.trajectory import (ConstProfile, RcTransmitter,
 from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
-from .step import Arm, AwaitMode, Climb, Control, Freefly, Land, LoiterHold
+from .step import (Arm, AwaitMode, Climb, Control, Freefly, Land, LoiterHold,
+                   WaitEkfPos)
 
 _TOKEN = re.compile(r'^([a-z_]+?)(-?\d+(?:\.\d+)?)?$')
 
@@ -148,10 +149,13 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
     alt_hold = AltHold(kp=cfg.alt_kp, rate_max=cfg.alt_rate_max, tol=cfg.alt_tol,
                        dz=cfg.alt_dz, span=cfg.alt_span, rate_full=cfg.alt_rate_full)
     alt_target = [None]        # высота последнего climb — уставка для Control-шагов
-    steps = [
-        AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget),
-        Arm("arm", RC_MIN_THR, cfg.arm_budget),
-    ]
+    steps = [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget)]
+    # loiter в миссии = профиль «взлёт на GPS → Loiter»: перед армом ждём, пока
+    # EKF захватит позицию (урок LV4 — гонка бута, см. WaitEkfPos). Не-loiter
+    # миссии не трогаем: боевой пре-VINS профиль позиции на земле не имеет.
+    if any(_parse(t)[0] == "loiter" for t in tokens):
+        steps.append(WaitEkfPos("ekf_warmup", RC_MIN_THR, cfg.ekf_pos_budget))
+    steps.append(Arm("arm", RC_MIN_THR, cfg.arm_budget))
 
     def _control(name, prof, max_sec=0.0, pilot_stabs=None):
         stack = ControlStack(build_stabilizers(cfg, stab_spec), prof, NoExcitation(),

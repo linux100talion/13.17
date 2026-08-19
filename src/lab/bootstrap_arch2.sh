@@ -170,6 +170,7 @@ ARGS=()
 # штатный LOITER-на-VINS: freefly-центр CH6 (BS_FF_LOITER=1) и бюджет гейта loiter<t>
 [ -n "${BS_FF_LOITER:-}" ]       && ARGS+=(--ff-loiter "$BS_FF_LOITER")
 [ -n "${BS_LOITER_GATE_BUDGET:-}" ] && ARGS+=(--loiter-gate-budget "$BS_LOITER_GATE_BUDGET")
+[ -n "${BS_EKF_POS_BUDGET:-}" ]  && ARGS+=(--ekf-pos-budget "$BS_EKF_POS_BUDGET")
 [ -n "${BS_ALT:-}" ]              && ARGS+=(--alt "$BS_ALT")
 [ -n "${BS_GZ_KP:-}" ]           && ARGS+=(--gz-kp "$BS_GZ_KP")
 [ -n "${BS_GZ_KD:-}" ]           && ARGS+=(--gz-kd "$BS_GZ_KD")
