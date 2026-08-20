@@ -437,6 +437,8 @@ class Freefly(Step):
         self._stab_pos = None
         self._in_loiter = False
         self._loiter_warned = False
+        self._loiter_since = 0.0
+        self._latch_warned = False
 
     def enter(self, ctx, s) -> None:
         self._greeted = False
@@ -444,6 +446,8 @@ class Freefly(Step):
         self._stab_pos = None
         self._in_loiter = False
         self._loiter_warned = False
+        self._loiter_since = 0.0
+        self._latch_warned = False
 
     def _mode_target(self, ctx, s) -> str:
         """Режим FCU под селектор (см. docstring про loiter_center)."""
@@ -451,6 +455,7 @@ class Freefly(Step):
                 or s.pilot_switch == 1):        # MANUAL-seize всегда в ALT_HOLD
             self._in_loiter = False
             self._loiter_warned = False
+            self._latch_warned = False
             return self.keep
         fresh_age = s.now_sim - s.vins_last_sim
         if self._in_loiter:
@@ -458,10 +463,22 @@ class Freefly(Step):
                 self._in_loiter = False
                 ctx.log.warn("    LOITER: VINS/extnav протух — откат в ALT_HOLD "
                              "(стики = наклоны)")
+            elif (s.mode != "LOITER" and not self._latch_warned
+                    and s.now_sim - self._loiter_since > 5.0):
+                # честность к пилоту: гейт открыт, но FCU отказывает («requires
+                # position» — EKF без позиции). Центр = пустой стек, т.е. борт
+                # ФАКТИЧЕСКИ в голом ALT_HOLD и дрейфует с ветром (прогон
+                # 2026-08-20). Ре-ассерт продолжается — EKF может дозреть.
+                self._latch_warned = True
+                ctx.log.warn("    LOITER: FCU не латчит режим (requires "
+                             "position?) — ФАКТИЧЕСКИ чистый ALT_HOLD, стики = "
+                             "наклоны; тумблер вверх вернёт наш стек")
         elif (s.extnav_ready and fresh_age < self.vins_fresh
                 and (s.rel_alt or 0.0) > 1.5):
             self._in_loiter = True
             self._loiter_warned = False
+            self._loiter_since = s.now_sim
+            self._latch_warned = False
             ctx.log.info("    селектор-центр: ШТАТНЫЙ LOITER — позицию держит FCU "
                          "(extnav), стики = уставки скорости")
         elif not self._loiter_warned:

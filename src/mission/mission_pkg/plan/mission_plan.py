@@ -134,7 +134,14 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                              RcTransmitter(cfg.pilot_deadzone, cfg.pilot_full,
                                            cfg.pilot_pitch_sign, cfg.pilot_roll_sign),
                              NoExcitation(), slew=cfg.slew)
-        return [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget),
+        # ff_loiter: центр CH6 = штатный LOITER — значит та же гонка бута, что у
+        # loiter-токена (LV4 и прогон 2026-08-20: пилот заармил на 17-й секунде
+        # после бута, EK3 не успел начать aiding, в воздухе уже не начал —
+        # const_pos весь полёт, «Loiter failed: requires position»). Пока шаг
+        # ждёт позицию EKF, газ прижат — руддер-арм физически невозможен.
+        warmup = ([WaitEkfPos("ekf_warmup", RC_MIN_THR, cfg.ekf_pos_budget)]
+                  if cfg.ff_loiter > 0 else [])
+        return [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget)] + warmup + [
                 Freefly("freefly", stack, keep=keep,
                         pilot_stabs=build_stabilizers(cfg, stab_spec),
                         handover=handover,

@@ -382,6 +382,11 @@ def main():
     ffl = compile_mission(cfg_lo, "freefly", "DpRollHold+DpYawHold", live_pilot=True)
     ffls = ffl[-1]
     checks.append(("freefly+ff_loiter: loiter_center включён", ffls.loiter_center))
+    # гонка бута (прогон 2026-08-20): арм до aiding EKF → const_pos весь полёт,
+    # LOITER невозможен. ff_loiter несёт тот же ekf_warmup, что и loiter-токен:
+    # газ прижат — руддер-арм невозможен, пока EKF не держит позицию.
+    checks.append(("freefly+ff_loiter: план = prearm + ekf_warmup + freefly",
+                   [st.name for st in ffl] == ["prearm", "ekf_warmup", "freefly"]))
     fctx2 = _LCtx()
     ffls.enter(fctx2, None)
     s_arm2 = DroneState(armed=True, now_sim=1.0)            # гейт закрыт (нет extnav)
@@ -405,6 +410,25 @@ def main():
     ffls.tick(fctx2, s_man)
     checks.append(("freefly+ff_loiter: MANUAL-seize (+1) всегда возвращает ALT_HOLD",
                    fctx2.kept == "ALT_HOLD"))
+    # честность при отказе FCU (прогон 2026-08-20): гейт открыт, LOITER затребован,
+    # но полётник >5 с остаётся в ALT_HOLD (requires position) — ОДНО честное WARN
+    # («фактически ALT_HOLD»), цель не меняем (ре-ассерт продолжается)
+    ffl2s = compile_mission(cfg_lo, "freefly", "DpRollHold+DpYawHold",
+                            live_pilot=True)[-1]
+    fctx3 = _LCtx()
+    ffl2s.enter(fctx3, None)
+    s_c0 = DroneState(mode="ALT_HOLD", armed=True, rel_alt=3.0, pilot_switch=0,
+                      extnav_ready=True, vins_odom_count=80,
+                      vins_last_sim=10.0, now_sim=10.0, flow_seq=1)
+    ffl2s.tick(fctx3, s_c0)                     # вход в LOITER-цель (@10.0)
+    s_c1 = DroneState(mode="ALT_HOLD", armed=True, rel_alt=3.0, pilot_switch=0,
+                      extnav_ready=True, vins_odom_count=90,
+                      vins_last_sim=16.0, now_sim=16.0, flow_seq=2)
+    ffl2s.tick(fctx3, s_c1)                     # 6 с без латча → WARN
+    ffl2s.tick(fctx3, s_c1)                     # повтор тика — WARN не дублируется
+    n_latch_warn = sum("не латчит" in ln for ln in fctx3.log.lines)
+    checks.append(("freefly+ff_loiter: FCU не латчит >5с → одно WARN, цель LOITER",
+                   fctx3.kept == "LOITER" and n_latch_warn == 1))
 
     # --- токен в ГРАДУСАХ (yaw_l/yaw_r) ---
     # Смысл токена: угол — величина, за которую отвечает контур. Держится на двух вещах:

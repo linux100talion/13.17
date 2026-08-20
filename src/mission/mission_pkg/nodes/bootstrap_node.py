@@ -199,9 +199,16 @@ class BootstrapArch2Node(Node):
             # Симметрично самовосстановлению EK3_SRC1_* выше; убирает ручной
             # pymavlink-шаг между прогонами (LV-серия делала его трижды).
             self._ekf_pending.insert(0, ('SIM_GPS1_ENABLE', 1.0, None))
+            # Глушим ТОЛЬКО при живой позиции EKF (свежий local_position): если
+            # EK3 так и не начал aiding (гонка бута, прогон 2026-08-20 — арм на
+            # 17-й секунде, const_pos), убить GPS = добить полёт: в воздухе
+            # aiding не стартует (LV4), LOITER невозможен до посадки. Без
+            # позиции миссия остаётся на GPS — та же безопасная деградация,
+            # что и при мёртвом VINS.
             self._ekf_pending.append(
                 ('SIM_GPS1_ENABLE', 0.0,
-                 lambda s: s.vins_odom_count > 50 and (s.rel_alt or 0.0) > 1.5))
+                 lambda s: s.vins_odom_count > 50 and (s.rel_alt or 0.0) > 1.5
+                 and (s.now_sim - s.ekf_pos_last_sim) < 2.0))
         self._ekf_src_last_try = 0.0
         if cfg.vision_vel > 0 and self.perception is not None:
             from geometry_msgs.msg import PoseStamped, TwistStamped
