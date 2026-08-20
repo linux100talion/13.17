@@ -61,6 +61,19 @@ if [ -d src/control ] || [ -d src/mission ]; then
     fi
 fi
 
+# 1g. Форк VINS (vins_oss, C++) — ТОЖЕ инкрементально и всегда, по той же
+#     причине: исходники правятся на хосте (bind mount), а install/ живёт в
+#     volume — фикс в форке иначе не попадает в бинарь до ручного nav-rebuild.
+#     make инкрементален: без изменений это <1 c, с правкой — десятки секунд.
+if [ -d src/vins_oss/feature_tracker ]; then
+    echo "  colcon build (feature_tracker, vins_estimator) ..."
+    if colcon build --packages-select feature_tracker vins_estimator 2>&1 | tail -3; then
+        source install/setup.bash
+    else
+        echo "  ⚠️ сборка форка VINS не удалась (см. выше) — летим на прежнем бинаре"
+    fi
+fi
+
 # 2. Байеризатор: Gazebo RGB → /dev/rawbayer (v4l2loopback).
 #    Запускается ВНЕ sim_nav.launch.py: если запустить внутри launch, его крах
 #    убивает весь launch (camera_node + VINS). Здесь он изолирован.
