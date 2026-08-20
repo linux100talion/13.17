@@ -69,6 +69,8 @@ class RayTracer(Node):
         self.declare_parameter("publish_vision_pose", True)
         self.declare_parameter("vision_pose_topic", "/mavros/vision_pose/pose")
         self.declare_parameter("vision_pose_frame", "map")
+        # Якорение кадра VINS на кадр EKF при первой одометрии (см. _on_vins).
+        self.declare_parameter("ekf_pose_topic", "/mavros/local_position/pose")
 
         self.db_path = self.get_parameter("db_path").value
         self.alpha = float(self.get_parameter("correction_alpha").value)
@@ -88,6 +90,9 @@ class RayTracer(Node):
         self.vins_pos = None          # последняя поза VINS (ENU)
         self.offset = np.zeros(3)     # поправка-смещение
         self.have_fix = False
+        self.ekf_pos = None           # последняя поза EKF (local_position)
+        self.ekf_pos_wall = 0.0
+        self.frame_latched = False    # кадр VINS заякорен на кадр EKF
 
         # I/O
         self.create_subscription(CameraInfo, self.get_parameter("camera_info_topic").value,
@@ -100,6 +105,9 @@ class RayTracer(Node):
                                  self._on_vins, 50)
         self.create_subscription(Detection2DArray, self.get_parameter("detections_topic").value,
                                  self._on_detections, 10)
+        from rclpy.qos import qos_profile_sensor_data
+        self.create_subscription(PoseStamped, self.get_parameter("ekf_pose_topic").value,
+                                 self._on_ekf_pose, qos_profile_sensor_data)
 
         self.pub_anchor = self.create_publisher(PoseWithCovarianceStamped, "/nn1/anchor_pose", 10)
         self.pub_corr = self.create_publisher(Odometry, "/nn1/corrected_odom", 10)
@@ -141,9 +149,31 @@ class RayTracer(Node):
     def _on_rel_alt(self, msg):
         self.rel_alt = float(msg.data)
 
+    def _on_ekf_pose(self, msg):
+        p = msg.pose.position
+        self.ekf_pos = np.array([p.x, p.y, p.z])
+        self.ekf_pos_wall = time.time()
+
     def _on_vins(self, msg):
         p = msg.pose.pose.position
         self.vins_pos = np.array([p.x, p.y, p.z])
+        # Якорение КАДРА (полёт 2026-08-20 №4): мир VINS рождается в точке его
+        # инициализации — в воздухе, куда борт уже улетел от точки арма, а кадр
+        # EKF считается от арма. Офсет кадров (9.6 м в том полёте) выносит
+        # каждое vision-измерение за инновационный гейт EK3 — фьюжн не
+        # начинается вовсе (рантайм-смена EK3_SRC1_POSXY ресет позиции НЕ
+        # делает), «EKF variance: position lost». Пока EKF жив (взлёт на GPS) —
+        # разово защёлкиваем offset = EKF − VINS тем же механизмом, что у
+        # засечки NN1 (та потом уточнит). Нет свежей EKF-позы (боевой
+        # GPS-denied бут) — offset остаётся 0, поведение прежнее.
+        if (not self.frame_latched and not self.have_fix
+                and self.ekf_pos is not None
+                and time.time() - self.ekf_pos_wall < 2.0):
+            self.frame_latched = True
+            self.offset = self.ekf_pos - self.vins_pos
+            self.get_logger().info(
+                f"кадр VINS заякорен на EKF: offset=({self.offset[0]:+.2f},"
+                f"{self.offset[1]:+.2f},{self.offset[2]:+.2f}) м")
         # на каждой одометрии VINS публикуем скорректированную
         corr = Odometry()
         corr.header = msg.header
