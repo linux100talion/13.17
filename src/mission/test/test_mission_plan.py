@@ -429,6 +429,22 @@ def main():
     n_latch_warn = sum("не латчит" in ln for ln in fctx3.log.lines)
     checks.append(("freefly+ff_loiter: FCU не латчит >5с → одно WARN, цель LOITER",
                    fctx3.kept == "LOITER" and n_latch_warn == 1))
+    # failsafe-LAND: FCU сам сажает борт (EKF failsafe) — центр НЕ воюет с ним
+    # (полёт 2026-08-20 №5: ре-ассерт LOITER бился с LAND весь остаток полёта)
+    s_land = DroneState(mode="LAND", armed=True, rel_alt=2.0, pilot_switch=0,
+                        extnav_ready=True, vins_odom_count=95,
+                        vins_last_sim=17.0, now_sim=17.0, flow_seq=3)
+    ffl2s.tick(fctx3, s_land)
+    ffl2s.tick(fctx3, s_land)
+    n_land_warn = sum("уважаем" in ln for ln in fctx3.log.lines)
+    checks.append(("freefly+ff_loiter: FCU в LAND (failsafe) → уважаем (одно WARN)",
+                   fctx3.kept == "LAND" and n_land_warn == 1))
+    s_up2 = DroneState(mode="LAND", armed=True, rel_alt=2.0, pilot_switch=-1,
+                       extnav_ready=True, vins_odom_count=99,
+                       vins_last_sim=18.0, now_sim=18.0, flow_seq=4)
+    ffl2s.tick(fctx3, s_up2)
+    checks.append(("freefly+ff_loiter: из LAND тумблер вверх → пилот забирает (ALT_HOLD)",
+                   fctx3.kept == "ALT_HOLD"))
 
     # --- токен в ГРАДУСАХ (yaw_l/yaw_r) ---
     # Смысл токена: угол — величина, за которую отвечает контур. Держится на двух вещах:

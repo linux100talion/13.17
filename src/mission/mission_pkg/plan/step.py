@@ -439,6 +439,7 @@ class Freefly(Step):
         self._loiter_warned = False
         self._loiter_since = 0.0
         self._latch_warned = False
+        self._land_warned = False
 
     def enter(self, ctx, s) -> None:
         self._greeted = False
@@ -448,6 +449,7 @@ class Freefly(Step):
         self._loiter_warned = False
         self._loiter_since = 0.0
         self._latch_warned = False
+        self._land_warned = False
 
     def _mode_target(self, ctx, s) -> str:
         """Режим FCU под селектор (см. docstring про loiter_center)."""
@@ -457,6 +459,18 @@ class Freefly(Step):
             self._loiter_warned = False
             self._latch_warned = False
             return self.keep
+        if s.mode == "LAND":
+            # FCU сам ушёл в LAND (EKF-failsafe, FS_EKF_ACTION) — с failsafe
+            # не воюем (полёт 2026-08-20 №5: ре-ассерт LOITER бился с LAND
+            # весь остаток полёта). Центр = уважаем посадку; пилот забирает
+            # борт тумблером вверх/вниз (ветка выше — сознательное действие).
+            if not self._land_warned:
+                self._land_warned = True
+                ctx.log.warn("    LOITER: FCU в LAND (failsafe) — уважаем, не "
+                             "ре-ассертим; тумблер вверх вернёт наш стек")
+            self._in_loiter = False
+            return "LAND"
+        self._land_warned = False
         fresh_age = s.now_sim - s.vins_last_sim
         if self._in_loiter:
             if not s.extnav_ready or fresh_age > 3.0 * self.vins_fresh:
