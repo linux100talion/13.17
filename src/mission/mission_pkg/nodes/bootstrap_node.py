@@ -175,8 +175,22 @@ class BootstrapArch2Node(Node):
         # С интегралом IPM гейт не нужен — интеграл жив с земли (проверено).
         self._has_calm_steps = any(st.name.startswith(('hover', 'loiter'))
                                    for st in plan)
-        _vins_ripe = (lambda s: s.vins_odom_count > 50 and self._calm_phase()) \
+        # Зрелость VINS для EKF-свапа. В планах со спокойной фазой (hover/loiter)
+        # порог низкий: к hover VINS давно зрел (LV5 — свап в ховере чист). БЕЗ
+        # спокойной фазы (freefly) зрелость — ЕДИНСТВЕННАЯ защита, и она должна
+        # быть жёстче хэндоверной: полёт 2026-08-20 №3 — свап на VINS возрастом
+        # ~3 с (odom≈50-150): перемещение VIO врало до ×10 против истины (bag,
+        # окна 2 с: ratio 0.11 на init → 10.0 сразу после), EKF словил «variance:
+        # position lost» через 3 с после глушения GPS и НЕ восстановился до
+        # посадки (in-flight restart aiding не работает — LV4). Стики пилота при
+        # этом были В ЦЕНТРЕ — «спокойные стики» не гейт: скорость создают ветер
+        # и демпфер. По замеру ratio выходит на ~1 к ≈21 с от init ≈ 550-600
+        # odom; хэндовер нашего стека на 300 (BS_VINS_MIN) был на грани.
+        ripe_n = 50 if self._has_calm_steps else max(600, 2 * cfg.vins_min)
+        _vins_ripe = (lambda s: s.vins_odom_count > ripe_n and self._calm_phase()) \
             if cfg.vision_pose_src == 'extern' else None
+        # Глушение GPS — ещё позже: EKF должен пожить на extnav (см. очередь ниже).
+        kill_n = 50 if self._has_calm_steps else ripe_n + 150
         # ⚠️ САМОВОССТАНОВЛЕНИЕ eeprom ПЕРЕД АРМОМ: EK3_SRC1_* персистятся, и
         # после vision-прогона следующий бут стартует с extnav-источниками БЕЗ
         # якоря VINS — EKF фьюзит климб-фантом IPM-скорости → улёт на наборе
@@ -205,9 +219,12 @@ class BootstrapArch2Node(Node):
             # aiding не стартует (LV4), LOITER невозможен до посадки. Без
             # позиции миссия остаётся на GPS — та же безопасная деградация,
             # что и при мёртвом VINS.
+            # kill_n > ripe_n: между свапом на extnav и глушением EKF живёт на
+            # vision при живом GPS (~6 с) — если фьюжн развалится, local_position
+            # протухнет и глушение не случится вовсе (безопасная деградация).
             self._ekf_pending.append(
                 ('SIM_GPS1_ENABLE', 0.0,
-                 lambda s: s.vins_odom_count > 50 and (s.rel_alt or 0.0) > 1.5
+                 lambda s: s.vins_odom_count > kill_n and (s.rel_alt or 0.0) > 1.5
                  and (s.now_sim - s.ekf_pos_last_sim) < 2.0))
         self._ekf_src_last_try = 0.0
         if cfg.vision_vel > 0 and self.perception is not None:
