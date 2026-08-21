@@ -471,7 +471,7 @@ docker exec p1317_nav bash -lc "$SRC; python3 /lab/<tool> ..."
 |---|---|---|
 | `two_clocks.py [topic]` | wall-fps vs sim-Гц топика (разрыv RTF) | `/lab/two_clocks.py /mavros/imu/data_raw` |
 | `grab_live.py [out.png]` | снять 1 живой кадр `/image_color` + метрики (ORB/резкость/цвет → детект «оранж-фриза» рендера) | `/lab/grab_live.py` |
-| `gyro_fft.py [bag] [imu]` | FFT гироскопа из bag по окнам ground/air/late (осцилляции rate-loop, см. `docker/sim/FAQ_rate_loop.md`) | `/lab/gyro_fft.py` |
+| `gyro_fft.py [bag] [imu]` | FFT гироскопа из bag по окнам ground/air/late (осцилляции rate-loop, см. `docker/sim/doc/old/FAQ_rate_loop.md`) | `/lab/gyro_fft.py` |
 | `bag_frames.py "n:wall,…"\|N` | кадры `/image_color` из bag по wall-моментам (= эпоха логов VINS) + монтаж + метрики | `/lab/bag_frames.py "init:1782653941,reboot:1782654163"` |
 
 Нужен IMU в bag для FFT — писать с `TOPICS_EXTRA="/mavros/imu/data /mavros/imu/data_raw"`.

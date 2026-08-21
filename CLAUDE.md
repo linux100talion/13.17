@@ -17,7 +17,6 @@ src/
   nav/         — пакет nav_pkg: нейросети навигации (NN1/NN2, пока болванки)
                  + openhd_streamer (даунлинк в OpenHD с оверлеем детекций)
   orin_shutdown/ — Go-утилита graceful shutdown через MAVLink
-  concept.txt  — исходная концепция проекта
 distro/        — деплой на Orin (etc/, home/andriy/, usr/) — systemd, сети, скрипты
 tools/mdtopdf/ — генератор CLAUDE.pdf (reportlab)
 ```
@@ -214,7 +213,8 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 
 ## Ключевые решения по симуляции
 
-1. **Gazebo Harmonic** (не Fortress) — по concept.txt (плагины `gz-sim-*`).
+1. **Gazebo Harmonic** (не Fortress) — по concept.txt
+   (`docker/sim/doc/old/concept.txt`; плагины `gz-sim-*`).
    Нештатная пара для Humble, ставится вручную из репозитория osrfoundation.
 2. **GPU = NVIDIA CUDA** (везде).
 3. **Вариант А — OpenCV+CUDA из исходников в образе `nav`.** Камера-нода работает

@@ -21,7 +21,10 @@ scripts/                    — entrypoint'ы (монтируются как /sc
 simulator/  nav/  mavlink_router/  — Dockerfile'ы образов
 worlds/                     — SDF-миры и модель дрона (iris_cam)
 output/                     — логи нод (make logs читает отсюда)
-FAQ*.txt, README.md, todo.txt — заметки по отладке
+Q.txt, CMD.txt, loiter.md   — актуальные заметки (вопросы-ответы по freefly,
+                              холодный старт, переход в LOITER-на-VINS)
+doc/old/                    — архив (FAQ*, todo*, README, laptop_move.md,
+                              concept.txt, спеки flow/yaw, tune_results)
 ```
 
 ## Рабочий цикл (всё через Makefile)
@@ -39,11 +42,12 @@ make fresh-start    # полный сброс (down→up, ephemeral state тер
 Лётные команды (после `wait`): `make arm takeoff hover land disarm`,
 `make fly` (облёт квадрата для инициализации VINS), `make vins-watch`.
 
-## Переезд на GPU-ноутбук — `laptop_move.md`
+## Переезд на GPU-ноутбук — `doc/old/laptop_move.md`
 
 Стенд жил на GPU-less боксе (`CPU=1`, llvmpipe, RTF ≈ 0.07). Чек-лист подъёма на
 машине с NVIDIA, что ломается при переходе к реальному времени (разрешение камеры,
-окна в КАДРАХ, wall-таймауты) и план проброса живого пульта — `docker/sim/laptop_move.md`.
+окна в КАДРАХ, wall-таймауты) и план проброса живого пульта —
+`docker/sim/doc/old/laptop_move.md` (архив; итоги серии LV — там же, §3).
 
 ## CPU-режим (ветка nn2_c3_cpu)
 
@@ -197,7 +201,7 @@ ARM_SIM_BUDGET=100 ARM_WALL_CAP=2400 \
 Открытый контур для калибровки планта флоу-демпфера (`flow_calib.py`, слой C):
 под gz-hold-pitch на roll подаётся ЗАДАННЫЙ `roll_off` (демпфер ВЫКЛ) → `roll_off`
 экзогенный → чистая идентификация `k/s/τ/d`. Полный контекст и три бэга кампании —
-`docker/sim/HowToFlow_PID_synth.md`. `/flow_dbg` в bag обязателен (фактический
+`docker/sim/doc/old/HowToFlow_PID_synth.md`. `/flow_dbg` в bag обязателен (фактический
 `roll_off`).
 
 **Эталонная команда (balanced — позиция ВОЗВРАЩАЕТСЯ, дрон на сцене):**
