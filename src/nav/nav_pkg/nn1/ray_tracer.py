@@ -19,6 +19,7 @@
 # развороты/рычаги камеры — ROS-параметры, калибруются на живом запуске.
 # ============================================================================
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -71,6 +72,10 @@ class RayTracer(Node):
         self.declare_parameter("vision_pose_frame", "map")
         # Якорение кадра VINS на кадр EKF при первой одометрии (см. _on_vins).
         self.declare_parameter("ekf_pose_topic", "/mavros/local_position/pose")
+        # Слежение якоря ПОСЛЕ первого латча (полёт 2026-08-21 №7): порог
+        # жёсткой подтяжки, м (0 = выкл) и τ мягкого дожима, с (0 = выкл).
+        self.declare_parameter("anchor_relatch_m", 1.0)
+        self.declare_parameter("anchor_tau_sec", 5.0)
 
         self.db_path = self.get_parameter("db_path").value
         self.alpha = float(self.get_parameter("correction_alpha").value)
@@ -93,6 +98,10 @@ class RayTracer(Node):
         self.ekf_pos = None           # последняя поза EKF (local_position)
         self.ekf_pos_wall = 0.0
         self.frame_latched = False    # кадр VINS заякорен на кадр EKF
+        self.anchor_relatch_m = float(self.get_parameter("anchor_relatch_m").value)
+        self.anchor_tau = float(self.get_parameter("anchor_tau_sec").value)
+        self._anchor_wall = 0.0       # wall-время последнего апдейта якоря
+        self._relatch_n = 0           # счётчик жёстких подтяжек (для лога)
 
         # I/O
         self.create_subscription(CameraInfo, self.get_parameter("camera_info_topic").value,
@@ -163,17 +172,50 @@ class RayTracer(Node):
         # каждое vision-измерение за инновационный гейт EK3 — фьюжн не
         # начинается вовсе (рантайм-смена EK3_SRC1_POSXY ресет позиции НЕ
         # делает), «EKF variance: position lost». Пока EKF жив (взлёт на GPS) —
-        # разово защёлкиваем offset = EKF − VINS тем же механизмом, что у
-        # засечки NN1 (та потом уточнит). Нет свежей EKF-позы (боевой
-        # GPS-denied бут) — offset остаётся 0, поведение прежнее.
-        if (not self.frame_latched and not self.have_fix
-                and self.ekf_pos is not None
+        # защёлкиваем offset = EKF − VINS тем же механизмом, что у засечки NN1
+        # (та потом уточнит). Нет свежей EKF-позы (боевой GPS-denied бут) —
+        # offset остаётся 0, поведение прежнее.
+        #
+        # СЛЕЖЕНИЕ после первого латча (полёт 2026-08-21 №7): разовый латч
+        # ловит ХУДШИЙ момент — init VINS, когда юный VIO врёт масштабом
+        # (ratio до ×10 первые ~20 с, полёт №3). При активном пилотировании
+        # в ветре кадры разошлись на 4 м за 8 с ПОСЛЕ идеального латча
+        # (VISP−XKF1: 0.11 м → 4.0 м), своп POSXY→6 через минуту получил
+        # vision за гейтом → position lost при живом GPS. Поэтому пока EKF
+        # свеж и засечки NN1 нет:
+        #   расход > anchor_relatch_m — жёсткая подтяжка (снова offset=EKF−VINS);
+        #   меньше — мягкий дожим с τ=anchor_tau_sec.
+        # После свапа на extnav EKF сам следует vision → расход ≈ инновация
+        # (дециметры) → жёсткая подтяжка не срабатывает, дожим ≈ 0 — обратная
+        # связь стабильна. Если EKF умер в const_pos, его поза замирает и
+        # слежение поведёт offset к ней — фьюжн к тому моменту уже потерян
+        # (in-flight aiding не рестартует, LV4), хуже не делает.
+        if (not self.have_fix and self.ekf_pos is not None
                 and time.time() - self.ekf_pos_wall < 2.0):
-            self.frame_latched = True
-            self.offset = self.ekf_pos - self.vins_pos
-            self.get_logger().info(
-                f"кадр VINS заякорен на EKF: offset=({self.offset[0]:+.2f},"
-                f"{self.offset[1]:+.2f},{self.offset[2]:+.2f}) м")
+            new_off = self.ekf_pos - self.vins_pos
+            now = time.time()
+            if not self.frame_latched:
+                self.frame_latched = True
+                self.offset = new_off
+                self._anchor_wall = now
+                self.get_logger().info(
+                    f"кадр VINS заякорен на EKF: offset=({new_off[0]:+.2f},"
+                    f"{new_off[1]:+.2f},{new_off[2]:+.2f}) м")
+            else:
+                delta = new_off - self.offset
+                dn = float(np.linalg.norm(delta))
+                dt = min(max(now - self._anchor_wall, 0.0), 0.5)
+                self._anchor_wall = now
+                if self.anchor_relatch_m > 0 and dn > self.anchor_relatch_m:
+                    self.offset = new_off
+                    self._relatch_n += 1
+                    self.get_logger().info(
+                        f"якорь кадра подтянут (№{self._relatch_n}): расход "
+                        f"{dn:.2f} м > {self.anchor_relatch_m:g} — offset="
+                        f"({new_off[0]:+.2f},{new_off[1]:+.2f},{new_off[2]:+.2f}) м")
+                elif self.anchor_tau > 0 and dt > 0:
+                    self.offset = self.offset + \
+                        (1.0 - math.exp(-dt / self.anchor_tau)) * delta
         # на каждой одометрии VINS публикуем скорректированную
         corr = Odometry()
         corr.header = msg.header
