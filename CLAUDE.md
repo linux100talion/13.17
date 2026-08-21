@@ -402,4 +402,6 @@ GPU/CPU-прогоны torch/CUDA/ROS2, вынесенные с ноута/Jetso
 
 - GitHub: `https://github.com/linux100talion/13.17`, ветка `main`
 - Git user: Andriy Kutsevol `andriykutsevol@gmail.com`
-- `CLAUDE.pdf` генерится: `/tmp/pdfenv/bin/python3 tools/mdtopdf/claudetopdf.py`
+- `CLAUDE.pdf` генерится: `~/.venvs/pdfenv/bin/python3 tools/mdtopdf/claudetopdf.py`
+  (venv постоянный, переживает ребут; пересоздать: `python3 -m venv ~/.venvs/pdfenv
+  && ~/.venvs/pdfenv/bin/pip install -r tools/mdtopdf/requirements.txt`)
