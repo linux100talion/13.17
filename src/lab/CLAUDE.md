@@ -388,6 +388,36 @@ Drive), как требует дисциплина прогона — пошаг
 - мало параллакса / VINS не сходится → поднять `BS_EXCITE` или `BS_EXCITE_PERIOD`;
 - скорость разворота головы → `BS_YAW` (0 = совсем без yaw).
 
+### `freefly_lv.sh` — единая обёртка пилотных freefly-прогонов (флаг `LV=0/1`)
+
+Один скрипт вместо двух эталонных env-блоков (см. `docker/sim/Q.txt`):
+
+```bash
+bash src/lab/freefly_lv.sh          # LV=1 (default): freefly-LV — центр CH6 =
+                                    #   штатный LOITER-на-VINS, GPS глушится в полёте
+LV=0 bash src/lab/freefly_lv.sh     # базовый freefly: только наш стек, GPS жив
+WIND_SPD=5 bash src/lab/freefly_lv.sh   # любой env поверх дефолтов
+```
+
+Перед атомарным прогоном (`capture_scene.sh 960x540 bootstrap_arch2`) сама
+готовит **eeprom SITL** под профиль (`docker/sim/scripts/sitl_lv_profile.py`,
+pymavlink в контейнере simulator, tcp:5762):
+- `LV=1` → `VISO_TYPE=1` (без него «Loiter failed: requires position»;
+  остальное самовосстанавливает очередь bootstrap_node до арма);
+- `LV=0` → `VISO_TYPE=0` (**с 1 без vision-фида не армится**: «Arm: VisOdom:
+  not healthy», `ARMING_CHECK 0` чек не снимает) + возврат GPS-профиля EKF
+  (`EK3_SRC1_POSXY/VELXY=3`, `SIM_GPS1_ENABLE=1`) — в LV=0 очередь ноды не
+  работает и сама его не вернёт.
+
+Записанные значения применяются на рестарте стека в начале прогона — отдельный
+ребут не нужен, дисциплина «стек только целиком» сохранена.
+
+Самодостаточен от **холодного старта** (после ребута ноута): сам делает
+`make host-setup`, если нет `/dev/rawbayer` (v4l2loopback не персистентен;
+нужен sudo — спросит пароль), и `make up && make wait`, если контейнеры не
+бегут. Убирает и ручной pymavlink-шаг, который LV-серия делала между
+профилями трижды, и ручную возню с подъёмом стека.
+
 ### `vins_watch.sh`
 Мониторинг VINS в реальном времени:
 - фильтрует `sim_nav.log` по ключевым событиям
