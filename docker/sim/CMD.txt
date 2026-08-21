@@ -1,0 +1,94 @@
+Из корня репы (/usr/local/DATA/Calude/13.17):
+
+p = pwd (корень проекта)
+cd p/docker/sim
+make host-setup
+make up && make wait
+
+bash p/src/lab/freefly_lv.sh
+
+
+
+
+
+# базовый freefly: только наш стек, GPS живой весь полёт
+LV=0 bash src/lab/freefly_lv.sh
+
+
+--------------------------------------------------------
+
+# полный freefly-LV (LV=1 по умолчанию): центр CH6 = LOITER-на-VINS, GPS глушится
+bash src/lab/freefly_lv.sh
+
+# базовый freefly: только наш стек, GPS живой весь полёт
+LV=0 bash src/lab/freefly_lv.sh
+
+Скрипт сам находит capture_scene.sh по своему пути, так что работает из любой директории. 
+
+Перед запуском стек должен быть поднят (живой SITL) — если нет: cd docker/sim && make up && make wait. 
+
+Любые ручки можно накинуть сверху, например WIND_SPD=5 bash src/lab/freefly_lv.sh или GDRIVE_UP=1 LV=1 bash src/lab/freefly_lv.sh.
+
+
+
+--------------------------------------------------------
+
+cd docker/sim && make up && make wait. 
+
+cd docker/sim && make restart-all && make wait && make fpv
+
+
+cd docker/sim && make make restart-all && make wait && make gui
+
+
+--------------------------------------------------------
+
+
+$ docker compose stop
+
+
+--------------------------------------------------------
+
+
+
+❯ В чем разница между 
+cd docker/sim && make up && make wait 
+и
+cd docker/sim && make restart-all && make wait
+
+  Searched for 1 pattern
+
+Разница в том, что происходит с контейнерами:
+
+- make up = docker compose up -d — создаёт контейнеры, если их нет, и запускает. Если контейнеры уже существуют и работают — почти ничего не делает (compose скажет «up-to-date» и не перезапустит их; пересоздаст только если изменился compose-конфиг/образ). То есть на живом стеке make up — это no-op, стек НЕ перезапускается.
+- make restart-all = docker compose stop → start — гарантированный перезапуск уже существующих контейнеров: все процессы внутри (Gazebo, SITL, VINS, MAVROS) убиваются и entrypoint-скрипты (sim_up.sh/nav_up.sh) отрабатывают заново. Контейнеры не пересоздаются, поэтому ephemeral state (apt/pip-установки внутри контейнера) выживает. Если контейнеров ещё нет — restart-all не поможет, нужен up.
+
+Практически для нашего случая:
+
+make up && make wait          # стек НЕ поднят (после ребута ноута, make down/clean)
+make restart-all && make wait # стек поднят, нужен чистый перезапуск всех нод
+
+Для freefly_lv.sh это почти не важно: 
+    ему нужен только живой SITL для записи eeprom, 
+    а перезапуск стека прогон делает сам (capture_scene.sh с разрешением 960x540 вообще делает fresh-start). 
+    Так что если стек уже стоит — можно сразу bash src/lab/freefly_lv.sh без предварительных make-команд; make up && make wait нужен только когда контейнеров нет совсем.
+
+Третий родственник для полноты: 
+
+make fresh-start = down → up 
+    — пересоздаёт контейнеры, ephemeral теряется, named volumes (colcon-артефакты, eeprom SITL) живут.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
