@@ -35,6 +35,7 @@ disarm-жест) — стенд без человека не зависает в
 """
 import argparse
 import json
+import math
 import sys
 
 import rclpy
@@ -113,13 +114,20 @@ class JoyReplay(Node):
         self._armed = None          # None = /mavros/state ещё не видели
         self._mode = ''
         self._alt = None            # м над точкой старта (gt)
-        self._z_warm = []
-        self._z0 = None
+        self._dist = None           # м по горизонтали от точки старта (gt)
+        self._warm = []
+        self._x0 = self._y0 = self._z0 = None
+        # геозабор: --fence либо "fence" в сценарии; freefly сам его не проверяет
+        # («пилот — страховка» по определению миссии), а пилот теперь — мы
+        self._fence = float(args.fence)
 
         self._raw = None
         if args.raw:
             self._raw = load_raw(args.raw)
             self._raw_i = 0
+            if self._fence > 0:
+                self.get_logger().warn("--fence в raw-режиме не поддержан — выкл")
+                self._fence = 0.0
             self.get_logger().info(
                 f"RAW-реплей {args.raw}: {len(self._raw[0])} сэмплов, "
                 f"{self._raw[0][-1]:.1f} sim-с")
@@ -131,9 +139,12 @@ class JoyReplay(Node):
             self._sem.update({k: float(v)
                               for k, v in init.get('sticks', {}).items()})
             self._sw = int(init.get('sw', -1))
+            if self._fence <= 0:
+                self._fence = float(scn.get('fence', 0))
             self.get_logger().info(
                 f"сценарий {args.scenario}: «{scn.get('name', '?')}», "
-                f"{len(self._steps)} шагов, init sticks={self._sem} sw={self._sw}")
+                f"{len(self._steps)} шагов, init sticks={self._sem} sw={self._sw}, "
+                f"fence={self._fence or 'выкл'}")
         self._i = 0
         self._step_t0 = None        # sim-время входа в текущий шаг
         self._ramp_from = None
@@ -149,15 +160,17 @@ class JoyReplay(Node):
         self._armed, self._mode = bool(m.armed), m.mode
 
     def _on_odom(self, m):
-        z = m.pose.pose.position.z
+        p = m.pose.pose.position
         if self._z0 is None:
-            self._z_warm.append(z)
-            if len(self._z_warm) >= ALT_BASELINE_N:
-                s = sorted(self._z_warm)
-                self._z0 = s[len(s) // 2]
-                self._z_warm = None
+            self._warm.append((p.x, p.y, p.z))
+            if len(self._warm) >= ALT_BASELINE_N:
+                mid = len(self._warm) // 2
+                xs, ys, zs = (sorted(c) for c in zip(*self._warm))
+                self._x0, self._y0, self._z0 = xs[mid], ys[mid], zs[mid]
+                self._warm = None
             return
-        self._alt = z - self._z0
+        self._alt = p.z - self._z0
+        self._dist = math.hypot(p.x - self._x0, p.y - self._y0)
 
     # ---------- публикация ----------
     def _publish(self, raw6=None):
@@ -185,6 +198,19 @@ class JoyReplay(Node):
                 self._raw_i += 1
             self._publish(axes[self._raw_i])
             return
+        # геозабор (gt): дальше fence метров от старта → аварийная посадка;
+        # работает и после конца сценария (зависший борт может дрейфовать)
+        if (self._fence > 0 and not self._aborting
+                and self._dist is not None and self._dist > self._fence):
+            self.get_logger().error(
+                f"ГЕОЗАБОР: {self._dist:.1f}м > {self._fence:.0f}м от старта "
+                f"— аварийная посадка")
+            self._aborting = True
+            self._steps = list(ABORT_STEPS)
+            self._i = 0
+            self._step_t0 = None
+            self._ramp_from = None
+            self._done = False
         # семантический сценарий: мгновенные шаги схлопываются в один тик
         for _ in range(64):
             if self._i >= len(self._steps):
@@ -306,7 +332,11 @@ def main():
     ap.add_argument('--rate', type=float, default=50.0,
                     help='частота публикации /joy, sim-Гц (50)')
     ap.add_argument('--alt-topic', default='/model/iris_cam/odometry',
-                    help='ground-truth одометрия для wait_alt')
+                    help='ground-truth одометрия для wait_alt/геозабора')
+    ap.add_argument('--fence', type=float, default=0.0,
+                    help='геозабор, м от точки старта по gt (0 = выкл; '
+                         'перекрывает "fence" сценария). Уход дальше → '
+                         'аварийная посадка. Только семантический режим.')
     args = ap.parse_args()
     args.signs = (tuple(float(x) for x in args.signs.split(','))
                   if args.signs else default_signs())

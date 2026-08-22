@@ -92,6 +92,9 @@ if [ "${BS_PILOT:-}" = "replay" ]; then
     done
     # форма --signs=… обязательна: значение начинается с «-», argparse иначе падает
     [ -n "${BS_JOY_SIGNS:-}" ] && RARGS+=("--signs=$BS_JOY_SIGNS")
+    # геозабор ВИРТУАЛЬНОГО ПИЛОТА (freefly фенс не проверяет — «пилот сам
+    # страховка», и пилот теперь joy_replay); перекрывает "fence" сценария
+    [ -n "${BS_REPLAY_FENCE:-}" ] && RARGS+=(--fence "$BS_REPLAY_FENCE")
     python3 /lab/joystick/joy_replay.py "${RARGS[@]}" \
         > /root/sim_ws/output/joy_replay.log 2>&1 &
     JOY_PID=$!
