@@ -86,6 +86,19 @@ if [ -n "$BUSY" ]; then
 fi
 
 # ── 1) eeprom SITL под профиль (VISO_TYPE и, для LV=0, возврат GPS-профиля) ──
+# SITL поднимается десятки секунд ПОСЛЕ «nav: готово» (make wait ждёт только
+# nav_up) — ждём порт 5762 сами, иначе eeprom-шаг стучится рано и сдаётся
+# (два ложных «SITL мёртв» 2026-08-22; ретраев самого sitl_lv_profile мало).
+wait_sitl() {
+    for _ in $(seq 1 45); do
+        docker exec "$SIM" python3 -c \
+            "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',5762))" \
+            2>/dev/null && return 0
+        sleep 2
+    done
+    return 1
+}
+wait_sitl || echo "freefly_lv: 5762 так и не открылся — пробую eeprom-шаг как есть"
 EEPROM_CMD="PYTHONPATH=/root/ardupilot/modules/mavlink python3 /scripts/sitl_lv_profile.py $LV"
 if ! docker exec "$SIM" bash -lc "$EEPROM_CMD"; then
     # SITL часто мёртв после аварийно размотанного прогона (краш физики/зависший
