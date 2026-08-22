@@ -95,6 +95,7 @@ RECORD=0 bash src/lab/capture_scene.sh arm takeoff 3 land             # дешё
 | `MP4_MAXW` | 1280 | макс. ширина кадра в mp4, px (0 = не масштабировать) |
 | `DIST_M` | 0.5 | **шаг выборки кадров по пройденному пути, м** |
 | `N_FRAMES` | 30 | макс. число кадров (0 = без лимита) |
+| `FRAMES` | 1 | `0` = совсем НЕ извлекать JPEG-кадры (mp4 не затронут; так летает joystick-серия) |
 | `TOPIC` | `/image_color` | топик камеры |
 | `POSE_TOPIC` | `/mavros/local_position/pose` | поза для расчёта пути |
 | `TOPICS_EXTRA` | — | доп. топики в bag через пробел (напр. `"/mavros/imu/data /mavros/imu/data_raw"` для диагностики IMU) |
@@ -429,9 +430,12 @@ bag (лента событий: CH6/жесты/высоты + черновик �
 детали: `src/lab/joystick/README.md`.
 
 Каждый прогон `freefly_lv.sh` архивируется в `output/joystick/<NAME>/`
-(scene.mp4 + frames/ + мета `.env` + bag; `NAME=…` или автогенерат
+(scene.mp4 + мета `.env` + bag + joy.log; `NAME=…` или автогенерат
 `lv<LV>_<пилот>_<дата_время>`; `KEEP_BAG=0` — не забирать bag) — иначе
 видео/bag живут только до следующего прогона (capture_scene чистит на старте).
+JPEG-кадры в этой серии не делаются (`FRAMES=0`). Запуск поверх летящего
+прогона блокируется; freefly завершается ДИЗАРМОМ пилота (газ min + yaw ВЛЕВО
+2–3 с — тем же руддером, что арм, только в другую сторону).
 
 ```bash
 bash src/lab/freefly_lv.sh                 # 1) ручной полёт → архив прогона

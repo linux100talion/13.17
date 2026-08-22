@@ -33,8 +33,9 @@
 # В LV=0 BS_VINS_MIN не задаётся (дефолт ноды 40, как в эталонной команде №1).
 #
 # После прогона — АРХИВ в docker/sim/output/joystick/<NAME>/ (шаг 4): scene.mp4,
-# кадры, мета .env, bag (KEEP_BAG=0 — не забирать), реплей-артефакты. Имя —
-# NAME=… или автогенерат lv<LV>_<пилот>_<дата_время>. См. src/lab/joystick/README.md.
+# мета .env, bag (KEEP_BAG=0 — не забирать), joy.log, реплей-артефакты. JPEG-кадры
+# не делаются (FRAMES=0; вернуть — FRAMES=1). Имя — NAME=… или автогенерат
+# lv<LV>_<пилот>_<дата_время>. См. src/lab/joystick/README.md.
 # ============================================================================
 set -euo pipefail
 
@@ -61,6 +62,27 @@ if ! grep -qx "$SIM" <<< "$RUNNING" || ! grep -qx "$NAV" <<< "$RUNNING"; then
     echo "freefly_lv: стек не поднят — make up && make wait"
     make -C "$SIMDIR" up
     make -C "$SIMDIR" wait
+fi
+
+# ── 0b) защита от наслоения прогонов ─────────────────────────────────────────
+# Второй freefly_lv поверх летящего рвёт запись первого (рестарт стека посреди
+# чужой лётной фазы) — 2026-08-22 три наслоённых прогона стоили bag'а полёта.
+# Отдельный случай: freefly ЖДЁТ ДИЗАРМ пилота — пока его нет, нода жива и
+# прогон не завершён (дизарм с пульта: газ в МИНИМУМ + yaw ВЛЕВО до упора 2–3 с).
+BUSY=""
+pgrep -f "capture_scene.sh" >/dev/null 2>&1 && BUSY="capture_scene на хосте"
+# ps+grep вместо pgrep -f: зомби (умершая нода, которую PID1-tail не пожал —
+# снесётся рестартом стека) не должны блокировать запуск; [b] — не матчить себя.
+if [ -z "$BUSY" ] && docker exec "$NAV" bash -lc \
+        "ps -eo stat=,cmd= | grep -v '^Z' | grep -q '[b]ootstrap_arch2'" 2>/dev/null; then
+    BUSY="лётная нода bootstrap_arch2 в контейнере (freefly ждёт дизарм?)"
+fi
+if [ -n "$BUSY" ]; then
+    echo "ОШИБКА: уже идёт прогон — $BUSY." >&2
+    echo "  Заверши его (дизарм: газ min + yaw ВЛЕВО 2–3 с) или прибей:" >&2
+    echo "    docker exec $NAV pkill -f bootstrap_arch2" >&2
+    echo "    pkill -f capture_scene.sh" >&2
+    exit 3
 fi
 
 # ── 1) eeprom SITL под профиль (VISO_TYPE и, для LV=0, возврат GPS-профиля) ──
@@ -103,6 +125,7 @@ export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
 export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9}"
 export GDRIVE_UP="${GDRIVE_UP:-0}"
 export MP4="${MP4:-1}"
+export FRAMES="${FRAMES:-0}"    # JPEG-кадры не нужны (просьба 2026-08-22): только mp4
 
 if [ "$LV" = "1" ]; then                 # LV-добавки (см. Q.txt: ровно пять)
     export BS_VINS_MIN="${BS_VINS_MIN:-300}"
@@ -120,10 +143,11 @@ bash "$SCRIPT_DIR/capture_scene.sh" "$RES" bootstrap_arch2 || RC=$?
 
 # ── 4) архив прогона: docker/sim/output/joystick/<NAME>/ ─────────────────────
 # Имя: NAME=… снаружи или автогенерат lv<LV>_<пилот>_<дата_время>. Внутрь едут:
-# scene.mp4, кадры (frames/), мета <NAME>.env (все BS_*/WIND_ + commit; та же
-# идея, что у calib_run.sh), bag (KEEP_BAG=1, default — без него разбор
-# joystick/analyze.sh умрёт на следующем же прогоне), а для BS_PILOT=replay —
-# joy_replay.log и копия сценария. Архив копится — старые прогоны чистить руками.
+# scene.mp4, мета <NAME>.env (все BS_*/WIND_ + commit; та же идея, что у
+# calib_run.sh), bag (KEEP_BAG=1, default — без него разбор joystick/analyze.sh
+# умрёт на следующем же прогоне), joy.log, а для BS_PILOT=replay — joy_replay.log
+# и копия сценария. JPEG-кадры не делаются вовсе (FRAMES=0 в шаге 2).
+# Архив копится — старые прогоны чистить руками.
 NAME="${NAME:-lv${LV}_${BS_PILOT}_$(date +%Y%m%d_%H%M%S)}"
 case "$NAME" in
     */*|*' '*) echo "ОШИБКА: NAME без пробелов и слэшей ('$NAME')" >&2; exit 2 ;;
@@ -137,17 +161,30 @@ mkdir -p "$RUN_DIR"
     echo "LV=$LV  RES=$RES"
     env | { grep -E '^(BS_|WIND_|TOPICS_|GDRIVE_|MP4)' || true; } | sort
 } > "$RUN_DIR/$NAME.env"
-[ -f "$SIMDIR/output/scene_img/scene.mp4" ] && \
-    cp "$SIMDIR/output/scene_img/scene.mp4" "$RUN_DIR/scene.mp4"
-if compgen -G "$SIMDIR/output/scene_img/*.jpg" > /dev/null; then
-    mkdir -p "$RUN_DIR/frames"
-    cp "$SIMDIR"/output/scene_img/*.jpg "$RUN_DIR/frames/"
+# Каждый артефакт — со своей громкой диагностикой: шаг 4 НЕ умирает молча и не
+# молчит о пропаже (bag прогона 2026-08-22 не доехал до архива без единого слова).
+if [ -f "$SIMDIR/output/scene_img/scene.mp4" ]; then
+    cp "$SIMDIR/output/scene_img/scene.mp4" "$RUN_DIR/scene.mp4" \
+        || echo "⚠️ scene.mp4 не скопировался в архив" >&2
+else
+    echo "⚠️ scene.mp4 нет (MP4=0 или прогон упал до сборки видео)" >&2
 fi
-if [ "$KEEP_BAG" = "1" ] && [ -d "$SIMDIR/output/scene_bag" ]; then
-    mv "$SIMDIR/output/scene_bag" "$RUN_DIR/bag"
+if [ "$KEEP_BAG" = "1" ]; then
+    if [ -d "$SIMDIR/output/scene_bag" ]; then
+        if mv "$SIMDIR/output/scene_bag" "$RUN_DIR/bag"; then
+            echo "    bag → joystick/$NAME/bag ($(du -sh "$RUN_DIR/bag" 2>/dev/null | cut -f1))"
+        else
+            echo "⚠️ bag НЕ переехал (mv не удался) — остался в output/scene_bag" >&2
+        fi
+    else
+        echo "⚠️ output/scene_bag нет — запись не состоялась (RECORD=0 или прогон упал)" >&2
+    fi
+fi
+if [ -f "$SIMDIR/output/joy.log" ]; then
+    cp "$SIMDIR/output/joy.log" "$RUN_DIR/" || true
 fi
 if [ "${BS_PILOT}" = "replay" ] && [ -f "$SIMDIR/output/joy_replay.log" ]; then
-    cp "$SIMDIR/output/joy_replay.log" "$RUN_DIR/"
+    cp "$SIMDIR/output/joy_replay.log" "$RUN_DIR/" || true
 fi
 # копия сценария реплея (провенанс): контейнерный путь → хостовый
 SCN_HOST=""

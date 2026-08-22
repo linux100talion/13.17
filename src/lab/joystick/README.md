@@ -12,11 +12,14 @@
 1. РУЧНОЙ ПОЛЁТ (как обычно; /joy уже пишется в bag через TOPICS_EXTRA):
      bash src/lab/freefly_lv.sh
    Каждый прогон freefly_lv АРХИВИРУЕТСЯ: docker/sim/output/joystick/<NAME>/
-   (scene.mp4, frames/, <NAME>.env — вся мета BS_*/ветер/commit, bag/;
-   для реплея — ещё joy_replay.log и копия сценария). NAME=… задаёт имя,
+   (scene.mp4, <NAME>.env — вся мета BS_*/ветер/commit, bag/, joy.log;
+   для реплея — ещё joy_replay.log и копия сценария). JPEG-кадры не делаются
+   вовсе (FRAMES=0 по умолчанию; вернуть — FRAMES=1). NAME=… задаёт имя,
    дефолт lv<LV>_<пилот>_<дата_время>; KEEP_BAG=0 — не забирать bag (2+ ГБ).
    Без архива scene.mp4/scene_bag живут до СЛЕДУЮЩЕГО прогона (capture_scene
    чистит их на старте). Архив копится — старые прогоны чистить руками.
+   Повторный запуск поверх летящего прогона блокируется (наслоение стоило
+   bag'а 2026-08-22): freefly ждёт ДИЗАРМ пилота — газ min + yaw ВЛЕВО 2–3 с.
 
 2. РАЗБОР bag (стек не трогает):
      RUN=<NAME> bash src/lab/joystick/analyze.sh     # bag из архива прогона

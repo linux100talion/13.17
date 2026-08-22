@@ -37,6 +37,7 @@ MP4="${MP4:-1}"                 # 1 = собрать mp4 из ВСЕХ кадр�
 MP4_MAXW="${MP4_MAXW:-1280}"    # макс. ширина кадра в mp4, px (0 = не масштабировать)
 N_FRAMES="${N_FRAMES:-30}"      # макс. число кадров (0 = без лимита)
 DIST_M="${DIST_M:-0.5}"         # шаг выборки кадров по пройденному пути, м
+FRAMES="${FRAMES:-1}"           # 0 = совсем НЕ извлекать JPEG-кадры (mp4 не затронут)
 TOPIC="${TOPIC:-/image_color}"  # топик камеры
 POSE_TOPIC="${POSE_TOPIC:-/mavros/local_position/pose}" # поза для расчёта пути
 TOPICS_EXTRA="${TOPICS_EXTRA:-}" # доп. топики в bag (через пробел), напр. диагностика IMU
@@ -245,11 +246,15 @@ if [ "$SKIP_CAM" = "1" ]; then
     log "ГОТОВО"
     exit 0
 fi
-log "извлечение кадров по пути (шаг ${DIST_M}м, макс ${N_FRAMES})"
-docker exec \
-  -e SCENE_N="$N_FRAMES" -e SCENE_DIST_M="$DIST_M" \
-  -e SCENE_TOPIC="$TOPIC" -e SCENE_POSE="$POSE_TOPIC" \
-  "$NAV" bash -lc "$SRC; python3 /lab/extract_frames.py" | tail -8
+if [ "$FRAMES" = "0" ]; then
+    log "FRAMES=0 — извлечение JPEG-кадров пропущено (mp4 собирается как обычно)"
+else
+    log "извлечение кадров по пути (шаг ${DIST_M}м, макс ${N_FRAMES})"
+    docker exec \
+      -e SCENE_N="$N_FRAMES" -e SCENE_DIST_M="$DIST_M" \
+      -e SCENE_TOPIC="$TOPIC" -e SCENE_POSE="$POSE_TOPIC" \
+      "$NAV" bash -lc "$SRC; python3 /lab/extract_frames.py" | tail -8
+fi
 
 # ── 5b. сборка mp4 из ВСЕХ кадров /image_color (полный поток камеры) ───────────
 # В отличие от шага 5 (JPEG-выборка по пути), здесь кодируется весь поток камеры
