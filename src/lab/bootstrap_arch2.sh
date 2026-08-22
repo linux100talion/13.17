@@ -20,7 +20,9 @@
 # Параметры через env (подмножество BS_*, совместимое с liftland.sh):
 #   BS_PILOT (scripted)         — источник стиков: scripted | joy (живой TX12 по USB,
 #                                 поднимает joy_linux_node; устройство — JOY_DEV,
-#                                 default /dev/input/js0) | ros (ЛЕГАСИ, петля)
+#                                 default /dev/input/js0) | ros (ЛЕГАСИ, петля) |
+#                                 replay (виртуальный пилот joy_replay.py по сценарию:
+#                                 BS_REPLAY_SCENARIO/BS_REPLAY_RAW, см. src/lab/joystick/)
 #   BS_ALT (3)                  — целевая высота, м
 #   BS_GZ_KP/KD/KI/IMAX/MAX     — гейны gz-hold (дефолты ноды 40/120/8/100/150)
 #   BS_GZ_PSIGN/RSIGN           — знаки коррекции (±1)
@@ -64,6 +66,38 @@ if [ "${BS_PILOT:-}" = "joy" ]; then
     JOY_PID=$!
     trap '[ -n "$JOY_PID" ] && kill "$JOY_PID" 2>/dev/null || true' EXIT
     echo ">>> joy_linux_node запущен (dev=$JOY_DEV, pid=$JOY_PID, лог output/joy.log)"
+fi
+
+# ВИРТУАЛЬНЫЙ ПИЛОТ (BS_PILOT=replay): joy_replay.py публикует /joy по сценарию
+# (src/lab/joystick/, см. README.md там) — нода видит его как живой пульт
+# (--pilot joy), весь стек ниже /joy идентичен ручному полёту. Источник:
+#   BS_REPLAY_SCENARIO — семантический сценарий .json (боевой режим);
+#   BS_REPLAY_RAW      — сырой таймлайн .jsonl из joy_timeline.py (валидация).
+# Знаки осей BS_JOY_SIGNS уходят и ноде, и реплею — рассинхрон невозможен.
+if [ "${BS_PILOT:-}" = "replay" ]; then
+    RARGS=()
+    [ -n "${BS_REPLAY_SCENARIO:-}" ] && RARGS+=(--scenario "$BS_REPLAY_SCENARIO")
+    [ -n "${BS_REPLAY_RAW:-}" ]      && RARGS+=(--raw "$BS_REPLAY_RAW")
+    if [ ${#RARGS[@]} -eq 0 ]; then
+        echo "  ОШИБКА: BS_PILOT=replay требует BS_REPLAY_SCENARIO (сценарий .json)"
+        echo "  или BS_REPLAY_RAW (сырой .jsonl). См. src/lab/joystick/README.md."
+        exit 1
+    fi
+    for f in "${BS_REPLAY_SCENARIO:-}" "${BS_REPLAY_RAW:-}"; do
+        if [ -n "$f" ] && [ ! -e "$f" ]; then
+            echo "  ОШИБКА: файл реплея не найден: $f (путь — ВНУТРИ контейнера:"
+            echo "  /lab/joystick/scenarios/... или /root/sim_ws/output/joystick/...)"
+            exit 1
+        fi
+    done
+    # форма --signs=… обязательна: значение начинается с «-», argparse иначе падает
+    [ -n "${BS_JOY_SIGNS:-}" ] && RARGS+=("--signs=$BS_JOY_SIGNS")
+    python3 /lab/joystick/joy_replay.py "${RARGS[@]}" \
+        > /root/sim_ws/output/joy_replay.log 2>&1 &
+    JOY_PID=$!
+    trap '[ -n "$JOY_PID" ] && kill "$JOY_PID" 2>/dev/null || true' EXIT
+    BS_PILOT=joy          # нода получает --pilot joy: JoyPilot на /joy, как с TX12
+    echo ">>> joy_replay запущен (pid=$JOY_PID, лог output/joy_replay.log)"
 fi
 
 ARGS=()

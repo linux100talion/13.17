@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "name": "example_lv",
+  "note": "справочный пример (README.md): взлёт → LOITER-на-VINS → вперёд → посадка. Не калиброван реальным полётом — тайминги/уровни уточнить по первому разбору bag.",
+  "init": {"sticks": {"thr": -1}, "sw": -1},
+  "steps": [
+    {"arm":  {"timeout": 120}, "note": "руддер-арм, замкнуто по /mavros/state"},
+    {"sticks": {"thr": 0.4},   "note": "взлёт"},
+    {"wait_alt": {"gte": 2.5, "timeout": 60}},
+    {"sticks": {"thr": 0.0}},
+    {"hold": 3.0},
+    {"sw": 0,                  "note": "центр CH6 → штатный LOITER-на-VINS"},
+    {"wait_mode": {"is": "LOITER", "timeout": 30}},
+    {"hold": 10.0},
+    {"sticks": {"pitch": -0.3}, "note": "немного вперёд"},
+    {"hold": 3.0},
+    {"sticks": {"pitch": 0.0}},
+    {"hold": 5.0},
+    {"sticks": {"thr": -0.4},  "note": "снижение"},
+    {"wait_alt": {"lte": 0.15, "timeout": 90}},
+    {"sticks": {"thr": -1.0}},
+    {"hold": 2.0},
+    {"disarm": {"timeout": 30}}
+  ]
+}

@@ -31,6 +31,10 @@
 # Любой параметр (BS_*, WIND_SPD, RES, GDRIVE_UP, MP4, TOPICS_EXTRA...)
 # переопределяется через env; дефолты ниже — эталонные команды из Q.txt.
 # В LV=0 BS_VINS_MIN не задаётся (дефолт ноды 40, как в эталонной команде №1).
+#
+# После прогона — АРХИВ в docker/sim/output/joystick/<NAME>/ (шаг 4): scene.mp4,
+# кадры, мета .env, bag (KEEP_BAG=0 — не забирать), реплей-артефакты. Имя —
+# NAME=… или автогенерат lv<LV>_<пилот>_<дата_время>. См. src/lab/joystick/README.md.
 # ============================================================================
 set -euo pipefail
 
@@ -109,4 +113,53 @@ if [ "$LV" = "1" ]; then                 # LV-добавки (см. Q.txt: ро�
 fi
 
 # ── 3) атомарный прогон (рестарт стека внутри — применяет eeprom из шага 1) ──
-exec bash "$SCRIPT_DIR/capture_scene.sh" "$RES" bootstrap_arch2
+# Не exec: после прогона — шаг 4, архив под именем (scene.mp4/scene_bag живут
+# в output/ только до следующего прогона — capture_scene чистит их на старте).
+RC=0
+bash "$SCRIPT_DIR/capture_scene.sh" "$RES" bootstrap_arch2 || RC=$?
+
+# ── 4) архив прогона: docker/sim/output/joystick/<NAME>/ ─────────────────────
+# Имя: NAME=… снаружи или автогенерат lv<LV>_<пилот>_<дата_время>. Внутрь едут:
+# scene.mp4, кадры (frames/), мета <NAME>.env (все BS_*/WIND_ + commit; та же
+# идея, что у calib_run.sh), bag (KEEP_BAG=1, default — без него разбор
+# joystick/analyze.sh умрёт на следующем же прогоне), а для BS_PILOT=replay —
+# joy_replay.log и копия сценария. Архив копится — старые прогоны чистить руками.
+NAME="${NAME:-lv${LV}_${BS_PILOT}_$(date +%Y%m%d_%H%M%S)}"
+case "$NAME" in
+    */*|*' '*) echo "ОШИБКА: NAME без пробелов и слэшей ('$NAME')" >&2; exit 2 ;;
+esac
+KEEP_BAG="${KEEP_BAG:-1}"
+RUN_DIR="$SIMDIR/output/joystick/$NAME"
+mkdir -p "$RUN_DIR"
+{
+    echo "# freefly_lv: $NAME (rc=$RC)"
+    echo "# commit: $(git -C "$SCRIPT_DIR/../.." rev-parse --short HEAD 2>/dev/null || echo '?')"
+    echo "LV=$LV  RES=$RES"
+    env | { grep -E '^(BS_|WIND_|TOPICS_|GDRIVE_|MP4)' || true; } | sort
+} > "$RUN_DIR/$NAME.env"
+[ -f "$SIMDIR/output/scene_img/scene.mp4" ] && \
+    cp "$SIMDIR/output/scene_img/scene.mp4" "$RUN_DIR/scene.mp4"
+if compgen -G "$SIMDIR/output/scene_img/*.jpg" > /dev/null; then
+    mkdir -p "$RUN_DIR/frames"
+    cp "$SIMDIR"/output/scene_img/*.jpg "$RUN_DIR/frames/"
+fi
+if [ "$KEEP_BAG" = "1" ] && [ -d "$SIMDIR/output/scene_bag" ]; then
+    mv "$SIMDIR/output/scene_bag" "$RUN_DIR/bag"
+fi
+if [ "${BS_PILOT}" = "replay" ] && [ -f "$SIMDIR/output/joy_replay.log" ]; then
+    cp "$SIMDIR/output/joy_replay.log" "$RUN_DIR/"
+fi
+# копия сценария реплея (провенанс): контейнерный путь → хостовый
+SCN_HOST=""
+case "${BS_REPLAY_SCENARIO:-}" in
+    /lab/*)                SCN_HOST="$SCRIPT_DIR/${BS_REPLAY_SCENARIO#/lab/}" ;;
+    /root/sim_ws/output/*) SCN_HOST="$SIMDIR/output/${BS_REPLAY_SCENARIO#/root/sim_ws/output/}" ;;
+esac
+if [ -n "$SCN_HOST" ] && [ -f "$SCN_HOST" ]; then
+    cp "$SCN_HOST" "$RUN_DIR/"
+fi
+
+echo "=== freefly_lv: архив прогона → docker/sim/output/joystick/$NAME/ ==="
+ls -lh "$RUN_DIR" | tail -n +2 | awk '{print "    " $NF " (" $5 ")"}'
+[ -d "$RUN_DIR/bag" ] && echo "    разбор: RUN=$NAME bash src/lab/joystick/analyze.sh"
+exit $RC

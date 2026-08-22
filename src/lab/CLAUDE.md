@@ -418,6 +418,28 @@ pymavlink в контейнере simulator, tcp:5762):
 бегут. Убирает и ручной pymavlink-шаг, который LV-серия делала между
 профилями трижды, и ручную возню с подъёмом стека.
 
+### `joystick/` — запись и реплей пульта (freefly без человека)
+Пилот летает freefly руками (TX12 → `/joy`) → `joystick/analyze.sh` разбирает
+bag (лента событий: CH6/жесты/высоты + черновик сценария + сырой таймлайн) →
+сценарий правится и кладётся в `joystick/scenarios/` → `BS_PILOT=replay`
+проигрывает его виртуальным пилотом: `joy_replay.py` публикует `/joy` вместо
+`joy_linux_node`, для JoyPilot неотличимо от живого пульта. Якоря замкнуты
+(arm/disarm по `/mavros/state`, wait_alt по gt, wait_mode по режиму FCU) —
+тайминги RTF-независимы, таймаут якоря → аварийная посадка. Формат сценария и
+детали: `src/lab/joystick/README.md`.
+
+Каждый прогон `freefly_lv.sh` архивируется в `output/joystick/<NAME>/`
+(scene.mp4 + frames/ + мета `.env` + bag; `NAME=…` или автогенерат
+`lv<LV>_<пилот>_<дата_время>`; `KEEP_BAG=0` — не забирать bag) — иначе
+видео/bag живут только до следующего прогона (capture_scene чистит на старте).
+
+```bash
+bash src/lab/freefly_lv.sh                 # 1) ручной полёт → архив прогона
+RUN=<NAME> bash src/lab/joystick/analyze.sh  # 2) разбор bag из архива
+BS_PILOT=replay BS_REPLAY_SCENARIO=/lab/joystick/scenarios/x.json \
+  bash src/lab/freefly_lv.sh               # 3) реплей — тот же атомарный прогон
+```
+
 ### `vins_watch.sh`
 Мониторинг VINS в реальном времени:
 - фильтрует `sim_nav.log` по ключевым событиям
