@@ -121,6 +121,18 @@ SRC='source /opt/ros/humble/setup.bash; source /opt/overlay/install/setup.bash; 
 
 log() { echo -e "\n=== $* ==="; }
 
+# ── владелец артефактов ───────────────────────────────────────────────────────
+# Всё в output/ пишут root-процессы ВНУТРИ контейнеров (bag, кадры, mp4, логи) —
+# bind mount сохраняет UID писателя, на хосте файлы выходят root'овыми, и cp/rm
+# под обычным юзером (ноут) упираются в права. Возвращаем владельца юзеру хоста
+# изнутри nav-контейнера (там мы root → sudo на хосте не нужен). trap EXIT →
+# срабатывает на ЛЮБОМ выходе: успех, ошибка, ранние exit (SKIP_CAM/RECORD=0).
+HOST_UG="$(id -u):$(id -g)"
+chown_output() {
+    docker exec "$NAV" chown -R "$HOST_UG" /root/sim_ws/output >/dev/null 2>&1 || true
+}
+trap chown_output EXIT
+
 # ── 0. подготовка хоста + очистка артефактов прошлого прогона ─────────────────
 # fresh-start/restart монтируют /dev/rawbayer (v4l2loopback) в nav. Модуль ядра
 # может выгрузиться (ребут бокса) → docker не найдёт устройство и fresh-start
