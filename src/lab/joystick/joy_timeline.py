@@ -56,11 +56,11 @@ def default_signs():
         return JOY_SIGNS_DEFAULT
 
 
-def read_bag(bag, joy_topic, ref_topic):
+def read_bag(bag, joy_topic, ref_topic, state_topic='/mavros/state'):
     r = SequentialReader()
     r.open(StorageOptions(uri=bag, storage_id='sqlite3'),
            ConverterOptions('cdr', 'cdr'))
-    joy_ns, joy_axes, ref = [], [], []
+    joy_ns, joy_axes, ref, fcu = [], [], [], []
     while r.has_next():
         topic, raw, t_ns = r.read_next()
         if topic == joy_topic:
@@ -72,7 +72,13 @@ def read_bag(bag, joy_topic, ref_topic):
             m = deserialize_message(raw, Odometry)
             st = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
             ref.append((t_ns, st, m.pose.pose.position.z))
-    return np.array(joy_ns, dtype=np.int64), np.array(joy_axes), np.array(ref)
+        elif topic == state_topic:
+            # ленивый импорт: в старых bag топика нет, mavros_msgs не обязателен
+            from mavros_msgs.msg import State
+            m = deserialize_message(raw, State)
+            fcu.append((t_ns, bool(m.armed), m.mode))
+    return (np.array(joy_ns, dtype=np.int64), np.array(joy_axes),
+            np.array(ref), fcu)
 
 
 def zoh(t_src, v_src, grid):
@@ -136,7 +142,8 @@ def main():
     signs = (tuple(float(x) for x in args.signs.split(','))
              if args.signs else default_signs())
 
-    joy_ns, joy_axes, ref = read_bag(args.bag, args.joy_topic, args.ref_topic)
+    joy_ns, joy_axes, ref, fcu = read_bag(args.bag, args.joy_topic,
+                                          args.ref_topic)
     if len(joy_ns) == 0:
         sys.exit(f"ОШИБКА: в {args.bag} нет {args.joy_topic}. Полёт был с "
                  f"BS_PILOT=joy и /joy в TOPICS_EXTRA?")
@@ -194,6 +201,18 @@ def main():
         events.append((grid[i0] - t0, 'arm', (grid[i1 - 1] - grid[i0])))
     for i0, i1 in dis_runs:
         events.append((grid[i0] - t0, 'disarm', (grid[i1 - 1] - grid[i0])))
+    if fcu:                                   # /mavros/state в bag (1 Гц): латчи
+        fcu_ns = np.array([f[0] for f in fcu], dtype=np.int64)
+        fcu_sim = (np.interp(fcu_ns, ref[:, 0], ref[:, 1]) if len(ref) >= 2
+                   else (fcu_ns - joy_ns[0]) / 1e9)
+        prev_a, prev_m = None, None
+        for (t_ns, armed, mode), t_s in zip(fcu, fcu_sim):
+            if prev_a is not None and armed != prev_a:
+                events.append((t_s - t0, 'alt',
+                               'FCU: ARMED' if armed else 'FCU: DISARMED'))
+            if mode != prev_m and prev_m is not None:
+                events.append((t_s - t0, 'alt', f'FCU: режим {prev_m} → {mode}'))
+            prev_a, prev_m = armed, mode
     if len(alt_t):
         up = np.where(alt_v > LIFTOFF_ALT)[0]
         if len(up):

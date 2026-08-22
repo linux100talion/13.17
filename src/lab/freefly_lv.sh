@@ -122,7 +122,9 @@ export BS_YAW_LEAK="${BS_YAW_LEAK:-8}"
 export BS_YAW_MAX_RATE="${BS_YAW_MAX_RATE:-100}"
 export BS_YAW_RATE_FULL="${BS_YAW_RATE_FULL:-60}"
 export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
-export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9}"
+# /mavros/state (1 Гц) — для разбора joystick-серии: латчи режимов (LOITER!) и
+# арм/дизарм видны в bag (двойной щелчок CH6 в полёте 182409 без него не объяснить).
+export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9}"
 export GDRIVE_UP="${GDRIVE_UP:-0}"
 export MP4="${MP4:-1}"
 export FRAMES="${FRAMES:-0}"    # JPEG-кадры не нужны (просьба 2026-08-22): только mp4
@@ -171,7 +173,12 @@ else
 fi
 if [ "$KEEP_BAG" = "1" ]; then
     if [ -d "$SIMDIR/output/scene_bag" ]; then
-        if mv "$SIMDIR/output/scene_bag" "$RUN_DIR/bag"; then
+        # mv — ИЗНУТРИ контейнера (root): bag создан root'ом, а перенос каталога
+        # в другой родитель требует записи на сам каталог (обновляется его "..") —
+        # с хоста (andriy) это Permission denied. Так пропал bag прогона 182409.
+        if docker exec "$NAV" mv /root/sim_ws/output/scene_bag \
+                "/root/sim_ws/output/joystick/$NAME/bag" 2>/dev/null \
+           || mv "$SIMDIR/output/scene_bag" "$RUN_DIR/bag" 2>/dev/null; then
             echo "    bag → joystick/$NAME/bag ($(du -sh "$RUN_DIR/bag" 2>/dev/null | cut -f1))"
         else
             echo "⚠️ bag НЕ переехал (mv не удался) — остался в output/scene_bag" >&2
