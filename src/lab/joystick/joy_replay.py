@@ -259,13 +259,20 @@ class JoyReplay(Node):
                 self.get_logger().info("    ARMED — жест снят")
                 return True
             return self._abort('arm') if self._timeout(now, step, 120) else False
-        if 'disarm' in step:            # газ min + yaw влево
-            self._sem.update({'thr': -1.0, 'yaw': -1.0})
+        if 'disarm' in step:            # газ min + yaw влево ИМПУЛЬСАМИ 4с/2с:
+            # непрерывный yaw на земле (LOITER) крутит борт → детектор посадки
+            # не латчится, руддер-дизарм игнорируется, борт опрокинуло и
+            # провалило под карту (реплей 185615). AP хватает ~2с удержания.
+            phase = (now - self._step_t0) % 6.0
+            self._sem.update({'thr': -1.0, 'yaw': -1.0 if phase < 4.0 else 0.0})
             if self._armed is False:
                 self._sem['yaw'] = 0.0
                 self.get_logger().info("    DISARMED — жест снят")
                 return True
-            return self._abort('disarm') if self._timeout(now, step, 30) else False
+            if self._timeout(now, step, 30):
+                self._sem['yaw'] = 0.0          # руль не держать и на отказе
+                return self._abort('disarm')
+            return False
         if 'wait_alt' in step:
             w = step['wait_alt']
             if self._alt is not None:
