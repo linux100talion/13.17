@@ -86,11 +86,17 @@ if [ -n "$BUSY" ]; then
 fi
 
 # ── 1) eeprom SITL под профиль (VISO_TYPE и, для LV=0, возврат GPS-профиля) ──
-if ! docker exec "$SIM" bash -lc \
-    "PYTHONPATH=/root/ardupilot/modules/mavlink python3 /scripts/sitl_lv_profile.py $LV"; then
-    echo "ОШИБКА: не удалось подготовить eeprom (SITL жив? см. make logs)." >&2
-    echo "Попробуй: cd docker/sim && make restart-all && make wait — и повтори." >&2
-    exit 1
+EEPROM_CMD="PYTHONPATH=/root/ardupilot/modules/mavlink python3 /scripts/sitl_lv_profile.py $LV"
+if ! docker exec "$SIM" bash -lc "$EEPROM_CMD"; then
+    # SITL часто мёртв после аварийно размотанного прогона (краш физики/зависший
+    # арм) при живых контейнерах — лечится полным рестартом стека, делаем сами.
+    echo "freefly_lv: SITL недоступен — make restart-all && make wait и повтор"
+    make -C "$SIMDIR" restart-all 2>&1 | tail -2
+    make -C "$SIMDIR" wait
+    if ! docker exec "$SIM" bash -lc "$EEPROM_CMD"; then
+        echo "ОШИБКА: eeprom не подготовлен и после рестарта (см. make logs)." >&2
+        exit 1
+    fi
 fi
 
 # ── 2) env-профиль полёта (эталон из Q.txt; всё переопределяется снаружи) ────
