@@ -50,14 +50,18 @@ AXES = ('roll', 'pitch', 'thr', 'yaw')          # семантические о�
 STEP_KEYS = {'note', 'sticks', 'sw', 'hold', 'arm', 'disarm',
              'wait_alt', 'wait_mode', 'ramp'}
 ALT_BASELINE_N = 40      # сэмплов gt-z на базлайн «земли» (нода стартует до арма)
-# Аварийная посадка при таймауте якоря: умеренное снижение → газ min → дизарм.
+SK_ALT_MIN = 1.0         # станция-кипинг только в воздухе (ниже — руки прочь:
+                         # чистые стики нужны детектору посадки и руддер-жестам)
+# Аварийная посадка при таймауте якоря/геозаборе: снижение → газ min → дизарм.
+# Выдержка газа в полу 8с (не 2): детектору посадки нужно время (реплей 185615/
+# 193735 — 2-3с не хватало, руддер-дизарм игнорировался).
 ABORT_STEPS = [
     {'note': 'АВАРИЙНАЯ ПОСАДКА (таймаут якоря)'},
     {'sticks': {'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0, 'thr': -0.5}},
     {'wait_alt': {'lte': 0.2, 'timeout': 120}},
     {'sticks': {'thr': -1.0}},
-    {'hold': 2.0},
-    {'disarm': {'timeout': 30}},
+    {'hold': 8.0},
+    {'disarm': {'timeout': 60}},
 ]
 
 
@@ -115,8 +119,12 @@ class JoyReplay(Node):
         self._mode = ''
         self._alt = None            # м над точкой старта (gt)
         self._dist = None           # м по горизонтали от точки старта (gt)
+        self._x = self._y = 0.0
+        self._gyaw = 0.0            # курс по gt (для перевода «к дому» в стики)
         self._warm = []
         self._x0 = self._y0 = self._z0 = None
+        self._sk = None             # станция-кипинг (конфиг из сценария)
+        self._sk_on = False         # текущее состояние (для логов на переходах)
         # геозабор: --fence либо "fence" в сценарии; freefly сам его не проверяет
         # («пилот — страховка» по определению миссии), а пилот теперь — мы
         self._fence = float(args.fence)
@@ -141,10 +149,20 @@ class JoyReplay(Node):
             self._sw = int(init.get('sw', -1))
             if self._fence <= 0:
                 self._fence = float(scn.get('fence', 0))
+            # станция-кипинг — имитация рук пилота: ветер 10 м/с за раскачку
+            # унёс разомкнутый реплей на 40м (фенс!), пилот же дрейф держал
+            # стиками (его максимум 34.6м). Дефолт ВКЛ; "station_keeping": 0 —
+            # выкл; dict — переопределить r/r_full/cap.
+            sk = scn.get('station_keeping', {})
+            if sk not in (False, 0):
+                sk = sk if isinstance(sk, dict) else {}
+                self._sk = {'r': float(sk.get('r', 15.0)),
+                            'r_full': float(sk.get('r_full', 30.0)),
+                            'cap': float(sk.get('cap', 0.5))}
             self.get_logger().info(
                 f"сценарий {args.scenario}: «{scn.get('name', '?')}», "
                 f"{len(self._steps)} шагов, init sticks={self._sem} sw={self._sw}, "
-                f"fence={self._fence or 'выкл'}")
+                f"fence={self._fence or 'выкл'}, sk={self._sk or 'выкл'}")
         self._i = 0
         self._step_t0 = None        # sim-время входа в текущий шаг
         self._ramp_from = None
@@ -170,12 +188,47 @@ class JoyReplay(Node):
                 self._warm = None
             return
         self._alt = p.z - self._z0
+        self._x, self._y = p.x, p.y
         self._dist = math.hypot(p.x - self._x0, p.y - self._y0)
+        q = m.pose.pose.orientation
+        self._gyaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                                1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
+    def _sk_correction(self):
+        """(pitch_add, roll_add) — мягкий стик «к дому», имитация рук пилота.
+        Сила 0→cap линейно на радиусах r→r_full; только в воздухе (SK_ALT_MIN).
+        Знаки: pitch −1 = вперёд («от себя»), roll +1 = вправо."""
+        act = (self._sk is not None and self._dist is not None
+               and self._alt is not None and self._alt >= SK_ALT_MIN
+               and self._dist > self._sk['r'])
+        if act != self._sk_on:
+            self._sk_on = act
+            self.get_logger().info(
+                f"    станция-кипинг {'ВКЛ' if act else 'выкл'} "
+                f"(dist={self._dist:.1f}м)" if self._dist is not None else
+                f"    станция-кипинг {'ВКЛ' if act else 'выкл'}")
+        if not act:
+            return 0.0, 0.0
+        k = self._sk['cap'] * min(1.0, (self._dist - self._sk['r'])
+                                  / max(self._sk['r_full'] - self._sk['r'], 1e-6))
+        dx, dy = self._x0 - self._x, self._y0 - self._y
+        n = math.hypot(dx, dy)
+        if n < 1e-6:
+            return 0.0, 0.0
+        dx, dy = dx / n, dy / n
+        c, s = math.cos(self._gyaw), math.sin(self._gyaw)
+        fwd = c * dx + s * dy           # компонента «к дому» вдоль носа
+        left = -s * dx + c * dy         # …и влево от носа
+        return -k * fwd, -k * left
 
     # ---------- публикация ----------
     def _publish(self, raw6=None):
         if raw6 is None:
-            raw6 = [self._sem[a] * self._signs[i] for i, a in enumerate(AXES)]
+            p_add, r_add = self._sk_correction()
+            sem = dict(self._sem)
+            sem['pitch'] = max(-1.0, min(1.0, sem['pitch'] + p_add))
+            sem['roll'] = max(-1.0, min(1.0, sem['roll'] + r_add))
+            raw6 = [sem[a] * self._signs[i] for i, a in enumerate(AXES)]
             raw6 += [0.0, float(self._sw)]      # axes[4]=CH5 (не трогаем), [5]=CH6
         m = Joy()
         m.header.stamp = self.get_clock().now().to_msg()
