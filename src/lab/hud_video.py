@@ -32,6 +32,7 @@ header) — sim-время последнего стемпованного со�
   SCENE_TOPIC    топик изображения (default /image_color)
   SCENE_FPS      FPS видео; 0 = авто по первым кадрам (default 0)
   SCENE_MAXW     макс. ширина кадра, px; 0 = не масштабировать (default 1280)
+  SCENE_FEAT_DOTS точки фич трекера на кадре; 0 = только счётчик FEAT (default 1)
 """
 import os
 import sys
@@ -55,6 +56,7 @@ MP4 = os.environ.get("SCENE_HUD_MP4", "/root/sim_ws/output/scene_img/scene_hud.m
 TOPIC = os.environ.get("SCENE_TOPIC", "/image_color")
 FPS_ENV = float(os.environ.get("SCENE_FPS", "0"))
 MAXW = int(os.environ.get("SCENE_MAXW", "1280"))
+FEAT_DOTS = os.environ.get("SCENE_FEAT_DOTS", "1") == "1"
 FPS_PROBE_N = 90          # кадров на авто-оценку fps (~3 sim-с при 30 Гц)
 
 
@@ -72,6 +74,7 @@ def main():
     # источники HUD → (тип, обработчик); отсутствующие в bag просто выпадают
     hud = HudRenderer()
     now_sim = [0.0]        # sim-часы реплея: последний виденный header.stamp
+    scale = [1.0]          # кадр/камера после MAXW-даунскейла (для точек фич)
 
     def on_status(m):
         hud.set_status(m.data, now_sim[0])       # String без header — см. докстринг
@@ -86,7 +89,14 @@ def main():
 
     def on_feat(m):
         now_sim[0] = stamp(m)
-        hud.set_feat(len(m.points), now_sim[0])
+        # каналы feature_tracker: [id, u, v, vx, vy]; u,v — пиксели кадра
+        # камеры; при даунскейле MAXW домножаем на коэффициент кадра
+        pts = None
+        if FEAT_DOTS and len(m.channels) >= 3:
+            s = scale[0]
+            pts = [(u * s, v * s) for u, v in
+                   zip(m.channels[1].values, m.channels[2].values)]
+        hud.set_feat(len(m.points), now_sim[0], pts)
 
     def on_roll(m):
         now_sim[0] = stamp(m)
@@ -132,6 +142,7 @@ def main():
         img = bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
         if MAXW > 0 and img.shape[1] > MAXW:
             h = int(img.shape[0] * MAXW / img.shape[1])
+            scale[0] = MAXW / img.shape[1]
             img = cv2.resize(img, (MAXW, h), interpolation=cv2.INTER_AREA)
         hud.draw(img, t)
         t_last = t

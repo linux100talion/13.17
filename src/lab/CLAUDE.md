@@ -501,7 +501,7 @@ docker exec p1317_nav bash -lc "$SRC; python3 /lab/<tool> ..."
 | `grab_live.py [out.png]` | снять 1 живой кадр `/image_color` + метрики (ORB/резкость/цвет → детект «оранж-фриза» рендера) | `/lab/grab_live.py` |
 | `gyro_fft.py [bag] [imu]` | FFT гироскопа из bag по окнам ground/air/late (осцилляции rate-loop, см. `docker/sim/doc/old/FAQ_rate_loop.md`) | `/lab/gyro_fft.py` |
 | `bag_frames.py "n:wall,…"\|N` | кадры `/image_color` из bag по wall-моментам (= эпоха логов VINS) + монтаж + метрики | `/lab/bag_frames.py "init:1782653941,reboot:1782654163"` |
-| `hud_video.py` | пост-рендер debug-HUD на видео из bag → `scene_hud.mp4` (HUD живёт только в FPV :5600, в bag его нет; рисует тем же `nav_pkg/hud_renderer.py`). Env: `SCENE_BAG`, `SCENE_HUD_MP4`, `SCENE_MAXW`, `SCENE_FPS` | `SCENE_BAG=…/joystick/<RUN>/bag python3 /lab/hud_video.py` |
+| `hud_video.py` | пост-рендер debug-HUD на видео из bag → `scene_hud.mp4` (HUD живёт только в FPV :5600, в bag его нет; рисует тем же `nav_pkg/hud_renderer.py`; зелёные точки фич трекера — из каналов `/feature`). Env: `SCENE_BAG`, `SCENE_HUD_MP4`, `SCENE_MAXW`, `SCENE_FPS`, `SCENE_FEAT_DOTS` | `SCENE_BAG=…/joystick/<RUN>/bag python3 /lab/hud_video.py` |
 
 Нужен IMU в bag для FFT — писать с `TOPICS_EXTRA="/mavros/imu/data /mavros/imu/data_raw"`.
 IMU sim-частоту в рантайме подтверждает `docker/sim/scripts/imu_rate.py` (его зовёт

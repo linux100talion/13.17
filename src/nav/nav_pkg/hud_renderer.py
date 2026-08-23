@@ -37,6 +37,7 @@ class HudRenderer:
         self.status_t = None
         self.odom_times = collections.deque(maxlen=64)   # приходы /odometry
         self.feat_n, self.feat_t = 0, None
+        self.feat_pts = None          # [(u,v)] фич трекера — зелёные точки
         self.fcu_mode, self.fcu_armed, self.fcu_t = "", False, None
         self.cmd_roll, self.cmd_pitch, self.cmd_t = 0.0, 0.0, None
         self.drift = None             # (норма поправки м, время прихода)
@@ -50,8 +51,13 @@ class HudRenderer:
     def add_odom(self, t: float) -> None:
         self.odom_times.append(t)
 
-    def set_feat(self, n: int, t: float) -> None:
+    def set_feat(self, n: int, t: float, pts=None) -> None:
+        """pts — [(u, v), ...] отслеживаемых фич В КООРДИНАТАХ РИСУЕМОГО КАДРА
+        (масштабирует вызывающий: стример рисует на полном кадре — 1:1,
+        hud_video после resize домножает на свой коэффициент). None = только
+        счётчик FEAT, без точек."""
         self.feat_n, self.feat_t = n, t
+        self.feat_pts = pts
 
     def set_state(self, mode: str, armed: bool, t: float) -> None:
         self.fcu_mode, self.fcu_armed, self.fcu_t = mode, armed, t
@@ -85,6 +91,16 @@ class HudRenderer:
 
     def draw(self, frame, now: float) -> None:
         k = frame.shape[1] / 1280.0
+        # 0) фичи VINS-трекера — то, за что реально цепляется одометрия.
+        # /feature идёт 10 Гц против ~30 у камеры — точки «залипают» на 2-3
+        # кадра (та же философия, что рамки NN); протухли (>0.5 с) — гаснут
+        # раньше строки FEAT: точки врут быстрее счётчика. Рисуются ПОД
+        # текстовым блоком, чтобы не портить читаемость строк.
+        if (self.feat_pts and self.feat_t is not None
+                and now - self.feat_t < 0.5):
+            r = max(2, round(3 * k))
+            for u, v in self.feat_pts:
+                cv2.circle(frame, (round(u), round(v)), r, (0, 255, 0), -1)
         y = round(34 * k)
         # 1) баннер гейта — правда лётной ноды, тухнет за 3 с без /mission/status
         if self.status_t is not None and now - self.status_t < 3.0:

@@ -70,6 +70,8 @@ class OpenHDStreamer(Node):
         self.declare_parameter("out_width", 640)
         self.declare_parameter("out_height", 360)
         self.declare_parameter("hud", True)     # debug-HUD зрелости VINS/фич/осей
+        # точки фич трекера на кадре (зелёные): видно, за что цепляется VINS
+        self.declare_parameter("hud_features", True)
 
         host = self.get_parameter("host").value
         port = int(self.get_parameter("port").value)
@@ -77,6 +79,7 @@ class OpenHDStreamer(Node):
         self.ow = int(self.get_parameter("out_width").value)
         self.oh = int(self.get_parameter("out_height").value)
         self.hud = bool(self.get_parameter("hud").value)
+        self.hud_features = bool(self.get_parameter("hud_features").value)
 
         self.bridge = CvBridge()
         self.last_detections = None   # vision_msgs/Detection2DArray
@@ -131,7 +134,12 @@ class OpenHDStreamer(Node):
         self.renderer.add_odom(self._now())
 
     def on_feat(self, msg):
-        self.renderer.set_feat(len(msg.points), self._now())
+        # каналы feature_tracker: [id, u, v, vx, vy]; u,v — ПИКСЕЛИ кадра
+        # камеры (наш кадр /image_color той же величины → координаты 1:1)
+        pts = None
+        if self.hud_features and len(msg.channels) >= 3:
+            pts = list(zip(msg.channels[1].values, msg.channels[2].values))
+        self.renderer.set_feat(len(msg.points), self._now(), pts)
 
     def on_state(self, msg):
         self.renderer.set_state(msg.mode, msg.armed, self._now())

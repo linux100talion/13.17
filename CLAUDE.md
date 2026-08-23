@@ -88,7 +88,9 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   публикует лётная нода `bootstrap_arch2` (ТОТ ЖЕ гейт, что пускает LOITER —
   единый источник правды; логика `control_pkg/application/hud.py`, офлайн-тест
   `test_hud_status.py`); плюс Гц/возраст `/odometry` (меряет сам), фичи трекера
-  (`/feature` | `/feature_tracker/feature`), режим+armed `/mavros/state`,
+  (`/feature` | `/feature_tracker/feature`) — счётчик FEAT и ЗЕЛЁНЫЕ ТОЧКИ
+  самих фич на кадре (пиксельные u,v из каналов PointCloud [id,u,v,vx,vy];
+  параметр `hud_features`), режим+armed `/mavros/state`,
   PWM-смещения демпферов `/flow_dbg*`, дрейф `/nn1/drift`. Без лётной ноды
   (голый стример на Orin) баннер гейта не рисуется, остальное живёт.
   `/mission/status` пишется в bag (`freefly_lv.sh`), `joy_timeline` показывает
