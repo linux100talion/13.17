@@ -405,6 +405,18 @@ class Freefly(Step):
       живого yaw, а демпферы на земле выдают центр (сигналов нет).
     - Завершение = ДИЗАРМ после хотя бы одного арма; make pilot-done не нужен,
       auto-Land эпилога нет — сажает пилот.
+    - СТРАХОВКА ДИЗАРМА (урок lv1_replay_20260823_191230): FCU может молча
+      отказывать в руддер-дизарме (детектор посадки не взводится), а freefly
+      ждёт дизарм БЕССРОЧНО — прогон завис на земле, bag раздуло до 41 ГБ.
+      Пилот при этом ЯВНО держит жест (газ min + yaw влево; руддеру хватает
+      ~2 с). Жест на земле (баро ≤0.3 м) дольше 8 с → дизармим сервисом
+      cmd/arming сами; ещё через 4 с — force (MAV_CMD 400, param2=21196):
+      раз штатный путь отвергнут, сломан как раз детектор посадки. На земле
+      с газом в полу это безопасно и повторяет аварийный тумблер реального
+      пульта. Отпустил жест — таймер сбрасывается. Последний рубеж: реплей №1
+      (2026-08-22, опрокинутый борт) показал, что FCU может отвергнуть ДАЖЕ
+      force — жест дольше 30 с завершает миссию FREEFLY_STUCK: запись обязана
+      остановиться, bag ограничен (борт остаётся заармленным — громкий error).
     Селектор CH6 после арма работает как в pilot-сегменте (−1 = наш стек, 0 = чистый
     ALT_HOLD; +1 = MANUAL правит Арбитр выше шага).
     ⚠️ Тумблер +1 (MANUAL) до арма: газ идёт через защёлку АРБИТРА (центр, пока стик
@@ -440,6 +452,8 @@ class Freefly(Step):
         self._loiter_since = 0.0
         self._latch_warned = False
         self._land_warned = False
+        self._disarm_since = None      # sim-старт удержания жеста дизарма на земле
+        self._disarm_warned = False
 
     def enter(self, ctx, s) -> None:
         self._greeted = False
@@ -450,6 +464,8 @@ class Freefly(Step):
         self._loiter_since = 0.0
         self._latch_warned = False
         self._land_warned = False
+        self._disarm_since = None
+        self._disarm_warned = False
 
     def _mode_target(self, ctx, s) -> str:
         """Режим FCU под селектор (см. docstring про loiter_center)."""
@@ -537,6 +553,29 @@ class Freefly(Step):
         if not s.armed:
             ctx.log.info("    пилот дизармил — freefly завершён")
             return _finish(rc, "FREEFLY_DONE")
+        # страховка дизарма (см. docstring): жест на земле дольше порога →
+        # дизармим за FCU сами (сервис → force). Пороги PWM — как жесты
+        # joy_timeline (GESTURE_LVL 0.85 → центр−340).
+        gesture = (s.pilot_throttle <= 1160 and s.pilot_yaw <= 1160
+                   and s.rel_alt is not None and s.rel_alt <= 0.3)
+        if not gesture:
+            self._disarm_since = None
+        elif self._disarm_since is None:
+            self._disarm_since = s.now_sim
+        else:
+            held = s.now_sim - self._disarm_since
+            if held > 8.0 and not self._disarm_warned:
+                self._disarm_warned = True
+                ctx.log.warn("    freefly: FCU не дизармится руддером — "
+                             "дизармлю сервисом (страховка)")
+            if held > 30.0:
+                ctx.log.error("    freefly: дизарм не прошёл даже force — "
+                              "завершаю миссию, БОРТ ОСТАЛСЯ ЗААРМЛЕННЫМ")
+                return _finish(rc, "FREEFLY_STUCK")
+            if held > 12.0 and hasattr(ctx.mode, "force_disarm"):
+                ctx.try_cmd(ctx.mode.force_disarm)
+            elif held > 8.0:
+                ctx.try_cmd(lambda: ctx.mode.arm(False))
         return _run(rc)
 
 
