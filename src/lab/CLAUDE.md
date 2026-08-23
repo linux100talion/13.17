@@ -430,7 +430,9 @@ bag (лента событий: CH6/жесты/высоты + черновик �
 детали: `src/lab/joystick/README.md`.
 
 Каждый прогон `freefly_lv.sh` архивируется в `output/joystick/<NAME>/`
-(scene.mp4 + мета `.env` + bag + joy.log; `NAME=…` или автогенерат
+(scene.mp4 + **scene_hud.mp4** — пост-рендер debug-HUD из bag «глазами пилота
+OpenHD», `hud_video.py` тем же кодом `nav_pkg/hud_renderer.py`, что живой FPV;
+`HUD_MP4=0` — выключить; + мета `.env` + bag + joy.log; `NAME=…` или автогенерат
 `lv<LV>_<пилот>_<дата_время>`; `KEEP_BAG=0` — не забирать bag) — иначе
 видео/bag живут только до следующего прогона (capture_scene чистит на старте).
 JPEG-кадры в этой серии не делаются (`FRAMES=0`). Запуск поверх летящего
@@ -499,6 +501,7 @@ docker exec p1317_nav bash -lc "$SRC; python3 /lab/<tool> ..."
 | `grab_live.py [out.png]` | снять 1 живой кадр `/image_color` + метрики (ORB/резкость/цвет → детект «оранж-фриза» рендера) | `/lab/grab_live.py` |
 | `gyro_fft.py [bag] [imu]` | FFT гироскопа из bag по окнам ground/air/late (осцилляции rate-loop, см. `docker/sim/doc/old/FAQ_rate_loop.md`) | `/lab/gyro_fft.py` |
 | `bag_frames.py "n:wall,…"\|N` | кадры `/image_color` из bag по wall-моментам (= эпоха логов VINS) + монтаж + метрики | `/lab/bag_frames.py "init:1782653941,reboot:1782654163"` |
+| `hud_video.py` | пост-рендер debug-HUD на видео из bag → `scene_hud.mp4` (HUD живёт только в FPV :5600, в bag его нет; рисует тем же `nav_pkg/hud_renderer.py`). Env: `SCENE_BAG`, `SCENE_HUD_MP4`, `SCENE_MAXW`, `SCENE_FPS` | `SCENE_BAG=…/joystick/<RUN>/bag python3 /lab/hud_video.py` |
 
 Нужен IMU в bag для FFT — писать с `TOPICS_EXTRA="/mavros/imu/data /mavros/imu/data_raw"`.
 IMU sim-частоту в рантайме подтверждает `docker/sim/scripts/imu_rate.py` (его зовёт

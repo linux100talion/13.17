@@ -147,7 +147,9 @@ export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
 # арм/дизарм видны в bag (двойной щелчок CH6 в полёте 182409 без него не объяснить).
 # /mission/status — гейт LOITER-на-VINS от лётной ноды (debug-HUD): joy_timeline
 # показывает переходы «VINS READY t=…» в ленте событий.
-export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /mission/status /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9}"
+# /feature — счётчик фич трекера для строки FEAT пост-рендера HUD (hud_video.py);
+# PointCloud 10 sim-Гц — копейки против /image_color.
+export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /mission/status /feature /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9}"
 export GDRIVE_UP="${GDRIVE_UP:-0}"
 export MP4="${MP4:-1}"
 export FRAMES="${FRAMES:-0}"    # JPEG-кадры не нужны (просьба 2026-08-22): только mp4
@@ -165,6 +167,20 @@ fi
 # в output/ только до следующего прогона — capture_scene чистит их на старте).
 RC=0
 bash "$SCRIPT_DIR/capture_scene.sh" "$RES" bootstrap_arch2 || RC=$?
+
+# ── 3.5) пост-рендер debug-HUD на видео из bag (HUD_MP4=0 — выключить) ──────
+# HUD живёт только в FPV-потоке :5600 (в bag не пишется), а scene.mp4 —
+# чистая камера. scene_hud.mp4 = тот же полёт глазами пилота OpenHD:
+# hud_video.py восстанавливает оверлей из топиков bag ТЕМ ЖЕ кодом
+# (nav_pkg/hud_renderer.py), что рисует живой поток.
+if [ "${HUD_MP4:-1}" = "1" ] && [ -d "$SIMDIR/output/scene_bag" ]; then
+    echo "=== пост-рендер debug-HUD (scene_hud.mp4) ==="
+    docker exec "$NAV" bash -lc 'source /opt/ros/humble/setup.bash;
+        source /opt/overlay/install/setup.bash;
+        source /root/sim_ws/install/setup.bash;
+        python3 /lab/hud_video.py' \
+        || echo "⚠️ hud_video.py упал — scene_hud.mp4 не будет (прогон цел)" >&2
+fi
 
 # ── 4) архив прогона: docker/sim/output/joystick/<NAME>/ ─────────────────────
 # Имя: NAME=… снаружи или автогенерат lv<LV>_<пилот>_<дата_время>. Внутрь едут:
@@ -193,6 +209,12 @@ if [ -f "$SIMDIR/output/scene_img/scene.mp4" ]; then
         || echo "⚠️ scene.mp4 не скопировался в архив" >&2
 else
     echo "⚠️ scene.mp4 нет (MP4=0 или прогон упал до сборки видео)" >&2
+fi
+if [ -f "$SIMDIR/output/scene_img/scene_hud.mp4" ]; then
+    cp "$SIMDIR/output/scene_img/scene_hud.mp4" "$RUN_DIR/scene_hud.mp4" \
+        || echo "⚠️ scene_hud.mp4 не скопировался в архив" >&2
+elif [ "${HUD_MP4:-1}" = "1" ]; then
+    echo "⚠️ scene_hud.mp4 нет (hud_video.py упал или bag не писался)" >&2
 fi
 if [ "$KEEP_BAG" = "1" ]; then
     if [ -d "$SIMDIR/output/scene_bag" ]; then

@@ -33,13 +33,11 @@
 #     борту /feature_tracker/feature — подписка на оба, издатель ровно один);
 #   - режим+armed из /mavros/state; демпферы (PWM-смещения) из /flow_dbg*;
 #   - DRIFT: норма поправки NN1 (/nn1/drift), засечки редкие → показываем возраст.
-# Всё рисуется по той же схеме, что рамки NN: кэш + putText на каждом кадре,
-# fps видео от частоты источников не зависит; протухшие источники гаснут сами.
-# Возрасты меряются часами ноды (sim-время в симе, wall на борту) — пороги
-# одинаково честны при любом RTF.
+# Сама отрисовка и пороги — в nav_pkg/hud_renderer.py (БЕЗ ROS): тем же кодом
+# hud_video.py (src/lab/) пост-рендерит scene_hud.mp4 из bag. Здесь — только
+# подписки, кормящие рендерер часами ноды (sim в симе, wall на борту) →
+# возрасты RTF-независимы. Кэш + отрисовка на каждом кадре, fps не гейтится.
 # ============================================================================
-import collections
-
 import cv2
 import rclpy
 from cv_bridge import CvBridge
@@ -50,6 +48,8 @@ from sensor_msgs.msg import Image, PointCloud
 from std_msgs.msg import String
 from vision_msgs.msg import Detection2DArray
 
+from nav_pkg.hud_renderer import HUD_SCENE, HudRenderer
+
 # mavros_msgs в наших образах есть (MAVROS живёт в том же контейнере), но
 # стримеру он не обязателен: без него HUD просто не рисует строку режима.
 try:
@@ -58,12 +58,6 @@ except ImportError:
     State = None
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
-# BGR-палитра HUD; баннер гейта заливается цветом состояния, текст на нём чёрный
-HUD_GREEN = (60, 200, 60)
-HUD_YELLOW = (0, 210, 240)
-HUD_RED = (50, 50, 230)
-HUD_WHITE = (235, 235, 235)
-HUD_SCENE = (0, 255, 255)
 
 
 class OpenHDStreamer(Node):
@@ -86,16 +80,7 @@ class OpenHDStreamer(Node):
 
         self.bridge = CvBridge()
         self.last_detections = None   # vision_msgs/Detection2DArray
-        self.last_scene = ""          # str
-
-        # --- кэши HUD: (значение, время прихода по нашим часам) ---
-        self.status = {}              # разобранный /mission/status (k=v)
-        self.status_t = None
-        self.odom_times = collections.deque(maxlen=64)   # приходы /odometry
-        self.feat_n, self.feat_t = 0, None
-        self.fcu_mode, self.fcu_armed, self.fcu_t = "", False, None
-        self.cmd_roll, self.cmd_pitch, self.cmd_t = 0.0, 0.0, None
-        self.drift = None             # (норма поправки м, время прихода)
+        self.renderer = HudRenderer()
 
         pipeline = (
             "appsrc ! videoconvert ! "
@@ -137,31 +122,29 @@ class OpenHDStreamer(Node):
         self.last_detections = msg
 
     def on_nn2(self, msg):
-        self.last_scene = msg.data
+        self.renderer.set_scene(msg.data)
 
     def on_status(self, msg):
-        self.status = dict(p.split("=", 1) for p in msg.data.split() if "=" in p)
-        self.status_t = self._now()
+        self.renderer.set_status(msg.data, self._now())
 
     def on_odom(self, _msg):
-        self.odom_times.append(self._now())
+        self.renderer.add_odom(self._now())
 
     def on_feat(self, msg):
-        self.feat_n, self.feat_t = len(msg.points), self._now()
+        self.renderer.set_feat(len(msg.points), self._now())
 
     def on_state(self, msg):
-        self.fcu_mode, self.fcu_armed, self.fcu_t = msg.mode, msg.armed, self._now()
+        self.renderer.set_state(msg.mode, msg.armed, self._now())
 
     def on_dbg_roll(self, msg):
-        # /flow_dbg: vector.x = PWM-смещение крена (rc.roll − центр) от стека
-        self.cmd_roll, self.cmd_t = msg.vector.x, self._now()
+        self.renderer.set_cmd_roll(msg.vector.x, self._now())
 
     def on_dbg_pitch(self, msg):
-        self.cmd_pitch = msg.vector.x
+        self.renderer.set_cmd_pitch(msg.vector.x)
 
     def on_drift(self, msg):
         v = msg.vector
-        self.drift = ((v.x * v.x + v.y * v.y + v.z * v.z) ** 0.5, self._now())
+        self.renderer.set_drift(v.x, v.y, v.z, self._now())
 
     def on_image(self, msg):
         if not self.writer.isOpened():
@@ -185,73 +168,11 @@ class OpenHDStreamer(Node):
                     cv2.putText(frame, label, (x1, max(0, y1 - 6)),
                                 FONT, 0.6, (0, 255, 0), 2)
         if self.hud:
-            self._draw_hud(frame)
-        elif self.last_scene:
+            self.renderer.draw(frame, self._now())
+        elif self.renderer.scene:
             # HUD выключен — прежний одинокий баннер сцены (жёлтый).
-            cv2.putText(frame, f"scene: {self.last_scene}", (10, 30),
+            cv2.putText(frame, f"scene: {self.renderer.scene}", (10, 30),
                         FONT, 0.8, HUD_SCENE, 2)
-
-    def _hud_line(self, frame, y, text, color, scale=0.8, fill=None):
-        """Строка HUD на подложке (читаемость поверх любой сцены); вернёт next y."""
-        (tw, th), base = cv2.getTextSize(text, FONT, scale, 2)
-        x = 10
-        cv2.rectangle(frame, (x - 6, y - th - 6), (x + tw + 6, y + base + 4),
-                      (0, 0, 0) if fill is None else fill, -1)
-        cv2.putText(frame, text, (x, y), FONT, scale,
-                    color if fill is None else (0, 0, 0), 2)
-        return y + th + base + 18
-
-    def _draw_hud(self, frame):
-        now = self._now()
-        y = 34
-        # 1) баннер гейта — правда лётной ноды, тухнет за 3 с без /mission/status
-        if self.status_t is not None and now - self.status_t < 3.0:
-            st = self.status.get("st", "")
-            why = self.status.get("why", "-")
-            if st == "READY":
-                y = self._hud_line(frame, y, "VINS READY", HUD_GREEN,
-                                   scale=1.0, fill=HUD_GREEN)
-            elif st == "WAIT":
-                y = self._hud_line(frame, y, f"VINS WAIT ({why})", HUD_YELLOW,
-                                   scale=1.0, fill=HUD_YELLOW)
-            else:
-                y = self._hud_line(frame, y, f"NO VINS ({why})", HUD_RED,
-                                   scale=1.0, fill=HUD_RED)
-        # 2) режим FCU + armed
-        if self.fcu_t is not None and now - self.fcu_t < 5.0:
-            arm = "ARM" if self.fcu_armed else "DISARM"
-            y = self._hud_line(frame, y, f"{self.fcu_mode} {arm}", HUD_WHITE)
-        # 3) /odometry: Гц (окно 3 с) + возраст; красный ODO -- = VINS без init
-        if self.odom_times:
-            age = now - self.odom_times[-1]
-            win = [t for t in self.odom_times if now - t < 3.0]
-            hz = ((len(win) - 1) / (win[-1] - win[0])
-                  if len(win) >= 2 and win[-1] > win[0] else 0.0)
-            col = (HUD_GREEN if age < 0.5 else
-                   HUD_YELLOW if age < 1.5 else HUD_RED)
-            y = self._hud_line(frame, y, f"ODO {hz:4.1f}Hz {age:4.1f}s", col)
-        else:
-            y = self._hud_line(frame, y, "ODO --", HUD_RED)
-        # 4) фичи трекера: замолк при живой камере — это ЧП, красним
-        if self.feat_t is not None:
-            if now - self.feat_t < 3.0:
-                y = self._hud_line(frame, y, f"FEAT {self.feat_n}", HUD_WHITE)
-            else:
-                y = self._hud_line(frame, y, "FEAT --", HUD_RED)
-        # 5) PWM-смещения крена/тангажа от стека (/flow_dbg, /flow_dbg2)
-        if self.cmd_t is not None and now - self.cmd_t < 2.0:
-            y = self._hud_line(frame, y,
-                               f"CMD R{self.cmd_roll:+04.0f} "
-                               f"P{self.cmd_pitch:+04.0f}", HUD_WHITE)
-        # 6) поправка NN1: засечки редкие, старше 10 с — показываем возраст
-        if self.drift is not None:
-            d, t = self.drift
-            age = now - t
-            txt = f"DRIFT {d:.2f}m" + (f" ({age:.0f}s)" if age > 10.0 else "")
-            y = self._hud_line(frame, y, txt, HUD_WHITE)
-        # 7) семантика сцены NN2 (бывший одинокий баннер)
-        if self.last_scene:
-            self._hud_line(frame, y, f"scene: {self.last_scene}", HUD_SCENE)
 
 
 def main(args=None):
