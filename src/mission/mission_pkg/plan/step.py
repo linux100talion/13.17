@@ -555,9 +555,15 @@ class Freefly(Step):
             return _finish(rc, "FREEFLY_DONE")
         # страховка дизарма (см. docstring): жест на земле дольше порога →
         # дизармим за FCU сами (сервис → force). Пороги PWM — как жесты
-        # joy_timeline (GESTURE_LVL 0.85 → центр−340).
-        gesture = (s.pilot_throttle <= 1160 and s.pilot_yaw <= 1160
-                   and s.rel_alt is not None and s.rel_alt <= 0.3)
+        # joy_timeline (GESTURE_LVL 0.85 → центр−340). «На земле» — баро ИЛИ
+        # gt (как детект касания у Land): прогон 2 серии 2026-08-23 вскрыл
+        # механизм отказов — баро/EKF-высота после касания ЗАСТРЕВАЕТ на
+        # ~1.4-1.5 м (gt=0.0), детектор посадки FCU не взводится, и гейт
+        # только по rel_alt молчал бы вместе с ним (27 мин до дизарма).
+        # На борту gt_valid=False — там остаётся баро (кампания alt_src=baro).
+        landed = ((s.rel_alt is not None and s.rel_alt <= 0.3)
+                  or (s.gt_valid and s.gt_z <= 0.3))
+        gesture = (s.pilot_throttle <= 1160 and s.pilot_yaw <= 1160 and landed)
         if not gesture:
             self._disarm_since = None
         elif self._disarm_since is None:

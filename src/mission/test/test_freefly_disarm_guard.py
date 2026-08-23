@@ -68,10 +68,11 @@ def make(clock, mode):
     return PlanRunner([step], clock, mode, FakeLog())
 
 
-def snap(t, armed=True, alt=0.1, thr=1100, yaw=1100):
+def snap(t, armed=True, alt=0.1, thr=1100, yaw=1100, gt=None):
     return DroneState(mode="LOITER", armed=armed, rel_alt=alt, now_sim=t,
                       pilot_throttle=thr, pilot_yaw=yaw,
-                      pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER)
+                      pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER,
+                      gt_valid=gt is not None, gt_z=gt if gt is not None else 0.0)
 
 
 def tick_until(runner, clock, mode, dur, dt=0.05, **kw):
@@ -110,9 +111,18 @@ check("сброс таймера: 6+6 с с разрывом — дизарм Н
 clock, mode = FakeClock(), FakeMode()
 r = make(clock, mode)
 r.tick(snap(clock.t))
-tick_until(r, clock, mode, 20.0, alt=3.0)
-check("в воздухе (alt=3) 20 с жеста — ничего не дёргали",
+tick_until(r, clock, mode, 20.0, alt=3.0, gt=3.0)
+check("в воздухе (alt=3, gt=3) 20 с жеста — ничего не дёргали",
       mode.disarm_calls == 0 and mode.force_calls == 0)
+
+# --- 3b. сценарий прогона 2 серии 2026-08-23: баро ЗАСТРЯЛ на 1.4 м, но
+#         gt=0.0 (дрон на земле) — гейт по gt обязан взвести страховку ---
+clock, mode = FakeClock(), FakeMode()
+r = make(clock, mode)
+r.tick(snap(clock.t))
+tick_until(r, clock, mode, 10.0, alt=1.4, gt=0.0)
+check("баро застрял (1.4), gt=0 → страховка сработала по gt",
+      mode.disarm_calls >= 1)
 
 # --- 4. rel_alt=None (нет баро) — страховка молчит, не крэш ---
 clock, mode = FakeClock(), FakeMode()
