@@ -7,6 +7,7 @@ RTF не привязать к sim-времени. publish_axes() шлёт за�
 (pitch_off/flow_longitudinal/flow_yaw) — полный флоу-дамп для свипа/диагностики.
 """
 from geometry_msgs.msg import Vector3Stamped
+from std_msgs.msg import String
 
 from ..domain.rc import RC_CENTER
 
@@ -46,6 +47,12 @@ class RosDebugSink:
         # второй источник в /flow_dbg5: pos-осей стало две, и «первый ответивший»
         # молча подменил бы диагностику тангажа рысканием.
         self._pub6 = node.create_publisher(Vector3Stamped, '/flow_dbg6', 10)
+        # /mission/status = статус гейта LOITER-на-VINS (String, "k=v k=v ...").
+        # ЕДИНСТВЕННЫЙ источник правды для debug-HUD: openhd_streamer рисует
+        # баннер «VINS READY» ровно из этого топика, а не из своей оценки
+        # (полёт lv1_joy_20260822_232043: гейт молча держал, пилот щёлкал CH6
+        # вслепую). Заодно попадает в bag → joy_timeline показывает переходы.
+        self._pub_status = node.create_publisher(String, '/mission/status', 10)
 
     def publish(self, roll_off: float, flow_off: float, conf: float, stamp: float) -> None:
         d = Vector3Stamped()
@@ -54,6 +61,12 @@ class RosDebugSink:
         d.vector.y = float(flow_off)
         d.vector.z = float(conf)
         self._pub.publish(d)
+
+    def publish_status(self, line: str) -> None:
+        """/mission/status: строка гейта от лётной ноды (см. __init__)."""
+        m = String()
+        m.data = line
+        self._pub_status.publish(m)
 
     def publish_hold(self, hold) -> None:
         """/flow_dbg5 = УСТАВКА холдера положения: (точка удержания, ошибка до неё,

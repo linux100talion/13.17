@@ -83,7 +83,16 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   `/nn2/scene`, кэширует последние детекции, рисует на каждом кадре
   (`cv2.rectangle/putText`), ужимает до 640×360, кодирует H.264 (GStreamer →
   `udpsink :5600`). Видео на полном fps независимо от инференса; рамки «залипают»
-  между обновлениями (для FPV норм).
+  между обновлениями (для FPV норм). **Debug-HUD** (параметр `hud`, default true):
+  баннер гейта LOITER-на-VINS (зел/жёлт/крас) из **`/mission/status`** — его
+  публикует лётная нода `bootstrap_arch2` (ТОТ ЖЕ гейт, что пускает LOITER —
+  единый источник правды; логика `control_pkg/application/hud.py`, офлайн-тест
+  `test_hud_status.py`); плюс Гц/возраст `/odometry` (меряет сам), фичи трекера
+  (`/feature` | `/feature_tracker/feature`), режим+armed `/mavros/state`,
+  PWM-смещения демпферов `/flow_dbg*`, дрейф `/nn1/drift`. Без лётной ноды
+  (голый стример на Orin) баннер гейта не рисуется, остальное живёт.
+  `/mission/status` пишется в bag (`freefly_lv.sh`), `joy_timeline` показывает
+  переходы «HUD: VINS READY» в ленте событий.
 - **`nn1_anchor`** — Нейросеть №1 (якорная локализация). Инкремент 1: SuperPoint+
   LightGlue (`anchor_matcher.py`) матчит `/image_color` против георефернс-базы
   облёта (`data/reference_db/`) → bbox+id ориентира в `/nn1/detections`.

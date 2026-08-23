@@ -27,6 +27,7 @@ from std_msgs.msg import Empty
 
 from control_pkg.application.arbiter import Arbiter
 from control_pkg.application.handover import VinsHandover
+from control_pkg.application.hud import hud_status
 from control_pkg.domain.control.stabilization import VinsHold
 from control_pkg.domain.rc import RC_CENTER, RcCommand
 from control_pkg.infrastructure.mavros_actuator import MavrosActuator
@@ -273,6 +274,7 @@ class BootstrapArch2Node(Node):
         self._pilot_done = False
         self.create_subscription(Empty, '/mission/pilot_done',
                                  lambda _m: setattr(self, '_pilot_done', True), 1)
+        self._hud_st = ''      # последний st= в /mission/status (лог переходов)
         self.timer = self.create_timer(0.05, self._tick)
         self.logger.info(
             f"alt_hold_bootstrap ARCH2: mode={cfg.control_mode} alt={cfg.alt}м "
@@ -318,6 +320,13 @@ class BootstrapArch2Node(Node):
         self.debug.publish_rate_roll(self._rate_dbg('roll'))
         # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
+        # /mission/status: гейт LOITER-на-VINS для debug-HUD стримера + bag
+        line = hud_status(s, self.cfg.vins_fresh_sec)
+        st = line.split(' ', 1)[0]
+        if st != self._hud_st:      # переход статуса — в лог (виден и в sim_nav.log)
+            self._hud_st = st
+            self.logger.info(f"HUD: {line}")
+        self.debug.publish_status(line)
 
     def _calm_phase(self) -> bool:
         """Спокойная фаза для переключения источников EKF (урок LV2, см. очередь):

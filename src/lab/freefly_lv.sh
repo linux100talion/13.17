@@ -113,7 +113,9 @@ if ! docker exec "$SIM" bash -lc "$EEPROM_CMD"; then
 fi
 
 # ── 2) env-профиль полёта (эталон из Q.txt; всё переопределяется снаружи) ────
-export WIND_SPD="${WIND_SPD:-10}"
+# WIND_SPD: дефолт снижен 10 → 5 (2026-08-23, просьба Андрея) — 10 был из
+# LV-серии (стресс ветром), для регулярных прогонов серии joystick хватает 5.
+export WIND_SPD="${WIND_SPD:-5}"
 export BS_PILOT="${BS_PILOT:-joy}"
 export BS_STAB="${BS_STAB:-DpHoldM}"
 export BS_MISSION="${BS_MISSION:-freefly}"
@@ -143,7 +145,9 @@ export BS_YAW_RATE_FULL="${BS_YAW_RATE_FULL:-60}"
 export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
 # /mavros/state (1 Гц) — для разбора joystick-серии: латчи режимов (LOITER!) и
 # арм/дизарм видны в bag (двойной щелчок CH6 в полёте 182409 без него не объяснить).
-export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9}"
+# /mission/status — гейт LOITER-на-VINS от лётной ноды (debug-HUD): joy_timeline
+# показывает переходы «VINS READY t=…» в ленте событий.
+export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /mission/status /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9}"
 export GDRIVE_UP="${GDRIVE_UP:-0}"
 export MP4="${MP4:-1}"
 export FRAMES="${FRAMES:-0}"    # JPEG-кадры не нужны (просьба 2026-08-22): только mp4

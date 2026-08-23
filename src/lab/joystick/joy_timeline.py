@@ -56,11 +56,12 @@ def default_signs():
         return JOY_SIGNS_DEFAULT
 
 
-def read_bag(bag, joy_topic, ref_topic, state_topic='/mavros/state'):
+def read_bag(bag, joy_topic, ref_topic, state_topic='/mavros/state',
+             hud_topic='/mission/status'):
     r = SequentialReader()
     r.open(StorageOptions(uri=bag, storage_id='sqlite3'),
            ConverterOptions('cdr', 'cdr'))
-    joy_ns, joy_axes, ref, fcu = [], [], [], []
+    joy_ns, joy_axes, ref, fcu, hud = [], [], [], [], []
     while r.has_next():
         topic, raw, t_ns = r.read_next()
         if topic == joy_topic:
@@ -77,8 +78,15 @@ def read_bag(bag, joy_topic, ref_topic, state_topic='/mavros/state'):
             from mavros_msgs.msg import State
             m = deserialize_message(raw, State)
             fcu.append((t_ns, bool(m.armed), m.mode))
+        elif topic == hud_topic:
+            # гейт LOITER-на-VINS от лётной ноды (debug-HUD, "k=v k=v ...")
+            from std_msgs.msg import String
+            m = deserialize_message(raw, String)
+            kv = dict(p.split('=', 1) for p in m.data.split() if '=' in p)
+            hud.append((t_ns, kv.get('st', '?'), kv.get('why', '-'),
+                        kv.get('odom', '?')))
     return (np.array(joy_ns, dtype=np.int64), np.array(joy_axes),
-            np.array(ref), fcu)
+            np.array(ref), fcu, hud)
 
 
 def zoh(t_src, v_src, grid):
@@ -142,8 +150,8 @@ def main():
     signs = (tuple(float(x) for x in args.signs.split(','))
              if args.signs else default_signs())
 
-    joy_ns, joy_axes, ref, fcu = read_bag(args.bag, args.joy_topic,
-                                          args.ref_topic)
+    joy_ns, joy_axes, ref, fcu, hud = read_bag(args.bag, args.joy_topic,
+                                               args.ref_topic)
     if len(joy_ns) == 0:
         sys.exit(f"ОШИБКА: в {args.bag} нет {args.joy_topic}. Полёт был с "
                  f"BS_PILOT=joy и /joy в TOPICS_EXTRA?")
@@ -213,6 +221,18 @@ def main():
             if mode != prev_m and prev_m is not None:
                 events.append((t_s - t0, 'alt', f'FCU: режим {prev_m} → {mode}'))
             prev_a, prev_m = armed, mode
+    if hud:                                   # /mission/status в bag: гейт HUD
+        hud_ns = np.array([h[0] for h in hud], dtype=np.int64)
+        hud_sim = (np.interp(hud_ns, ref[:, 0], ref[:, 1]) if len(ref) >= 2
+                   else (hud_ns - joy_ns[0]) / 1e9)
+        prev_st = None
+        for (t_ns, st, why, odom), t_s in zip(hud, hud_sim):
+            if prev_st is not None and st != prev_st:
+                label = {'READY': f'HUD: VINS READY (odom={odom})',
+                         'WAIT': f'HUD: VINS WAIT ({why})'}.get(
+                             st, f'HUD: NO VINS ({why})')
+                events.append((t_s - t0, 'alt', label))
+            prev_st = st
     if len(alt_t):
         up = np.where(alt_v > LIFTOFF_ALT)[0]
         if len(up):
