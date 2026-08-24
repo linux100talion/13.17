@@ -1,8 +1,13 @@
-SPAWN_POSE=among_trees bash src/lab/freefly_lv.sh
 
-SPAWN_FROM=docker/sim/output/joystick/lv1_joy_20260824_140447 bash src/lab/freefly_lv.sh
+SPAWN_FROM=/usr/local/DATA/Calude/13.17/docker/sim/output/joystick/lv1_joy_20260824_211215/ bash src/lab/freefly_lv.sh
 
 
+python3 src/lab/spawn_save.py docker/sim/output/joystick/lv1_joy_20260824_224118 among_trees
+BS_SF_MASTER=1 SPAWN_POSE=among_trees bash src/lab/freefly_lv.sh
+
+BS_SF_MASTER=1 .SPAWN_POSE="-0.6018 -11.0809 0.2450 0 0 -2.95235" bash src/lab/freefly_lv.sh
+
+--------------------------------------------------------
 
 # базовый freefly: только наш стек, GPS живой весь полёт
 LV=0 bash src/lab/freefly_lv.sh

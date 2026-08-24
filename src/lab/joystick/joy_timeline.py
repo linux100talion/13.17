@@ -176,6 +176,13 @@ def main():
     ap.add_argument('--min-dur', type=float, default=0.3,
                     help='мин. длительность сегмента, sim-с')
     ap.add_argument('--grid-hz', type=float, default=20.0)
+    ap.add_argument('--sf-master', dest='sf_master', default='auto',
+                    choices=['auto', '0', '1'],
+                    help='схема SF-мастер в ЭТОМ полёте: 1/0 — истина из .env '
+                         'прогона (analyze.sh передаёт сам); auto — эвристика '
+                         'по живой оси 6. Эвристика врёт, когда SF уже сидит в '
+                         'миксере, а полёт легаси (прогон 213830: CH6 подписан '
+                         'потолками лесенки при легаси-семантике)')
     args = ap.parse_args()
     signs = (tuple(float(x) for x in args.signs.split(','))
              if args.signs else default_signs())
@@ -216,11 +223,13 @@ def main():
            for i, a in enumerate(AXES)}
     sw_raw = zoh(sim_joy, joy_axes[:, 5], grid)
     sw = np.where(sw_raw > 0.5, 1, np.where(sw_raw < -0.5, -1, 0))
-    # SF-мастер (CH7): бинарник «вверх / не-вверх». Ось жила в полёте → имена
-    # CH6 переключаем на потолки лесенки (иначе лента врала бы про MANUAL).
+    # SF-мастер (CH7): бинарник «вверх / не-вверх». Семантику полёта задаёт
+    # --sf-master (истина из .env прогона); auto — эвристика по живой оси 6
+    # (ось живёт и в легаси-полёте, если SF уже назначен в миксере)
     sf_raw = zoh(sim_joy, joy_axes[:, 6], grid)
     sf = np.where(sf_raw > 0.5, 1, 0)
-    sf_used = bool(np.any(np.abs(joy_axes[:, 6]) > 0.5))
+    sf_axis_alive = bool(np.any(np.abs(joy_axes[:, 6]) > 0.5))
+    sf_used = {'auto': sf_axis_alive, '0': False, '1': True}[args.sf_master]
     sw_names = SW_NAMES_SF if sf_used else SW_NAMES
 
     # квантование + сглаживание медианой (5 тиков ≈ 0.25 с) от дребезга
