@@ -21,6 +21,7 @@ scripts/                    — entrypoint'ы (монтируются как /sc
 simulator/  nav/  mavlink_router/  — Dockerfile'ы образов
 worlds/                     — SDF-миры и модель дрона (iris_cam)
 output/                     — логи нод (make logs читает отсюда)
+spawn.md                    — шпаргалка: точка старта «где сел — там и стартуем»
 Q.txt, CMD.txt, loiter.md   — актуальные заметки (вопросы-ответы по freefly,
                               холодный старт, переход в LOITER-на-VINS)
 doc/old/                    — архив (FAQ*, todo*, README, laptop_move.md,
@@ -233,6 +234,44 @@ Env (`BS_RE_*` → `--roll-excite-*`): `MODE` (balanced/chirp), `AMP` (PWM),
 cp -r docker/sim/output/scene_bag docker/sim/bags/roll_excite_$(date +%Y%m%d)
 ```
 `docker/sim/bags/` — в `.gitignore` (бэги крупные, вне git).
+
+## Точка спавна и геодезическая привязка
+
+**`SPAWN_POSE="x y z roll pitch yaw"`** (env контейнера `simulator`) — где
+поставить борт, в осях МИРА Gazebo (x-восток, y-север, yaw в радианах, 0 = нос
+на восток). Пусто = штатный центр площадки. `scripts/sim_up.sh` подставляет позу
+в `<pose>` модели `iris_cam` в копии мира в `/tmp`. Применяется при СОЗДАНИИ
+контейнера → только `fresh-start`; постоянный дефолт — строка в `docker/sim/.env`.
+Вместо шести чисел можно дать **имя пресета**: `SPAWN_POSE=among_trees` →
+`docker/sim/output/spawn/among_trees`. Пресеты пишет `src/lab/spawn_save.py`
+(вынимает из прогона только позу — семь чисел из `/model/iris_cam/odometry`, —
+после чего прогон можно удалять); `--list` показывает сохранённые. Разовый
+вариант — `SPAWN_FROM=<каталог прогона>` у `freefly_lv.sh`. Подробности —
+`src/lab/CLAUDE.md`, короткая шпаргалка — `spawn.md` в этом каталоге.
+Пресеты лежат в `output/`, а он в `.gitignore` — на другой бокс не переезжают.
+
+⚠️ **Борт на земле удерживает только ветер.** Трения о землю в связке
+Gazebo+dartsim фактически нет (добавление `<surface><friction><ode><mu>` ничего
+не меняет), собственного сопротивления воздуха у модели тоже нет — единственное
+демпфирование даёт плагин `WindEffects` (сила ∝ разности скоростей ветра и
+звена). При `WIND_SPD=0` борт получает при подключении SITL толчок ~0.06 м/с и
+едет ВЕЧНО (замер 2026-08-24: скорость не падает за 45 с, 13 м за 4 мин) — это
+не связано со спавном, так же уезжает и штатный старт в начале координат.
+Все прогоны серии идут с `WIND_SPD=5` (дефолт `freefly_lv.sh`), там борт стоит
+намертво.
+
+**Геодезическая привязка — ТРИ точки, менять только вместе:**
+
+| где | что | зачем |
+|---|---|---|
+| `worlds/mili_fortress.sdf` | `<spherical_coordinates>` 50.4501 / 30.5234 / 180 | начало координат Gazebo = эта точка Земли, оси ENU |
+| `scripts/sim_up.sh` | `SIM_HOME` → `sim_vehicle --custom-location` | дом SITL: от него рисуется магнитометр и GPS |
+| `src/mission/mission_pkg/config.py` | `origin_lat/lon/alt` (`BS_ORIGIN_*`) | `SET_GPS_GLOBAL_ORIGIN` в безжпсном буте LV=2 |
+
+EK3 строит из origin модель магнитного поля (WMM) и сверяет с магнитометром, а
+тот рисуется от дома SITL: разъедутся — «PreArm: Check mag field (z diff:999>200)»
+и арма нет (урок прогона `lv2_replay_20260824_034433`). До 2026-08-24 все три
+точки были CMAC (Канберра, дефолт `sim_vehicle`), теперь — Киев.
 
 ## Пустая площадка — `src/lab/scene_objects.py`
 

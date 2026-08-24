@@ -432,8 +432,11 @@ class BootstrapArch2Node(Node):
         """SET_GPS_GLOBAL_ORIGIN раз в 2 с до подтверждения. Координаты — из
         cfg.origin_*: локальный фрейм борт строит от этой точки, но «условными»
         они быть НЕ могут — EKF выводит из origin модель магнитного поля (WMM)
-        и сверяет с магнитометром (см. комментарий в config.origin_lat: Киев
-        на стенде = «PreArm: Check mag field», арм невозможен)."""
+        и сверяет с магнитометром. Магнитометр в SITL рисуется от ДОМА SITL,
+        поэтому origin и дом обязаны совпадать: Киев при доме-CMAC давал
+        «PreArm: Check mag field» и арма не было. С 2026-08-24 согласованы обе
+        точки (дом SITL, origin) и начало координат мира Gazebo — все Киев,
+        см. комментарий в config.origin_lat."""
         if self._origin_pub is None or self._origin_ok:
             return
         if time.time() - self._origin_last < 2.0:
@@ -701,7 +704,7 @@ def _parse() -> tuple:
     p.add_argument('--set-origin', dest='set_origin', type=float,
                    default=_D.set_origin)
     # координаты origin (примерная РЕАЛЬНАЯ точка старта — см. config.origin_lat:
-    # из них EKF строит модель магнитного поля; дефолт = дом SITL CMAC)
+    # из них EKF строит модель магнитного поля; дефолт = дом SITL, с 2026-08-24 Киев)
     p.add_argument('--origin-lat', dest='origin_lat', type=float,
                    default=_D.origin_lat)
     p.add_argument('--origin-lon', dest='origin_lon', type=float,

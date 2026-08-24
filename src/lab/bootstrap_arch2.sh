@@ -165,7 +165,8 @@ ARGS=()
 [ -n "${BS_PERC_ALT_SRC:-}" ]    && ARGS+=(--perc-alt-src "$BS_PERC_ALT_SRC")
 [ -n "${BS_SET_ORIGIN:-}" ]      && ARGS+=(--set-origin "$BS_SET_ORIGIN")
 # координаты origin — примерная РЕАЛЬНАЯ точка старта (EKF строит по ним модель
-# магнитного поля WMM; дефолт = дом SITL CMAC, боевой борт задаёт свои)
+# магнитного поля WMM; дефолт = дом SITL, с 2026-08-24 Киев — та же точка, что
+#                                 начало координат мира Gazebo; боевой борт задаёт свои)
 [ -n "${BS_ORIGIN_LAT:-}" ]      && ARGS+=(--origin-lat "$BS_ORIGIN_LAT")
 [ -n "${BS_ORIGIN_LON:-}" ]      && ARGS+=(--origin-lon "$BS_ORIGIN_LON")
 [ -n "${BS_ORIGIN_ALT:-}" ]      && ARGS+=(--origin-alt "$BS_ORIGIN_ALT")

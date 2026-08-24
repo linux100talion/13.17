@@ -1,13 +1,6 @@
-Из корня репы (/usr/local/DATA/Calude/13.17):
+SPAWN_POSE=among_trees bash src/lab/freefly_lv.sh
 
-p = pwd (корень проекта)
-cd p/docker/sim
-make host-setup
-make up && make wait
-
-bash p/src/lab/freefly_lv.sh
-
-
+SPAWN_FROM=docker/sim/output/joystick/lv1_joy_20260824_140447 bash src/lab/freefly_lv.sh
 
 
 

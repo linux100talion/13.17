@@ -38,6 +38,33 @@
     <plugin filename="gz-sim-navsat-system"
             name="gz::sim::systems::NavSat"/>
 
+    <!-- ====== Геодезическая привязка мира ======
+         Начало координат Gazebo (x=0 y=0 z=0) = эта точка на Земле; оси ENU
+         (x — на восток, y — на север, z — вверх), поэтому <pose> любой модели
+         читается как «столько-то метров восточнее/севернее origin».
+         Точка — Киев (примерная реальная точка старта).
+
+         ⚠️ ОДНА ИЗ ТРЁХ СОГЛАСОВАННЫХ ТОЧЕК. EK3 строит из origin модель
+         магнитного поля (WMM) и сверяет с магнитометром; магнитометр в SITL
+         рисуется от ДОМА SITL. Разъедутся — «PreArm: Check mag field
+         (z diff:999>200)» и арма нет (урок прогона lv2_replay_20260824_034433).
+         Менять только ВСЕ ТРИ ВМЕСТЕ:
+           1) этот блок,
+           2) дом SITL — SIM_HOME в docker/sim/scripts/sim_up.sh
+              (ключ custom-location у sim_vehicle),
+           3) origin ноды — origin_lat/lon/alt в src/mission/mission_pkg/config.py
+              (BS_ORIGIN_LAT/LON/ALT), его нода шлёт SET_GPS_GLOBAL_ORIGIN
+              в безжпсном буте LV=2.
+         Высота 180 м AMSL здесь и в SIM_HOME/origin_alt — одна и та же. -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>50.450100</latitude_deg>
+      <longitude_deg>30.523400</longitude_deg>
+      <elevation>180</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
     <physics name="default_physics" type="dart">
       <max_step_size>0.004</max_step_size>
       <real_time_factor>1.0</real_time_factor>

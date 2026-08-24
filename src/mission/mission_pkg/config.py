@@ -466,11 +466,14 @@ class BootstrapConfig:
     # «PreArm: Check mag field (z diff:999>200)», арм невозможен, и yaw-компас
     # был бы отравлен (прогон lv2_replay_20260824_034433, 59 ГБ земли).
     # Ставить ПРИМЕРНУЮ РЕАЛЬНУЮ точку старта (десятки км погрешности — ок,
-    # поле меняется медленно). Дефолт = дом SITL (CMAC, sim_vehicle без -L);
-    # боевой борт задаёт свои через BS_ORIGIN_LAT/LON/ALT.
-    origin_lat: float = -35.363261   # BS_ORIGIN_LAT / --origin-lat
-    origin_lon: float = 149.165230   # BS_ORIGIN_LON / --origin-lon
-    origin_alt: float = 584.0        # м AMSL; BS_ORIGIN_ALT / --origin-alt
+    # поле меняется медленно). Дефолт = дом SITL, а он с 2026-08-24 — Киев
+    # (SIM_HOME в docker/sim/scripts/sim_up.sh, он же <spherical_coordinates>
+    # мира = начало координат Gazebo). ⚠️ Эти три точки менять только ВМЕСТЕ:
+    # магнитометр SITL рисуется от дома, WMM у EK3 — от origin.
+    # Боевой борт задаёт свои через BS_ORIGIN_LAT/LON/ALT.
+    origin_lat: float = 50.450100    # BS_ORIGIN_LAT / --origin-lat
+    origin_lon: float = 30.523400    # BS_ORIGIN_LON / --origin-lon
+    origin_alt: float = 180.0        # м AMSL; BS_ORIGIN_ALT / --origin-alt
     perc_alt_src: str = 'global'     # источник ВЫСОТЫ ПЕРЦЕПЦИИ (масштаб IPM +
                                      # гейты опоры; НЕ alt_src миссии!):
                                      # 'global' — rel_alt EKF (дефолт, GPS-

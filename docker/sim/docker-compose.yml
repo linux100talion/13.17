@@ -48,6 +48,12 @@ services:
       - WIND_SPD=${WIND_SPD:-0}
       - WIND_DIR_DEG=${WIND_DIR_DEG:-98}
       - WIND_FACTOR=${WIND_FACTOR:-0.4}
+      # ТОЧКА СПАВНА дрона: "x y z roll pitch yaw" в осях МИРА Gazebo (пусто =
+      # штатный центр площадки). Задаётся из окружения прогона (freefly_lv:
+      # SPAWN_FROM=<каталог прогона> → src/lab/spawn_pose.py) или постоянно —
+      # строкой SPAWN_POSE=... в docker/sim/.env. Применяется при СОЗДАНИИ
+      # контейнера → менять только через fresh-start. См. scripts/sim_up.sh.
+      - SPAWN_POSE=${SPAWN_POSE:-}
 
     # iGPU (Intel, DRI3) для ОКНА `make gui`: X-сервер гибридного ноута сидит на
     # /dev/dri/card*, без проброса Mesa в контейнере падает на llvmpipe (софт-рендер,

@@ -186,6 +186,41 @@ if [ "$LV" = "2" ]; then                 # GPS ОТСУТСТВУЕТ С БУТ�
     export BS_PERC_ALT_SRC="${BS_PERC_ALT_SRC:-local}"
 fi
 
+# ── 2b) ТОЧКА СПАВНА: где сел — там и стартуем ──────────────────────────────
+# SPAWN_FROM=<каталог прогона|bag|.db3> — взять МЕСТО ПОСАДКИ того прогона
+# (истинная поза Gazebo из bag'а, src/lab/spawn_pose.py) и спавнить борт там же
+# с тем же курсом. SPAWN_POSE="x y z r p y" — та же поза руками (оси мира
+# Gazebo: x-восток, y-север, yaw 0 = нос на восток).
+#   SPAWN_FROM=docker/sim/output/joystick/lv1_joy_20260824_140447 bash src/lab/freefly_lv.sh
+# ЧАСТО ПРОЩЕ: сохранить точку под именем один раз и звать по имени —
+#   python3 src/lab/spawn_save.py <прогон> among_trees   (прогон дальше не нужен)
+#   SPAWN_POSE=among_trees bash src/lab/freefly_lv.sh
+# Пусто — штатный спавн в центре площадки. Постоянный дефолт для всех прогонов
+# кладётся строкой SPAWN_POSE=... в docker/sim/.env (её читает compose).
+# Применяет позу scripts/sim_up.sh (патчит КОПИЮ мира в /tmp); env доезжает до
+# контейнера только при ПЕРЕСОЗДАНИИ — capture_scene делает fresh-start, т.к.
+# RES задан всегда.
+# ⚠️ Требует ВЕТРА (WIND_SPD ≠ 0, здесь дефолт 5): в безветренном прогоне борт на
+# земле ничем не удерживается и уезжает — трения о землю в этой связке нет,
+# демпфирует только плагин ветра. Подробности и замеры — в sim_up.sh.
+if [ -n "${SPAWN_FROM:-}" ]; then
+    if [ -n "${SPAWN_POSE:-}" ]; then
+        echo "freefly_lv: заданы и SPAWN_POSE, и SPAWN_FROM — беру SPAWN_FROM" >&2
+    fi
+    SPAWN_LINE="$(python3 "$SCRIPT_DIR/spawn_pose.py" "$SPAWN_FROM")" || {
+        echo "ОШИБКА: место посадки из '$SPAWN_FROM' не достаётся (см. выше)" >&2
+        exit 4; }
+    eval "$SPAWN_LINE"
+fi
+export SPAWN_POSE="${SPAWN_POSE:-}"
+if [ -n "$SPAWN_POSE" ]; then
+    # тут может быть и ИМЯ ПРЕСЕТА (SPAWN_POSE=among_trees) — его разрешает уже
+    # sim_up.sh по файлу docker/sim/output/spawn/<имя> (пишет spawn_save.py)
+    echo "freefly_lv: точка старта — $SPAWN_POSE"
+else
+    echo "freefly_lv: спавн штатный (центр площадки)"
+fi
+
 # ── 3) атомарный прогон (рестарт стека внутри — применяет eeprom из шага 1) ──
 # Не exec: после прогона — шаг 4, архив под именем (scene.mp4/scene_bag живут
 # в output/ только до следующего прогона — capture_scene чистит их на старте).
@@ -224,7 +259,7 @@ mkdir -p "$RUN_DIR"
     echo "# freefly_lv: $NAME (rc=$RC)"
     echo "# commit: $(git -C "$SCRIPT_DIR/../.." rev-parse --short HEAD 2>/dev/null || echo '?')"
     echo "LV=$LV  RES=$RES"
-    env | { grep -E '^(BS_|WIND_|TOPICS_|GDRIVE_|MP4)' || true; } | sort
+    env | { grep -E '^(BS_|WIND_|SPAWN_|TOPICS_|GDRIVE_|MP4)' || true; } | sort
 } > "$RUN_DIR/$NAME.env"
 # Каждый артефакт — со своей громкой диагностикой: шаг 4 НЕ умирает молча и не
 # молчит о пропаже (bag прогона 2026-08-22 не доехал до архива без единого слова).

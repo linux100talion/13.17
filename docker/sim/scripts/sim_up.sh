@@ -96,6 +96,89 @@ else
     echo "  ветер: выкл (WIND_SPD=0)"
 fi
 
+# ── ТОЧКА СПАВНА: «где сел — там и стартуем» ─────────────────────────────────
+# SPAWN_POSE="x y z roll pitch yaw" — где поставить борт, в осях МИРА Gazebo
+# (x-восток, y-север, z-вверх; yaw 0 = нос на восток, радианы). Пусто = штатный
+# спавн из SDF (0 0 0.245 0 0 0 — центр площадки).
+#
+# Позу места посадки достаёт из bag'а прошлого прогона src/lab/spawn_pose.py,
+# freefly_lv.sh умеет одним env: SPAWN_FROM=<каталог прогона>.
+#
+# Вместо чисел можно дать ИМЯ ПРЕСЕТА: SPAWN_POSE=among_trees → берётся
+# docker/sim/output/spawn/among_trees (пресеты пишет src/lab/spawn_save.py —
+# он вынимает из прогона только позу, дальше прогон можно удалять).
+#
+# Патчим тем же приёмом, что ветер и разрешение: КОПИЯ мира в /tmp, репозиторный
+# SDF чист. Проверено 2026-08-24: борт встаёт ровно в заданную точку с заданным
+# курсом и стоит неподвижно (bit-in-bit 48 с).
+#
+# ⚠️ ТОЛЬКО С ВЕТРОМ (WIND_SPD ≠ 0, дефолт freefly — 5). В БЕЗВЕТРЕННОМ прогоне
+#    борт на земле не удерживает ничто: трения о землю в этой связке (dartsim +
+#    <surface> из SDF) фактически нет, сопротивления воздуха у модели тоже нет —
+#    единственное демпфирование даёт плагин WindEffects (сила ∝ разности скоростей
+#    ветра и звена). Замер 2026-08-24, WIND_SPD=0: борт получает при подключении
+#    SITL толчок ~0.06 м/с и едет ВЕЧНО (скорость не падает за 45 с, 13 м за
+#    4 мин) — и это НЕ связано со спавном: при WIND_SPD=0 так же уезжает штатный
+#    спавн в начале координат. С WIND_SPD=5 обе конфигурации стоят намертво.
+# ⚠️ z — точка ПОКОЯ (верх земли + клиренс ног 0.195). На ровной травяной
+#    площадке это 0.245; spawn_pose.py берёт фактическое z посадки.
+# ⚠️ env применяется при СОЗДАНИИ контейнера → менять только через fresh-start
+#    (capture_scene.sh делает его сам, когда задано разрешение — freefly_lv
+#    задаёт всегда).
+# ⚠️ Истинная поза Gazebo теперь начинается НЕ с нуля (скрипты разбора, если они
+#    считают старт началом координат, надо кормить той же SPAWN_POSE). Полётнику
+#    сдвиг безразличен: home/origin EKF он ставит на буте от своей точки (LV=1 —
+#    по SIM-GPS, LV=2 — SET_GPS_GLOBAL_ORIGIN от ноды), локальные координаты
+#    снова начинаются с нуля в точке спавна.
+SPAWN_POSE="${SPAWN_POSE:-}"
+# Вместо шести чисел можно дать ИМЯ пресета — файла в output/spawn/ (это
+# /root/output/spawn в контейнере, каталог смонтирован с хоста). Пресеты пишет
+# src/lab/spawn_save.py: «взять из прогона только позу и сохранить под именем»,
+# после чего сам прогон можно удалять. Формат файла: комментарии «#» + одна
+# строка «x y z r p y».
+case "$SPAWN_POSE" in
+    ''|*[0-9]*[!0-9.eE+\ -]*|*[!0-9.eE+\ -]*)
+        if [ -n "$SPAWN_POSE" ]; then
+            SPAWN_NAME="$SPAWN_POSE"
+            PRESET="/root/output/spawn/$SPAWN_NAME"
+            if [ ! -f "$PRESET" ]; then
+                echo "  ОШИБКА: нет пресета спавна '$SPAWN_NAME' ($PRESET)" >&2
+                echo "  есть: $(ls /root/output/spawn 2>/dev/null | tr '\n' ' ')" >&2
+                echo "  сделать: python3 src/lab/spawn_save.py <прогон> $SPAWN_NAME" >&2
+                exit 2
+            fi
+            SPAWN_POSE="$(grep -vE '^[[:space:]]*(#|$)' "$PRESET" | head -1 \
+                          | tr -s ' ' | sed 's/^ *//; s/ *$//')"
+            echo "  спавн из пресета '$SPAWN_NAME' ($PRESET)"
+        fi
+        ;;
+esac
+if [ -n "$SPAWN_POSE" ]; then
+    if [ "$(wc -w <<< "$SPAWN_POSE")" != "6" ]; then
+        echo "  ОШИБКА: SPAWN_POSE='$SPAWN_POSE' — жду 6 чисел «x y z r p y»" >&2
+        exit 2
+    fi
+    [ "${WIND_SPD:-0}" = "0" ] && echo "  ⚠️ СПАВН при WIND_SPD=0: борт поедет (см. комментарий в sim_up.sh)" >&2
+    mkdir -p "$PATCH"
+    cp "$WORLD" "$PATCH/world_spawn.sdf"
+    python3 - "$PATCH/world_spawn.sdf" "$SPAWN_POSE" <<'PYEOF'
+import re, sys
+path, pose = sys.argv[1], sys.argv[2]
+s = open(path).read()
+# <include> именно с <name>iris_cam</name> — прочие модели мира не трогаем
+pat = re.compile(r'(<include>(?:(?!</include>).)*?<name>iris_cam</name>'
+                 r'(?:(?!</include>).)*?<pose>)([^<]*)(</pose>)', re.S)
+s, n = pat.subn(lambda m: m.group(1) + pose + m.group(3), s, count=1)
+if n != 1:
+    sys.exit("ОШИБКА: не нашёл <pose> модели iris_cam в мире")
+open(path, 'w').write(s)
+PYEOF
+    WORLD="$PATCH/world_spawn.sdf"
+    echo "  СПАВН: борт в ($SPAWN_POSE) вместо штатного 0 0 0.245 0 0 0"
+else
+    echo "  спавн: штатный (центр площадки, SPAWN_POSE не задан)"
+fi
+
 # 1. Gazebo Harmonic — мир + дрон с камерой (ArduPilotPlugin слушает 9002).
 if ! pgrep -f "gz sim" >/dev/null; then
     nohup gz sim -s --headless-rendering -v4 -r "$WORLD" >"$LOG/gz_sim.log" 2>&1 &
@@ -116,7 +199,16 @@ if ! pgrep -f "sim_vehicle" >/dev/null; then
     # что правки sitl-extra.parm по-прежнему подхватываются, а калибровка (её нет
     # в .parm) сохраняется в eeprom. См. docker/sim/todo.txt.
     mkdir -p /root/sitl_state
+    # SIM_HOME — ДОМ SITL «lat,lon,alt,heading». Держать согласованным с
+    # <spherical_coordinates> мира и origin_lat/lon/alt ноды: SITL рисует от дома
+    # магнитное поле, EK3 строит WMM от origin — разъедутся, и арма нет
+    # («PreArm: Check mag field», урок lv2_replay_20260824_034433). Дефолт — Киев,
+    # та же точка, что начало координат Gazebo (см. worlds/mili_fortress.sdf).
+    # Без ключа SITL брал CMAC (Канберра) из Tools/autotest/locations.txt.
+    SIM_HOME="${SIM_HOME:-50.450100,30.523400,180,0}"
+    echo "  дом SITL: $SIM_HOME (= начало координат мира)"
     ( cd /root/sitl_state && nohup sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON \
+        --custom-location="$SIM_HOME" \
         --add-param-file=/root/ardupilot/Tools/autotest/default_params/gazebo-iris.parm \
         --add-param-file=/root/sitl-extra.parm \
         --no-rebuild --no-mavproxy >"$LOG/sitl.log" 2>&1 & )
