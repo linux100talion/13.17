@@ -40,8 +40,19 @@ from sensor_msgs.msg import Joy
 AXES = ('roll', 'pitch', 'thr', 'yaw')
 SW_NAMES = {-1: 'ВВЕРХ(-1, наш стек)', 0: 'ЦЕНТР(0, ALT_HOLD/LOITER)',
             1: 'ВНИЗ(+1, MANUAL)'}
+# Пороги жеста ОТКАЛИБРОВАНЫ 2026-08-24 по 13 реплейным bag'ам против истины
+# /mavros/state: recall 13/13 и НОЛЬ ложных на всей сетке LVL 0.5-0.9 (фоновый
+# max|yaw| при газе<−0.5 вне жестов ≈ 0.00 — предикат «газ в полу И yaw в
+# упоре» самоселективен). 0.85 подтверждён и единственным ручным полётом
+# (182409, жесты пилота детектились). Двигать не по чему — живые-руки-данные
+# соберёт следующий ручной полёт (старые ручные bag'и удалены при чистках).
 GESTURE_LVL = 0.85       # |thr|,|yaw| для распознавания руддер-жеста
 GESTURE_MIN = 0.5        # мин. длительность жеста, sim-с
+GESTURE_GAP = 3.0        # слияние импульсов жеста с паузой ≤gap в ОДНО событие:
+                         # реплей давит руддер-дизарм импульсами 4с/2с
+                         # (joy_replay), и отказ FCU выглядел бы десятком
+                         # жестов в ленте. Та же семантика «отпустил = пауза
+                         # >3 с», что у страховки дизарма Freefly.
 LIFTOFF_ALT = 0.3        # м: отрыв
 TOUCH_ALT = 0.15         # м: касание после апекса
 
@@ -131,6 +142,17 @@ def sustained_runs(mask, dt, min_dur):
             if v and (i1 - i0) * dt >= min_dur]
 
 
+def merge_runs(runs, dt, gap):
+    """Слить прогоны с паузой ≤ gap (сек) в один: импульсный жест = одно событие."""
+    out = []
+    for i0, i1 in runs:
+        if out and (i0 - out[-1][1]) * dt <= gap:
+            out[-1][1] = i1
+        else:
+            out.append([i0, i1])
+    return [(a, b) for a, b in out]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -201,10 +223,12 @@ def main():
     events = []                                # (t_rel, 'вид', данные)
     for i0, i1, v in sw_segs[1:]:
         events.append((grid[i0] - t0, 'sw', int(v)))
-    arm_runs = sustained_runs((sem['thr'] < -GESTURE_LVL)
-                              & (sem['yaw'] > GESTURE_LVL), dt, GESTURE_MIN)
-    dis_runs = sustained_runs((sem['thr'] < -GESTURE_LVL)
-                              & (sem['yaw'] < -GESTURE_LVL), dt, GESTURE_MIN)
+    arm_runs = merge_runs(sustained_runs((sem['thr'] < -GESTURE_LVL)
+                                         & (sem['yaw'] > GESTURE_LVL),
+                                         dt, GESTURE_MIN), dt, GESTURE_GAP)
+    dis_runs = merge_runs(sustained_runs((sem['thr'] < -GESTURE_LVL)
+                                         & (sem['yaw'] < -GESTURE_LVL),
+                                         dt, GESTURE_MIN), dt, GESTURE_GAP)
     for i0, i1 in arm_runs:
         events.append((grid[i0] - t0, 'arm', (grid[i1 - 1] - grid[i0])))
     for i0, i1 in dis_runs:
