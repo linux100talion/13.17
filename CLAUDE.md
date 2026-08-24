@@ -311,7 +311,8 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
     ```
     SCHED_LOOP_RATE 100   # иначе "Main loop slow (249Hz < 400Hz)" → краш FCU
     FS_GCS_ENABLE 0       # отключить failsafe GCS
-    ARMING_CHECK 0        # упростить армирование в симуляции
+    ARMING_SKIPCHK -1     # выключить pre-arm чеки (4.8: бывш. ARMING_CHECK 0 —
+                          # переименован, старая строка молча игнорировалась)
     DISARM_DELAY 0
     ```
     TODO: зафиксировать в образе (Dockerfile COPY или volume-монтирование .parm).

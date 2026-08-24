@@ -206,17 +206,37 @@ class BootstrapArch2Node(Node):
         # IPM-скорость остаётся у профиля 'integral' (там она — единственные
         # данные) и в паблишере vision_speed (health VisOdom для арма).
         vel_ripe = 0.0 if cfg.vision_pose_src == 'extern' else 6.0
-        self._ekf_pending = [('EK3_SRC1_VELXY', 3.0, None),
-                             ('EK3_SRC1_POSXY', 3.0, None),
-                             ('EK3_SRC1_VELXY', vel_ripe, _vins_ripe),
-                             ('EK3_SRC1_POSXY', 6.0, _vins_ripe)]
+        if cfg.gps_denied > 0:
+            # LV=2 «GPS отсутствует С БУТА»: eeprom уже стоит extnav-парой
+            # (sitl_lv_profile.py 2: POSXY=6, VELXY=0, SIM_GPS1_ENABLE=0) — EKF
+            # живёт на vision с земли (нулевая поза, мост в _pose_bridge).
+            # Очередь тут не ПЕРЕКЛЮЧАЕТ источники, а (а) самовосстанавливает
+            # eeprom, если его увёл чужой профиль (LV=0 вернул 3/3), и
+            # (б) ДАТИРУЕТ extnav_ready зрелостью VINS: POSXY=6 переписывается
+            # по _vins_ripe → гейт LOITER (и HUD READY) открывается на тех же
+            # ~600 odom, что в LV=1 — семантика зрелости не меняется. GPS-ветки
+            # (восстановление до арма / глушение в полёте) не нужны: глушить
+            # нечего, gps_disable игнорируется.
+            if cfg.gps_disable > 0:
+                self.logger.warn("gps_denied>0: gps_disable игнорируется — "
+                                 "GPS нет с бута, глушить нечего")
+            if cfg.set_origin <= 0:
+                self.logger.warn("gps_denied>0 БЕЗ set_origin: origin ставить "
+                                 "некому — EKF не начнёт aiding (LOITER мёртв)")
+            self._ekf_pending = [('EK3_SRC1_VELXY', vel_ripe, None),
+                                 ('EK3_SRC1_POSXY', 6.0, _vins_ripe)]
+        else:
+            self._ekf_pending = [('EK3_SRC1_VELXY', 3.0, None),
+                                 ('EK3_SRC1_POSXY', 3.0, None),
+                                 ('EK3_SRC1_VELXY', vel_ripe, _vins_ripe),
+                                 ('EK3_SRC1_POSXY', 6.0, _vins_ripe)]
         # GPS-denied профиль «GPS теряется В ПОЛЁТЕ»: глушим GPS только когда
         # VINS реально публикует одометрию И дрон в воздухе. Попытка глушить на
         # земле (прогон 2026-08-19) провалилась: VINS без параллакса не инитится,
         # EKF минуты без позиционных данных → z-оценка едет → AltHold (газ по
         # EKF-z) сам сажает дрон. Если VINS так и не оживёт — GPS не глушится
         # вовсе (миссия остаётся на GPS, безопасная деградация).
-        if cfg.gps_disable > 0:
+        if cfg.gps_disable > 0 and cfg.gps_denied <= 0:
             # Самовосстановление GPS ДО арма (голова очереди): SIM_GPS1_ENABLE=0
             # прошлого прогона ПЕРСИСТИТСЯ в eeprom — следующий бут остался бы
             # без GPS с земли (climb по замёрзшему global не видит взлёта).
@@ -246,6 +266,16 @@ class BootstrapArch2Node(Node):
             # (два издателя vision_pose ломают фьюжн). Скорость+нули на земле
             # для арма шлём в любом случае.
             if cfg.vision_pose_src != 'extern':
+                self._vis_pose_pub = self.create_publisher(
+                    PoseStamped, '/mavros/vision_pose/pose', 10)
+            elif cfg.gps_denied > 0:
+                # Мост безжпсного бута: до первой одометрии VINS позу extern-
+                # издателя (ray_tracer) взять неоткуда, а EK3 обязан начать
+                # aiding НА ЗЕМЛЕ (в воздухе не стартует — LV4). Издаём
+                # (0,0,баро) сами (см. _pose_bridge) и замолкаем НАВСЕГДА с
+                # первым /odometry — правило «два издателя позы недопустимы»
+                # соблюдено во времени: перекрытия нет, стык гладкий (кадр
+                # ray_tracer якорится на EKF, обе стороны ≈ (0,0,alt)).
                 self._vis_pose_pub = self.create_publisher(
                     PoseStamped, '/mavros/vision_pose/pose', 10)
             from mavros_msgs.srv import ParamSetV2
@@ -353,8 +383,11 @@ class BootstrapArch2Node(Node):
             self.logger.info("set_origin: EKF-origin подтверждён (gp_origin)")
 
     def _send_origin(self):
-        """SET_GPS_GLOBAL_ORIGIN раз в 2 с до подтверждения. Координаты условные
-        (борт без GPS всё равно живёт в локальном фрейме от этой точки)."""
+        """SET_GPS_GLOBAL_ORIGIN раз в 2 с до подтверждения. Координаты — из
+        cfg.origin_*: локальный фрейм борт строит от этой точки, но «условными»
+        они быть НЕ могут — EKF выводит из origin модель магнитного поля (WMM)
+        и сверяет с магнитометром (см. комментарий в config.origin_lat: Киев
+        на стенде = «PreArm: Check mag field», арм невозможен)."""
         if self._origin_pub is None or self._origin_ok:
             return
         if time.time() - self._origin_last < 2.0:
@@ -363,9 +396,9 @@ class BootstrapArch2Node(Node):
         from geographic_msgs.msg import GeoPointStamped
         m = GeoPointStamped()
         m.header.frame_id = 'map'
-        m.position.latitude = 50.4501
-        m.position.longitude = 30.5234
-        m.position.altitude = 179.0
+        m.position.latitude = float(self.cfg.origin_lat)
+        m.position.longitude = float(self.cfg.origin_lon)
+        m.position.altitude = float(self.cfg.origin_alt)
         self._origin_pub.publish(m)
 
     def _vision_feed(self, s):
@@ -398,6 +431,9 @@ class BootstrapArch2Node(Node):
                     (self.logger.info if ok else self.logger.warn)(
                         f"{name}: " + ("установлен" if ok else "отказ — ретраю"))
                 fut.add_done_callback(_done)
+        # мост позы безжпсного бута — ДО скоростных гейтов: в наборе высоты
+        # ipm слеп (return ниже), а aiding EK3 рвать нельзя ни на секунду
+        self._pose_bridge(s)
         if s.ipm_ok:
             vf, vl = s.ipm_vfwd, s.ipm_vlat
         elif s.rel_alt is not None and s.rel_alt >= 0.5:
@@ -426,8 +462,9 @@ class BootstrapArch2Node(Node):
         # и пусть: EKF нужен ХОТЬ КАКОЙ-ТО позиционный источник, чтобы вообще
         # начать aiding (прогон C: без позиции скоростной источник игнорируется).
         # z = баро (EK3_SRC1_POSZ остаётся баро и это не потребляет).
-        # При vision_pose_src='extern' позу даёт ray_tracer — блок ниже молчит.
-        if self._vis_pose_pub is None:
+        # При vision_pose_src='extern' позу даёт ray_tracer — блок ниже молчит
+        # (мост gps_denied живёт в _pose_bridge, интеграл ему не нужен).
+        if self._vis_pose_pub is None or self.cfg.vision_pose_src == 'extern':
             return
         from geometry_msgs.msg import PoseStamped
         dt = 0.0 if self._vis_pos_t is None else min(0.2, wall - self._vis_pos_t)
@@ -442,6 +479,34 @@ class BootstrapArch2Node(Node):
         pm.pose.position.z = float(s.rel_alt or 0.0)
         # ориентация — текущий курс EKF (кватернион вокруг z): yaw-источник EKF
         # остаётся компасом (EK3_SRC1_YAW не трогаем), эти углы он не потребляет
+        pm.pose.orientation.z = math.sin(0.5 * s.att_yaw)
+        pm.pose.orientation.w = math.cos(0.5 * s.att_yaw)
+        self._vis_pose_pub.publish(pm)
+
+    def _pose_bridge(self, s):
+        """Мост позы безжпсного бута (gps_denied + pose extern): (0,0,баро) в
+        /mavros/vision_pose/pose с земли и весь набор высоты, пока VINS молчит.
+
+        Зачем: EK3 стартует aiding ТОЛЬКО на земле (в воздухе не начинает —
+        LV4), а extern-издатель (ray_tracer) до init VINS в полёте не публикует
+        ничего — без моста EKF остался бы без позиционного источника с бута и
+        LOITER был бы мёртв весь полёт. x=y=0 на вертикальном взлёте — честное
+        приближение (снос ветром за ~8 с набора ограничен); z — баро (alt_src
+        профиля LV=2). С ПЕРВОЙ одометрией VINS замолкаем навсегда: топик
+        переходит к ray_tracer, его кадр якорится на EKF (стык гладкий).
+        Штамп wall-временем — как у всего vision-фида (FCU в SITL живёт по
+        wall, см. _vision_feed)."""
+        if self._vis_pose_pub is None or self.cfg.vision_pose_src != 'extern':
+            return
+        if s.vins_odom_count > 0:
+            return
+        from geometry_msgs.msg import PoseStamped
+        wall = time.time()
+        pm = PoseStamped()
+        pm.header.stamp.sec = int(wall)
+        pm.header.stamp.nanosec = int((wall % 1.0) * 1e9)
+        pm.header.frame_id = 'map'
+        pm.pose.position.z = float(s.rel_alt or 0.0)
         pm.pose.orientation.z = math.sin(0.5 * s.att_yaw)
         pm.pose.orientation.w = math.cos(0.5 * s.att_yaw)
         self._vis_pose_pub.publish(pm)
@@ -580,10 +645,20 @@ def _parse() -> tuple:
                    default=_D.vision_pose_src, choices=['integral', 'extern'])
     p.add_argument('--gps-disable', dest='gps_disable', type=float,
                    default=_D.gps_disable)
+    p.add_argument('--gps-denied', dest='gps_denied', type=float,
+                   default=_D.gps_denied)
     p.add_argument('--alt-src', dest='alt_src',
                    default=_D.alt_src, choices=['global', 'baro'])
     p.add_argument('--set-origin', dest='set_origin', type=float,
                    default=_D.set_origin)
+    # координаты origin (примерная РЕАЛЬНАЯ точка старта — см. config.origin_lat:
+    # из них EKF строит модель магнитного поля; дефолт = дом SITL CMAC)
+    p.add_argument('--origin-lat', dest='origin_lat', type=float,
+                   default=_D.origin_lat)
+    p.add_argument('--origin-lon', dest='origin_lon', type=float,
+                   default=_D.origin_lon)
+    p.add_argument('--origin-alt', dest='origin_alt', type=float,
+                   default=_D.origin_alt)
     p.add_argument('--ipm-wz-tau', dest='ipm_wz_tau', type=float, default=_D.ipm_wz_tau)
     p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
     p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,

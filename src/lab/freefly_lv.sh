@@ -13,6 +13,18 @@
 #                    healthy», ARMING_CHECK 0 чек не снимает) и возврата
 #                    GPS-источников EKF после LV-полётов (POSXY/VELXY=3,
 #                    SIM_GPS1_ENABLE=1) — всё ставится автоматически.
+#   LV=2           — «GPS ОТСУТСТВУЕТ С БУТА» (модель боевого борта без
+#                    приёмника): SIM_GPS1_ENABLE=0 + extnav-пара EKF ставятся
+#                    в eeprom ЕЩЁ ДО старта; origin — SET_GPS_GLOBAL_ORIGIN
+#                    (BS_SET_ORIGIN=1), высота миссии — сырой баро
+#                    (BS_ALT_SRC=baro: global rel_alt без GPS замерзает),
+#                    aiding EKF стартует НА ЗЕМЛЕ от нулевой vision_pose
+#                    (мост gps_denied в ноде), с init VINS топик у ray_tracer.
+#                    Центр CH6 = тот же LOITER-на-VINS, что в LV=1, но GPS
+#                    не участвовал ни секунды. ⚠️ Перцепция демпфера сидит
+#                    на global rel_alt (намеренно, см. bootstrap_node) — без
+#                    GPS она может ослепнуть: CH6-вверх тогда ≈ чистый
+#                    ALT_HOLD. Это известная цена, отдельная кампания.
 #
 # Самодостаточен от ХОЛОДНОГО СТАРТА (после ребута ноута): шаг 0 поднимает
 # хост и стек, если они не готовы — `make host-setup` при отсутствии
@@ -46,7 +58,7 @@ NAV="${NAV:-p1317_nav}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIMDIR="$(cd "$SCRIPT_DIR/../../docker/sim" && pwd)"
 
-case "$LV" in 0|1) ;; *) echo "ОШИБКА: LV=$LV (ожидаю 0 или 1)" >&2; exit 2 ;; esac
+case "$LV" in 0|1|2) ;; *) echo "ОШИБКА: LV=$LV (ожидаю 0, 1 или 2)" >&2; exit 2 ;; esac
 echo "=== freefly_lv: профиль LV=$LV (${RES}) ==="
 
 # ── 0) холодный старт: хост + стек (после ребута ноута оба слетают) ──────────
@@ -85,7 +97,8 @@ if [ -n "$BUSY" ]; then
     exit 3
 fi
 
-# ── 1) eeprom SITL под профиль (VISO_TYPE и, для LV=0, возврат GPS-профиля) ──
+# ── 1) eeprom SITL под профиль (VISO_TYPE; LV=0 — возврат GPS-профиля;
+# LV=2 — глушение GPS + extnav-пара EKF ещё до бута) ─────────────────────────
 # SITL поднимается десятки секунд ПОСЛЕ «nav: готово» (make wait ждёт только
 # nav_up) — ждём порт 5762 сами, иначе eeprom-шаг стучится рано и сдаётся
 # (два ложных «SITL мёртв» 2026-08-22; ретраев самого sitl_lv_profile мало).
@@ -154,12 +167,20 @@ export GDRIVE_UP="${GDRIVE_UP:-0}"
 export MP4="${MP4:-1}"
 export FRAMES="${FRAMES:-0}"    # JPEG-кадры не нужны (просьба 2026-08-22): только mp4
 
-if [ "$LV" = "1" ]; then                 # LV-добавки (см. Q.txt: ровно пять)
+if [ "$LV" = "1" ] || [ "$LV" = "2" ]; then   # общие vision-добавки (Q.txt)
     export BS_VINS_MIN="${BS_VINS_MIN:-300}"
     export BS_FF_LOITER="${BS_FF_LOITER:-1}"
     export BS_VISION_VEL="${BS_VISION_VEL:-1}"
     export BS_VISION_POSE_SRC="${BS_VISION_POSE_SRC:-extern}"
+fi
+if [ "$LV" = "1" ]; then                 # GPS есть на буте, глушится В ПОЛЁТЕ
     export BS_GPS_DISABLE="${BS_GPS_DISABLE:-1}"
+fi
+if [ "$LV" = "2" ]; then                 # GPS ОТСУТСТВУЕТ С БУТА (см. шапку)
+    export BS_GPS_DENIED="${BS_GPS_DENIED:-1}"
+    export BS_GPS_DISABLE="${BS_GPS_DISABLE:-0}"   # глушить нечего
+    export BS_SET_ORIGIN="${BS_SET_ORIGIN:-1}"     # origin руками (GPS не поставит)
+    export BS_ALT_SRC="${BS_ALT_SRC:-baro}"        # global rel_alt без GPS замерзает
 fi
 
 # ── 3) атомарный прогон (рестарт стека внутри — применяет eeprom из шага 1) ──

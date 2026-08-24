@@ -397,6 +397,12 @@ Drive), как требует дисциплина прогона — пошаг
 bash src/lab/freefly_lv.sh          # LV=1 (default): freefly-LV — центр CH6 =
                                     #   штатный LOITER-на-VINS, GPS глушится в полёте
 LV=0 bash src/lab/freefly_lv.sh     # базовый freefly: только наш стек, GPS жив
+LV=2 bash src/lab/freefly_lv.sh     # GPS ОТСУТСТВУЕТ С БУТА: eeprom глушит приёмник
+                                    #   до старта, origin руками (BS_SET_ORIGIN=1),
+                                    #   высота — сырой баро (BS_ALT_SRC=baro), aiding
+                                    #   EKF с земли от нулевой vision_pose (мост
+                                    #   gps_denied), с init VINS топик у ray_tracer;
+                                    #   LOITER-на-VINS без секунды GPS
 WIND_SPD=5 bash src/lab/freefly_lv.sh   # любой env поверх дефолтов
 ```
 
@@ -408,7 +414,15 @@ pymavlink в контейнере simulator, tcp:5762):
 - `LV=0` → `VISO_TYPE=0` (**с 1 без vision-фида не армится**: «Arm: VisOdom:
   not healthy», `ARMING_CHECK 0` чек не снимает) + возврат GPS-профиля EKF
   (`EK3_SRC1_POSXY/VELXY=3`, `SIM_GPS1_ENABLE=1`) — в LV=0 очередь ноды не
-  работает и сама его не вернёт.
+  работает и сама его не вернёт;
+- `LV=2` → `VISO_TYPE=1` + `SIM_GPS1_ENABLE=0` + extnav-пара
+  (`EK3_SRC1_POSXY=6`, `VELXY=0`) **ещё до бута**: борт стартует безжпсным,
+  EKF живёт на vision с земли. Очередь ноды (режим `gps_denied`) эти же
+  значения лишь самовосстанавливает и датирует `extnav_ready` зрелостью
+  VINS (те же ~600 odom, что в LV=1 — гейт LOITER/HUD READY не упрощён).
+  ⚠️ Перцепция демпфера сидит на global rel_alt (намеренно) — без GPS
+  может ослепнуть: CH6-вверх тогда ≈ чистый ALT_HOLD (отдельная кампания
+  «перцепция на баро»).
 
 Записанные значения применяются на рестарте стека в начале прогона — отдельный
 ребут не нужен, дисциплина «стек только целиком» сохранена.
@@ -522,6 +536,8 @@ IMU sim-частоту в рантайме подтверждает `docker/sim/
   origin. Раньше требовалось вручную ждать 3–5 с после `make arm`; теперь
   `takeoff.sh` поллит высоту до набора, а к этому моменту origin уже есть,
   так что ручная пауза не нужна.
-- `arm.sh` требует `ARMING_CHECK 0` в SITL (задано в `sitl-extra.parm`).
+- `arm.sh` требует отключённых pre-arm чеков в SITL: в ArduPilot 4.8 это
+  `ARMING_SKIPCHK -1` (бывш. `ARMING_CHECK 0` — переименован и молча
+  игнорировался; задано в `sitl-extra.parm` + продублировано в eeprom).
 - При потере VINS трекинга (`system reboot!`) — остановить `fly`, сделать
   `make land`, потом `make arm && make takeoff && make fly` заново.

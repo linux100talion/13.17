@@ -20,6 +20,13 @@
 #         проверено 2026-08-18 дважды). Плюс возврат GPS-профиля EKF, который
 #         LV-полёт оставил в eeprom (POSXY=6, VELXY=0, SIM_GPS1=0): в LV=0
 #         vision_vel=0 → очередь ноды не работает и сама НЕ вернёт.
+#   LV=2: «GPS ОТСУТСТВУЕТ С БУТА» (модель боевого борта без приёмника):
+#         приёмник глушится в eeprom ЕЩЁ ДО старта ноды (SIM_GPS1_ENABLE=0)
+#         и EKF сразу ставится на extnav-пару (POSXY=6 — позу с земли даёт
+#         мост нулевой позы bootstrap_node, gps_denied; VELXY=0 — скорость
+#         IPM не фьюзим, урок полёта №5: фантомы в ветре → EKF failsafe).
+#         Очередь ноды эти же значения лишь самовосстанавливает и датирует
+#         extnav_ready зрелостью VINS — источники тут ставим МЫ, до бута.
 # ============================================================================
 import sys
 import time
@@ -34,6 +41,10 @@ PROFILE = {
           'SIM_GPS1_ENABLE': 1.0,
           'EK3_SRC1_POSXY': 3.0,
           'EK3_SRC1_VELXY': 3.0},
+    '2': {'VISO_TYPE': 1.0,
+          'SIM_GPS1_ENABLE': 0.0,
+          'EK3_SRC1_POSXY': 6.0,
+          'EK3_SRC1_VELXY': 0.0},
 }
 
 
@@ -65,7 +76,7 @@ def main():
     lv = sys.argv[1] if len(sys.argv) > 1 else '1'
     want = PROFILE.get(lv)
     if want is None:
-        print(f"ОШИБКА: LV={lv} (ожидаю 0 или 1)")
+        print(f"ОШИБКА: LV={lv} (ожидаю 0, 1 или 2)")
         return 2
     print(f"  eeprom-профиль LV={lv}: подключаюсь к SITL ({CONN})...", flush=True)
     try:

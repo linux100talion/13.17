@@ -434,11 +434,43 @@ class BootstrapConfig:
                                      # едет → AltHold (газ по EKF-z) сам сажает дрон.
                                      # Если VINS не ожил — GPS остаётся (безопасно).
                                      # BS_GPS_DISABLE / --gps-disable
+    gps_denied: float = 0.0          # профиль «GPS ОТСУТСТВУЕТ С БУТА» (LV=2 —
+                                     # модель боевого борта без приёмника; в симе
+                                     # eeprom готовит sitl_lv_profile.py 2:
+                                     # SIM_GPS1_ENABLE=0 + extnav-пара POSXY=6/
+                                     # VELXY=0 ещё ДО старта ноды). Меняет три вещи:
+                                     # (1) очередь EK3 без GPS-веток: пары 3→6 нет
+                                     # (переключаться не с чего), POSXY=6 пере-
+                                     # записывается по зрелости VINS ТОЛЬКО чтобы
+                                     # extnav_ready (гейт LOITER + HUD READY)
+                                     # открылся на тех же ~600 odom, что в LV=1;
+                                     # (2) gps_disable игнорируется — глушить
+                                     # нечего; (3) мост позы: (0,0,баро) в
+                                     # vision_pose с земли и весь набор до ПЕРВОЙ
+                                     # одометрии VINS — EK3 стартует aiding только
+                                     # НА ЗЕМЛЕ (в воздухе не стартует, LV4), а
+                                     # extern-издатель (ray_tracer) до init VINS
+                                     # молчит; дальше топик навсегда у ray_tracer
+                                     # (его кадр якорится на EKF — стык гладкий).
+                                     # Требует vision_vel=1 + pose extern +
+                                     # set_origin=1 (origin больше некому ставить)
+                                     # + alt_src=baro (global rel_alt без GPS
+                                     # замерзает). BS_GPS_DENIED / --gps-denied
     set_origin: float = 0.0          # слать SET_GPS_GLOBAL_ORIGIN до подтверждения
                                      # (боевой безжпсный бут: без origin EKF не даёт
                                      # локальный фрейм и не принимает extnav; с GPS
                                      # origin ставится сам — опт-ин не нужен).
                                      # BS_SET_ORIGIN / --set-origin
+    # ⚠️ Координаты origin НЕ произвольны: EKF строит из них модель магнитного
+    # поля (WMM) и сверяет с магнитометром — «условный Киев» на стенде дал
+    # «PreArm: Check mag field (z diff:999>200)», арм невозможен, и yaw-компас
+    # был бы отравлен (прогон lv2_replay_20260824_034433, 59 ГБ земли).
+    # Ставить ПРИМЕРНУЮ РЕАЛЬНУЮ точку старта (десятки км погрешности — ок,
+    # поле меняется медленно). Дефолт = дом SITL (CMAC, sim_vehicle без -L);
+    # боевой борт задаёт свои через BS_ORIGIN_LAT/LON/ALT.
+    origin_lat: float = -35.363261   # BS_ORIGIN_LAT / --origin-lat
+    origin_lon: float = 149.165230   # BS_ORIGIN_LON / --origin-lon
+    origin_alt: float = 584.0        # м AMSL; BS_ORIGIN_ALT / --origin-alt
     alt_src: str = 'global'          # источник rel_alt для миссии И перцепции:
                                      # 'global' — /mavros/global_position/rel_alt
                                      # (GLOBAL_POSITION_INT; БЕЗ GPS ЗАМЕРЗАЕТ:
