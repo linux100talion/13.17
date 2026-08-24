@@ -97,15 +97,27 @@ r.tick(snap(clock.t, armed=False))        # FCU дизармился
 check("после дизарма миссия FREEFLY_DONE",
       r.finished and r.result == "FREEFLY_DONE")
 
-# --- 2. отпущенный жест сбрасывает таймер ---
+# --- 2. отпущенный жест (пауза > 3 с) сбрасывает таймер ---
 clock, mode = FakeClock(), FakeMode()
 r = make(clock, mode)
 r.tick(snap(clock.t))
 tick_until(r, clock, mode, 6.0)                       # 6 с жеста
-tick_until(r, clock, mode, 1.0, yaw=RC_CENTER)        # отпустил yaw
+tick_until(r, clock, mode, 3.5, yaw=RC_CENTER)        # отпустил yaw > 3 с
 tick_until(r, clock, mode, 6.0)                       # снова 6 с жеста
-check("сброс таймера: 6+6 с с разрывом — дизарм НЕ дёргали",
+check("сброс таймера: 6+6 с с разрывом >3 с — дизарм НЕ дёргали",
       mode.disarm_calls == 0 and mode.force_calls == 0)
+
+# --- 2b. ИМПУЛЬСНЫЙ жест реплея (4с yaw-влево / 2с отпуск, joy_replay) —
+#         короткие отпуски таймер НЕ сбрасывают (урок lv2_replay_20260824_040722:
+#         страховка молчала все 60 с дизарм-якоря, борт простоял 9 мин) ---
+clock, mode = FakeClock(), FakeMode()
+r = make(clock, mode)
+r.tick(snap(clock.t))
+for _ in range(3):                                    # 3 цикла = 18 с
+    tick_until(r, clock, mode, 4.0)                   # 4 с жеста
+    tick_until(r, clock, mode, 2.0, yaw=RC_CENTER)    # 2 с отпуск
+check("импульсы 4с/2с: сервис-дизарм сработал", mode.disarm_calls >= 1)
+check("импульсы 4с/2с: дошло и до force", mode.force_calls >= 1)
 
 # --- 3. жест В ВОЗДУХЕ страховку не взводит (газ min + yaw влево на снижении) ---
 clock, mode = FakeClock(), FakeMode()
@@ -130,6 +142,16 @@ r = make(clock, mode)
 r.tick(snap(clock.t))
 tick_until(r, clock, mode, 20.0, alt=None)
 check("rel_alt=None — молчим, не крэш", mode.disarm_calls == 0)
+
+# --- 4b. арм НЕ СЛУЧИЛСЯ (урок lv2_replay_20260824_034433: FCU отверг руддер-
+#         арм по PreArm mag — 59 ГБ земли): 300 с без арма → FREEFLY_NOARM ---
+clock, mode = FakeClock(), FakeMode()
+r = make(clock, mode)
+tick_until(r, clock, mode, 290.0, armed=False)
+check("290 с без арма — миссия ещё ждёт пилота", not r.finished)
+tick_until(r, clock, mode, 15.0, armed=False)
+check("после 300 с без арма → FREEFLY_NOARM",
+      r.finished and r.result == "FREEFLY_NOARM")
 
 # --- 5. FCU игнорирует и сервис, и force (реплей №1: опрокинутый борт) —
 #        жест дольше 30 с завершает миссию FREEFLY_STUCK (запись ограничена) ---

@@ -453,6 +453,7 @@ class Freefly(Step):
         self._latch_warned = False
         self._land_warned = False
         self._disarm_since = None      # sim-старт удержания жеста дизарма на земле
+        self._gesture_last = 0.0       # sim-время последнего тика с жестом
         self._disarm_warned = False
 
     def enter(self, ctx, s) -> None:
@@ -465,6 +466,7 @@ class Freefly(Step):
         self._latch_warned = False
         self._land_warned = False
         self._disarm_since = None
+        self._gesture_last = 0.0
         self._disarm_warned = False
 
     def _mode_target(self, ctx, s) -> str:
@@ -531,6 +533,17 @@ class Freefly(Step):
             self.stack.enter(s)
             ctx.log.info("    пилот заармил — свободный полёт")
         if not self._was_armed:
+            # СТРАХОВКА «АРМ НЕ СЛУЧИЛСЯ» (урок lv2_replay_20260824_034433):
+            # FCU может отвергать руддер-арм бессрочно (там — PreArm mag field
+            # из-за origin, не совпавшего с точкой старта), freefly ждёт
+            # пилота вечно → 59 ГБ земли в bag. Живому пилоту 300 sim-с на
+            # арм хватает с запасом (реплеи армят за ~45 с, пилот 182409 —
+            # за 43); вышло — завершаем миссию, запись ограничена.
+            if ctx.elapsed() > 300.0:
+                ctx.log.error("    freefly: арм не случился за 300 с — "
+                              "завершаю миссию (FCU отвергает арм? см. PreArm "
+                              "в mavros.log)")
+                return _finish(rc, "FREEFLY_NOARM")
             ctx.keep_mode(s, self.keep)
             rc.roll, rc.pitch, rc.yaw = s.pilot_roll, s.pilot_pitch, s.pilot_yaw
             return _run(rc)
@@ -564,11 +577,22 @@ class Freefly(Step):
         landed = ((s.rel_alt is not None and s.rel_alt <= 0.3)
                   or (s.gt_valid and s.gt_z <= 0.3))
         gesture = (s.pilot_throttle <= 1160 and s.pilot_yaw <= 1160 and landed)
+        # Таймер переживает КОРОТКИЕ отпускания жеста (<3 с): реплей давит
+        # руддер ИМПУЛЬСАМИ 4с/2с (joy_replay, фикс закрутки на земле из
+        # реплея №1) — сброс на каждом отпускании держал таймер <8 с вечно,
+        # и страховка молчала все 60 с дизарм-якоря (lv2_replay_20260824_
+        # 040722: FCU отказал, борт простоял 9 мин, bag 40 ГБ). Для живого
+        # пилота семантика не меняется: «отпустил» = пауза >3 с.
         if not gesture:
-            self._disarm_since = None
+            # короткий отпуск (<3 с) таймер держит; действия — только под жестом
+            if (self._disarm_since is not None
+                    and s.now_sim - self._gesture_last > 3.0):
+                self._disarm_since = None
         elif self._disarm_since is None:
+            self._gesture_last = s.now_sim
             self._disarm_since = s.now_sim
         else:
+            self._gesture_last = s.now_sim
             held = s.now_sim - self._disarm_since
             if held > 8.0 and not self._disarm_warned:
                 self._disarm_warned = True
