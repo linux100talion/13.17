@@ -40,6 +40,13 @@
 #   bash src/lab/freefly_lv.sh              # LV=1, полный freefly-LV
 #   LV=0 bash src/lab/freefly_lv.sh         # базовый freefly (GPS жив)
 #   WIND_SPD=5 LV=1 bash src/lab/freefly_lv.sh
+#   BS_SF_MASTER=1 bash src/lab/freefly_lv.sh   # схема «SF-мастер»: SF (CH7) =
+#       мастер сырых стиков (не-вверх = MANUAL при любом SC), SC (CH6) = потолок
+#       лесенки зрелости (вверх демпфер / центр +VinsHold / вниз +LOITER).
+#       ⚠️ Требует SF → CH7 в миксере EdgeTX; НЕ включать под старые реплеи
+#       (их сценарии без "sf" полетят целиком на сырых стиках).
+#   SPAWN_FROM=docker/sim/output/joystick/lv1_joy_20260824_140447 \
+#       bash src/lab/freefly_lv.sh   # стартовать с места посадки того прогона
 # Любой параметр (BS_*, WIND_SPD, RES, GDRIVE_UP, MP4, TOPICS_EXTRA...)
 # переопределяется через env; дефолты ниже — эталонные команды из Q.txt.
 # В LV=0 BS_VINS_MIN не задаётся (дефолт ноды 40, как в эталонной команде №1).

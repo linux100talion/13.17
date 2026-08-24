@@ -430,10 +430,21 @@ class Freefly(Step):
     Выход из LOITER — с гистерезисом (3×fresh): мигание свежести у порога не должно
     дёргать режим под пилотом. MANUAL (+1) всегда возвращает ALT_HOLD — safety-seize
     отдаёт сырые стики в предсказуемой семантике «стик = наклон», а не «стик =
-    скорость». Стек селектора не меняется (центр и так = пустой список)."""
+    скорость». Стек селектора не меняется (центр и так = пустой список).
+
+    sf_master (BS_SF_MASTER) — схема «SF-мастер» вместо легаси-селектора: MANUAL
+    даёт ТОЛЬКО SF (CH7) не-вверх (pilot_switch=+1, Арбитр выше шага), а SC (CH6)
+    задаёт ПОТОЛОК лесенки зрелости (s.pilot_level): 0 = демпфер, 1 = +VinsHold,
+    2 = +штатный LOITER. Борт живёт на лучшей ДОСТУПНОЙ ступени ≤ потолка
+    (_ladder_*): позиция «loiter» до зрелости — это демпфер/VinsHold, а не голый
+    ALT_HOLD (в легаси-центре борт при закрытом гейте дрейфовал с ветром — прогон
+    2026-08-20); деградация симметрична (VINS протух в LOITER → демпфер, VinsHold
+    с протухшим VINS мёртв так же). Вход/выход LOITER ведёт тот же _mode_target
+    (гейт + гистерезис легаси-центра, ярусу нужен loiter_center=True)."""
 
     def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
-                 handover=None, loiter_center=False, vins_fresh=2.0):
+                 handover=None, loiter_center=False, vins_fresh=2.0,
+                 sf_master=False):
         self.name = name
         self.stack = stack
         self.keep = keep
@@ -441,9 +452,11 @@ class Freefly(Step):
         # handover Flow→Vins: срабатывает ТОЛЬКО в позиции селектора «наш стек»
         # (−1 или тумблер не трогали) — «вверх» = лучший доступный стек (демпфер
         # до готовности VINS, VinsHold после); центр/MANUAL свапом не трогаем.
+        # В схеме SF-мастер одноразовый свап заменён лесенкой (_ladder_apply).
         self.handover = handover
         self.loiter_center = loiter_center
         self.vins_fresh = vins_fresh
+        self.sf_master = sf_master
         self._greeted = False
         self._was_armed = False
         self._stab_pos = None
@@ -452,6 +465,9 @@ class Freefly(Step):
         self._loiter_since = 0.0
         self._latch_warned = False
         self._land_warned = False
+        self._level = None             # применённый потолок SC (0/1/2, sf_master)
+        self._tier = 0                 # активный ярус лесенки (0/1/2)
+        self._was_manual = False       # для пересева опор на выходе из MANUAL
         self._disarm_since = None      # sim-старт удержания жеста дизарма на земле
         self._gesture_last = 0.0       # sim-время последнего тика с жестом
         self._disarm_warned = False
@@ -465,13 +481,20 @@ class Freefly(Step):
         self._loiter_since = 0.0
         self._latch_warned = False
         self._land_warned = False
+        self._level = None
+        self._tier = 0
+        self._was_manual = False
         self._disarm_since = None
         self._gesture_last = 0.0
         self._disarm_warned = False
 
+    def _loiter_selected(self) -> bool:
+        """Позиция селектора «хочу штатный LOITER»: легаси-центр или потолок 2."""
+        return (self._level == 2) if self.sf_master else (self._stab_pos == 0)
+
     def _mode_target(self, ctx, s) -> str:
         """Режим FCU под селектор (см. docstring про loiter_center)."""
-        if (not self.loiter_center or self._stab_pos != 0
+        if (not self.loiter_center or not self._loiter_selected()
                 or s.pilot_switch == 1):        # MANUAL-seize всегда в ALT_HOLD
             self._in_loiter = False
             self._loiter_warned = False
@@ -493,32 +516,95 @@ class Freefly(Step):
         if self._in_loiter:
             if not s.extnav_ready or fresh_age > 3.0 * self.vins_fresh:
                 self._in_loiter = False
-                ctx.log.warn("    LOITER: VINS/extnav протух — откат в ALT_HOLD "
-                             "(стики = наклоны)")
+                ctx.log.warn("    LOITER: VINS/extnav протух — откат {}".format(
+                    "на ярус ниже (лесенка)" if self.sf_master
+                    else "в ALT_HOLD (стики = наклоны)"))
             elif (s.mode != "LOITER" and not self._latch_warned
                     and s.now_sim - self._loiter_since > 5.0):
                 # честность к пилоту: гейт открыт, но FCU отказывает («requires
-                # position» — EKF без позиции). Центр = пустой стек, т.е. борт
-                # ФАКТИЧЕСКИ в голом ALT_HOLD и дрейфует с ветром (прогон
-                # 2026-08-20). Ре-ассерт продолжается — EKF может дозреть.
+                # position» — EKF без позиции). В легаси центр = пустой стек,
+                # т.е. борт ФАКТИЧЕСКИ в голом ALT_HOLD и дрейфует с ветром
+                # (прогон 2026-08-20); в лесенке стек не бросается до латча —
+                # держит текущий ярус. Ре-ассерт продолжается — EKF может дозреть.
                 self._latch_warned = True
                 ctx.log.warn("    LOITER: FCU не латчит режим (requires "
-                             "position?) — ФАКТИЧЕСКИ чистый ALT_HOLD, стики = "
-                             "наклоны; тумблер вверх вернёт наш стек")
+                             "position?) — {}".format(
+                                 "держу текущий ярус лесенки в ALT_HOLD"
+                                 if self.sf_master else
+                                 "ФАКТИЧЕСКИ чистый ALT_HOLD, стики = наклоны; "
+                                 "тумблер вверх вернёт наш стек"))
         elif (s.extnav_ready and fresh_age < self.vins_fresh
                 and (s.rel_alt or 0.0) > 1.5):
             self._in_loiter = True
             self._loiter_warned = False
             self._loiter_since = s.now_sim
             self._latch_warned = False
-            ctx.log.info("    селектор-центр: ШТАТНЫЙ LOITER — позицию держит FCU "
+            ctx.log.info("    селектор: ШТАТНЫЙ LOITER — позицию держит FCU "
                          "(extnav), стики = уставки скорости")
         elif not self._loiter_warned:
             self._loiter_warned = True
-            ctx.log.info(f"    селектор-центр: LOITER не готов (extnav_ready="
+            ctx.log.info("    селектор: LOITER не готов (extnav_ready="
                          f"{s.extnav_ready}, odom={s.vins_odom_count}) — "
-                         f"чистый ALT_HOLD")
+                         + ("летим на лесенке (лучший доступный ярус)"
+                            if self.sf_master else "чистый ALT_HOLD"))
         return "LOITER" if self._in_loiter else self.keep
+
+    # --- Лесенка SF-мастера (sf_master): SC задаёт ПОТОЛОК, летим на лучшей
+    # ДОСТУПНОЙ ступени: 0 демпфер → 1 VinsHold (готовность VINS) → 2 штатный
+    # LOITER (вход/выход ведёт _mode_target — тот же гейт и гистерезис, что у
+    # легаси-центра). Стек яруса LOITER пустеет ТОЛЬКО когда FCU фактически
+    # залатчил режим (урок LoiterHold: бросать свои законы ДО смены режима
+    # нельзя — центр-стики в ALT_HOLD никого не держат); пока идёт ре-ассерт,
+    # продолжаем VinsHold/демпфер в семантике ALT_HOLD. ---
+
+    def _ladder_select(self, ctx, s) -> None:
+        """Прочитать пульт: потолок SC + пересев опор на выходе из MANUAL.
+        Пересев обязателен: в MANUAL пилот перегоняет борт руками, и позиц-
+        холдеры со старой опорой тянули бы его обратно в точку до перехвата."""
+        manual = (s.pilot_switch == 1)
+        if self._was_manual and not manual:
+            ctx.reset_keyframe()
+            self.stack.enter(s)
+            ctx.log.info("    SF: возврат из MANUAL — держим от текущей точки")
+        self._was_manual = manual
+        lvl = s.pilot_level if s.pilot_level in (0, 1, 2) else self._level
+        if lvl is not None and lvl != self._level:
+            self._level = lvl
+            ctx.log.info("    SC-потолок: {}".format(
+                {0: "ДЕМПФЕР (без свапа на VinsHold)",
+                 1: "демпфер → VINSHOLD по готовности",
+                 2: "демпфер → VinsHold → LOITER по зрелости"}[lvl]))
+
+    def _ladder_tier(self, s) -> int:
+        """Активный ярус = min(потолок SC, лучший ГОТОВЫЙ). Вниз с VinsHold —
+        с гистерезисом 3×fresh (как выход из LOITER): мигание свежести у порога
+        не должно дёргать стек под пилотом. Протух дольше — честный демпфер."""
+        lvl = self._level if self._level is not None else 0
+        ho = self.handover
+        if lvl < 1 or ho is None:
+            tier = 0
+        elif self._tier >= 1:
+            tier = 1 if (s.now_sim - s.vins_last_sim) <= 3.0 * ho.fresh_sec else 0
+        else:
+            tier = 1 if ho.vins_ready(s) else 0
+        if lvl >= 2 and self._in_loiter and s.mode == "LOITER":
+            tier = 2
+        return tier
+
+    def _ladder_apply(self, ctx, s) -> None:
+        """Применить ярус: стек по ярусу, пересев опор от текущей точки."""
+        tier = self._ladder_tier(s)
+        if tier == self._tier:
+            return
+        self._tier = tier
+        stabs = (self._pilot_stabs if tier == 0
+                 else self.handover.vins_stabs(self._pilot_stabs, s) if tier == 1
+                 else [])                # LOITER: позицию держит FCU, стики =
+        self.stack.switch_stabilization(stabs)    # уставки скорости (passthrough)
+        self.stack.enter(s)              # пересев опор: держим ОТ ТЕКУЩЕЙ точки
+        ctx.log.info("    ЛЕСЕНКА: ярус {} (потолок SC={})".format(
+            {0: "ДЕМПФЕР", 1: "VINSHOLD",
+             2: "LOITER — стики = уставки скорости"}[tier], self._level))
 
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=s.pilot_throttle)
@@ -547,7 +633,9 @@ class Freefly(Step):
             ctx.keep_mode(s, self.keep)
             rc.roll, rc.pitch, rc.yaw = s.pilot_roll, s.pilot_pitch, s.pilot_yaw
             return _run(rc)
-        if self._pilot_stabs is not None:
+        if self._pilot_stabs is not None and self.sf_master:
+            self._ladder_select(ctx, s)          # потолок SC + выход из MANUAL
+        elif self._pilot_stabs is not None:
             pos = s.pilot_switch if s.pilot_switch in (-1, 0) else self._stab_pos
             if pos is not None and pos != self._stab_pos:
                 self._stab_pos = pos
@@ -555,9 +643,12 @@ class Freefly(Step):
                 self.stack.enter(s)      # пересев опор: держим ОТ ТЕКУЩЕЙ точки
                 ctx.log.info("    тумблер: {}".format(
                     "НАШ СТАБИЛИЗАТОР" if pos == -1 else "чистый ALT_HOLD (стики=наклоны)"))
-        # режим — ПОСЛЕ селектора (loiter_center читает свежий _stab_pos)
+        # режим — ПОСЛЕ селектора (loiter_center читает свежий _stab_pos/_level)
         ctx.keep_mode(s, self._mode_target(ctx, s))
-        if (self.handover is not None and self._stab_pos in (None, -1)
+        if self._pilot_stabs is not None and self.sf_master:
+            # ярус — ПОСЛЕ _mode_target: тир LOITER читает свежие _in_loiter+mode
+            self._ladder_apply(ctx, s)
+        elif (self.handover is not None and self._stab_pos in (None, -1)
                 and self.handover.maybe_switch(self.stack, s)):
             ctx.log.info("    ✅ VINS сошёлся → Flow→Vins (hot-swap); стики двигают "
                          "точку, отпустил — держит")

@@ -404,6 +404,14 @@ LV=2 bash src/lab/freefly_lv.sh     # GPS ОТСУТСТВУЕТ С БУТА: ee
                                     #   gps_denied), с init VINS топик у ray_tracer;
                                     #   LOITER-на-VINS без секунды GPS
 WIND_SPD=5 bash src/lab/freefly_lv.sh   # любой env поверх дефолтов
+BS_SF_MASTER=1 bash src/lab/freefly_lv.sh   # схема «SF-мастер»: SF (CH7)
+                                    #   не-вверх = СЫРЫЕ СТИКИ при любом SC;
+                                    #   SF вверх → SC (CH6) = потолок лесенки
+                                    #   зрелости (вверх = демпфер, центр =
+                                    #   +VinsHold, вниз = +LOITER; борт на
+                                    #   лучшей ДОСТУПНОЙ ступени). Нужен микс
+                                    #   SF→CH7 в EdgeTX; НЕ под старые реплеи
+                                    #   (сценарии без "sf" = всё сырые стики)
 ```
 
 Перед атомарным прогоном (`capture_scene.sh 960x540 bootstrap_arch2`) сама

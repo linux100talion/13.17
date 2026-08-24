@@ -146,7 +146,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                         pilot_stabs=build_stabilizers(cfg, stab_spec),
                         handover=handover,
                         loiter_center=cfg.ff_loiter > 0,
-                        vins_fresh=cfg.vins_fresh_sec)]
+                        vins_fresh=cfg.vins_fresh_sec,
+                        sf_master=cfg.sf_master > 0)]
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold
     lvl = cfg.mv_level

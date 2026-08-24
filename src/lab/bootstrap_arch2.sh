@@ -219,6 +219,9 @@ ARGS=()
 [ -n "${BS_RIPE_SEC:-}" ]        && ARGS+=(--ripe-sec "$BS_RIPE_SEC")
 # 2-я ступень гейта — детектор residual+ratio (ripeness.py; 0 = только время)
 [ -n "${BS_RIPE_DET:-}" ]        && ARGS+=(--ripe-det "$BS_RIPE_DET")
+# схема «SF-мастер» селектора (BS_SF_MASTER=1): SF (CH7) = мастер сырых стиков,
+# SC (CH6) = потолок лесенки демпфер/VinsHold/LOITER (⚠️ не под старые реплеи)
+[ -n "${BS_SF_MASTER:-}" ]       && ARGS+=(--sf-master "$BS_SF_MASTER")
 # штатный LOITER-на-VINS: freefly-центр CH6 (BS_FF_LOITER=1) и бюджет гейта loiter<t>
 [ -n "${BS_FF_LOITER:-}" ]       && ARGS+=(--ff-loiter "$BS_FF_LOITER")
 [ -n "${BS_LOITER_GATE_BUDGET:-}" ] && ARGS+=(--loiter-gate-budget "$BS_LOITER_GATE_BUDGET")

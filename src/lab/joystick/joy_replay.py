@@ -18,6 +18,9 @@ JoyPilot-вход — весь стек ниже /joy идентичен руч�
   thr:  −1 = газ min (1100), +1 = max (1900);  yaw: +1 = вправо (1900).
   sw (CH6): −1 = наш стек (тумблер ВВЕРХ), 0 = центр (ALT_HOLD; при
   BS_FF_LOITER=1 — штатный LOITER-на-VINS), +1 = MANUAL (ВНИЗ).
+  sf (CH7, схема BS_SF_MASTER=1): 1 = SF ВВЕРХ (стабилизация разрешена, CH6 =
+  потолок лесенки: −1 демпфер / 0 +VinsHold / +1 +LOITER), 0 = не-вверх (СЫРЫЕ
+  СТИКИ при любом CH6). Дефолт 0; легаси-нода (без BS_SF_MASTER) ось игнорирует.
 В /joy уходят СЫРЫЕ оси: raw = v * sign. Знаки (--signs) обязаны совпадать с
 BS_JOY_SIGNS ноды (дефолт — JOY_SIGNS_DEFAULT из control_pkg, единый источник).
 
@@ -47,7 +50,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Joy
 
 AXES = ('roll', 'pitch', 'thr', 'yaw')          # семантические оси = /joy 0..3
-STEP_KEYS = {'note', 'sticks', 'sw', 'hold', 'arm', 'disarm',
+STEP_KEYS = {'note', 'sticks', 'sw', 'sf', 'hold', 'arm', 'disarm',
              'wait_alt', 'wait_mode', 'ramp'}
 ALT_BASELINE_N = 40      # сэмплов gt-z на базлайн «земли» (нода стартует до арма)
 SK_ALT_MIN = 1.0         # станция-кипинг только в воздухе (ниже — руки прочь:
@@ -147,6 +150,9 @@ class JoyReplay(Node):
             self._sem.update({k: float(v)
                               for k, v in init.get('sticks', {}).items()})
             self._sw = int(init.get('sw', -1))
+            # SF-мастер (CH7, схема BS_SF_MASTER): дефолт 0 = не-вверх; легаси-
+            # сценарии/нода без схемы ось не замечают
+            self._sf = int(init.get('sf', 0))
             if self._fence <= 0:
                 self._fence = float(scn.get('fence', 0))
             # станция-кипинг — имитация рук пилота: ветер 10 м/с за раскачку
@@ -222,17 +228,18 @@ class JoyReplay(Node):
         return -k * fwd, -k * left
 
     # ---------- публикация ----------
-    def _publish(self, raw6=None):
-        if raw6 is None:
+    def _publish(self, raw_axes=None):
+        if raw_axes is None:
             p_add, r_add = self._sk_correction()
             sem = dict(self._sem)
             sem['pitch'] = max(-1.0, min(1.0, sem['pitch'] + p_add))
             sem['roll'] = max(-1.0, min(1.0, sem['roll'] + r_add))
-            raw6 = [sem[a] * self._signs[i] for i, a in enumerate(AXES)]
-            raw6 += [0.0, float(self._sw)]      # axes[4]=CH5 (не трогаем), [5]=CH6
+            raw_axes = [sem[a] * self._signs[i] for i, a in enumerate(AXES)]
+            # axes[4]=CH5 (не трогаем), [5]=CH6, [6]=CH7/SF-мастер
+            raw_axes += [0.0, float(self._sw), float(self._sf)]
         m = Joy()
         m.header.stamp = self.get_clock().now().to_msg()
-        m.axes = [float(v) for v in (list(raw6) + [0.0] * 8)[:8]]
+        m.axes = [float(v) for v in (list(raw_axes) + [0.0] * 8)[:8]]
         m.buttons = []
         self._pub.publish(m)
 
@@ -317,6 +324,9 @@ class JoyReplay(Node):
             return True
         if 'sw' in step:
             self._sw = int(step['sw'])
+            return True
+        if 'sf' in step:
+            self._sf = int(step['sf'])
             return True
         if set(step) == {'note'}:
             return True

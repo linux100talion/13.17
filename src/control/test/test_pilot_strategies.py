@@ -135,6 +135,25 @@ r, p, t, y, _ = joy_sticks([1.0, 1.0, 1.0, 1.0], signs=JOY_SIGNS_DEFAULT)
 check("joy_sticks с боевыми знаками: +1 по всем осям → 1100/1900/1100/1100",
       (r, p, t, y) == (1100, 1900, 1100, 1100))
 
+# --- joy_master: схема «SF-мастер» (SF на CH7/axes[6], SC — потолок лесенки) ---
+from control_pkg.infrastructure.ros_pilot import joy_master           # noqa: E402
+# оси SF нет (короткий axes — старые записи/6 осей) → MANUAL
+sw, _ = joy_master([0.0, 0.0, 0.0, 0.0, 0.0, -1.0])
+check("joy_master без оси SF → MANUAL (старые записи безопасны)", sw == 1)
+# SF центр/вниз → MANUAL при ЛЮБОМ SC
+check("joy_master SF центр → MANUAL", joy_master([0.0] * 6 + [0.0])[0] == 1)
+check("joy_master SF вниз → MANUAL при SC-вниз",
+      joy_master([0.0] * 5 + [1.0, -1.0])[0] == 1)
+# ровно на пороге (0.5) — ещё не вверх (строгое >)
+check("joy_master SF на пороге 0.5 → MANUAL", joy_master([0.0] * 6 + [0.5])[0] == 1)
+# SF вверх → авто (−1), SC задаёт потолок: −1→0 демпфер, 0→1 VinsHold, +1→2 LOITER
+check("joy_master SF-вверх + SC-вверх → авто, потолок 0 (демпфер)",
+      joy_master([0.0] * 5 + [-1.0, 1.0]) == (-1, 0))
+check("joy_master SF-вверх + SC-центр → потолок 1 (VinsHold)",
+      joy_master([0.0] * 5 + [0.0, 1.0]) == (-1, 1))
+check("joy_master SF-вверх + SC-вниз → потолок 2 (LOITER)",
+      joy_master([0.0] * 5 + [1.0, 1.0]) == (-1, 2))
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ПИЛОТ-СТРАТЕГИИ OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

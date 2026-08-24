@@ -9,6 +9,10 @@
   тумблер CH6 (3 позиции): ВНИЗ → MANUAL (+1), ЦЕНТР → ALTHOLD (0),
   ВВЕРХ → STAB (−1, наш стабилизатор). Если верх/низ поменяны местами —
   инвертировать weight в миксе CH6 (−100), не код.
+  SF-мастер (схема BS_SF_MASTER, микс SF → CH7): столбец SF показывает, что
+  увидит нода с включённой схемой — SF ВВЕРХ = потолок лесенки по SC (L0
+  демпфер / L1 VinsHold / L2 LOITER), иначе MANUAL. Если верх/низ SF поменяны —
+  инвертировать weight в миксе CH7, не код.
 PWM печатается УЖЕ с боевыми знаками (JOY_SIGNS_DEFAULT: roll/yaw/throttle в
 EdgeTX-HID зеркальны, выверено полётами) — т.е. «вправо → 1900» и «газ вверх →
 1900» должны выполняться буквально.
@@ -24,10 +28,12 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Joy
 
 try:
-    from control_pkg.infrastructure.ros_pilot import JOY_SIGNS_DEFAULT, joy_sticks
+    from control_pkg.infrastructure.ros_pilot import (JOY_SIGNS_DEFAULT,
+                                                      joy_master, joy_sticks)
 except ImportError:                     # workspace ещё не собран — берём исходники
     sys.path.insert(0, '/root/sim_ws/src/control')
-    from control_pkg.infrastructure.ros_pilot import JOY_SIGNS_DEFAULT, joy_sticks
+    from control_pkg.infrastructure.ros_pilot import (JOY_SIGNS_DEFAULT,
+                                                      joy_master, joy_sticks)
 
 
 class JoyCheck(Node):
@@ -42,8 +48,10 @@ class JoyCheck(Node):
         r, p, t, y, sw = joy_sticks(m.axes, JOY_SIGNS_DEFAULT)
         ax = " ".join(f"{a:+.2f}" for a in m.axes)
         mode = {1: 'MANUAL ', 0: 'ALTHOLD', -1: 'STAB   '}[sw]
+        msw, lvl = joy_master(m.axes)          # что увидит схема SF-мастер
+        sf = 'MANUAL' if msw == 1 else f'L{lvl}'
         print(f"\raxes[{len(m.axes)}]: {ax} | roll={r} pitch={p} thr={t} yaw={y} "
-              f"| {mode} (#{self._n})    ",
+              f"| {mode} SF:{sf:6s} (#{self._n})    ",
               end="", flush=True)
 
 

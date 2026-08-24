@@ -40,6 +40,13 @@ from sensor_msgs.msg import Joy
 AXES = ('roll', 'pitch', 'thr', 'yaw')
 SW_NAMES = {-1: 'ВВЕРХ(-1, наш стек)', 0: 'ЦЕНТР(0, ALT_HOLD/LOITER)',
             1: 'ВНИЗ(+1, MANUAL)'}
+# Схема «SF-мастер» (BS_SF_MASTER): SF на CH7 (axes[6]) — мастер сырых стиков,
+# CH6 при SF-вверх = ПОТОЛОК лесенки зрелости. Полёт по схеме опознаём по
+# использованной оси 6 в bag (в легаси-записях её нет/ноль).
+SW_NAMES_SF = {-1: 'ВВЕРХ(-1, потолок ДЕМПФЕР)',
+               0: 'ЦЕНТР(0, потолок VINSHOLD)',
+               1: 'ВНИЗ(+1, потолок LOITER)'}
+SF_NAMES = {1: 'ВВЕРХ (стабилизация разрешена)', 0: 'не-вверх (СЫРЫЕ СТИКИ)'}
 # Пороги жеста ОТКАЛИБРОВАНЫ 2026-08-24 по 13 реплейным bag'ам против истины
 # /mavros/state: recall 13/13 и НОЛЬ ложных на всей сетке LVL 0.5-0.9 (фоновый
 # max|yaw| при газе<−0.5 вне жестов ≈ 0.00 — предикат «газ в полу И yaw в
@@ -77,9 +84,10 @@ def read_bag(bag, joy_topic, ref_topic, state_topic='/mavros/state',
         topic, raw, t_ns = r.read_next()
         if topic == joy_topic:
             m = deserialize_message(raw, Joy)
-            a = list(m.axes) + [0.0] * 6
+            # 7 осей: [6] = CH7/SF-мастер (в легаси-записях оси нет → 0.0)
+            a = list(m.axes) + [0.0] * 7
             joy_ns.append(t_ns)
-            joy_axes.append(a[:6])
+            joy_axes.append(a[:7])
         elif topic == ref_topic:
             m = deserialize_message(raw, Odometry)
             st = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
@@ -208,6 +216,12 @@ def main():
            for i, a in enumerate(AXES)}
     sw_raw = zoh(sim_joy, joy_axes[:, 5], grid)
     sw = np.where(sw_raw > 0.5, 1, np.where(sw_raw < -0.5, -1, 0))
+    # SF-мастер (CH7): бинарник «вверх / не-вверх». Ось жила в полёте → имена
+    # CH6 переключаем на потолки лесенки (иначе лента врала бы про MANUAL).
+    sf_raw = zoh(sim_joy, joy_axes[:, 6], grid)
+    sf = np.where(sf_raw > 0.5, 1, 0)
+    sf_used = bool(np.any(np.abs(joy_axes[:, 6]) > 0.5))
+    sw_names = SW_NAMES_SF if sf_used else SW_NAMES
 
     # квантование + сглаживание медианой (5 тиков ≈ 0.25 с) от дребезга
     def med5(x):
@@ -218,11 +232,14 @@ def main():
     q = {a: np.round(med5(sem[a]) / args.eps) * args.eps for a in AXES}
     segs = {a: segments(q[a], dt, args.min_dur) for a in AXES}
     sw_segs = segments(sw, dt, args.min_dur)
+    sf_segs = segments(sf, dt, args.min_dur)
 
     # --- события ---
     events = []                                # (t_rel, 'вид', данные)
     for i0, i1, v in sw_segs[1:]:
         events.append((grid[i0] - t0, 'sw', int(v)))
+    for i0, i1, v in sf_segs[1:]:
+        events.append((grid[i0] - t0, 'sf', int(v)))
     arm_runs = merge_runs(sustained_runs((sem['thr'] < -GESTURE_LVL)
                                          & (sem['yaw'] > GESTURE_LVL),
                                          dt, GESTURE_MIN), dt, GESTURE_GAP)
@@ -272,7 +289,9 @@ def main():
     rep.append("\nсобытия (t от первого /joy, sim-с):")
     for t, kind, d in events:
         if kind == 'sw':
-            rep.append(f"  {t:7.1f}  CH6 → {SW_NAMES.get(d, d)}")
+            rep.append(f"  {t:7.1f}  CH6 → {sw_names.get(d, d)}")
+        elif kind == 'sf':
+            rep.append(f"  {t:7.1f}  CH7/SF → {SF_NAMES.get(d, d)}")
         elif kind == 'arm':
             rep.append(f"  {t:7.1f}  ЖЕСТ АРМ (газ min + yaw вправо), {d:.1f} с")
         elif kind == 'disarm':
@@ -292,6 +311,8 @@ def main():
     init = {'sticks': {a: round(float(q[a][min(gi0, len(grid) - 1)]), 2)
                        for a in AXES},
             'sw': int(sw[min(gi0, len(grid) - 1)])}
+    if sf_used:      # схема SF-мастер: реплей обязан воспроизвести и мастер
+        init['sf'] = int(sf[min(gi0, len(grid) - 1)])
     # маски жестов: их thr/yaw-сегменты — сам жест, в шаги не попадают
     gmask = [(grid[i0] - t0 - 0.3, grid[i1 - 1] - t0 + 0.3)
              for i0, i1 in arm_runs + dis_runs]
@@ -315,6 +336,11 @@ def main():
         t = grid[i0] - t0
         if t >= scn_t0:
             ev2.append((t, {'sw': int(v)}))
+    if sf_used:
+        for i0, i1, v in sf_segs[1:]:
+            t = grid[i0] - t0
+            if t >= scn_t0:
+                ev2.append((t, {'sf': int(v)}))
     if arm_runs:
         ev2.append((arm_t, {'arm': {'timeout': 120},
                             'note': 'руддер-арм (замкнуто по /mavros/state)'}))

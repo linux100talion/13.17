@@ -4,9 +4,23 @@
 # Лётный стек не трогает (дисциплина прогона не нарушается — это чтение input-
 # устройства, без FCU/Gazebo).
 #
-# Запуск с хоста:  docker exec -it p1317_nav bash /lab/joy_check.sh
-# Env: JOY_DEV (/dev/input/js0)
+# Запуск с хоста:  bash src/lab/joy_check.sh   (сам перезапустится внутри nav)
+# Env: JOY_DEV (/dev/input/js0), NAV (p1317_nav)
 set -e
+
+# НА ХОСТЕ ROS нет — перезапускаемся внутри контейнера nav (скрипт смонтирован
+# как /lab/joy_check.sh; /dev/input проброшен каталогом, hotplug работает)
+if [ ! -f /opt/ros/humble/setup.bash ]; then
+    NAV="${NAV:-p1317_nav}"
+    if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$NAV"; then
+        echo "ОШИБКА: контейнер $NAV не бежит — поднять: cd docker/sim && make up" >&2
+        echo "  (для сверки пульта хватит поднятого контейнера, полёт не нужен)" >&2
+        exit 1
+    fi
+    exec docker exec -it -e JOY_DEV="${JOY_DEV:-/dev/input/js0}" "$NAV" \
+        bash /lab/joy_check.sh
+fi
+
 source /opt/ros/humble/setup.bash
 source /root/sim_ws/install/setup.bash 2>/dev/null || true
 

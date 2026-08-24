@@ -115,7 +115,13 @@ class DroneState:
     pilot_yaw: int = RC_CENTER
     # Трёхпозиционник CH6: +1 = MANUAL (Arbiter, сырые стики); 0 = ALT_HOLD (Control-шаг
     # убирает стабилизаторы, стики = наклоны); −1 = наш стабилизатор (BS_STAB-стек).
+    # Схема «SF-мастер» (опт-ин BS_SF_MASTER): MANUAL сюда даёт ТОЛЬКО SF (CH7)
+    # не-вверх (+1); SF вверх → −1 (авто), а CH6 переезжает в pilot_level.
     pilot_switch: int = 0
+    # Потолок лесенки зрелости по SC (только схема SF-мастер, см. ros_pilot.joy_master):
+    # 0 = только демпфер; 1 = +VinsHold по готовности VINS; 2 = +штатный LOITER по
+    # зрелости extnav. Freefly._ladder_* держит борт на лучшей ДОСТУПНОЙ ступени.
+    pilot_level: int = 0
     # «Хватит летать»: one-shot от оператора (/mission/pilot_done, make pilot-done) —
     # завершает БЕССРОЧНЫЙ pilot-сегмент (токен `pilot` без числа) → миссия идёт дальше
     # (land). Узел выставляет на ОДИН тик; вне живого пилот-сегмента игнорируется.

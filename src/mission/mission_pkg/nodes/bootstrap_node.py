@@ -357,12 +357,15 @@ class BootstrapArch2Node(Node):
             f"pilot={pilot_kind} excite_max={cfg.excite_max_sec}s (sim)")
 
     def _make_pilot(self, cfg, kind):
+        sf = cfg.sf_master > 0        # схема SF-мастер (CH7): см. config.sf_master
         if kind == 'joy':
             if cfg.joy_signs:
-                return JoyPilot(self, signs=tuple(float(x) for x in cfg.joy_signs.split(',')))
-            return JoyPilot(self)     # знаки — JOY_SIGNS_DEFAULT (выверены полётом TX12)
+                return JoyPilot(self, signs=tuple(float(x) for x in cfg.joy_signs.split(',')),
+                                sf_master=sf)
+            # знаки — JOY_SIGNS_DEFAULT (выверены полётом TX12)
+            return JoyPilot(self, sf_master=sf)
         if kind == 'ros':
-            return RosPilot(self)
+            return RosPilot(self, sf_master=sf)
         # flow_assist — НЕЙТРАЛЬНЫЙ пилот (центр): флоу-демпфер держит снос сам;
         # изолирует боевой пре-VINS сценарий (аналог liftland --flow-hold монолита).
         script = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}.get(cfg.control_mode, [])
@@ -377,6 +380,7 @@ class BootstrapArch2Node(Node):
         s.pilot_roll, s.pilot_pitch = sticks.roll, sticks.pitch
         s.pilot_throttle, s.pilot_yaw = sticks.throttle, sticks.yaw
         s.pilot_switch = self.pilot.mode_switch()
+        s.pilot_level = self.pilot.stab_level()   # потолок лесенки SC (SF-мастер)
         s.pilot_done, self._pilot_done = self._pilot_done, False   # one-shot
         s.extnav_ready = self._extnav_ready()    # гейт штатного LOITER-на-VINS
 
@@ -790,6 +794,9 @@ def _parse() -> tuple:
     p.add_argument('--ripe-sec', dest='ripe_sec', type=float, default=_D.ripe_sec)
     # 2-я ступень гейта — детектор residual+ratio (0 = только время)
     p.add_argument('--ripe-det', dest='ripe_det', type=float, default=_D.ripe_det)
+    # схема «SF-мастер» селектора: SF (CH7) = мастер сырых стиков, SC (CH6) =
+    # потолок лесенки зрелости (см. config.sf_master; ⚠️ не под старые реплеи)
+    p.add_argument('--sf-master', dest='sf_master', type=float, default=_D.sf_master)
     # штатный LOITER-на-VINS: freefly-селектор (центр CH6) и бюджет гейта loiter<t>
     p.add_argument('--ff-loiter', dest='ff_loiter', type=float, default=_D.ff_loiter)
     p.add_argument('--loiter-gate-budget', dest='loiter_gate_budget', type=float,

@@ -33,6 +33,16 @@ class VinsHandover:
         return (s.vins_odom_count >= self.min_count and
                 (s.now_sim - s.vins_last_sim) < self.fresh_sec)
 
+    def vins_stabs(self, base, s):
+        """Состав яруса VinsHold: yaw-стабы из base + VinsHold ПОСЛЕДНИМ (порядок —
+        см. maybe_switch: поздний перезаписывает свои оси у раннего; keep+[vins]
+        верен и для композитов, и для раздельных стабов). VinsHold.enter здесь же:
+        опора = текущая точка. Используется и одноразовым свапом (maybe_switch),
+        и лесенкой SF-мастера (Freefly._ladder_apply — там переходы двусторонние)."""
+        keep = [st for st in base if "yaw" in getattr(st, "axes", frozenset())]
+        self._vins.enter(s)
+        return keep + [self._vins]
+
     def maybe_switch(self, stack, s) -> bool:
         """Если VINS сошёлся, а ЭТОТ стек ещё на демпфере — заменить roll/pitch-
         стабилизаторы на VinsHold, СОХРАНИВ стабы других осей (yaw-холд остаётся
@@ -52,10 +62,7 @@ class VinsHandover:
             return False
         if self._vins in stack.stabs:
             return False                           # этот стек уже на VinsHold
-        keep = [st for st in stack.stabs
-                if "yaw" in getattr(st, "axes", frozenset())]
-        self._vins.enter(s)                        # опора = текущая точка (семантика шага)
-        stack.switch_stabilization(keep + [self._vins])   # VinsHold ПОСЛЕДНИМ (см. выше)
+        stack.switch_stabilization(self.vins_stabs(stack.stabs, s))
         self._done = True
         return True
 

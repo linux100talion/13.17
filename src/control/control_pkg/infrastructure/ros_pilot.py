@@ -27,6 +27,21 @@ from ..domain.rc import RC_CENTER, RcCommand
 JOY_AXIS_ROLL, JOY_AXIS_PITCH, JOY_AXIS_THROTTLE, JOY_AXIS_YAW = 0, 1, 2, 3
 JOY_AXIS_SWITCH = 5
 JOY_SWITCH_THRESHOLD = 0.5
+# --- Схема «SF-мастер» (опт-ин: cfg.sf_master / BS_SF_MASTER) ---
+# axes[6] = CH7 — SF-мастер: ВВЕРХ (>0.5) = стабилизация разрешена; центр/вниз/
+# оси нет = СЫРЫЕ СТИКИ (MANUAL-seize Арбитра) при ЛЮБОМ SC. Выделенный
+# выключатель: перехват — один бинарный щелчок из любого состояния, без проезда
+# через центр SC (в легаси сырые стики — крайнее положение селектора).
+# CH6 (SC) при SF-вверх выбирает ПОТОЛОК лесенки зрелости (Freefly._ladder_*):
+#   −1 (SC физически ВВЕРХ) → 0: только демпфер (свапа на VinsHold НЕТ);
+#    0 (центр)              → 1: демпфер → VinsHold по готовности VINS;
+#   +1 (ВНИЗ)               → 2: демпфер → VinsHold → штатный LOITER по зрелости.
+# Борт всегда на лучшей ДОСТУПНОЙ ступени ≤ потолка, деградация симметрична.
+# ⚠️ СОВМЕСТИМОСТЬ: старые записи/реплеи несут 6 осей (axes[6] нет → «SF не
+# вверх») и CH6=+1 в них означал MANUAL — под sf_master они летели бы целиком
+# на сырых стиках. Поэтому семантика ТОЛЬКО опт-ином: старые jsonl гонять в
+# легаси, новые записи несут 7 осей (joy_timeline пишет axes[:7]).
+JOY_AXIS_MASTER = 6
 _JOY_SPAN = 400          # ось ±1 → PWM 1500±400 (конвенция pilot_full)
 # Знаки осей TX12 (roll,pitch,throttle,yaw) — выверены ЖИВЫМИ ПОЛЁТАМИ
 # (assisted/MANUAL, 2026-08-16): в EdgeTX-HID зеркальны нашей RC-конвенции
@@ -54,6 +69,22 @@ def joy_sticks(axes, signs=(1.0, 1.0, 1.0, 1.0)):
             pwm(JOY_AXIS_THROTTLE, signs[2]), pwm(JOY_AXIS_YAW, signs[3]), sw)
 
 
+def joy_master(axes):
+    """Чистое ядро схемы SF-мастер: axes → (switch, level).
+    switch — для Арбитра: +1 (MANUAL), пока SF не вверх; −1 (авто) при SF-вверх
+    (в Control-шагах −1 = наш стек — деградация не-freefly миссий осмысленна).
+    level 0..2 — потолок лесенки по SC (карта у JOY_AXIS_MASTER выше).
+    Отсутствующая ось SF (короткий axes, старые записи) → MANUAL: безопасный
+    дефолт «мастер выключен = сырые стики»."""
+    sc = 0
+    if JOY_AXIS_SWITCH < len(axes):
+        v = axes[JOY_AXIS_SWITCH]
+        sc = 1 if v > JOY_SWITCH_THRESHOLD else (-1 if v < -JOY_SWITCH_THRESHOLD else 0)
+    sf_up = (JOY_AXIS_MASTER < len(axes)
+             and axes[JOY_AXIS_MASTER] > JOY_SWITCH_THRESHOLD)
+    return (-1 if sf_up else 1), sc + 1
+
+
 class JoyPilot:
     """PilotInput из /joy (sensor_msgs/Joy) — живые стики МИМО FCU.
 
@@ -69,22 +100,34 @@ class JoyPilot:
     потере радио); барьер на этот случай — FCU-уровень (FLTMODE_CH), не адаптер.
     """
 
-    def __init__(self, node, signs=JOY_SIGNS_DEFAULT):
+    def __init__(self, node, signs=JOY_SIGNS_DEFAULT, sf_master=False):
         from rclpy.qos import qos_profile_sensor_data
         from sensor_msgs.msg import Joy
         self._signs = signs
+        self._sf_master = sf_master
         self._r = self._p = self._t = self._y = RC_CENTER
-        self._sw = 0
+        # дефолты до первого /joy: MANUAL в схеме SF-мастер (руки пилота —
+        # безопасный старт), потолок 0 (только демпфер) — эскалация лишь по
+        # явному положению SC
+        self._sw = 1 if sf_master else 0
+        self._lvl = 0
         node.create_subscription(Joy, '/joy', self._on, qos_profile_sensor_data)
 
     def _on(self, m):
-        self._r, self._p, self._t, self._y, self._sw = joy_sticks(m.axes, self._signs)
+        self._r, self._p, self._t, self._y, sw = joy_sticks(m.axes, self._signs)
+        if self._sf_master:
+            self._sw, self._lvl = joy_master(m.axes)
+        else:
+            self._sw = sw
 
     def sticks(self) -> RcCommand:
         return RcCommand(self._r, self._p, self._t, self._y)
 
     def mode_switch(self) -> int:
         return self._sw
+
+    def stab_level(self) -> int:
+        return self._lvl
 
 
 class RosPilot:
@@ -92,11 +135,13 @@ class RosPilot:
     (петля). Для живого пульта использовать JoyPilot; этот адаптер оставлен для
     сценариев, где нода не оверрайдит ch1..4."""
 
-    def __init__(self, node):
+    def __init__(self, node, sf_master=False):
         from mavros_msgs.msg import RCIn
         from rclpy.qos import qos_profile_sensor_data
+        self._sf_master = sf_master
         self._r = self._p = self._t = self._y = RC_CENTER
-        self._sw = 0
+        self._sw = 1 if sf_master else 0     # дефолты — как у JoyPilot
+        self._lvl = 0
         node.create_subscription(RCIn, '/mavros/rc/in', self._on, qos_profile_sensor_data)
 
     def _on(self, m):
@@ -104,14 +149,23 @@ class RosPilot:
         if len(ch) >= 4:
             self._r, self._p, self._t, self._y = ch[0], ch[1], ch[2], ch[3]
         if len(ch) >= 6:
-            # трёхпозиционник ch6 (зеркало joy_sticks): >1700 MANUAL / <1300 стаб / центр ALT_HOLD
-            self._sw = 1 if ch[5] > 1700 else (-1 if ch[5] < 1300 else 0)
+            # трёхпозиционник ch6 (зеркало joy_sticks): >1700 / <1300 / центр
+            sc = 1 if ch[5] > 1700 else (-1 if ch[5] < 1300 else 0)
+            if self._sf_master:
+                # зеркало joy_master в PWM: SF на CH7, >1700 = вверх
+                sf_up = len(ch) >= 7 and ch[6] > 1700
+                self._sw, self._lvl = (-1 if sf_up else 1), sc + 1
+            else:
+                self._sw = sc
 
     def sticks(self) -> RcCommand:
         return RcCommand(self._r, self._p, self._t, self._y)
 
     def mode_switch(self) -> int:
         return self._sw
+
+    def stab_level(self) -> int:
+        return self._lvl
 
 
 class ScriptedPilot:
@@ -143,6 +197,11 @@ class ScriptedPilot:
         for tu, val in self._sw:
             if t < tu:
                 return val
+        return 0
+
+    def stab_level(self) -> int:
+        # схема SF-мастер живому пилоту; scripted лесенку не ведёт (freefly и так
+        # требует живого пилота), потолок 0 = только демпфер
         return 0
 
     def total(self) -> float:
