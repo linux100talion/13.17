@@ -161,6 +161,8 @@ ARGS=()
 # GPS отсутствует С БУТА (LV=2): очередь EK3 без GPS-веток + мост нулевой позы с земли
 [ -n "${BS_GPS_DENIED:-}" ]      && ARGS+=(--gps-denied "$BS_GPS_DENIED")
 [ -n "${BS_ALT_SRC:-}" ]         && ARGS+=(--alt-src "$BS_ALT_SRC")
+# высота ПЕРЦЕПЦИИ (IPM/опора): global | local (EKF z, GPS-denied) | baro (экспер.)
+[ -n "${BS_PERC_ALT_SRC:-}" ]    && ARGS+=(--perc-alt-src "$BS_PERC_ALT_SRC")
 [ -n "${BS_SET_ORIGIN:-}" ]      && ARGS+=(--set-origin "$BS_SET_ORIGIN")
 # координаты origin — примерная РЕАЛЬНАЯ точка старта (EKF строит по ним модель
 # магнитного поля WMM; дефолт = дом SITL CMAC, боевой борт задаёт свои)

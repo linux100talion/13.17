@@ -115,14 +115,16 @@ class BootstrapArch2Node(Node):
                                             ipm_wz_tau=cfg.ipm_wz_tau,
                                             ipm_win=cfg.ipm_win,
                                             ipm_adapt=cfg.ipm_adapt,
-                                            ipm_vel_tau=cfg.ipm_vel_tau)
-            # ⚠️ ПЕРЦЕПЦИЯ ВСЕГДА НА GLOBAL rel_alt (cfg.alt_src сюда НЕ прокидываем):
-            # 4 прогона 2026-08-19 с баро-высотой в перцепции (сырой И EMA) дали
-            # горизонтальный улёт при наборе (15-59 м, демпфер срывается — логика
-            # опоры/гейтов IPM заточена под характер global-канала). С global —
-            # чисто. После GPS-kill global замерзает НА ВЫСОТЕ ХОВЕРА — масштаб
-            # IPM остаётся валидным для ховер-фазы (деградация терпима). Перевод
-            # перцепции на баро — отдельная кампания (для борта без GPS нужен).
+                                            ipm_vel_tau=cfg.ipm_vel_tau,
+                                            alt_src=cfg.perc_alt_src)
+            # ⚠️ Высота перцепции — СВОЯ ручка (perc_alt_src), НЕ cfg.alt_src:
+            # 4 прогона 2026-08-19 с баро в перцепции (сырой И EMA) дали улёты
+            # 15-59 м при наборе. Кампания 2026-08-24 доказала механизм замером
+            # (см. таблицу в RosPerception): сырой баро ломает IPM межкадровой
+            # производной (25.6 см p95 → фантомные скорости), EMA чинит
+            # производную, но лаг 0.35 с рушит масштаб/полосу на наборе. Для
+            # GPS-denied — 'local' (EKF z: гладко И без лага, живёт без GPS,
+            # вертикаль переживает смерть VINS); 'global' — дефолт GPS-профилей.
 
         # рантайм switch Flow→Vins: флаг + флоу-стабилизатор (VinsHold на gz_* гейнах)
         handover = None
@@ -693,6 +695,9 @@ def _parse() -> tuple:
                    default=_D.gps_denied)
     p.add_argument('--alt-src', dest='alt_src',
                    default=_D.alt_src, choices=['global', 'baro'])
+    # высота ПЕРЦЕПЦИИ (масштаб IPM/гейты опоры) — отдельно от alt_src миссии
+    p.add_argument('--perc-alt-src', dest='perc_alt_src',
+                   default=_D.perc_alt_src, choices=['global', 'local', 'baro'])
     p.add_argument('--set-origin', dest='set_origin', type=float,
                    default=_D.set_origin)
     # координаты origin (примерная РЕАЛЬНАЯ точка старта — см. config.origin_lat:

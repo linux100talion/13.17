@@ -180,7 +180,10 @@ if [ "$LV" = "2" ]; then                 # GPS ОТСУТСТВУЕТ С БУТ�
     export BS_GPS_DENIED="${BS_GPS_DENIED:-1}"
     export BS_GPS_DISABLE="${BS_GPS_DISABLE:-0}"   # глушить нечего
     export BS_SET_ORIGIN="${BS_SET_ORIGIN:-1}"     # origin руками (GPS не поставит)
-    export BS_ALT_SRC="${BS_ALT_SRC:-baro}"        # global rel_alt без GPS замерзает
+    export BS_ALT_SRC="${BS_ALT_SRC:-baro}"        # миссия: баро (независим от EKF)
+    # перцепция: EKF local z — гладко И без лага (замер 2026-08-24); global в
+    # LV=2 тоже жив (EKF с origin), но local не требует global-канала вовсе
+    export BS_PERC_ALT_SRC="${BS_PERC_ALT_SRC:-local}"
 fi
 
 # ── 3) атомарный прогон (рестарт стека внутри — применяет eeprom из шага 1) ──

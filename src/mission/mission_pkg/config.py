@@ -471,7 +471,17 @@ class BootstrapConfig:
     origin_lat: float = -35.363261   # BS_ORIGIN_LAT / --origin-lat
     origin_lon: float = 149.165230   # BS_ORIGIN_LON / --origin-lon
     origin_alt: float = 584.0        # м AMSL; BS_ORIGIN_ALT / --origin-alt
-    alt_src: str = 'global'          # источник rel_alt для миссии И перцепции:
+    perc_alt_src: str = 'global'     # источник ВЫСОТЫ ПЕРЦЕПЦИИ (масштаб IPM +
+                                     # гейты опоры; НЕ alt_src миссии!):
+                                     # 'global' — rel_alt EKF (дефолт, GPS-
+                                     # профили); 'local' — z локальной позы EKF
+                                     # (GPS-denied: гладко и без лага, замер
+                                     # 2026-08-24 в RosPerception; профиль
+                                     # LV=2); 'baro' — BaroAlt (лаг 0.35 с,
+                                     # только эксперименты — улёты 2026-08-19).
+                                     # BS_PERC_ALT_SRC / --perc-alt-src
+    alt_src: str = 'global'          # источник rel_alt для МИССИИ (перцепция —
+                                     # отдельная ручка perc_alt_src выше):
                                      # 'global' — /mavros/global_position/rel_alt
                                      # (GLOBAL_POSITION_INT; БЕЗ GPS ЗАМЕРЗАЕТ:
                                      # прогон 2026-08-19 — climb «не увидел» взлёта,

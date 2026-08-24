@@ -165,13 +165,31 @@ class RosPerception:
             node.create_subscription(Imu, gyro_topic,
                                      lambda m: self._on_gyro(m, own=True),
                                      qos_profile_sensor_data)
-        # Высота для масштаба IPM/гейтов: 'global' — rel_alt из GLOBAL_POSITION_INT
-        # (замерзает без GPS!); 'baro' — сырой барометр (GPS-denied / боевой борт,
-        # см. baro_alt.py). Опора действительна только пока высота не ушла
-        # (см. flow_estimator).
+        # Высота для масштаба IPM/гейтов. Она входит в IPM НА КАЖДОМ КАДРЕ
+        # (позиция адаптивной полосы + масштаб ректификации), поэтому критична
+        # МЕЖКАДРОВАЯ ПРОИЗВОДНАЯ шума (скачок alt между кадрами = «зум»
+        # ректификации = фантомная скорость ∝ Δalt/dt) и ЛАГ (на наборе врут
+        # масштаб и полоса — улёты 4 прогонов 2026-08-19 на баро). Замер бок о
+        # бок (bag lv2_replay_20260824_062957, п95 межкадровой |Δ| на сетке
+        # 30 Гц / σ шума в ховере / лаг):
+        #   global (EKF)  6.5 см / 4.2 см / ~0.03 с
+        #   local_z (EKF) 7.6 см / 3.5 см / +0.03 с
+        #   baro_raw     25.6 см / 11 см  / +0.10 с  ← фантомы производной
+        #   baro_ema      5.2 см / 5.1 см / ~0.35 с  ← лаг EMA, срыв на наборе
+        # 'global' — rel_alt из GLOBAL_POSITION_INT (жив, пока EKF с origin
+        # публикует global; при чистой потере aiding замерзает); 'local' —
+        # z из /mavros/local_position/pose: тот же EKF-канал (баро-POSZ +
+        # IMU-предсказание: гладко И без лага), но живёт без GPS и без global —
+        # профиль LV=2/боевой борт; вертикаль EKF переживает смерть VINS
+        # (баро-фьюжн продолжается). 'baro' — BaroAlt (сырой баро + EMA):
+        # полностью независим от EKF, но лаг 0.35 с — только для экспериментов.
         if alt_src == 'baro':
             from .baro_alt import BaroAlt
             self._baro = BaroAlt(node, self._set_alt)
+        elif alt_src == 'local':
+            from geometry_msgs.msg import PoseStamped
+            node.create_subscription(PoseStamped, '/mavros/local_position/pose',
+                                     self._on_lpos_alt, qos_profile_sensor_data)
         else:
             node.create_subscription(Float64, '/mavros/global_position/rel_alt',
                                      self._on_alt, qos_profile_sensor_data)
@@ -229,6 +247,11 @@ class RosPerception:
 
     def _on_alt(self, m):
         self._alt = float(m.data)
+
+    def _on_lpos_alt(self, m):
+        # EKF local z ≈ высота над точкой арма (origin EKF); на ровной сцене
+        # эквивалент rel_alt. Отрицательный дребезг у земли клампим нулём.
+        self._alt = max(0.0, float(m.pose.position.z))
 
     def _set_alt(self, alt):
         self._alt = float(alt)
