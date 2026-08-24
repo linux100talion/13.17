@@ -24,6 +24,15 @@ class DroneState:
     # --- VINS ---
     vins_odom_count: int = 0
     vins_last_sim: float = -1e9
+    vins_first_sim: float = -1e9          # sim-время ПЕРВОЙ одометрии (гейт
+                                          # зрелости по времени потока)
+    vins_res: float = -1.0                # EMA residual |Δp/Δt − twist|, м/с
+                                          # (детектор зрелости; -1 = нет данных)
+    vins_ratio: float = -1.0              # вертикальный ratio VINS/референс
+                                          # (-1 = референс ещё не ушёл на dz)
+    vins_ripe_det: bool = False           # детектор зрелости: residual тих
+                                          # quiet_sec И ratio в полосе (2-я
+                                          # ступень гейта, см. ripeness.py)
     # Поза VINS (свой фрейд, НЕ выровнен к миру) — для VinsHold после init. Хватает
     # для УДЕРЖАНИЯ (держим текущую позу константной), выравнивание не нужно.
     vins_valid: bool = False

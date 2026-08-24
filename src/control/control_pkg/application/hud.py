@@ -36,6 +36,10 @@ def hud_status(s, fresh_sec: float) -> str:
         st, why = 'WAIT', 'ground'
     else:
         st, why = 'READY', '-'
+    # res/rat — диагностика детектора зрелости (ripeness.py): residual
+    # «поза/скорость» (м/с; тихо < 0.15) и вертикальный ratio VINS/rel_alt
+    # (зрел в [0.8,1.25]); -1 = ещё нет данных. Рисуются мелкой строкой HUD.
     return (f"st={st} why={why} extnav={int(s.extnav_ready)} "
             f"odom={s.vins_odom_count} age={min(age, 999.0):.1f} "
-            f"alt={(s.rel_alt or 0.0):.1f}")
+            f"alt={(s.rel_alt or 0.0):.1f} "
+            f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f}")

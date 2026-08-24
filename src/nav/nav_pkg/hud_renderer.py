@@ -115,6 +115,20 @@ class HudRenderer:
             else:
                 y = self._line(frame, k, y, f"NO VINS ({why})", HUD_RED,
                                scale=1.0, fill=HUD_RED)
+            # 1b) диагностика детектора зрелости (мелко, под баннером):
+            # res — residual «поза/скорость» (тихо < 0.15 м/с), rat —
+            # вертикальный ratio VINS/rel_alt (зрел в [0.8,1.25]); «--» =
+            # данных ещё нет (-1 от лётной ноды / старый bag без полей)
+            res, rat = self.status.get("res"), self.status.get("rat")
+            if res is not None:
+                def _f(v):
+                    try:
+                        x = float(v)
+                    except (TypeError, ValueError):
+                        return "--"
+                    return "--" if x < 0 else f"{x:.2f}"
+                y = self._line(frame, k, y, f"res {_f(res)}  rat {_f(rat)}",
+                               HUD_WHITE, scale=0.6)
         # 2) режим FCU + armed
         if self.fcu_t is not None and now - self.fcu_t < 5.0:
             arm = "ARM" if self.fcu_armed else "DISARM"

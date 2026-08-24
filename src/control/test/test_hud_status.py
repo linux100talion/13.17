@@ -64,6 +64,8 @@ check("extnav+свежий+в воздухе → READY", d['st'] == 'READY' and 
 check("поля для analyze: extnav/odom/age/alt",
       d['extnav'] == '1' and d['odom'] == '700'
       and float(d['age']) < FRESH and float(d['alt']) == 3.2)
+check("поля детектора зрелости res/rat (дефолт -1 = нет данных)",
+      float(d['res']) == -1.0 and float(d['rat']) == -1.0)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")

@@ -14,6 +14,7 @@ from nav_msgs.msg import Odometry
 from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Float64
 
+from ..application.ripeness import VinsRipeness
 from ..domain.state import DroneState
 
 
@@ -21,6 +22,7 @@ class RosTelemetry:
     def __init__(self, node, clock, alt_src='global'):
         self._clock = clock
         self._s = DroneState()
+        self._ripe = VinsRipeness()   # детектор зрелости VINS (2-я ступень гейта)
         self._gt_px = self._gt_py = None
         self._gt_pt = None
         self._vins_px = self._vins_py = None
@@ -58,7 +60,23 @@ class RosTelemetry:
     def _on_odom(self, m):
         self._s.vins_odom_count += 1
         t = self._clock.now_sim()
+        if self._s.vins_odom_count == 1:
+            self._s.vins_first_sim = t    # старт потока — для гейта зрелости
         self._s.vins_last_sim = t
+        # детектор зрелости (2-я ступень гейта): residual поза/скорость +
+        # вертикальный ratio к rel_alt (баро при alt_src=baro, global на GPS).
+        # Время — HEADER-ШТАМП одометрии, не now_sim прихода: джиттер доставки
+        # раздувает конечную разность Δp/Δt и residual врёт вверх (прогон
+        # 052917: res=0.24 при офлайн-поле 0.05-0.10 — детектор молчал,
+        # зрелость открыл таймер).
+        th = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        p, v = m.pose.pose.position, m.twist.twist.linear
+        self._ripe.on_odom(th, (p.x, p.y, p.z), (v.x, v.y, v.z),
+                           self._s.rel_alt)
+        self._s.vins_res = self._ripe.res if self._ripe.res is not None else -1.0
+        self._s.vins_ratio = (self._ripe.ratio
+                              if self._ripe.ratio is not None else -1.0)
+        self._s.vins_ripe_det = self._ripe.ready
         # Поза VINS + скорость конечной разностью (twist-фрейм неоднозначен — как gt).
         x = m.pose.pose.position.x
         y = m.pose.pose.position.y

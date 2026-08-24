@@ -185,13 +185,53 @@ class BootstrapArch2Node(Node):
         # position lost» через 3 с после глушения GPS и НЕ восстановился до
         # посадки (in-flight restart aiding не работает — LV4). Стики пилота при
         # этом были В ЦЕНТРЕ — «спокойные стики» не гейт: скорость создают ветер
-        # и демпфер. По замеру ratio выходит на ~1 к ≈21 с от init ≈ 550-600
-        # odom; хэндовер нашего стека на 300 (BS_VINS_MIN) был на грани.
-        ripe_n = 50 if self._has_calm_steps else max(600, 2 * cfg.vins_min)
-        _vins_ripe = (lambda s: s.vins_odom_count > ripe_n and self._calm_phase()) \
+        # и демпфер. По замеру ratio выходит на ~1 к ≈21 с от init; хэндовер
+        # нашего стека на 300 (BS_VINS_MIN) был на грани.
+        # ГЕЙТ — ПО SIM-ВРЕМЕНИ ПОТОКА, а не по счётчику (2026-08-24, разбор
+        # «моды 14.7 Гц»): freq-контроль feature_tracker держит длинное среднее
+        # и после CPU-затыка на старте стека «выплачивает долг» кадрами —
+        # /odometry разгоняется до 14.7-29.5 Гц, и прежние 600 сообщений
+        # пролетали за 21-24 с (впритык к физике ~21 с, запас нулевой), а при
+        # штатных 10.5 Гц тянулись 57-62 с (втрое консервативнее физики).
+        # Время потока от моды частоты не зависит: ripe_sec=30 ≈ 21 с физики +
+        # запас. Счётчик остаётся ПОЛОМ против дырявого потока (30 с при 5 Гц —
+        # ещё не зрелость): vins_min (в LV-профилях 300). Слепое пятно то же,
+        # что у счётчика: перезапуск VINS в полёте гейт не замечает
+        # (first_sim/count не сбрасываются) — свежесть ловит vins_fresh.
+        ripe_sec = 5.0 if self._has_calm_steps else cfg.ripe_sec
+        ripe_min = 50 if self._has_calm_steps else cfg.vins_min
+
+        def _ripe_time(s):
+            return (s.vins_first_sim > -1e8
+                    and s.now_sim - s.vins_first_sim > ripe_sec
+                    and s.vins_odom_count > ripe_min)
+        # ВТОРАЯ СТУПЕНЬ — детектор зрелости (application/ripeness.py:
+        # residual «поза/скорость» тих 4 с + вертикальный ratio к rel_alt в
+        # полосе [0.8,1.25]) пускает РАНЬШЕ таймера в хороший день; время
+        # остаётся страховкой плохого (детектор не защёлкнулся — ripe_sec
+        # решает, как раньше). Пол детекторного пути СВОЙ, короткий (8 с /
+        # 80 сообщ.): пол времени-гейта (vins_min=300 ≈ 28 с @10.5 Гц)
+        # обесценил бы детектор. По bag'ам 041803/050600 зрелость на текущем
+        # стеке — 2-4 с после init; 8 с = двукратный запас.
+        self._ripe_det_logged = False
+
+        def _ripe_det(s):
+            if not (cfg.ripe_det > 0 and s.vins_ripe_det
+                    and s.vins_first_sim > -1e8
+                    and s.now_sim - s.vins_first_sim > 8.0
+                    and s.vins_odom_count > 80):
+                return False
+            if not self._ripe_det_logged:
+                self._ripe_det_logged = True
+                self.logger.info(
+                    f"зрелость VINS по ДЕТЕКТОРУ (res={s.vins_res:.2f} "
+                    f"ratio={s.vins_ratio:.2f}) — раньше таймера {ripe_sec:g} с")
+            return True
+        _vins_ripe = (lambda s: (_ripe_time(s) or _ripe_det(s))
+                      and self._calm_phase()) \
             if cfg.vision_pose_src == 'extern' else None
         # Глушение GPS — ещё позже: EKF должен пожить на extnav (см. очередь ниже).
-        kill_n = 50 if self._has_calm_steps else ripe_n + 150
+        kill_sec = ripe_sec + (0.0 if self._has_calm_steps else 15.0)
         # ⚠️ САМОВОССТАНОВЛЕНИЕ eeprom ПЕРЕД АРМОМ: EK3_SRC1_* персистятся, и
         # после vision-прогона следующий бут стартует с extnav-источниками БЕЗ
         # якоря VINS — EKF фьюзит климб-фантом IPM-скорости → улёт на наборе
@@ -249,12 +289,16 @@ class BootstrapArch2Node(Node):
             # aiding не стартует (LV4), LOITER невозможен до посадки. Без
             # позиции миссия остаётся на GPS — та же безопасная деградация,
             # что и при мёртвом VINS.
-            # kill_n > ripe_n: между свапом на extnav и глушением EKF живёт на
-            # vision при живом GPS (~6 с) — если фьюжн развалится, local_position
-            # протухнет и глушение не случится вовсе (безопасная деградация).
+            # kill_sec > ripe_sec (+15 с): между свапом на extnav и глушением
+            # EKF живёт на vision при живом GPS — если фьюжн развалится,
+            # local_position протухнет и глушение не случится вовсе
+            # (безопасная деградация).
             self._ekf_pending.append(
                 ('SIM_GPS1_ENABLE', 0.0,
-                 lambda s: s.vins_odom_count > kill_n and (s.rel_alt or 0.0) > 1.5
+                 lambda s: s.vins_first_sim > -1e8
+                 and s.now_sim - s.vins_first_sim > kill_sec
+                 and s.vins_odom_count > ripe_min
+                 and (s.rel_alt or 0.0) > 1.5
                  and (s.now_sim - s.ekf_pos_last_sim) < 2.0))
         self._ekf_src_last_try = 0.0
         if cfg.vision_vel > 0 and self.perception is not None:
@@ -734,6 +778,10 @@ def _parse() -> tuple:
     p.add_argument('--handover-vins', dest='handover_vins', action='store_true')
     p.add_argument('--vins-min', dest='vins_min', type=int, default=40)
     p.add_argument('--vins-fresh-sec', dest='vins_fresh_sec', type=float, default=2.0)
+    # зрелость VINS для EKF-свапа: sim-секунды от первой одометрии (см. config)
+    p.add_argument('--ripe-sec', dest='ripe_sec', type=float, default=_D.ripe_sec)
+    # 2-я ступень гейта — детектор residual+ratio (0 = только время)
+    p.add_argument('--ripe-det', dest='ripe_det', type=float, default=_D.ripe_det)
     # штатный LOITER-на-VINS: freefly-селектор (центр CH6) и бюджет гейта loiter<t>
     p.add_argument('--ff-loiter', dest='ff_loiter', type=float, default=_D.ff_loiter)
     p.add_argument('--loiter-gate-budget', dest='loiter_gate_budget', type=float,

@@ -211,6 +211,11 @@ ARGS=()
 # рантайм switch Flow→Vins по «VINS ready» (только flow_assist)
 [ "${BS_HANDOVER_VINS:-0}" = "1" ] && ARGS+=(--handover-vins)
 [ -n "${BS_VINS_MIN:-}" ]        && ARGS+=(--vins-min "$BS_VINS_MIN")
+# зрелость VINS для EKF-свапа: sim-СЕКУНД от первой одометрии (гейт по времени
+# потока, не по счётчику; пол по счётчику — BS_VINS_MIN)
+[ -n "${BS_RIPE_SEC:-}" ]        && ARGS+=(--ripe-sec "$BS_RIPE_SEC")
+# 2-я ступень гейта — детектор residual+ratio (ripeness.py; 0 = только время)
+[ -n "${BS_RIPE_DET:-}" ]        && ARGS+=(--ripe-det "$BS_RIPE_DET")
 # штатный LOITER-на-VINS: freefly-центр CH6 (BS_FF_LOITER=1) и бюджет гейта loiter<t>
 [ -n "${BS_FF_LOITER:-}" ]       && ARGS+=(--ff-loiter "$BS_FF_LOITER")
 [ -n "${BS_LOITER_GATE_BUDGET:-}" ] && ARGS+=(--loiter-gate-budget "$BS_LOITER_GATE_BUDGET")
