@@ -14,8 +14,11 @@
 # накопленный дрейф. Инъекция corrected_odom в MAVROS vision_pose / обратно в
 # VINS — Инкремент 3.
 #
-# Допущения (см. nn1_anchor_howto.txt): рамка VINS ~ ENU (origin-coupled на
-# взлёте + выровнены по рысканью); поправка пока ТРАНСЛЯЦИОННАЯ. Статичные
+# Кадры: мир VINS рождается с курсом ПЕРВОГО кадра камеры (yaw у монокуляра
+# ненаблюдаем) — к ENU он повёрнут на курс старта. Выравнивает FrameAnchor
+# (frame_anchor.py): Δyaw + трансляция латчатся по паре поз EKF/VINS (разнос
+# LOITER при спавне с курсом −169°, прогоны 2026-08-24). Засечка NN1 правит
+# только трансляцию; yaw-коррекция ПО ОРИЕНТИРУ — отдельный шаг. Статичные
 # развороты/рычаги камеры — ROS-параметры, калибруются на живом запуске.
 # ============================================================================
 import json
@@ -36,6 +39,7 @@ from std_msgs.msg import Float64
 from vision_msgs.msg import Detection2DArray
 
 from nav_pkg.nn1 import geo
+from nav_pkg.nn1.frame_anchor import FrameAnchor, quat_yaw
 
 
 class RayTracer(Node):
@@ -92,16 +96,17 @@ class RayTracer(Node):
         self.K = None                 # (fx,fy,cx,cy) из camera_info или params
         self.R_enu_body = None        # из attitude
         self.rel_alt = None           # высота над взлётом, м
-        self.vins_pos = None          # последняя поза VINS (ENU)
-        self.offset = np.zeros(3)     # поправка-смещение
+        self.vins_pos = None          # последняя поза VINS (его собственный кадр)
         self.have_fix = False
         self.ekf_pos = None           # последняя поза EKF (local_position)
+        self.ekf_yaw = 0.0            # курс EKF из ТОЙ ЖЕ позы (пара к ekf_pos)
         self.ekf_pos_wall = 0.0
-        self.frame_latched = False    # кадр VINS заякорен на кадр EKF
-        self.anchor_relatch_m = float(self.get_parameter("anchor_relatch_m").value)
-        self.anchor_tau = float(self.get_parameter("anchor_tau_sec").value)
-        self._anchor_wall = 0.0       # wall-время последнего апдейта якоря
-        self._relatch_n = 0           # счётчик жёстких подтяжек (для лога)
+        # Якорь кадра VINS→EKF: РЫСКАНЬЕ + трансляция (см. frame_anchor.py:
+        # трансляционный якорь при спавне с курсом −169° кормил EKF почти
+        # перевёрнутыми смещениями → положительная ОС LOITER, разнос 15 м/с)
+        self.anchor = FrameAnchor(
+            relatch_m=float(self.get_parameter("anchor_relatch_m").value),
+            tau_sec=float(self.get_parameter("anchor_tau_sec").value))
 
         # I/O
         self.create_subscription(CameraInfo, self.get_parameter("camera_info_topic").value,
@@ -160,21 +165,27 @@ class RayTracer(Node):
 
     def _on_ekf_pose(self, msg):
         p = msg.pose.position
+        q = msg.pose.orientation
         self.ekf_pos = np.array([p.x, p.y, p.z])
+        # курс — из той же позы, что и позиция: пара согласована по времени
+        self.ekf_yaw = quat_yaw(q.x, q.y, q.z, q.w)
         self.ekf_pos_wall = time.time()
 
     def _on_vins(self, msg):
         p = msg.pose.pose.position
+        q = msg.pose.pose.orientation
         self.vins_pos = np.array([p.x, p.y, p.z])
+        vins_yaw = quat_yaw(q.x, q.y, q.z, q.w)
         # Якорение КАДРА (полёт 2026-08-20 №4): мир VINS рождается в точке его
         # инициализации — в воздухе, куда борт уже улетел от точки арма, а кадр
         # EKF считается от арма. Офсет кадров (9.6 м в том полёте) выносит
         # каждое vision-измерение за инновационный гейт EK3 — фьюжн не
         # начинается вовсе (рантайм-смена EK3_SRC1_POSXY ресет позиции НЕ
         # делает), «EKF variance: position lost». Пока EKF жив (взлёт на GPS) —
-        # защёлкиваем offset = EKF − VINS тем же механизмом, что у засечки NN1
-        # (та потом уточнит). Нет свежей EKF-позы (боевой GPS-denied бут) —
-        # offset остаётся 0, поведение прежнее.
+        # FrameAnchor защёлкивает Δyaw (курс EKF − курс VINS) + трансляцию тем
+        # же механизмом, что у засечки NN1 (та потом уточнит трансляцию). Нет
+        # свежей EKF-позы (боевой GPS-denied бут) — якорь не латчится, сырой
+        # VINS идёт как есть (поведение прежнее).
         #
         # СЛЕЖЕНИЕ после первого латча (полёт 2026-08-21 №7): разовый латч
         # ловит ХУДШИЙ момент — init VINS, когда юный VIO врёт масштабом
@@ -183,54 +194,56 @@ class RayTracer(Node):
         # (VISP−XKF1: 0.11 м → 4.0 м), своп POSXY→6 через минуту получил
         # vision за гейтом → position lost при живом GPS. Поэтому пока EKF
         # свеж и засечки NN1 нет:
-        #   расход > anchor_relatch_m — жёсткая подтяжка (снова offset=EKF−VINS);
-        #   меньше — мягкий дожим с τ=anchor_tau_sec.
+        #   расход > anchor_relatch_m — жёсткая подтяжка (заново Δyaw + t:
+        #   расход мог накопиться именно из-за ошибки курса);
+        #   меньше — мягкий дожим t с τ=anchor_tau_sec (Δyaw не трогаем).
         # После свапа на extnav EKF сам следует vision → расход ≈ инновация
         # (дециметры) → жёсткая подтяжка не срабатывает, дожим ≈ 0 — обратная
         # связь стабильна. Если EKF умер в const_pos, его поза замирает и
-        # слежение поведёт offset к ней — фьюжн к тому моменту уже потерян
+        # слежение поведёт якорь к ней — фьюжн к тому моменту уже потерян
         # (in-flight aiding не рестартует, LV4), хуже не делает.
         if (not self.have_fix and self.ekf_pos is not None
                 and time.time() - self.ekf_pos_wall < 2.0):
-            new_off = self.ekf_pos - self.vins_pos
-            now = time.time()
-            if not self.frame_latched:
-                self.frame_latched = True
-                self.offset = new_off
-                self._anchor_wall = now
+            ev = self.anchor.update(self.vins_pos, vins_yaw,
+                                    self.ekf_pos, self.ekf_yaw, time.time())
+            if ev == 'latch':
                 self.get_logger().info(
-                    f"кадр VINS заякорен на EKF: offset=({new_off[0]:+.2f},"
-                    f"{new_off[1]:+.2f},{new_off[2]:+.2f}) м")
-            else:
-                delta = new_off - self.offset
-                dn = float(np.linalg.norm(delta))
-                dt = min(max(now - self._anchor_wall, 0.0), 0.5)
-                self._anchor_wall = now
-                if self.anchor_relatch_m > 0 and dn > self.anchor_relatch_m:
-                    self.offset = new_off
-                    self._relatch_n += 1
-                    self.get_logger().info(
-                        f"якорь кадра подтянут (№{self._relatch_n}): расход "
-                        f"{dn:.2f} м > {self.anchor_relatch_m:g} — offset="
-                        f"({new_off[0]:+.2f},{new_off[1]:+.2f},{new_off[2]:+.2f}) м")
-                elif self.anchor_tau > 0 and dt > 0:
-                    self.offset = self.offset + \
-                        (1.0 - math.exp(-dt / self.anchor_tau)) * delta
-        # на каждой одометрии VINS публикуем скорректированную
+                    f"кадр VINS заякорен на EKF: Δyaw="
+                    f"{math.degrees(self.anchor.yaw_off):+.1f}°, t="
+                    f"({self.anchor.t[0]:+.2f},{self.anchor.t[1]:+.2f},"
+                    f"{self.anchor.t[2]:+.2f}) м")
+            elif ev == 'relatch':
+                self.get_logger().info(
+                    f"якорь кадра подтянут (№{self.anchor.relatch_n}): Δyaw="
+                    f"{math.degrees(self.anchor.yaw_off):+.1f}°, t="
+                    f"({self.anchor.t[0]:+.2f},{self.anchor.t[1]:+.2f},"
+                    f"{self.anchor.t[2]:+.2f}) м")
+        # на каждой одометрии VINS публикуем скорректированную — В КАДРЕ EKF:
+        # позиция/ориентация/world-скорость повёрнуты на Δyaw (angular — body,
+        # как есть)
         corr = Odometry()
         corr.header = msg.header
         corr.child_frame_id = msg.child_frame_id
-        corr.pose = msg.pose
-        corr.twist = msg.twist
-        corr.pose.pose.position.x = p.x + self.offset[0]
-        corr.pose.pose.position.y = p.y + self.offset[1]
-        corr.pose.pose.position.z = p.z + self.offset[2]
+        cp = self.anchor.map(self.vins_pos)
+        cq = self.anchor.rotate_quat(q.x, q.y, q.z, q.w)
+        (corr.pose.pose.position.x, corr.pose.pose.position.y,
+         corr.pose.pose.position.z) = map(float, cp)
+        (corr.pose.pose.orientation.x, corr.pose.pose.orientation.y,
+         corr.pose.pose.orientation.z, corr.pose.pose.orientation.w) = \
+            map(float, cq)
+        corr.pose.covariance = msg.pose.covariance
+        tv = msg.twist.twist.linear
+        rv = self.anchor.rotate(np.array([tv.x, tv.y, tv.z]))
+        (corr.twist.twist.linear.x, corr.twist.twist.linear.y,
+         corr.twist.twist.linear.z) = map(float, rv)
+        corr.twist.twist.angular = msg.twist.twist.angular
+        corr.twist.covariance = msg.twist.covariance
         self.pub_corr.publish(corr)
 
         # Инкремент 3: та же скорректированная поза -> полётнику (PoseStamped).
-        # До первой засечки offset=0 => прокидываем сырой VINS (нужно ArduPilot
-        # для GPS-denied); после — с вшитой коррекцией дрейфа.
-        # Ориентация: пока от VINS как есть (yaw-коррекция — отдельный шаг).
+        # До латча якорь тождественен => прокидываем сырой VINS (нужно ArduPilot
+        # для GPS-denied); после — в кадре EKF с вшитой коррекцией дрейфа.
+        # Yaw-коррекция ПО ЗАСЕЧКЕ NN1 — отдельный шаг (якорь правит кадр).
         if self.pub_vision is not None:
             vp = PoseStamped()
             vp.header = msg.header
@@ -291,15 +304,16 @@ class RayTracer(Node):
 
         self._publish_anchor(msg.header, drone)
 
-        # сброс дрейфа: offset так, чтобы vins+offset == засечка
+        # сброс дрейфа: трансляция якоря так, чтобы map(vins) == засечка
+        # (поворот кадра остаётся от латча; yaw по ориентиру — отдельный шаг)
         if self.vins_pos is not None:
-            new_off = drone - self.vins_pos
-            self.offset = self.alpha * new_off + (1.0 - self.alpha) * self.offset
+            self.anchor.fix_translation(drone, self.vins_pos, self.alpha)
             self.have_fix = True
             self._publish_drift(msg.header)
+            t = self.anchor.t
             self.get_logger().info(
                 f"засечка '{lm_id}': drone ENU=({drone[0]:.1f},{drone[1]:.1f},{drone[2]:.1f}), "
-                f"дрейф=({self.offset[0]:.2f},{self.offset[1]:.2f},{self.offset[2]:.2f}) м")
+                f"дрейф=({t[0]:.2f},{t[1]:.2f},{t[2]:.2f}) м")
         else:
             self.get_logger().info(
                 f"засечка '{lm_id}': drone ENU=({drone[0]:.1f},{drone[1]:.1f},{drone[2]:.1f}); "
@@ -322,7 +336,7 @@ class RayTracer(Node):
     def _publish_drift(self, header):
         d = Vector3Stamped()
         d.header = header
-        d.vector.x, d.vector.y, d.vector.z = map(float, self.offset)
+        d.vector.x, d.vector.y, d.vector.z = map(float, self.anchor.t)
         self.pub_drift.publish(d)
 
 

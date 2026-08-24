@@ -106,7 +106,11 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   к VINS (сброс дрейфа) → `/nn1/anchor_pose`, `/nn1/corrected_odom`, `/nn1/drift`.
   Инкремент 3: публикует скорректированную позу в `/mavros/vision_pose/pose`
   (ArduPilot EK3 External Nav) — ray_tracer = единственный мост VINS→полётник.
-  Осталось: yaw-коррекция + FAISS-префильтр. На FCU нужен `EK3_SRC1_POSXY=6`.
+  Кадры выравнивает **`FrameAnchor`** (`frame_anchor.py`, офлайн-тест
+  `src/nav/test/test_frame_anchor.py`): Δyaw + трансляция латчатся по паре поз
+  EKF/VINS — мир монокуляра рождается с курсом первого кадра, и спавн с курсом
+  −169° разносил LOITER (положительная ОС, прогоны 2026-08-24). Осталось:
+  yaw-коррекция ПО ЗАСЕЧКЕ + FAISS-префильтр. На FCU нужен `EK3_SRC1_POSXY=6`.
   Детали и допущения: `src/nav/tools/nn1/nn1_anchor_howto.txt`.
 - **`nn2_scene`** — Нейросеть №2 (топологическая карта). Инкремент 1: DINOv2
   сжимает кадр в глобальный дескриптор, FAISS (`scene_descriptor.py`) ищет

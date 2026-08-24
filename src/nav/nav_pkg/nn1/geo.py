@@ -3,7 +3,8 @@
 #
 # Рамки:
 #   ENU         — локальная метрическая, начало = точка взлёта (датум из БД).
-#                 X=East, Y=North, Z=Up. Совпадает с рамкой VINS (по init).
+#                 X=East, Y=North, Z=Up. Кадр VINS к ней ПОВЁРНУТ на курс
+#                 первого кадра камеры — выравнивает FrameAnchor (frame_anchor.py).
 #   body (FLU)  — корпус дрона: X вперёд, Y влево, Z вверх (REP-103).
 #                 R_enu_body берём из ориентации /mavros/imu/data.
 #   camlink     — звено камеры в Gazebo: X вперёд, Y влево, Z вверх,
