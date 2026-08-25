@@ -1,0 +1,25 @@
+ 
+❯ Давай начнем с п.1 - диагностика причин
+
+
+$ claude
+
+Resume this session with:
+claude --resume 47154f72-2494-4536-9b19-2c3ac4908ee1
+andriy@andriy:/usr/local/DATA/Calude/13.17
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
