@@ -125,6 +125,7 @@ class RosPerception:
         self._ipm_fwd = self._ipm_lat = 0.0
         self._ipm_vfwd = self._ipm_vlat = 0.0
         self._ipm_ok = False
+        self._ipm_fail = 7   # причина брака кадра IPM (коды — FlowEstimator)
         # ω НЕ «последняя пришедшая», а СРЕДНЯЯ ЗА МЕЖКАДРОВЫЙ ИНТЕРВАЛ. Оценщик
         # умножает ω на dt, то есть ему нужен угол, повёрнутый МЕЖДУ кадрами, а не
         # мгновенная скорость в момент прихода сообщения. Телеметрия при этом реже
@@ -282,6 +283,7 @@ class RosPerception:
         self._ipm_fwd, self._ipm_lat = res['ipm_fwd'], res['ipm_lat']
         self._ipm_vfwd, self._ipm_vlat = res['ipm_vfwd'], res['ipm_vlat']
         self._ipm_ok = res['ipm_ok']
+        self._ipm_fail = res['ipm_fail']
         self._dt = res['dt']
         self._seq += 1               # НОВЫЙ кадр → домен продвинет PID
 
@@ -302,6 +304,7 @@ class RosPerception:
         s.ipm_fwd, s.ipm_lat = self._ipm_fwd, self._ipm_lat
         s.ipm_vfwd, s.ipm_vlat = self._ipm_vfwd, self._ipm_vlat
         s.ipm_ok = self._ipm_ok
+        s.ipm_fail = self._ipm_fail
         s.att_yaw = self._att_yaw
         return s
 

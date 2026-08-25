@@ -66,7 +66,9 @@ for name in sys.argv[1:]:
         a = alt[alt[:, 0] <= t, 1]
         s = DroneState(flow_seq=i + 1, now_sim=t, flow_dt=0.05, flow_conf=0.5,
                        rel_alt=float(a[-1]) if len(a) else None,
-                       ipm_ok=bool(ok), ipm_vfwd=float(vf),
+                       # z>0.5 = годен: в новых bag брак кодируется −кодом причины
+                       # (ros_io.publish_axes), bool() на нём дал бы True
+                       ipm_ok=bool(ok > 0.5), ipm_vfwd=float(vf),
                        ipm_vlat=float(np.interp(t, d9[:, 0], d9[:, 1])))
         rc = ax.update(s, Setpoint(), 0.05)
         real = float(np.interp(t, d2[:, 0], d2[:, 1]))

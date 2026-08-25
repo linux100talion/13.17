@@ -103,6 +103,8 @@ class DroneState:
     ipm_vfwd: float = 0.0            # продольная скорость, М/С
     ipm_vlat: float = 0.0            # боковая скорость, М/С
     ipm_ok: bool = False             # кадр выпрямился и поток посчитан
+    ipm_fail: int = 7                # причина брака кадра, 0 = годен
+                                     # (коды — FlowEstimator.ipm_fail)
     kf_rot: float = 0.0              # поворот кадра от опоры, рад (диагностика)
     kf_n: int = 0                    # сколько точек опоры ещё видно
     kf_age: int = 0                  # кадров с посева опоры

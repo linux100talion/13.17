@@ -148,6 +148,48 @@ ef._ipm_update(BLACK, t, 0.3, 0.0, 0.0)              # сели: alt < 0.5
 check("фильтр: на земле состояние сброшено в 0", ef._ipm_v == [0.0, 0.0])
 # tau=0 (дефолт) — прежнее поведение: все тесты выше по файлу шли без фильтра
 
+# --- 6. КОД ПРИЧИНЫ БРАКА (ipm_fail): какой return бьёт — видно из bag ---
+# Мотив: разбор LV2/1 (2026-08-25) — 31% слепоты канала на 1.1 м, причины по
+# бинарному ipm_ok неразличимы. Каждый ранний return _ipm_update помечен кодом;
+# здесь каждая ветка вызывается НАРОЧНО и проверяется её код.
+from control_pkg.perception.flow_estimator import ipm_dbg_z           # noqa: E402
+
+er = make(1.05)
+check("код: до первого кадра — 7 (нет опоры)", er.ipm_fail == 7)
+er._ipm_update(render(er, 3.0), 0.00, 0.3, 0.0, 0.0)
+check("код: alt 0.3 < 0.5 → 1 (гейт высоты)",
+      not er.ipm_ok and er.ipm_fail == 1)
+er._ipm_update(render(er, 3.0), 0.03, None, 0.0, 0.0)
+check("код: alt None → 1 (гейт высоты)", er.ipm_fail == 1)
+er._ipm_update(render(er, 3.0), 0.06, 3.0, 0.0, 0.0)
+check("код: первый кадр после сброса → 7 (нет опоры)", er.ipm_fail == 7)
+er._ipm_update(render(er, 3.0), 0.09, 3.0, 0.0, 0.0)
+check("код: годный кадр → 0, ipm_ok=True", er.ipm_ok and er.ipm_fail == 0)
+er._ipm_update(BLACK, 0.12, 3.0, 0.0, 0.0)
+check("код: поток из текстуры в черноту → 5 (мало выживших LK)",
+      not er.ipm_ok and er.ipm_fail == 5)
+er._ipm_update(BLACK, 0.15, 3.0, 0.0, 0.0)
+check("код: опора чёрная → 4 (мало фич)", er.ipm_fail == 4)
+er._ipm_update(render(er, 3.0), 0.18, 3.0, -0.8, 0.0)
+check("код: взгляд у горизонта → 2 (окно не видно)", er.ipm_fail == 2)
+e3 = make(0.0)   # adapt=0: окно не двигается — до варпа доходим и за камерой
+e3._ipm_update(render(e3, 3.0), 0.0, 3.0, -1.2, 0.0)
+check("код: точка полосы за камерой → 3 (варп за кадром)", e3.ipm_fail == 3)
+e6 = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm=False)
+e6._ipm_update(BLACK, 0.0, 3.0, 0.0, 0.0)
+check("код: канал выключен → 6", e6.ipm_fail == 6)
+
+# кодировка в /flow_dbg8.z (одна правда с ros_io.publish_axes): годный 1.0
+# бит-в-бит; брак −код; фильтр держит ok на браке → 1.0+код/10. Совместимость:
+# «z>0.5 = ок» верна на старых (0/1) и новых значениях.
+check("z: годный кадр = ровно 1.0", ipm_dbg_z(True, 0) == 1.0)
+check("z: брак → −код (гейт высоты −1.0)", ipm_dbg_z(False, 1) == -1.0)
+check("z: все коды брака ниже порога 0.5",
+      all(ipm_dbg_z(False, c) < 0.5 for c in range(1, 8)))
+check("z: фильтр мостит брак → 1.0+код/10 (>0.5, код восстановим)",
+      ipm_dbg_z(True, 5) == 1.5 and ipm_dbg_z(True, 5) > 0.5
+      and round((ipm_dbg_z(True, 5) - 1.0) * 10.0) == 5)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ АДАПТИВНАЯ ПОЛОСА IPM OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

@@ -48,6 +48,20 @@ except ImportError:
     cv2 = None
 
 
+def ipm_dbg_z(ok: bool, fail: int) -> float:
+    """Кодировка достоверности IPM для /flow_dbg8.z и /flow_dbg9.z.
+
+    Одна правда с таблицей кодов ipm_fail (см. FlowEstimator.__init__);
+    живёт здесь, а не в ros_io, чтобы тестироваться без ROS. Годный кадр →
+    1.0 (бит-в-бит со старыми bag); брак → −код (−1…−7: старые разборщики
+    «z>0.5 = ок» живут, причина = round(−z)); фильтр ipm_vel_tau держит
+    скорость на браке кадра → 1.0 + код/10 (1.1…1.7: для старых по-прежнему
+    «ок», причина = round((z−1)·10)). В старых bag 0.0 = брак без причины."""
+    if ok:
+        return 1.0 + (fail / 10.0 if fail else 0.0)
+    return float(-fail)
+
+
 class FlowEstimator:
     def __init__(self, fx, fy, cx, cy, R_cam_imu, rotflow_sign=1.0, max_feats=200,
                  roll_smooth_n=1, pitch_smooth_n=1, yaw_smooth_n=1, kf_min_pts=40,
@@ -152,6 +166,22 @@ class FlowEstimator:
         self.ipm_fwd = self.ipm_lat = 0.0
         self.ipm_vfwd = self.ipm_vlat = 0.0
         self.ipm_ok = False
+        # ПРИЧИНА, почему ЭТОТ кадр не дал измерения (0 = дал). Мотив: разбор
+        # LV2/1 (2026-08-25) упёрся в бинарный ipm_ok — 31% слепоты канала на
+        # 1.1 м с неразличимыми причинами (какой из ранних return бьёт — из
+        # bag не восстановить). Коды:
+        #   0 кадр посчитан        4 мало фич (<20 в опорном кадре;
+        #   1 гейт высоты            сюда же полоса под нижним краем
+        #     (alt None / <0.5)      кадра — варп там чёрный)
+        #   2 окно не видно        5 мало выживших LK (<15)
+        #     (взгляд у горизонта) 6 канал выключен (ipm=False)
+        #   3 варп за кадром       7 нет опорного кадра (первый после
+        #     (точка за камерой /    сброса или смена размера сетки —
+        #      полоса далеко вбок)   хвост любого сброса 1-3)
+        # Семантика ПОКАДРОВАЯ и от ipm_vel_tau не зависит: фильтр может
+        # держать ipm_ok=True на браке кадра — ipm_fail и тогда говорит, чем
+        # кадр плох. Кодировка в /flow_dbg8.z — см. ros_io.publish_axes.
+        self.ipm_fail = 7
         self.max_feats = max_feats
         # ВРЕМЕННОЕ СГЛАЖИВАНИЕ: медиана по N кадрам, СВОЁ N на КАЖДУЮ ось (roll=lateral,
         # pitch=longitudinal, yaw). Шум потока БЕЛЫЙ (автокорр≈0, см. flow_calib) →
@@ -571,6 +601,7 @@ class FlowEstimator:
         wz = self._wz_debias(stamp, wz)
         self.ipm_ok = False
         if not self.ipm or alt is None or alt < 0.5:
+            self.ipm_fail = 6 if not self.ipm else 1
             self._ipm_prev = None
             self._ipm_prev_t = None
             self._ipm_prev_x0 = None
@@ -583,6 +614,7 @@ class FlowEstimator:
             self.ipm_ok = (stamp - self._ipm_meas_t) <= self._VEL_HOLD
         x0 = self._ipm_window(alt, pitch)
         if x0 is None:
+            self.ipm_fail = 2
             self._ipm_prev = None
             self._ipm_prev_t = None
             self._ipm_prev_x0 = None
@@ -590,6 +622,7 @@ class FlowEstimator:
         x1 = x0 + (self.ipm_x1 - self.ipm_x0)
         rect = self._ipm_rectify(gray, alt, pitch, roll, x0, x1)
         if rect is None:
+            self.ipm_fail = 3
             self._ipm_prev = None
             self._ipm_prev_t = None
             self._ipm_prev_x0 = None
@@ -608,9 +641,11 @@ class FlowEstimator:
         self._ipm_prev_t = stamp
         self._ipm_prev_x0 = x0
         if prev is None or prev.shape != rect.shape:
+            self.ipm_fail = 7
             return
         pts = self._detect(prev)
         if pts is None or len(pts) < 20:
+            self.ipm_fail = 4
             return
         pts = pts.reshape(-1, 1, 2).astype(np.float32)
         p1, st, _ = cv2.calcOpticalFlowPyrLK(prev, rect, pts, None, **self._lk)
@@ -618,6 +653,7 @@ class FlowEstimator:
         ok = (st.reshape(-1) == 1) & (st2.reshape(-1) == 1)
         ok &= np.linalg.norm(p0b.reshape(-1, 2) - pts.reshape(-1, 2), axis=1) < 1.0
         if ok.sum() < 15:
+            self.ipm_fail = 5
             return
         p0 = pts.reshape(-1, 2)[ok]
         d = p1.reshape(-1, 2)[ok] - p0
@@ -657,6 +693,7 @@ class FlowEstimator:
         # но он известен ТОЧНО — вычитаем. При ipm_adapt=0 окна совпадают, дельта 0.
         self.ipm_fwd += float(np.median(d[:, 1])) * self.ipm_res - (x0 - prev_x0)
         self.ipm_ok = True
+        self.ipm_fail = 0
         self._ipm_meas_t = stamp
         self._ipm_hist.append((stamp, self.ipm_fwd, self.ipm_lat))
         while self._ipm_hist and stamp - self._ipm_hist[0][0] > self.ipm_win:
@@ -931,7 +968,7 @@ class FlowEstimator:
                     # --- канал вида сверху: МЕТРЫ и м/с ---
                     ipm_fwd=self.ipm_fwd, ipm_lat=self.ipm_lat,
                     ipm_vfwd=self.ipm_vfwd, ipm_vlat=self.ipm_vlat,
-                    ipm_ok=self.ipm_ok,
+                    ipm_ok=self.ipm_ok, ipm_fail=self.ipm_fail,
                     # --- диагностика для flow_derotation_check ---
                     resid_rms=float(np.sqrt(np.mean(np.sum(tr ** 2, axis=1)))),
                     meas_rms=float(np.sqrt(np.mean(np.sum(flow ** 2, axis=1)))),

@@ -10,6 +10,7 @@ from geometry_msgs.msg import Vector3Stamped
 from std_msgs.msg import String
 
 from ..domain.rc import RC_CENTER
+from ..perception.flow_estimator import ipm_dbg_z
 
 
 class RosLogger:
@@ -149,21 +150,26 @@ class RosDebugSink:
         d4.vector.z = float(s.kf_rejects)
         self._pub4.publish(d4)
         # /flow_dbg8 = КАНАЛ ВИДА СВЕРХУ: (путь вперёд М, продольная скорость М/С,
-        # достоверность кадра). Единственный канал в МЕТРАХ — остальные безразмерны,
-        # поэтому без него полёт на DpPitchRate нечем разбирать: и сигнал, и уставка
-        # оси живут здесь.
+        # достоверность С ПРИЧИНОЙ брака). Единственный канал в МЕТРАХ — остальные
+        # безразмерны, поэтому без него полёт на DpPitchRate нечем разбирать: и
+        # сигнал, и уставка оси живут здесь.
+        # z = достоверность С ПРИЧИНОЙ брака кадра: кодировка и таблица кодов —
+        # ipm_dbg_z / FlowEstimator.ipm_fail (перцепция; тестируется без ROS).
+        # Совместимость: «z>0.5 = ок» работает и на старых, и на новых bag.
+        z_ipm = ipm_dbg_z(s.ipm_ok, s.ipm_fail)
         d8 = Vector3Stamped()
         d8.header.stamp = t
         d8.vector.x = float(s.ipm_fwd)
         d8.vector.y = float(s.ipm_vfwd)
-        d8.vector.z = 1.0 if s.ipm_ok else 0.0
+        d8.vector.z = z_ipm
         self._pub8.publish(d8)
         # /flow_dbg9 = тот же канал, БОКОВАЯ ось: (боковая скорость М/С, продольная для
-        # пары, достоверность). Публикуется из СНАПШОТА, а не из контура — поэтому живёт
-        # и в чистом наблюдении, без единого стабилизатора в стеке.
+        # пары, достоверность с причиной — та же z_ipm). Публикуется из СНАПШОТА, а не
+        # из контура — поэтому живёт и в чистом наблюдении, без единого стабилизатора
+        # в стеке.
         d9 = Vector3Stamped()
         d9.header.stamp = t
         d9.vector.x = float(s.ipm_vlat)
         d9.vector.y = float(s.ipm_vfwd)
-        d9.vector.z = 1.0 if s.ipm_ok else 0.0
+        d9.vector.z = z_ipm
         self._pub9.publish(d9)
