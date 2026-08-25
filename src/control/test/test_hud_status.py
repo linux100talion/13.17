@@ -76,6 +76,18 @@ check("ekf: свежий local_position (age<2) → ekf=1", d['ekf'] == '1')
 d = kv(hud_status(DroneState(now_sim=7.0, ekf_pos_last_sim=4.0), FRESH))
 check("ekf: протух (age≥2) → ekf=0", d['ekf'] == '0')
 
+# 8. Высота глазами EKF3 (zekf=, строка ALT в HUD): значение только при
+# СВЕЖЕМ local_position — протухший z (после GPS-kill) честно «--»
+d = kv(hud_status(DroneState(now_sim=5.0, ekf_pos_last_sim=4.0, ekf_z=2.34),
+                  FRESH))
+check("zekf: свежий local_position → z с округлением", d['zekf'] == '2.3')
+d = kv(hud_status(DroneState(now_sim=7.0, ekf_pos_last_sim=4.0, ekf_z=2.34),
+                  FRESH))
+check("zekf: local_position протух → '--', не последнее значение",
+      d['zekf'] == '--')
+d = kv(hud_status(DroneState(now_sim=5.0, ekf_pos_last_sim=4.0), FRESH))
+check("zekf: свежесть есть, z ещё не пришёл (None) → '--'", d['zekf'] == '--')
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

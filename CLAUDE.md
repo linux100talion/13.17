@@ -90,7 +90,11 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   `test_hud_status.py`); постоянный баннер статуса борта — машина состояний
   «EKF WARMUP» (жёлт) → «EKF READY - TAKEOFF OK» (зел) → «ARMED» (зел) →
   после дизарма снова READY/WARMUP (поле `ekf=` той же строки, критерий =
-  WaitEkfPos — свежий local_position; в полёте ARMED, не ekf); плюс
+  WaitEkfPos — свежий local_position; в полёте ARMED, не ekf); строка
+  «ALT baro X.Xm ekf X.Xm» — высота двумя источниками (`alt=` rel_alt миссии,
+  баро при `BS_ALT_SRC=baro`; `zekf=` z того же local_position глазами EKF3,
+  при протухании честное `--`), расхождение >0.5 м — жёлтым (диагноз вертикали
+  EKF: её занижение душит IPM-гейт демпфера у земли); плюс
   Гц/возраст `/odometry` (меряет сам), фичи трекера
   (`/feature` | `/feature_tracker/feature`) — счётчик FEAT и ЗЕЛЁНЫЕ ТОЧКИ
   самих фич на кадре (пиксельные u,v из каналов PointCloud [id,u,v,vx,vy];

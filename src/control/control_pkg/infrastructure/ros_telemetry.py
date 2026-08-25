@@ -96,8 +96,9 @@ class RosTelemetry:
         if len(m.channels) >= 3:
             self._s.rcin_throttle = m.channels[2]
 
-    def _on_lpos(self, _m):
+    def _on_lpos(self, m):
         self._s.ekf_pos_last_sim = self._clock.now_sim()
+        self._s.ekf_z = float(m.pose.position.z)   # высота глазами EKF3 → HUD
 
     def _on_gt(self, m):
         x = m.pose.pose.position.x

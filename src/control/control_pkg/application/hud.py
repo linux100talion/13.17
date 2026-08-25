@@ -50,7 +50,13 @@ def hud_status(s, fresh_sec: float) -> str:
     # res/rat — диагностика детектора зрелости (ripeness.py): residual
     # «поза/скорость» (м/с; тихо < 0.15) и вертикальный ratio VINS/rel_alt
     # (зрел в [0.8,1.25]); -1 = ещё нет данных. Рисуются мелкой строкой HUD.
+    # zekf — высота глазами EKF3 (z того же local_position, чьей свежестью
+    # считается ekf=). Пара к alt= (баро при alt_src=baro): расхождение —
+    # диагноз вертикали EKF прямо в FPV (прогон 174603: EKF z −0.27 м к
+    # истине → гейт IPM alt<0.5 душил демпфер на истинных 0.7 м). Протух
+    # local_position (после GPS-kill) — честное «--», не последнее значение.
+    zekf = f"{s.ekf_z:.1f}" if (ekf and s.ekf_z is not None) else "--"
     return (f"st={st} why={why} ekf={ekf} extnav={int(s.extnav_ready)} "
             f"odom={s.vins_odom_count} age={min(age, 999.0):.1f} "
-            f"alt={(s.rel_alt or 0.0):.1f} "
+            f"alt={(s.rel_alt or 0.0):.1f} zekf={zekf} "
             f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f}")

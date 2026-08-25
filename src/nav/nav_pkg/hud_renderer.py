@@ -151,6 +151,27 @@ class HudRenderer:
                     return "--" if x < 0 else f"{x:.2f}"
                 y = self._line(frame, k, y, f"res {_f(res)}  rat {_f(rat)}",
                                HUD_WHITE, scale=0.6)
+            # 1c) высота двумя источниками: baro — высота миссии (alt=,
+            # rel_alt: баро при BS_ALT_SRC=baro), ekf — z local_position
+            # глазами EKF3 (zekf=). Расхождение >0.5 м — жёлтым: вертикаль
+            # EKF уехала, а масштаб IPM ∝ высоте — демпфер у земли слепнет
+            # первым (прогон 174603: EKF z −0.27 м → гейт alt<0.5 на
+            # истинных 0.7 м). zekf=-- (протух local_position) и старые
+            # bag без поля — «ekf --», белым.
+            alt, zekf = self.status.get("alt"), self.status.get("zekf")
+            if alt is not None:
+                def _v(s):
+                    try:
+                        return float(s)
+                    except (TypeError, ValueError):
+                        return None
+                a, z = _v(alt), _v(zekf)
+                col = (HUD_YELLOW if a is not None and z is not None
+                       and abs(a - z) > 0.5 else HUD_WHITE)
+                atxt = f"{a:.1f}" if a is not None else "--"
+                ztxt = f"{z:.1f}" if z is not None else "--"
+                y = self._line(frame, k, y,
+                               f"ALT baro {atxt}m  ekf {ztxt}m", col)
         # 2) режим FCU + armed
         if self.fcu_t is not None and now - self.fcu_t < 5.0:
             arm = "ARM" if self.fcu_armed else "DISARM"

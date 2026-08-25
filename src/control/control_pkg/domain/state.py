@@ -52,6 +52,11 @@ class DroneState:
     # ARMING_CHECK=0 проходит до захвата GPS EKF'ом, а начать aiding в воздухе
     # на манёврах EK3 не смог — полёт без позиции, Loiter refused.
     ekf_pos_last_sim: float = -1e9
+    # z из того же /mavros/local_position/pose — «высота глазами EKF3» (fusion
+    # баро+vision). Нужна HUD'у парой к rel_alt: расхождение баро/EKF по
+    # вертикали — ровно та ошибка, что занижает масштаб IPM у земли (прогон
+    # 174603: EKF z ниже истины на 0.27 м → гейт alt<0.5 душил демпфер).
+    ekf_z: float | None = None
 
     # --- Ground-truth Gazebo (СИМ; на Orin gt_valid=False) ---
     gt_valid: bool = False
