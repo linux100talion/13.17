@@ -104,6 +104,28 @@ class HudRenderer:
         y = round(34 * k)
         # 1) баннер гейта — правда лётной ноды, тухнет за 3 с без /mission/status
         if self.status_t is not None and now - self.status_t < 3.0:
+            # 1a) статус борта — ПОСТОЯННЫЙ баннер (машина состояний):
+            #   EKF WARMUP (жёлт) → EKF READY - TAKEOFF OK (зел) → после
+            #   арма ARMED (зел) → после дизарма снова READY/WARMUP по ekf=.
+            # До взлёта VINS мёртв по построению (нет параллакса) и гейт ниже
+            # всегда красный — пилоту нужен свой сигнал готовности борта.
+            # ekf= — тот же критерий, каким WaitEkfPos пускает арм (свежий
+            # local_position). В полёте показываем ARMED, а не ekf: после
+            # GPS-kill local_position молчит штатно — WARMUP в воздухе врал
+            # бы. Старые bag без ekf= — баннера нет (честная деградация).
+            ekf = self.status.get("ekf")
+            if ekf is not None:
+                armed = (self.fcu_t is not None and now - self.fcu_t < 5.0
+                         and self.fcu_armed)
+                if armed:
+                    y = self._line(frame, k, y, "ARMED", HUD_GREEN,
+                                   scale=1.0, fill=HUD_GREEN)
+                elif ekf == "1":
+                    y = self._line(frame, k, y, "EKF READY - TAKEOFF OK",
+                                   HUD_GREEN, scale=1.0, fill=HUD_GREEN)
+                else:
+                    y = self._line(frame, k, y, "EKF WARMUP", HUD_YELLOW,
+                                   scale=1.0, fill=HUD_YELLOW)
             st = self.status.get("st", "")
             why = self.status.get("why", "-")
             if st == "READY":

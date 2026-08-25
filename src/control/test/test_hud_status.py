@@ -67,6 +67,15 @@ check("поля для analyze: extnav/odom/age/alt",
 check("поля детектора зрелости res/rat (дефолт -1 = нет данных)",
       float(d['res']) == -1.0 and float(d['rat']) == -1.0)
 
+# 7. Прогрев EKF (баннер «можно взлетать»): ekf=1 ровно при свежем
+# local_position — зеркало критерия WaitEkfPos (fresh_sec=2.0)
+d = kv(hud_status(DroneState(now_sim=5.0), FRESH))
+check("ekf: позиции не было (дефолт -1e9) → ekf=0", d['ekf'] == '0')
+d = kv(hud_status(DroneState(now_sim=5.0, ekf_pos_last_sim=4.0), FRESH))
+check("ekf: свежий local_position (age<2) → ekf=1", d['ekf'] == '1')
+d = kv(hud_status(DroneState(now_sim=7.0, ekf_pos_last_sim=4.0), FRESH))
+check("ekf: протух (age≥2) → ekf=0", d['ekf'] == '0')
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
