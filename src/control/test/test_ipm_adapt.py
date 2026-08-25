@@ -39,10 +39,21 @@ FX = FY = 640.0
 CX, CY = 640.0, 360.0
 FPS_DT = 1.0 / 30.0
 
-# Земля: 1 см/пиксель, X 0..22 м (строки), Y ±8.5 м (столбцы) — все окна внутри
+# Земля: 1 см/пиксель, X 0..22 м (строки), Y ±8.5 м (столбцы) — все окна внутри.
+# МНОГООКТАВНАЯ (3/25/75 px): у реальной земли структура на всех масштабах, а
+# чисто мелкий шум алиасится в кашу при скользящих углах (пол высоты читает
+# полосу на 6-12 м с истинного 1 м — децимация >10:1), и LK на каше даже менял
+# знак потока — поймано при написании теста 7. LK любит градиенты, не соль-перец.
 rng = np.random.default_rng(1317)
-GROUND = rng.integers(0, 255, (2200, 1700), dtype=np.uint8)
-GROUND = cv2.GaussianBlur(GROUND, (3, 3), 0)    # LK любит градиенты, не соль-перец
+
+
+def _octave(k):
+    n = rng.integers(0, 255, (2200, 1700)).astype(np.float32)
+    return cv2.GaussianBlur(n, (k, k), 0)
+
+
+GROUND = 0.3 * _octave(3) + 2.0 * _octave(25) + 4.0 * _octave(75)
+GROUND = ((GROUND - GROUND.min()) / (GROUND.max() - GROUND.min()) * 255).astype(np.uint8)
 
 
 def g_px(X, Y):
@@ -189,6 +200,38 @@ check("z: все коды брака ниже порога 0.5",
 check("z: фильтр мостит брак → 1.0+код/10 (>0.5, код восстановим)",
       ipm_dbg_z(True, 5) == 1.5 and ipm_dbg_z(True, 5) > 0.5
       and round((ipm_dbg_z(True, 5) - 1.0) * 10.0) == 5)
+
+# --- 7. ПОЛ ВЫСОТЫ (ipm_alt_floor): у земли канал жив, масштаб врёт ограниченно ---
+# Мотив (прогоны LV2/1 174603/210917): EKF-z занижает на 0.3 м → гейт 0.5 держал
+# канал до истинных 0.9 м на взлёте. С полом: гейт земли 0.15 (сырая высота),
+# геометрия не ниже пола. Ниже пола скорость завышается в floor/h_ист раз —
+# проверяем и работу у земли, и предсказуемость масштабной ошибки.
+efl = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05, ipm_alt_floor=0.5)
+efl._ipm_update(render(efl, 0.35), 0.0, 0.35, 0.0, 0.0)
+efl._ipm_update(render(efl, 0.35), FPS_DT, 0.35, 0.0, 0.0)
+check("пол: истинные 0.35 (ниже старого гейта) — канал ЖИВ, путь ~0",
+      efl.ipm_ok and abs(efl.ipm_fwd) < 0.05)
+efl._ipm_update(render(efl, 0.35), 2 * FPS_DT, 0.10, 0.0, 0.0)
+check("пол: сырая высота 0.10 < 0.15 — на земле, код 1",
+      not efl.ipm_ok and efl.ipm_fail == 1)
+# масштаб: EKF врёт 0.5 при истинных 1.0 → канал видит ~половину хода
+efs = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05, ipm_alt_floor=0.5)
+t, dx = 0.0, 0.0
+for k in range(16):
+    efs._ipm_update(render(efs, 1.0, dx), t, 0.5, 0.0, 0.0)
+    t += FPS_DT
+    dx += 1.0 * FPS_DT              # 1 м/с истинных, итог 0.5 м
+check(f"пол: ход 0.50 м на истинных 1.0 при EKF 0.5 → намеряно ×~0.5 "
+      f"({efs.ipm_fwd:+.2f})", 0.10 < efs.ipm_fwd < 0.40)
+# выше пола поведение прежнее: та же сцена, что в тесте 4 (истинные 6.5 м)
+eq = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05, ipm_alt_floor=0.5)
+t, dx = 0.0, 0.0
+for k in range(16):
+    eq._ipm_update(render(eq, 6.5, dx), t, 6.5, 0.0, 0.0)
+    t += FPS_DT
+    dx += 1.0 * FPS_DT
+check(f"пол: выше пола метрика не тронута ({eq.ipm_fwd:+.3f} против "
+      f"{em.ipm_fwd:+.3f} в тесте 4)", abs(eq.ipm_fwd - em.ipm_fwd) < 1e-9)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ АДАПТИВНАЯ ПОЛОСА IPM OK" if ok_all else "❌ СБОЙ")

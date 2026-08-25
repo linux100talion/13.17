@@ -116,6 +116,7 @@ class BootstrapArch2Node(Node):
                                             ipm_win=cfg.ipm_win,
                                             ipm_adapt=cfg.ipm_adapt,
                                             ipm_vel_tau=cfg.ipm_vel_tau,
+                                            ipm_alt_floor=cfg.ipm_alt_floor,
                                             alt_src=cfg.perc_alt_src)
             # ⚠️ Высота перцепции — СВОЯ ручка (perc_alt_src), НЕ cfg.alt_src:
             # 4 прогона 2026-08-19 с баро в перцепции (сырой И EMA) дали улёты
@@ -692,6 +693,8 @@ def _parse() -> tuple:
     p.add_argument('--ipm-adapt', dest='ipm_adapt', type=float, default=_D.ipm_adapt)
     p.add_argument('--ipm-vel-tau', dest='ipm_vel_tau', type=float,
                    default=_D.ipm_vel_tau)
+    p.add_argument('--ipm-alt-floor', dest='ipm_alt_floor', type=float,
+                   default=_D.ipm_alt_floor)
     p.add_argument('--vision-vel', dest='vision_vel', type=float,
                    default=_D.vision_vel)
     p.add_argument('--vision-pose-src', dest='vision_pose_src',

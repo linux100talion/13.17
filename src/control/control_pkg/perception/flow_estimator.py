@@ -70,7 +70,8 @@ class FlowEstimator:
                  kf_alt_hold=1.5, yaw_trans_fix=True, kf_seg_min_sec=0.3, kf_seg_frac=0.30,
                  kf_seg_cap_sec=10.0, ipm=True, ipm_x0=3.0, ipm_x1=6.0,
                  ipm_yhalf=2.0, ipm_res=0.02, ipm_win=0.5, ipm_model='legacy',
-                 ipm_derot=0.0, ipm_wz_tau=0.0, ipm_adapt=0.0, ipm_vel_tau=0.0):
+                 ipm_derot=0.0, ipm_wz_tau=0.0, ipm_adapt=0.0, ipm_vel_tau=0.0,
+                 ipm_alt_floor=0.0):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -138,6 +139,20 @@ class FlowEstimator:
         # 0 = выкл (класс- и лётный дефолт до полётной валидации знаков наклона:
         # «конвенцию углов проверять ЧИСЛЕННО, до правки» — см. _ipm_px).
         self.ipm_vel_tau = float(ipm_vel_tau)
+        # --- ПОЛ ВЫСОТЫ ПЕРЦЕПЦИИ (у земли высоте верить нельзя) ---
+        # EKF-z у земли занижает на 0.25-0.3 м ВЕСЬ полёт (VINS-вертикаль;
+        # прогоны LV2/1 174603 и 210917) → гейт alt<0.5 держал канал до
+        # ИСТИННЫХ ~0.9 м на взлёте: демпфер слеп ровно в своей зоне
+        # ответственности. ipm_alt_floor > 0: высота геометрии = max(alt,
+        # floor), а гейт «на земле» опускается до _ALT_GROUND по СЫРОЙ
+        # высоте. Цена: ниже floor скорость завышается в floor/h_ист раз
+        # (×2.5 на истинных 0.2 м — перегейн вместо нынешней слепоты);
+        # выше floor поведение не меняется вовсе. Именно ПОЛ, а не ступенька
+        # «<1 м → 0.5»: у ступеньки разрыв масштаба ×2 на границе, окно МНК
+        # мешает кадры двух масштабов → фантомный рывок скорости на каждом
+        # пересечении. 0 = выкл (класс-дефолт: офлайн-репро старых прогонов);
+        # лётный дефолт — config.ipm_alt_floor.
+        self.ipm_alt_floor = float(ipm_alt_floor)
         self._ipm_v = [0.0, 0.0]     # [vfwd, vlat(влево+)] — состояние фильтра
         self._ipm_v_t = None
         self._ipm_meas_t = -1e9      # время последнего ГОДНОГО кадра (свежесть)
@@ -497,6 +512,8 @@ class FlowEstimator:
         return [self.cx + self.fx * P[0] / P[2], self.cy + self.fy * P[1] / P[2]]
 
     _VEL_HOLD = 1.0     # сек: сколько мостим провал измерений чистым прогнозом
+    _ALT_GROUND = 0.15  # м: гейт «точно на земле» при включённом ipm_alt_floor
+                        # (по СЫРОЙ высоте; тут же сброс фильтра скорости)
 
     def _vel_reset(self):
         """Скорость с фильтром — только в воздухе: на земле/без баро состояние 0."""
@@ -600,13 +617,18 @@ class FlowEstimator:
         """Шаг канала вида сверху: путь в метрах + скорость наклоном МНК в окне."""
         wz = self._wz_debias(stamp, wz)
         self.ipm_ok = False
-        if not self.ipm or alt is None or alt < 0.5:
+        # Гейт высоты: с полом (ipm_alt_floor) — только «точно на земле»
+        # (_ALT_GROUND по сырой высоте), без пола — прежние 0.5.
+        gate = self._ALT_GROUND if self.ipm_alt_floor > 0.0 else 0.5
+        if not self.ipm or alt is None or alt < gate:
             self.ipm_fail = 6 if not self.ipm else 1
             self._ipm_prev = None
             self._ipm_prev_t = None
             self._ipm_prev_x0 = None
             self._vel_reset()
             return
+        if self.ipm_alt_floor > 0.0:
+            alt = max(alt, self.ipm_alt_floor)   # геометрия — не ниже пола
         if self.ipm_vel_tau > 0.0:
             # прогноз тикает на КАЖДОМ кадре, включая бракованные — провалы мостятся;
             # ipm_ok при фильтре = «скорости можно верить» (измерения свежее _VEL_HOLD)
