@@ -7,6 +7,8 @@ BS_SF_MASTER=1 SPAWN_POSE=among_trees bash src/lab/freefly_lv.sh
 
 BS_SF_MASTER=1 .SPAWN_POSE="-0.6018 -11.0809 0.2450 0 0 -2.95235" bash src/lab/freefly_lv.sh
 
+BS_SF_MASTER=1 bash src/lab/freefly_lv.sh
+
 --------------------------------------------------------
 
 # базовый freefly: только наш стек, GPS живой весь полёт

@@ -1,0 +1,212 @@
+❯ ! sudo bash /usr/local/DATA/Calude/13.17/docker/sim/scripts/host_setup.sh
+
+
+
+BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="freefly" \
+  BS_MODE_BUDGET=80 \
+  BS_IPM_DEROT=1.0 BS_IPM_WIN=0.5 BS_IPM_WZ_TAU=2.0 \
+  BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=30 BS_PITCH_RATE_KP=30 \
+  BS_PITCH_RATE_CMD_GAIN=5 BS_ROLL_RATE_CMD_GAIN=5 \
+  BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KP=30 \
+  BS_SLEW=300 \
+  BS_YAW_ARM_FRAMES=5 BS_YAW_KD=6 BS_YAW_KI=0 BS_YAW_KP=0 BS_YAW_LEAK=8 \
+  BS_YAW_MAX_RATE=100 BS_YAW_RATE_FULL=60 BS_YAW_SMOOTH=5 \
+  TOPICS_EXTRA="/joy /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9" \
+  GDRIVE_UP=0 MP4=1 \
+  bash src/lab/capture_scene.sh 960x540 bootstrap_arch2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="climb5,pilot,land" \
+  BS_ARM_BUDGET=80 BS_CLIMB_BUDGET=120 BS_FENCE=25 BS_MODE_BUDGET=80 \
+  BS_IPM_DEROT=1.0 BS_IPM_WIN=0.5 BS_IPM_WZ_TAU=2.0 BS_LAND_BUDGET=180 \
+  BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=100 BS_PITCH_RATE_KP=100 \
+  BS_PITCH_RATE_CMD_GAIN=2 BS_ROLL_RATE_CMD_GAIN=2 \
+  BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KP=30 \
+  BS_SLEW=300 BS_THROTTLE_CLIMB=1800 \
+  BS_YAW_ARM_FRAMES=5 BS_YAW_KD=6 BS_YAW_KI=0 BS_YAW_KP=20 BS_YAW_LEAK=8 \
+  BS_YAW_MAX_RATE=100 BS_YAW_SMOOTH=5 \
+  TOPICS_EXTRA="/joy /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg7 /flow_dbg8 /flow_dbg9" \
+  GDRIVE_UP=0 MP4=1 \
+  bash src/lab/capture_scene.sh 960x540 bootstrap_arch2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+andriy@andriy:/usr/local/DATA/Calude/13.17
+$ BS_PILOT=joy \
+BS_CONTROL_MODE=assisted BS_EXCITE_MAX=120 \
+TOPICS_EXTRA="/joy /model/iris_cam/odometry" \
+GDRIVE_UP=0 MP4=1  \
+bash src/lab/capture_scene.sh \
+960x540 \
+bootstrap_arch2
+
+=== очистка артефактов прошлого прогона ===
+  хост: rm /usr/local/DATA/Calude/13.17/docker/sim/output/scene_bag*  +  /usr/local/DATA/Calude/13.17/docker/sim/output/scene_img (кадры + scene.mp4)
+  хост: артефакты принадлежат root — удаляю через контейнер p1317_nav
+
+=== перезапуск стека → 960×540 (fresh-start, пересоздание) ===
+ Container p1317_mavlink_router Started 
+ Container p1317_nav Started 
+make: Leaving directory '/usr/local/DATA/Calude/13.17/docker/sim'
+make: Entering directory '/usr/local/DATA/Calude/13.17/docker/sim'
+Жду завершения nav_up.sh...
+nav: готово
+make: Leaving directory '/usr/local/DATA/Calude/13.17/docker/sim'
+
+=== старт записи rosbag /image_color + /mavros/local_position/pose + /joy /model/iris_cam/odometry ===
+stdin is not a terminal device. Keyboard handling disabled.[INFO] [1786885652.857042818] [rosbag2_recorder]: Press SPACE for pausing/resuming
+[INFO] [1786885652.858750073] [rosbag2_storage]: Opened database 'scene_bag/scene_bag_0.db3' for READ_WRITE.
+[INFO] [1786885652.859408352] [rosbag2_recorder]: Listening for topics...
+[INFO] [1786885652.859633436] [rosbag2_recorder]: Recording...
+[INFO] [1786885652.859660925] [rosbag2_recorder]: Event publisher thread: Starting
+[INFO] [1786885652.963262906] [rosbag2_recorder]: Subscribed to topic '/mavros/local_position/pose'
+[INFO] [1786885654.294515486] [rosbag2_recorder]: Subscribed to topic '/model/iris_cam/odometry'
+
+=== последовательность: bootstrap_arch2 ===
+--- bootstrap_arch2 ---
+>>> joy_linux_node запущен (dev=/dev/input/js0, pid=628, лог output/joy.log)
+>>> ARCH2 bootstrap (gz-hold + shuttle) на control_pkg/mission_pkg: --control-mode assisted --excite-max-sec 120 --pilot joy
+[INFO] [1786885655.731990872] [rosbag2_recorder]: Subscribed to topic '/image_color'
+[INFO] [1786885655.836606078] [rosbag2_recorder]: Subscribed to topic '/joy'
+[INFO] [1786885655.836661240] [rosbag2_recorder]: All requested topics are subscribed. Stopping discovery...
+[INFO] [1786885656.133654683] [alt_hold_bootstrap_arch2]: alt_hold_bootstrap ARCH2: mode=assisted alt=3.0м pilot=joy excite_max=120.0s (sim)
+[INFO] [1786885656.460090748] [alt_hold_bootstrap_arch2]: >>> шаг 0 · prearm
+[INFO] [1786885659.565887554] [alt_hold_bootstrap_arch2]: >>> шаг 1 · arm
+[WARN] [1786885660.813816102] [alt_hold_bootstrap_arch2]: режим=STABILIZE ≠ ALT_HOLD — ре-ассерт
+[INFO] [1786885665.173024687] [alt_hold_bootstrap_arch2]: >>> шаг 2 · climb
+[INFO] [1786885665.173592963] [alt_hold_bootstrap_arch2]:     climb: стек активирован
+[INFO] [1786885674.364693497] [alt_hold_bootstrap_arch2]:     набрали 3.07м (цель 3.0м)
+[INFO] [1786885674.416412834] [alt_hold_bootstrap_arch2]: >>> шаг 3 · control
+[INFO] [1786885674.416734336] [alt_hold_bootstrap_arch2]:     control: стек активирован
+[INFO] [1786885796.441178411] [alt_hold_bootstrap_arch2]:     control завершён — дальше
+[INFO] [1786885796.490536829] [alt_hold_bootstrap_arch2]: >>> шаг 4 · land
+[INFO] [1786885796.491103018] [alt_hold_bootstrap_arch2]:     land: стек активирован
+[INFO] [1786885803.326137939] [alt_hold_bootstrap_arch2]:     касание (rel_alt=0.274, armed=True)
+[INFO] [1786885803.326673071] [alt_hold_bootstrap_arch2]: >>> ИТОГ: HOLD_DONE (mode=LAND, armed=True, rel_alt=0.274, odom=0)
+>>> bootstrap_arch2 завершён.
+
+=== стоп записи rosbag ===
+[INFO] [1786885803.710640791] [rosbag2_cpp]: Writing remaining messages from cache to the bag. It may take a while
+[INFO] [1786885803.711832251] [rosbag2_recorder]: Event publisher thread: Exiting
+[INFO] [1786885803.712084066] [rosbag2_recorder]: Recording stopped
+6.4G    /usr/local/DATA/Calude/13.17/docker/sim/output/scene_bag
+
+=== извлечение кадров по пути (шаг 0.5м, макс 30) ===
+[INFO] [1786885806.557903934] [rosbag2_storage]: Opened database '/root/sim_ws/output/scene_bag/scene_bag_0.db3' for READ_ONLY.
+/root/sim_ws/output/scene_img/frame_13_006.55m.jpg  (540, 960, 3)  path=6.55m  encoding=bgr8
+/root/sim_ws/output/scene_img/frame_14_007.05m.jpg  (540, 960, 3)  path=7.05m  encoding=bgr8
+/root/sim_ws/output/scene_img/frame_15_007.57m.jpg  (540, 960, 3)  path=7.57m  encoding=bgr8
+/root/sim_ws/output/scene_img/frame_16_008.10m.jpg  (540, 960, 3)  path=8.10m  encoding=bgr8
+/root/sim_ws/output/scene_img/frame_17_008.61m.jpg  (540, 960, 3)  path=8.61m  encoding=bgr8
+/root/sim_ws/output/scene_img/frame_18_009.13m.jpg  (540, 960, 3)  path=9.13m  encoding=bgr8
+/root/sim_ws/output/scene_img/frame_19_009.66m.jpg  (540, 960, 3)  path=9.66m  encoding=bgr8
+Сохранено 20 кадров в /root/sim_ws/output/scene_img (шаг 0.5м, путь всего 9.83м)
+
+=== сборка mp4 из всех кадров /image_color ===
+[INFO] [1786885817.077395287] [rosbag2_storage]: Opened database '/root/sim_ws/output/scene_bag/scene_bag_0.db3' for READ_ONLY.
+Записано 4384 кадров → /root/sim_ws/output/scene_img/scene.mp4
+  размер 960×540, fps=30.31, длительность ~144.7с (sim)
+
+=== заливка видео (scene.mp4) на Google Drive ===
+rosbag оставлен для анализа: /usr/local/DATA/Calude/13.17/docker/sim/output/scene_bag (6.4G)
+GDRIVE_UP=0 — видео в /usr/local/DATA/Calude/13.17/docker/sim/output/scene_img/scene.mp4, заливка пропущена.
+
+=== ГОТОВО ===
+
+
+
+
+------------------
+
+
+andriy@andriy:/usr/local/DATA/Calude/13.17/docker/sim
+$ make gui
+docker exec -d p1317_simulator bash -c "gz sim -g > /root/output/gz_gui.log 2>&1"
+gui: окно Gazebo запускается (первый раз ~10 c, лог output/gz_gui.log).
+gui: после restart-all/fresh-start окно закрыть и снова make gui.
+
+
+
+------------------
+
+andriy@andriy:/usr/local/DATA/Calude/13.17/docker/sim
+$ cd /usr/local/DATA/Calude/13.17/docker/sim && docker compose stop
+
+
+------------------
+
+
+
+
+cd docker/sim && make host-setup && make restart-all 2>&1 | tail -3 && make wait
+docker exec -it p1317_nav bash /lab/joy_check.sh
+
+
+
+
+andriy@andriy:/usr/local/DATA/Calude/13.17
+$ cd docker/sim && make host-setup && make restart-all 2>&1 | tail -3 && make wait
+bash scripts/host_setup.sh
+non-network local connections being added to access control list
+[sudo] password for andriy: 
+host: DISPLAY=:1, /dev/rawbayer -> /dev/video9 готовы
+ Container p1317_nav Starting 
+ Container p1317_mavlink_router Started 
+ Container p1317_nav Started 
+Жду завершения nav_up.sh...
+nav: готово
+andriy@andriy:/usr/local/DATA/Calude/13.17/docker/sim
+$ 
+andriy@andriy:/usr/local/DATA/Calude/13.17/docker/sim
+$ cd ../../
+andriy@andriy:/usr/local/DATA/Calude/13.17
+$ docker exec -it p1317_nav bash /lab/joy_check.sh
+Жду /joy … двигай стики (Ctrl+C — выход)
+axes[7]: +0.00 -0.00 +0.00 +0.00 +0.00 -0.00 +0.00 | roll=1500 pitch=1500 thr=1500 yaw=1500 | ALTHOLD (#372)    ^C
+andriy@andriy:/usr/local/DATA/Calude/13.17
+$ docker exec -it p1317_nav bash /lab/joy_check.sh
+Жду /joy … двигай стики (Ctrl+C — выход)
+axes[7]: +0.00 +0.00 +0.00 +0.00 +0.00 -0.00 +0.00 | roll=1500 pitch=1500 thr=1500 yaw=1500 | ALTHOLD (#203)    ^C
+andriy@andriy:/usr/local/DATA/Calude/13.17
+
+
+
+
+Проверил. Channels Monitor — CH6 вверх → +100, вниз → −100 (наоборот от нынешнего). Затем joy_check: вверх → −1.00 / STAB, центр → ALTHOLD, вниз → +1.00 / MANUAL. Все именно так.
+
+
+
+------------------

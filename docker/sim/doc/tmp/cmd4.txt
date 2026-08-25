@@ -1,0 +1,161 @@
+Одна заметка под твой полёт: с BS_HANDOVER_VINS=1 в freefly свап на 
+VinsHold произойдёт по дефолтному порогу vins_min=40 — то есть через ~1.5–2 
+с после init VINS, возможно посреди манёвра. 
+
+На ветру это тот самый режим, который в LV6 дал разгон (свап на незрелый VINS). 
+Если борт после хэндовера поведёт себя странно — добавь BS_VINS_MIN=300, 
+как в LV-профиле; 
+тумблер MANUAL как перехват никуда не девается.
+
+
+WIND_SPD=10 \
+BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="freefly" \
+  BS_HANDOVER_VINS=1 BS_GZ_CMD_GAIN=4 \
+  BS_MODE_BUDGET=80 \
+  BS_IPM_DEROT=1.0 BS_IPM_WIN=0.5 BS_IPM_WZ_TAU=2.0 \
+  BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=30 BS_PITCH_RATE_KP=30 \
+  BS_PITCH_RATE_CMD_GAIN=5 BS_ROLL_RATE_CMD_GAIN=5 \
+  BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KP=30 \
+  BS_SLEW=300 \
+  BS_YAW_ARM_FRAMES=5 BS_YAW_KD=6 BS_YAW_KI=0 BS_YAW_KP=0 BS_YAW_LEAK=8 \
+  BS_YAW_MAX_RATE=100 BS_YAW_RATE_FULL=60 BS_YAW_SMOOTH=5 \
+  TOPICS_EXTRA="/joy /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9" \
+  GDRIVE_UP=0 MP4=1 \
+  bash src/lab/capture_scene.sh 960x540 bootstrap_arch2
+
+- это был режим когда vins (по тумблеру вверх) участвует как часть нашего демпфера.
+
+
+
+  #VISO_TYPE 1
+# ВКЛЮЧЁН для freefly-LV (живой пилот, BS_FF_LOITER=1: центр CH6 = LOITER).
+VISO_TYPE 1
+
+
+Готово, стенд подготовлен (5d2a535). Вот твоя команда с четырьмя добавками — они и включают Loiter-путь:
+
+WIND_SPD=10 \
+BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="freefly" \
+  BS_HANDOVER_VINS=1 BS_GZ_CMD_GAIN=4 BS_VINS_MIN=300 \
+  BS_FF_LOITER=1 \
+  BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern BS_GPS_DISABLE=1 \
+  BS_MODE_BUDGET=80 \
+  BS_IPM_DEROT=1.0 BS_IPM_WIN=0.5 BS_IPM_WZ_TAU=2.0 \
+  BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=30 BS_PITCH_RATE_KP=30 \
+  BS_PITCH_RATE_CMD_GAIN=5 BS_ROLL_RATE_CMD_GAIN=5 \
+  BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KP=30 \
+  BS_SLEW=300 \
+  BS_YAW_ARM_FRAMES=5 BS_YAW_KD=6 BS_YAW_KI=0 BS_YAW_KP=0 BS_YAW_LEAK=8 \
+  BS_YAW_MAX_RATE=100 BS_YAW_RATE_FULL=60 BS_YAW_SMOOTH=5 \
+  TOPICS_EXTRA="/joy /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9" \
+  GDRIVE_UP=0 MP4=1 \
+  bash src/lab/capture_scene.sh 960x540 bootstrap_arch2
+
+Что добавилось и зачем:
+- BS_FF_LOITER=1 — центр CH6 теперь штатный LOITER (вместо чистого ALT_HOLD). Лесенка тумблера: вверх = наш стек (демпфер → VinsHold), центр = Loiter полётника, вниз = MANUAL (всегда ALT_HOLD, сырые стики).
+- BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern — vision-фид: нода шлёт скорость IPM (и нули на земле — без них с VISO_TYPE=1 руддер-арм не пройдёт), ray_tracer шлёт позу VINS, очередь сама переводит EK3 на extnav.
+- BS_GPS_DISABLE=1 — глушение GPS в воздухе по зрелости VINS: Loiter будет на чистом VINS. Для первой пробы можно убрать — тогда GPS останется страховкой, но после свапа источников Loiter всё равно едет по VINS.
+- BS_VINS_MIN=300 — урок LV6: хэндовер на VinsHold только на зрелом VINS.
+
+Как летать:
+1. Армись руддером с тумблером вверх. Взлетай, полетай — параллакс инитит VINS, в логе появится «VINS сошёлся → Flow→Vins» (VinsHold уже под руками).
+2. ⚠️ Когда VINS сошёлся — повиси спокойно несколько секунд: в freefly гейта спокойной фазы нет (он есть только в скриптовых миссиях), и очередь применит EK3_SRC1_*→6 и глушение GPS сама, как только VINS созреет. Свап источников на резком манёвре — тот самый разгон-улёт из LV2, тут дисциплина на тебе.
+3. Щёлкай CH6 в центр — в логе «селектор-центр: ШТАТНЫЙ LOITER — позицию держит FCU». Если рано — «LOITER не готов … чистый ALT_HOLD» (одно предупреждение, борт остаётся в ALT_HOLD, это безопасно).
+4. В Loiter стики = уставки скорости полётника (живость задаёт его LOIT_SPEED, не наш BS_GZ_CMD_GAIN) — отпустил, встал. Газ: центр = держит высоту. Щёлкай вверх↔центр сколько хочешь — это живой A/B «VinsHold против Loiter» одним тумблером; по LV-метрике жди, что вверх держит ощутимо плотнее (0.07 м против 0.85).
+5. Если VINS протухнет в Loiter — автооткат в ALT_HOLD с warn в логе: стики резко станут наклонами, будь готов подхватить. Вниз (+1) — безусловный MANUAL. Дизарм руддером завершает миссию.
+
+Когда закончишь полёты — скажи: верну VISO_TYPE в выкл и приберу eeprom 
+(глушение GPS из полёта персистится).
+
+✻ Baked for 2m 3s
+
+
+
+
+
+andriy@andriy:/usr/local/DATA/Calude/13.17
+$ WIND_SPD=10 BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="freefly"   BS_HANDOVER_VINS=1 BS_GZ_CMD_GAIN=4 BS_VINS_MIN=300   BS_FF_LOITER=1   BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern BS_GPS_DISABLE=1   BS_MODE_BUDGET=80   BS_IPM_DEROT=1.0 BS_IPM_WIN=0.5 BS_IPM_WZ_TAU=2.0   BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=30 BS_PITCH_RATE_KP=30   BS_PITCH_RATE_CMD_GAIN=5 BS_ROLL_RATE_CMD_GAIN=5   BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KP=30   BS_SLEW=300   BS_YAW_ARM_FRAMES=5 BS_YAW_KD=6 BS_YAW_KI=0 BS_YAW_KP=0 BS_YAW_LEAK=8   BS_YAW_MAX_RATE=100 BS_YAW_RATE_FULL=60 BS_YAW_SMOOTH=5   TOPICS_EXTRA="/joy /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9"   GDRIVE_UP=0 MP4=1   bash src/lab/capture_scene.sh 960x540 bootstrap_arch2
+
+
+WIND_SPD=10 \
+BS_PILOT=joy BS_STAB=DpHoldM BS_MISSION="freefly" \
+  BS_HANDOVER_VINS=1 BS_GZ_CMD_GAIN=4 BS_VINS_MIN=300 \
+  BS_FF_LOITER=1 \
+  BS_VISION_VEL=1 BS_VISION_POSE_SRC=extern BS_GPS_DISABLE=1 \
+  BS_MODE_BUDGET=80 \
+  BS_IPM_DEROT=1.0 BS_IPM_WIN=0.5 BS_IPM_WZ_TAU=2.0 \
+  BS_PITCH_OSIGN=1 BS_PITCH_RATE_KI=30 BS_PITCH_RATE_KP=30 \
+  BS_PITCH_RATE_CMD_GAIN=5 BS_ROLL_RATE_CMD_GAIN=5 \
+  BS_ROLL_IMAX=150 BS_ROLL_OSIGN=1 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KP=30 \
+  BS_SLEW=300 \
+  BS_YAW_ARM_FRAMES=5 BS_YAW_KD=6 BS_YAW_KI=0 BS_YAW_KP=0 BS_YAW_LEAK=8 \
+  BS_YAW_MAX_RATE=100 BS_YAW_RATE_FULL=60 BS_YAW_SMOOTH=5 \
+  TOPICS_EXTRA="/joy /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9" \
+  GDRIVE_UP=0 MP4=1 \
+  bash src/lab/capture_scene.sh 960x540 bootstrap_arch2
+
+
+
+Resume this session with:
+claude --resume 5d17a136-b532-4108-ae06-561654010eaf
+andriy@andriy:/usr/local/DATA/Calude/13.17
+$ 
+
+
+
+
+
+
+
+andriy@andriy:/usr/local/DATA/Calude/13.17
+$ claude -r
+
+Resume this session with:
+claude --resume 5d17a136-b532-4108-ae06-561654010eaf
+andriy@andriy:/usr/local/DATA/Calude/13.17
+
+
+
+
+❯ Полетал ещё - всё держит. Возвращай VISO_TYPE в 0.
+
+
+
+
+
+
+
+
+
+---------------------------------------------------
+
+
+
+Разобрался — и это был не «то же самое»: оба прошлых фикса отработали (в логе видно кадр VINS заякорен на EKF: offset=(+0.78,+7.57,+5.64), и фьюжн позы реально начался — отказ ушёл на слой глубже, и теперь он пойман с поличным.
+
+Что убивало на этот раз. В dataflash по каналам вариансов видно секунду в секунду: до свапа все ратио 0.01–0.05 (здоровый фьюжн на GPS), и в тот самый миг, когда EK3_SRC1_VELXY переключился на extnav — скоростной канал взлетает до 1.72 (за гейтом), а следом разъезжается и позиция. Виновник — скоростной фид IPM (vision_speed от оптофлоу бутстрапа): в момент свапа ты висел идеально (истинная скорость 0.1–0.2 м/с — проверил по бэгу), а IPM слал полётнику фантомные 1.5–2.6 м/с — на порядок больше реальности (остатки деротации на порывах ветра 10). EKF получил противоречие «поза говорит стоим — скорость говорит летим», отбраковка, варианс раскачался — отсюда циклы «EKF Failsafe → Cleared → снова», FCU сам падал в LAND по failsafe, а наш ре-ассерт LOITER ещё и воевал с этой посадкой (видно в твоём логе: режим=LAND ≠ LOITER). LV5 без ветра этого не ловил: там и фантом, и истина были ~0 — нечему было противоречить.
+
+Фиксы (718f019):
+1. В extern-профиле пара зрелости теперь ставит POSXY=6, VELXY=0 — EKF ведётся только чистой позой VINS (10 Гц, точная), скорость выводит сам. Фантомная IPM-скорость полётнику больше не отдаётся (она остаётся у integral-профиля, где она — единственные данные, и для health VisOdom при арме).
+2. freefly-центр при FCU-LAND (failsafe) — уважает посадку, одно честное предупреждение, без ре-ассертов; тумблер вверх забирает борт пилоту.
+
+Гейты зелёные, ранбук и память обновлены.
+
+Запускай ту же команду, процедура прежняя (арм после ekf_warmup, центр — после SIM_GPS1_ENABLE: установлен). Ожидание: после свапа больше не будет шторма «variance/Failsafe» в mavros.log, и центр должен залатчиться. Для честности: это уже третий вскрытый слой на одном симптоме (кадры → зрелость → скоростной фид), но каждый был реален и измерен, и этот — последний из противоречивых входов EKF: теперь он получает ровно один источник горизонтали. Если и сейчас откажет — сажусь, собираем картину вместе, но следующий подозреваемый уже будет виден тем же разбором каналов XKF4 (высота/компас).
+
+
+
+
+
+
+
+
+Сработало, и данные это подтверждают железно:
+
+- Латч: режим LOITER защёлкнулся с первого set_mode (в твоём логе один-единственный ре-ассерт — это тот самый запрос, который FCU принял). Ноль отказов «requires position» за весь полёт.
+- EKF: ни одного события — ни variance, ни failsafe, ни glitch, ни LAND. Максимум варианс-ратио за весь полёт 0.41 (в провальных прогонах было 1.7–7.3). Фьюжн чистой позы VINS держал EKF стабильным все 4+ минуты.
+- Качество удержания: первые 34 секунды после латча ты не трогал стики — среднее отклонение по истинной позе 0.12 м, максимум 0.50 м при ветре 10 м/с и мёртвом GPS. Это даже лучше скриптового LV5 (0.85 м). Дальше ты летал стиками (в Loiter это уставки скорости полётника) — и после каждого манёвра он снова вставал.
+
+Итог всей охоты — на одном симптоме «LOITER не держит» лежало пять реальных, независимых слоёв, и каждый пойман данными: VISO_TYPE, затёртый eeprom'ом → арм до захвата позиции EKF (ekf_warmup для freefly) → свап источников на незрелом VINS → расхождение кадров VINS/EKF на 10 м (якорь в ray_tracer) → фантомная скорость IPM в ветре (VELXY=0). Последние два — не симуляционные мелочи, а боевые находки: на Orin кадр VINS точно так же рождается в воздухе, и скоростной фид там будет с теми же рисками.
+
+Всё закоммичено (fd8e07c…b76de40), ранбук и память обновлены. Из хвостов: VISO_TYPE=1 остаётся в eeprom (нужен, пока летаешь freefly-LV — скажи, когда закончишь, верну 0 через pymavlink), и два коммита форка VINS (de17c71, 4c826bd) лежат только локально — запушь ветку 1317_debug с машины с GitHub-доступом при случае.
