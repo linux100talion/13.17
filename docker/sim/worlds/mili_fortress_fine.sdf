@@ -1,0 +1,460 @@
+<?xml version="1.0" ?>
+<!-- ВАРИАНТ мира с МЕЛКОЙ фактурой земли (grass_plane_fine: тайлинг
+     геометрией, texel 1.5 см против 29 см у базового) - для полётов у
+     земли: ближе ~3 м базовая земля бесфактурна, зрение слепнет по
+     построению мира. Всё остальное 1:1 с mili_fortress.sdf.
+     Опт-ин: WORLD=/root/worlds/mili_fortress_fine.sdf (см. compose;
+     применяется при СОЗДАНИИ контейнера - fresh-start). -->
+<!-- ============================================================================
+  mili_fortress.sdf — Military fortress (engcang/gazebo_maps) портирован под
+  Gazebo Harmonic (gz-sim) для проекта 13.17.
+
+  Источник: https://github.com/engcang/gazebo_maps (mili_tech.tar.xz), CC.
+  См. mili_tech/ATTRIBUTION.md.
+
+  Отличия от оригинального Classic mili.world:
+    - добавлены ОБЯЗАТЕЛЬНЫЕ system-плагины gz-sim (physics/scene/sensors/...)
+    - <population> заменены явной расстановкой деревьев/огня (gz-sim не
+      поддерживает <population>)
+    - <road> удалён (не поддерживается gz-sim)
+    - <physics type=ode>+<ode> -> дефолт gz (DART)
+    - материалы grass_plane/digital_wall -> PBR (см. их model.sdf)
+
+  Дрон (iris + камера + ardupilot_gazebo) спавнится ОТДЕЛЬНО — см. README.
+============================================================================ -->
+<sdf version="1.9">
+  <world name="default">
+
+    <!-- ОБЯЗАТЕЛЬНЫЕ system-плагины Harmonic: без них мир не работает -->
+    <plugin filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <!-- для дрона: IMU и барометр -->
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-air-pressure-system"
+            name="gz::sim::systems::AirPressure"/>
+    <plugin filename="gz-sim-navsat-system"
+            name="gz::sim::systems::NavSat"/>
+
+    <!-- ====== Геодезическая привязка мира ======
+         Начало координат Gazebo (x=0 y=0 z=0) = эта точка на Земле; оси ENU
+         (x — на восток, y — на север, z — вверх), поэтому <pose> любой модели
+         читается как «столько-то метров восточнее/севернее origin».
+         Точка — Киев (примерная реальная точка старта).
+
+         ⚠️ ОДНА ИЗ ТРЁХ СОГЛАСОВАННЫХ ТОЧЕК. EK3 строит из origin модель
+         магнитного поля (WMM) и сверяет с магнитометром; магнитометр в SITL
+         рисуется от ДОМА SITL. Разъедутся — «PreArm: Check mag field
+         (z diff:999>200)» и арма нет (урок прогона lv2_replay_20260824_034433).
+         Менять только ВСЕ ТРИ ВМЕСТЕ:
+           1) этот блок,
+           2) дом SITL — SIM_HOME в docker/sim/scripts/sim_up.sh
+              (ключ custom-location у sim_vehicle),
+           3) origin ноды — origin_lat/lon/alt в src/mission/mission_pkg/config.py
+              (BS_ORIGIN_LAT/LON/ALT), его нода шлёт SET_GPS_GLOBAL_ORIGIN
+              в безжпсном буте LV=2.
+         Высота 180 м AMSL здесь и в SIM_HOME/origin_alt — одна и та же. -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>50.450100</latitude_deg>
+      <longitude_deg>30.523400</longitude_deg>
+      <elevation>180</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
+    <physics name="default_physics" type="dart">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+    </physics>
+
+    <scene>
+      <ambient>0.7 0.7 0.7 1</ambient>
+      <background>0.7 0.8 0.9 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <!-- Глобальный источник света (из оригинала) -->
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 200 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.9 0.9 0.9 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>0.2 0.2 -0.9</direction>
+    </light>
+
+    <!-- Земля -->
+    <include>
+      <static>true</static>
+      <name>plane1</name>
+      <pose>3 -5 0 0 0 0</pose>
+      <uri>model://grass_plane_fine</uri>
+    </include>
+
+    <!-- Главная карта: стены, дома, техника, солдаты (вложенные include).
+         РИСК: gz-sim композиция вложенных include. Если не загрузится —
+         расплющить mili_map в world-level include (см. README). -->
+    <include>
+      <static>true</static>
+      <pose>-35 -5 0 0 0 0</pose>
+      <uri>model://mili_map</uri>
+    </include>
+
+    <!-- Фон-горы (heightmap) ОТКЛЮЧЁН: mt_background/model.sdf ссылается на
+         текстуры Ogre Classic (file://media/materials/textures/*.png) которых
+         нет в Gazebo Harmonic → "Failed to load a world". -->
+    <!--
+    <include>
+      <static>true</static>
+      <uri>model://mt_background</uri>
+    </include>
+    -->
+
+    <!-- ====== Дрон: iris + камера + плагин ArduPilot ======
+         Спавн на открытой площадке. ArduPilotPlugin внутри слушает SITL на
+         127.0.0.1:9002. Камера публикует gz-топик camera/image_raw. -->
+    <include>
+      <name>iris_cam</name>
+      <!-- z=0.245 = точка ПОКОЯ: верх grass_plane (box 150×150×0.1 @ z=0 → top 0.05)
+           + клиренс ног iris (низ ног = base_link−0.195). Спавн ровно на землю,
+           без проседания/выталкивания → EKF не трясёт → быстрый арм.
+           (z<0.245 = спавн ВНУТРИ земли → переходный процесс осадки.) -->
+      <pose>0 0 0.245 0 0 0</pose>
+      <uri>model://iris_cam</uri>
+    </include>
+
+    <!-- ====== Деревья (дубы) — замена <population> ====== -->
+    <include>
+      <name>oak_tree_1</name>
+      <static>true</static>
+      <pose>-25.82 -31.86 0 0 0 1.13</pose>
+      <uri>model://oak_tree</uri>
+    </include>
+    <include>
+      <name>oak_tree_2</name>
+      <static>true</static>
+      <pose>-3.34 -65.48 0 0 0 5.136</pose>
+      <uri>model://oak_tree</uri>
+    </include>
+    <include>
+      <name>oak_tree_3</name>
+      <static>true</static>
+      <pose>-34.33 66.52 0 0 0 0.852</pose>
+      <uri>model://oak_tree</uri>
+    </include>
+    <include>
+      <name>oak_tree_4</name>
+      <static>true</static>
+      <pose>-12.44 -76.4 0 0 0 0.821</pose>
+      <uri>model://oak_tree</uri>
+    </include>
+    <include>
+      <name>oak_tree_5</name>
+      <static>true</static>
+      <pose>-12.75 -72.18 0 0 0 1.511</pose>
+      <uri>model://oak_tree</uri>
+    </include>
+    <include>
+      <name>oak_tree_6</name>
+      <static>true</static>
+      <pose>-11.57 40.97 0 0 0 0.487</pose>
+      <uri>model://oak_tree</uri>
+    </include>
+    <!-- SCENE-CLEAR oak_tree_7 (oak_tree) — вернуть: scene_objects.py restore
+    <include>
+      <name>oak_tree_7</name>
+      <static>true</static>
+      <pose>-6.82 16.09 0 0 0 4.656</pose>
+      <uri>model://oak_tree</uri>
+    </include>
+    -->
+    <include>
+      <name>oak_tree_8</name>
+      <static>true</static>
+      <pose>-36.37 0.14 0 0 0 4.857</pose>
+      <uri>model://oak_tree</uri>
+    </include>
+
+    <!-- ====== Деревья (сосны) — замена <population> ====== -->
+    <include>
+      <name>pine_tree_1</name>
+      <static>true</static>
+      <pose>-64.14 32.03 0 0 0 2.529</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_2</name>
+      <static>true</static>
+      <pose>-40.39 30.04 0 0 0 2.406</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_3</name>
+      <static>true</static>
+      <pose>18.9 57.94 0 0 0 1.252</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_4</name>
+      <static>true</static>
+      <pose>-34.25 -28.43 0 0 0 4.007</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <!-- SCENE-CLEAR pine_tree_5 (pine_tree) — вернуть: scene_objects.py restore
+    <include>
+      <name>pine_tree_5</name>
+      <static>true</static>
+      <pose>20.08 19.31 0 0 0 4.415</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    -->
+    <include>
+      <name>pine_tree_6</name>
+      <static>true</static>
+      <pose>-51.17 -2.13 0 0 0 2.202</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_7</name>
+      <static>true</static>
+      <pose>9.21 -34.74 0 0 0 0.22</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_8</name>
+      <static>true</static>
+      <pose>-59.77 -12.12 0 0 0 5.91</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_9</name>
+      <static>true</static>
+      <pose>-38.28 -39.54 0 0 0 4.371</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_10</name>
+      <static>true</static>
+      <pose>7.14 -67.88 0 0 0 2.678</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_11</name>
+      <static>true</static>
+      <pose>-37.53 17.97 0 0 0 2.651</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_12</name>
+      <static>true</static>
+      <pose>-46.37 8.98 0 0 0 1.313</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_13</name>
+      <static>true</static>
+      <pose>-53.36 -24.39 0 0 0 5.065</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_14</name>
+      <static>true</static>
+      <pose>2.94 -70.02 0 0 0 0.921</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_15</name>
+      <static>true</static>
+      <pose>-17.59 -72.4 0 0 0 2.328</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_16</name>
+      <static>true</static>
+      <pose>-45.0 43.55 0 0 0 0.408</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_17</name>
+      <static>true</static>
+      <pose>-23.21 -36.01 0 0 0 3.822</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_18</name>
+      <static>true</static>
+      <pose>-24.49 -52.72 0 0 0 0.173</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <!-- SCENE-CLEAR pine_tree_19 (pine_tree) — вернуть: scene_objects.py restore
+    <include>
+      <name>pine_tree_19</name>
+      <static>true</static>
+      <pose>-1.02 -19.81 0 0 0 0.879</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    -->
+    <include>
+      <name>pine_tree_20</name>
+      <static>true</static>
+      <pose>-38.1 5.82 0 0 0 4.106</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_21</name>
+      <static>true</static>
+      <pose>-37.09 -39.01 0 0 0 4.018</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+    <include>
+      <name>pine_tree_22</name>
+      <static>true</static>
+      <pose>17.34 -46.87 0 0 0 5.664</pose>
+      <uri>model://pine_tree</uri>
+    </include>
+
+    <!-- ====== Огонь — замена <population> ====== -->
+    <!-- SCENE-CLEAR fire_1 (fire) — вернуть: scene_objects.py restore
+    <include>
+      <name>fire_1</name>
+      <static>true</static>
+      <pose>-30.81 14.0 0 0 0 2.752</pose>
+      <uri>model://fire</uri>
+    </include>
+    -->
+    <include>
+      <name>fire_2</name>
+      <static>true</static>
+      <pose>-25.56 -52.19 0 0 0 3.452</pose>
+      <uri>model://fire</uri>
+    </include>
+    <!-- SCENE-CLEAR fire_3 (fire) — вернуть: scene_objects.py restore
+    <include>
+      <name>fire_3</name>
+      <static>true</static>
+      <pose>-26.77 2.07 0 0 0 1.994</pose>
+      <uri>model://fire</uri>
+    </include>
+    -->
+    <include>
+      <name>fire_4</name>
+      <static>true</static>
+      <pose>-74.69 41.18 0 0 0 0.76</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_5</name>
+      <static>true</static>
+      <pose>-70.53 -2.58 0 0 0 5.973</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_6</name>
+      <static>true</static>
+      <pose>-65.87 -59.26 0 0 0 1.948</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_7</name>
+      <static>true</static>
+      <pose>-62.54 -37.71 0 0 0 2.496</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_8</name>
+      <static>true</static>
+      <pose>-25.12 57.12 0 0 0 5.518</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_9</name>
+      <static>true</static>
+      <pose>-71.82 49.15 0 0 0 1.414</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_10</name>
+      <static>true</static>
+      <pose>-28.37 -76.4 0 0 0 0.445</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_11</name>
+      <static>true</static>
+      <pose>-25.12 -61.93 0 0 0 6.244</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_12</name>
+      <static>true</static>
+      <pose>-31.6 28.02 0 0 0 2.958</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_13</name>
+      <static>true</static>
+      <pose>-16.28 47.1 0 0 0 5.654</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_14</name>
+      <static>true</static>
+      <pose>-45.52 -69.54 0 0 0 3.809</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_15</name>
+      <static>true</static>
+      <pose>-27.61 62.26 0 0 0 0.648</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_16</name>
+      <static>true</static>
+      <pose>-74.18 -77.03 0 0 0 5.971</pose>
+      <uri>model://fire</uri>
+    </include>
+    <!-- SCENE-CLEAR fire_17 (fire) — вернуть: scene_objects.py restore
+    <include>
+      <name>fire_17</name>
+      <static>true</static>
+      <pose>-26.69 -10.63 0 0 0 2.25</pose>
+      <uri>model://fire</uri>
+    </include>
+    -->
+    <include>
+      <name>fire_18</name>
+      <static>true</static>
+      <pose>-57.49 8.79 0 0 0 4.541</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_19</name>
+      <static>true</static>
+      <pose>-23.86 37.75 0 0 0 2.847</pose>
+      <uri>model://fire</uri>
+    </include>
+    <include>
+      <name>fire_20</name>
+      <static>true</static>
+      <pose>-54.85 5.94 0 0 0 4.673</pose>
+      <uri>model://fire</uri>
+    </include>
+
+  </world>
+</sdf>

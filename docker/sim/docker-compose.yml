@@ -54,6 +54,12 @@ services:
       # строкой SPAWN_POSE=... в docker/sim/.env. Применяется при СОЗДАНИИ
       # контейнера → менять только через fresh-start. См. scripts/sim_up.sh.
       - SPAWN_POSE=${SPAWN_POSE:-}
+      # МИР (пусто = /root/worlds/mili_fortress.sdf). Вариант с МЕЛКОЙ фактурой
+      # земли для полётов у земли (базовая земля бесфактурна ближе ~3 м — одна
+      # текстура 512px на 150 м, зрение слепнет по построению мира):
+      #   WORLD=/root/worlds/mili_fortress_fine.sdf
+      # Применяется при СОЗДАНИИ контейнера → только fresh-start.
+      - WORLD=${WORLD:-}
 
     # iGPU (Intel, DRI3) для ОКНА `make gui`: X-сервер гибридного ноута сидит на
     # /dev/dri/card*, без проброса Mesa в контейнере падает на llvmpipe (софт-рендер,

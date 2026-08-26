@@ -1,0 +1,2126 @@
+<?xml version="1.0" ?>
+<!-- СГЕНЕРИРОВАНО gen_fine.py (лежит рядом; сид 1317) — вариант grass_plane с
+     МЕЛКОЙ фактурой земли для полётов у земли. Мотив (прогоны lv2 040737/041255):
+     gz-sim не тайлит текстуру по грани бокса, у grass_plane один grass_dry.png
+     512px растянут на 150 м (texel 29 см) - ближе ~3 м земля бесфактурная каша,
+     полнокадровый LK и IPM-канал слепнут по построению мира, а не алгоритма.
+     Здесь текстура тайлится ГЕОМЕТРИЕЙ: сетка визуалов 15х15 м (texel 3.7 мм,
+     grass_fine.jpg 4096px = grass_dry + многооктавная яркость 5мм/2/9/35 см -
+     предел нужного: варп IPM у пола 0.5 м сэмплирует 3.3 мм/px), йав
+     тайлов 0/90/180/270 псевдослучайно - рвёт периодичность. Коллизия прежним
+     одним боксом, верх на z=0.05 - спавны/оси мира не тронуты.
+     Опт-ин: мир mili_fortress_fine.sdf (env WORLD, см. docker-compose). -->
+<sdf version="1.5">
+  <model name="grass_plane_fine">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>150 150 .1</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="v0_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 -67.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v0_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 -52.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v0_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 -37.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v0_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 -22.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v0_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 -7.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v0_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 7.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v0_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 22.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v0_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 37.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v0_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 52.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v0_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>-67.5 67.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 -67.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 -52.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 -37.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 -22.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 -7.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 7.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 22.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 37.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 52.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v1_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>-52.5 67.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 -67.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 -52.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 -37.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 -22.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 -7.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 7.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 22.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 37.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 52.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v2_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>-37.5 67.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 -67.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 -52.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 -37.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 -22.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 -7.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 7.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 22.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 37.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 52.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v3_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>-22.5 67.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 -67.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 -52.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 -37.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 -22.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 -7.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 7.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 22.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 37.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 52.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v4_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>-7.5 67.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 -67.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 -52.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 -37.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 -22.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 -7.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 7.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 22.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 37.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 52.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v5_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>7.5 67.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 -67.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 -52.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 -37.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 -22.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 -7.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 7.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 22.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 37.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 52.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v6_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>22.5 67.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 -67.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 -52.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 -37.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 -22.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 -7.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 7.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 22.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 37.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 52.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v7_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>37.5 67.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 -67.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 -52.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 -37.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 -22.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 -7.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 7.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 22.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 37.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 52.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v8_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>52.5 67.5 0 0 0 0.0000000000</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_0">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 -67.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_1">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 -52.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_2">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 -37.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_3">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 -22.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_4">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 -7.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_5">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 7.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_6">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 22.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_7">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 37.5 0 0 0 3.1415926536</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_8">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 52.5 0 0 0 1.5707963268</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="v9_9">
+        <cast_shadows>false</cast_shadows>
+        <pose>67.5 67.5 0 0 0 4.7123889804</pose>
+        <geometry>
+          <box>
+            <size>15 15 .1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.4 0.45 0.3 1</ambient>
+          <diffuse>0.55 0.6 0.4 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/grass_fine.jpg</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>
