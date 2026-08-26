@@ -300,7 +300,7 @@ class LoiterHold(Step):
       WAIT  — гейт закрыт: ведём себя как стабилизированный hover (ALT_HOLD,
               hold-стек держит горизонт, газ — контур высоты). Гейт: extnav_ready
               (пара EK3_SRC1_*=6 применена очередью ноды) + свежий VINS + в воздухе
-              (>1.5 м — на земле без GPS позиции нет, VINS без параллакса не
+              (>loiter_alt — на земле без GPS позиции нет, VINS без параллакса не
               инитится, latch невозможен по построению). Не открылся за
               gate_budget → шаг ПРОПУСКАЕТСЯ (LOITER_SKIP): деградация безопасная,
               миссия продолжается на нашем стеке.
@@ -318,7 +318,7 @@ class LoiterHold(Step):
 
     def __init__(self, name, sec, throttle, gate_budget, keep="ALT_HOLD",
                  stack=None, wait_gt=False, alt_hold=None, alt_target=None,
-                 fresh_sec=2.0, mode_budget=20.0):
+                 fresh_sec=2.0, mode_budget=20.0, loiter_alt=1.5):
         self.name = name
         self.sec = sec
         self.throttle = throttle
@@ -330,6 +330,7 @@ class LoiterHold(Step):
         self.alt_target = alt_target
         self.fresh_sec = fresh_sec
         self.mode_budget = mode_budget
+        self.loiter_alt = loiter_alt  # гейт «в воздухе» (см. config.loiter_alt)
         self._entered_stack = False
         self._gated = False
         self._t_gate = None
@@ -370,7 +371,7 @@ class LoiterHold(Step):
             _overlay_stack(self, ctx, s, rc)
             gate = (s.extnav_ready
                     and (s.now_sim - s.vins_last_sim) < self.fresh_sec
-                    and (s.rel_alt or 0.0) > 1.5)
+                    and (s.rel_alt or 0.0) > self.loiter_alt)
             if gate:
                 self._gated = True
                 self._t_gate = s.now_sim
@@ -444,11 +445,12 @@ class Freefly(Step):
 
     def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
                  handover=None, loiter_center=False, vins_fresh=2.0,
-                 sf_master=False):
+                 sf_master=False, loiter_alt=1.5):
         self.name = name
         self.stack = stack
         self.keep = keep
         self._pilot_stabs = pilot_stabs
+        self.loiter_alt = loiter_alt   # гейт «в воздухе» (см. config.loiter_alt)
         # handover Flow→Vins: срабатывает ТОЛЬКО в позиции селектора «наш стек»
         # (−1 или тумблер не трогали) — «вверх» = лучший доступный стек (демпфер
         # до готовности VINS, VinsHold после); центр/MANUAL свапом не трогаем.
@@ -534,7 +536,7 @@ class Freefly(Step):
                                  "ФАКТИЧЕСКИ чистый ALT_HOLD, стики = наклоны; "
                                  "тумблер вверх вернёт наш стек"))
         elif (s.extnav_ready and fresh_age < self.vins_fresh
-                and (s.rel_alt or 0.0) > 1.5):
+                and (s.rel_alt or 0.0) > self.loiter_alt):
             self._in_loiter = True
             self._loiter_warned = False
             self._loiter_since = s.now_sim

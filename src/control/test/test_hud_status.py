@@ -88,6 +88,17 @@ check("zekf: local_position протух → '--', не последнее зн�
 d = kv(hud_status(DroneState(now_sim=5.0, ekf_pos_last_sim=4.0), FRESH))
 check("zekf: свежесть есть, z ещё не пришёл (None) → '--'", d['zekf'] == '--')
 
+# 9. Ручка loiter_alt (гейт «в воздухе», config.loiter_alt): нода передаёт СВОЙ
+# порог — READY/ground обязаны ехать за ним, а не за легаси-дефолтом 1.5
+d = kv(hud_status(s(odom=700, last=10.0, now=10.1, extnav=True, alt=1.0), FRESH,
+                  loiter_alt=0.5))
+check("loiter_alt=0.5: 1.0 м — в воздухе → READY",
+      d['st'] == 'READY' and d['why'] == '-')
+d = kv(hud_status(s(odom=700, last=10.0, now=10.1, extnav=True, alt=0.4), FRESH,
+                  loiter_alt=0.5))
+check("loiter_alt=0.5: 0.4 м → WAIT/ground",
+      d['st'] == 'WAIT' and d['why'] == 'ground')
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

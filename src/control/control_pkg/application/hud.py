@@ -8,7 +8,8 @@
 
 ЕДИНСТВЕННЫЙ источник правды: ТЕ ЖЕ условия, которыми Freefly._mode_target и
 LoiterHold пускают штатный LOITER (extnav_ready + свежий VINS + в воздухе
->1.5 м), а не параллельная оценка стримера. Градации:
+>loiter_alt, конфиг-ручка — см. config.loiter_alt), а не параллельная оценка
+стримера. Градации:
   st=READY — гейт открыт: центр CH6 даст LOITER;
   st=WAIT  — VINS жив, но гейт закрыт (why: extnav — очередь EK3_SRC1_* ещё не
              пройдена; stale — odom протух с fresh, но ещё не 3×fresh;
@@ -31,8 +32,11 @@ WaitEkfPos (step.py) пускает арм: свежий /mavros/local_position 
 EKF_FRESH_SEC = 2.0
 
 
-def hud_status(s, fresh_sec: float) -> str:
-    """Строка "k=v k=v ..." для /mission/status по снапшоту DroneState."""
+def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5) -> str:
+    """Строка "k=v k=v ..." для /mission/status по снапшоту DroneState.
+
+    loiter_alt — гейт «в воздухе» (м): обязан совпадать с cfg.loiter_alt лётной
+    ноды (bootstrap передаёт его сам); дефолт 1.5 — легаси для старых вызовов."""
     ekf = int(s.now_sim - s.ekf_pos_last_sim < EKF_FRESH_SEC)
     age = s.now_sim - s.vins_last_sim
     if s.vins_odom_count == 0:
@@ -43,7 +47,7 @@ def hud_status(s, fresh_sec: float) -> str:
         st, why = 'WAIT', 'extnav'
     elif age >= fresh_sec:
         st, why = 'WAIT', 'stale'
-    elif (s.rel_alt or 0.0) <= 1.5:
+    elif (s.rel_alt or 0.0) <= loiter_alt:
         st, why = 'WAIT', 'ground'
     else:
         st, why = 'READY', '-'

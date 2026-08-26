@@ -147,7 +147,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                         handover=handover,
                         loiter_center=cfg.ff_loiter > 0,
                         vins_fresh=cfg.vins_fresh_sec,
-                        sf_master=cfg.sf_master > 0)]
+                        sf_master=cfg.sf_master > 0,
+                        loiter_alt=cfg.loiter_alt)]
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold
     lvl = cfg.mv_level
@@ -234,7 +235,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                                     stack=_hold_stack(), wait_gt=wait_gt,
                                     alt_hold=alt_hold, alt_target=alt_target[0],
                                     fresh_sec=cfg.vins_fresh_sec,
-                                    mode_budget=cfg.mode_budget))
+                                    mode_budget=cfg.mode_budget,
+                                    loiter_alt=cfg.loiter_alt))
         elif verb == "pilot":
             if num is None and not live_pilot:
                 # scripted держит центр → бессрочный сегмент никогда не кончится

@@ -117,6 +117,7 @@ class BootstrapArch2Node(Node):
                                             ipm_adapt=cfg.ipm_adapt,
                                             ipm_vel_tau=cfg.ipm_vel_tau,
                                             ipm_alt_floor=cfg.ipm_alt_floor,
+                                            ipm_scale_ref=cfg.ipm_scale_ref,
                                             alt_src=cfg.perc_alt_src)
             # ⚠️ Высота перцепции — СВОЯ ручка (perc_alt_src), НЕ cfg.alt_src:
             # 4 прогона 2026-08-19 с баро в перцепции (сырой И EMA) дали улёты
@@ -402,7 +403,7 @@ class BootstrapArch2Node(Node):
         # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
         # /mission/status: гейт LOITER-на-VINS для debug-HUD стримера + bag
-        line = hud_status(s, self.cfg.vins_fresh_sec)
+        line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt)
         st = line.split(' ', 1)[0]
         if st != self._hud_st:      # переход статуса — в лог (виден и в sim_nav.log)
             self._hud_st = st
@@ -695,6 +696,9 @@ def _parse() -> tuple:
                    default=_D.ipm_vel_tau)
     p.add_argument('--ipm-alt-floor', dest='ipm_alt_floor', type=float,
                    default=_D.ipm_alt_floor)
+    # масштабно-инвариантная полоса IPM (геометрия ∝ alt/h_ref; 0 = легаси)
+    p.add_argument('--ipm-scale-ref', dest='ipm_scale_ref', type=float,
+                   default=_D.ipm_scale_ref)
     p.add_argument('--vision-vel', dest='vision_vel', type=float,
                    default=_D.vision_vel)
     p.add_argument('--vision-pose-src', dest='vision_pose_src',
@@ -802,6 +806,9 @@ def _parse() -> tuple:
     p.add_argument('--sf-master', dest='sf_master', type=float, default=_D.sf_master)
     # штатный LOITER-на-VINS: freefly-селектор (центр CH6) и бюджет гейта loiter<t>
     p.add_argument('--ff-loiter', dest='ff_loiter', type=float, default=_D.ff_loiter)
+    # гейт «в воздухе» LOITER-на-VINS, м (одна правда: Freefly+LoiterHold+HUD)
+    p.add_argument('--loiter-alt', dest='loiter_alt', type=float,
+                   default=_D.loiter_alt)
     p.add_argument('--loiter-gate-budget', dest='loiter_gate_budget', type=float,
                    default=_D.loiter_gate_budget)
     p.add_argument('--ekf-pos-budget', dest='ekf_pos_budget', type=float,
