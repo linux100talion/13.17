@@ -106,6 +106,8 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   (это чистый `/image_color`); полёт «глазами пилота» — **`scene_hud.mp4`**:
   пост-рендер из bag тем же кодом (`nav_pkg/hud_renderer.py`, без ROS) через
   `src/lab/hud_video.py` (freefly_lv.sh делает сам, `HUD_MP4=0` — выкл).
+  **Каждое поле HUD по отдельности** — источник, цвета, пороги, таймауты,
+  чек-лист «что смотреть по фазам полёта»: **`src/nav/hud.md`**.
 - **`nn1_anchor`** — Нейросеть №1 (якорная локализация). Инкремент 1: SuperPoint+
   LightGlue (`anchor_matcher.py`) матчит `/image_color` против георефернс-базы
   облёта (`data/reference_db/`) → bbox+id ориентира в `/nn1/detections`.
