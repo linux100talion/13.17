@@ -99,6 +99,28 @@ d = kv(hud_status(s(odom=700, last=10.0, now=10.1, extnav=True, alt=0.4), FRESH,
 check("loiter_alt=0.5: 0.4 м → WAIT/ground",
       d['st'] == 'WAIT' and d['why'] == 'ground')
 
+# 10. ВЫСОТА ПЕРЦЕПЦИИ (palt=) и КАНАЛ ВИДА СВЕРХУ (ipm=/ipmf=) — строки ALT и
+# IPM в HUD. Мотив: разбор 183305/185921 упёрся в то, что статус нёс rel_alt и
+# ekf_z, а гейт земли IPM закрывала ТРЕТЬЯ высота (perc_alt_src + латч), которой
+# в строке не было вовсе — «демпфер молчит» читалось только по bag.
+d = kv(hud_status(DroneState(now_sim=5.0, rel_alt=0.3, perc_alt=0.31), FRESH))
+check("palt: высота перцепции в строке", d['palt'] == '0.3')
+d = kv(hud_status(DroneState(now_sim=5.0, rel_alt=0.3), FRESH))
+check("palt: перцепции нет в стеке (None) → '--'", d['palt'] == '--')
+check("palt=None не мешает остальным полям", d['alt'] == '0.3')
+
+# ipm/ipmf: дефолт снапшота — «канала ещё не было» (ok=0, код 7 «нет опоры»)
+d = kv(hud_status(DroneState(now_sim=5.0), FRESH))
+check("ipm: дефолт = слеп, код 7", d['ipm'] == '0' and d['ipmf'] == '7')
+# как летали 183305: гейт высоты (код 1) — ось замерзает, PWM 0
+d = kv(hud_status(DroneState(now_sim=5.0, ipm_ok=False, ipm_fail=1), FRESH))
+check("ipm: гейт высоты → ipm=0 ipmf=1", d['ipm'] == '0' and d['ipmf'] == '1')
+# фильтр ipm_vel_tau мостит брак кадра: скоростям верить можно, кадр плох
+d = kv(hud_status(DroneState(now_sim=5.0, ipm_ok=True, ipm_fail=5), FRESH))
+check("ipm: мост фильтром → ipm=1 при ipmf=5", d['ipm'] == '1' and d['ipmf'] == '5')
+d = kv(hud_status(DroneState(now_sim=5.0, ipm_ok=True, ipm_fail=0), FRESH))
+check("ipm: годен → ipm=1 ipmf=0", d['ipm'] == '1' and d['ipmf'] == '0')
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

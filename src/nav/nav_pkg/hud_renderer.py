@@ -29,6 +29,11 @@ HUD_YELLOW = (0, 210, 240)
 HUD_RED = (50, 50, 230)
 HUD_WHITE = (235, 235, 235)
 HUD_SCENE = (0, 255, 255)
+# Причина брака кадра IPM (ipmf= в /mission/status) — та же таблица, что
+# FlowEstimator.ipm_fail. ⚠️ ТОЛЬКО ASCII: Hershey-шрифт OpenCV кириллицу не
+# рисует (вышли бы «?»), поэтому подписи английские, как и остальной HUD.
+IPM_FAIL = {0: "OK", 1: "ALT GATE", 2: "NO WINDOW", 3: "WARP OOB",
+            4: "FEW PTS", 5: "FEW LK", 6: "OFF", 7: "NO REF"}
 
 
 class HudRenderer:
@@ -42,11 +47,20 @@ class HudRenderer:
         self.cmd_roll, self.cmd_pitch, self.cmd_t = 0.0, 0.0, None
         self.drift = None             # (норма поправки м, время прихода)
         self.scene = ""               # метка NN2
+        self.ipm_hist = collections.deque(maxlen=128)   # (t, ipm_ok) из статуса
 
     # --- питание кэшей (стример — из колбэков, пост-рендер — из bag) ---
     def set_status(self, line: str, t: float) -> None:
         self.status = dict(p.split("=", 1) for p in line.split() if "=" in p)
         self.status_t = t
+        # доля годных кадров IPM за окно: мгновенный код скачет (гейт у земли
+        # открывается и закрывается по дребезгу высоты — прогон 185921: 10%
+        # кадров годны, и по одному кадру этого не увидеть)
+        if "ipm" in self.status:
+            try:
+                self.ipm_hist.append((t, int(self.status["ipm"])))
+            except ValueError:
+                pass
 
     def add_odom(self, t: float) -> None:
         self.odom_times.append(t)
@@ -151,27 +165,55 @@ class HudRenderer:
                     return "--" if x < 0 else f"{x:.2f}"
                 y = self._line(frame, k, y, f"res {_f(res)}  rat {_f(rat)}",
                                HUD_WHITE, scale=0.6)
-            # 1c) высота двумя источниками: baro — высота миссии (alt=,
+            # 1c) высота ТРЕМЯ источниками: baro — высота миссии (alt=,
             # rel_alt: баро при BS_ALT_SRC=baro), ekf — z local_position
-            # глазами EKF3 (zekf=). Расхождение >0.5 м — жёлтым: вертикаль
-            # EKF уехала, а масштаб IPM ∝ высоте — демпфер у земли слепнет
-            # первым (прогон 174603: EKF z −0.27 м → гейт alt<0.5 на
-            # истинных 0.7 м). zekf=-- (протух local_position) и старые
-            # bag без поля — «ekf --», белым.
-            alt, zekf = self.status.get("alt"), self.status.get("zekf")
+            # глазами EKF3 (zekf=), perc — высота ПЕРЦЕПЦИИ (palt=), по
+            # которой судит гейт земли IPM. Третья не от жадности: разбор
+            # 183305 упёрся ровно в то, что HUD показывал первые две, а
+            # канал закрывала ТРЕТЬЯ (perc_alt_src=local, смещение −0.27 м).
+            # ⚠️ Порог жёлтого ОТНОСИТЕЛЬНЫЙ: max(0.2, 0.2·baro). Прежние
+            # фиксированные 0.5 м на низком полёте бесполезны — в 183305
+            # расхождение 0.3 м было ровно 100% высоты полёта и не
+            # подсветилось. Судим по perc (её и слушает гейт), при её
+            # отсутствии — по ekf. «--» = источника нет / протух.
+            alt = self.status.get("alt")
             if alt is not None:
                 def _v(s):
                     try:
                         return float(s)
                     except (TypeError, ValueError):
                         return None
-                a, z = _v(alt), _v(zekf)
-                col = (HUD_YELLOW if a is not None and z is not None
-                       and abs(a - z) > 0.5 else HUD_WHITE)
-                atxt = f"{a:.1f}" if a is not None else "--"
-                ztxt = f"{z:.1f}" if z is not None else "--"
+
+                def _t(x):
+                    return f"{x:.1f}" if x is not None else "--"
+                a = _v(alt)
+                z, pa = _v(self.status.get("zekf")), _v(self.status.get("palt"))
+                cmp_v = pa if pa is not None else z
+                thr = max(0.2, 0.2 * abs(a)) if a is not None else 0.2
+                col = (HUD_YELLOW if a is not None and cmp_v is not None
+                       and abs(a - cmp_v) > thr else HUD_WHITE)
+                txt = f"ALT baro {_t(a)}m  ekf {_t(z)}m"
+                if "palt" in self.status:
+                    txt += f"  perc {_t(pa)}m"
+                y = self._line(frame, k, y, txt, col)
+            # 1d) КАНАЛ ВИДА СВЕРХУ — на чём стоит демпфер у земли. Мгновенный
+            # код (ipmf=) + доля годных за окно 3 с: гейт высоты у земли
+            # дребезжит, и по одному кадру «10% годных» неотличимы от нуля.
+            # Зелёный — годен; жёлтый — фильтр ipm_vel_tau мостит брак кадра
+            # (ipm=1 при ipmf≠0); красный — оси слепы (ipm=0).
+            if "ipm" in self.status:
+                try:
+                    ok = int(self.status["ipm"])
+                    fail = int(self.status.get("ipmf", 0))
+                except ValueError:
+                    ok, fail = 0, 0
+                win = [v for t, v in self.ipm_hist if now - t < 3.0]
+                share = 100.0 * sum(win) / len(win) if win else 0.0
+                col = (HUD_GREEN if ok and not fail else
+                       HUD_YELLOW if ok else HUD_RED)
+                name = IPM_FAIL.get(fail, f"?{fail}")
                 y = self._line(frame, k, y,
-                               f"ALT baro {atxt}m  ekf {ztxt}m", col)
+                               f"IPM {name} {share:3.0f}%", col)
         # 2) режим FCU + armed
         if self.fcu_t is not None and now - self.fcu_t < 5.0:
             arm = "ARM" if self.fcu_armed else "DISARM"

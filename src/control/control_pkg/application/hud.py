@@ -17,6 +17,9 @@ LoiterHold пускают штатный LOITER (extnav_ready + свежий VIN
   st=DEAD  — VINS-одометрии нет (why: no_odom — не было вовсе; stale — молчит
              дольше 3×fresh — гистерезис выхода Freefly из LOITER).
 
+Отдельно поля высот и канала зрения (palt=/ipm=/ipmf=) — диагностика демпфера у
+земли: см. комментарий у их формирования ниже.
+
 Отдельно поле ekf= — прогрев EKF полётника: до взлёта VINS мёртв по построению
 (монокуляру нужен параллакс) и баннер гейта всегда красный, а пилоту нужен
 сигнал «борт готов, можно взлетать». ekf=1 ровно по тому же критерию, каким
@@ -60,7 +63,14 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5) -> str:
     # истине → гейт IPM alt<0.5 душил демпфер на истинных 0.7 м). Протух
     # local_position (после GPS-kill) — честное «--», не последнее значение.
     zekf = f"{s.ekf_z:.1f}" if (ekf and s.ekf_z is not None) else "--"
+    # palt — ВЫСОТА ПЕРЦЕПЦИИ (perc_alt_src + латч perc_alt_zero): ровно то число,
+    # по которому судит гейт земли IPM. Третье в строке не от жадности: разбор
+    # 183305 упёрся ровно в то, что HUD показывал rel_alt и ekf_z, а канал закрывал
+    # ТРЕТЬЮ высоту — у неё свой источник и своё смещение. ipm/ipmf — состояние
+    # самого канала (ipm_ok + код причины брака кадра, таблица — FlowEstimator).
+    palt = f"{s.perc_alt:.1f}" if s.perc_alt is not None else "--"
     return (f"st={st} why={why} ekf={ekf} extnav={int(s.extnav_ready)} "
             f"odom={s.vins_odom_count} age={min(age, 999.0):.1f} "
-            f"alt={(s.rel_alt or 0.0):.1f} zekf={zekf} "
+            f"alt={(s.rel_alt or 0.0):.1f} zekf={zekf} palt={palt} "
+            f"ipm={int(s.ipm_ok)} ipmf={s.ipm_fail} "
             f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f}")
