@@ -43,7 +43,15 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
+.PHONY: help ensure-env host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
+
+# .env (локальный профиль бокса, в .gitignore) сеется из эталона env.default
+# (в git): свежий клон получает боевые дефолты (WORLD/LV/BS_SF_MASTER) без
+# ручной возни. СУЩЕСТВУЮЩИЙ .env НЕ трогаем — машинные правки живут в нём.
+# Подробности — env.md.
+ensure-env:
+	@[ -f .env ] || { cp env.default .env; \
+	  echo ".env создан из env.default — проверь VINS_SRC/CUDA_ARCH_BIN под бокс"; }
 
 # Дефолтная последовательность команд для `make capture-scene` (без разрешения →
 # restart-all). Переопределяется: make capture-scene CSARGS="640x480 arm takeoff 5 hover 2 land"
@@ -56,10 +64,10 @@ help:            ## показать список целей
 host-setup:      ## хост: xhost + v4l2loopback (/dev/rawbayer) — нужен sudo
 	bash scripts/host_setup.sh
 
-build:           ## собрать образы (долго: SITL+Gazebo+OpenCV из исходников)
+build: ensure-env  ## собрать образы (долго: SITL+Gazebo+OpenCV из исходников)
 	$(DC) build
 
-up:              ## создать и запустить контейнеры (скрипты стартуют автоматически)
+up: ensure-env     ## создать и запустить контейнеры (скрипты стартуют автоматически)
 	$(DC) up -d
 
 sim:             ## (ручной) перезапустить ноды в simulator (Gazebo+SITL+bridge)
@@ -82,11 +90,11 @@ fpv:             ## окно оператора: боевой поток openhd_
 
 run: up          ## псевдоним для up (скрипты стартуют сами при подъёме контейнеров)
 
-restart-all:     ## быстрый перезапуск: stop → start (контейнеры живут, ephemeral state сохраняется)
+restart-all: ensure-env  ## быстрый перезапуск: stop → start (контейнеры живут, ephemeral state сохраняется)
 	$(DC) stop
 	$(DC) start
 
-fresh-start:     ## полный сброс: down → up (пересоздать контейнеры, потерять ephemeral state)
+fresh-start: ensure-env  ## полный сброс: down → up (пересоздать контейнеры, потерять ephemeral state)
 	$(DC) down
 	$(DC) up -d
 

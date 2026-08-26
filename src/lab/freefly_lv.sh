@@ -37,7 +37,9 @@
 # Шаг 2 — тот же атомарный прогон, что и руками: capture_scene.sh RES bootstrap_arch2.
 #
 # Запуск С ХОСТА из любого места:
-#   bash src/lab/freefly_lv.sh              # LV=1, полный freefly-LV
+#   bash src/lab/freefly_lv.sh              # профиль БОКСА из docker/sim/.env
+#       (сеется из эталона env.default В GIT: LV=2 BS_SF_MASTER=1 — дефолт и
+#       на свежем клоне); без строк в .env — LV=1
 #   LV=0 bash src/lab/freefly_lv.sh         # базовый freefly (GPS жив)
 #   WIND_SPD=5 LV=1 bash src/lab/freefly_lv.sh
 #   BS_SF_MASTER=1 bash src/lab/freefly_lv.sh   # схема «SF-мастер»: SF (CH7) =
@@ -49,6 +51,9 @@
 #       bash src/lab/freefly_lv.sh   # стартовать с места посадки того прогона
 # Любой параметр (BS_*, WIND_SPD, RES, GDRIVE_UP, MP4, TOPICS_EXTRA...)
 # переопределяется через env; дефолты ниже — эталонные команды из Q.txt.
+# Приоритет: env снаружи > docker/sim/.env (локальный профиль бокса, gitignore —
+# тот же файл, что читает compose: WORLD/SPAWN_POSE едут туда же) > дефолт скрипта.
+# Шпаргалка по .env (ключи, правила разбора, грабли) — docker/sim/env.md.
 # В LV=0 BS_VINS_MIN не задаётся (дефолт ноды 40, как в эталонной команде №1).
 #
 # После прогона — АРХИВ в docker/sim/output/joystick/<NAME>/ (шаг 4): scene.mp4,
@@ -58,12 +63,51 @@
 # ============================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SIMDIR="$(cd "$SCRIPT_DIR/../../docker/sim" && pwd)"
+
+# ── дефолты БОКСА из docker/sim/.env (тот же файл, что читает compose) ───────
+# Локальный профиль машины (в .gitignore); эталон — env.default (В GIT): при
+# отсутствии .env сеем его копией эталона (то же делает make build/up/restart-
+# all/fresh-start) — свежий клон летит боевым профилем сразу. Существующий
+# .env не трогаем. Строки KEY=VALUE применяются ТОЛЬКО
+# к незаданным переменным — env снаружи (`LV=1 bash ...`) всегда сильнее.
+# Так `bash src/lab/freefly_lv.sh` без ничего летит боевым профилем бокса
+# (сейчас LV=2 + BS_SF_MASTER=1), а WORLD/SPAWN_POSE, которые compose и так
+# берёт из .env, заодно становятся видны скрипту (честный echo точки спавна
+# и мета-архив прогона).
+# ⚠️ Под BS_SF_MASTER=1 реплей СТАРОГО сценария (без "sf") летит целиком на
+# сырых стиках — для таких реплеев давать BS_SF_MASTER=0 снаружи.
+if [ ! -f "$SIMDIR/.env" ] && [ -f "$SIMDIR/env.default" ]; then
+    cp "$SIMDIR/env.default" "$SIMDIR/.env"
+    echo "freefly_lv: docker/sim/.env создан из env.default (свежий клон) —" \
+         "проверь VINS_SRC/CUDA_ARCH_BIN под бокс"
+fi
+ENV_DEFAULTS=""
+if [ -f "$SIMDIR/.env" ]; then
+    while IFS= read -r line; do
+        case "$line" in ''|\#*) continue ;; esac
+        key="${line%%=*}"; val="${line#*=}"
+        case "$key" in ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;; esac
+        # снять парные кавычки вокруг значения (compose их тоже снимает)
+        case "$val" in
+            \"*\") val="${val%\"}"; val="${val#\"}" ;;
+            \'*\') val="${val%\'}"; val="${val#\'}" ;;
+        esac
+        if [ -z "${!key+x}" ]; then
+            export "$key=$val"
+            ENV_DEFAULTS="$ENV_DEFAULTS $key=$val"
+        fi
+    done < "$SIMDIR/.env"
+fi
+if [ -n "$ENV_DEFAULTS" ]; then
+    echo "freefly_lv: дефолты бокса из docker/sim/.env:$ENV_DEFAULTS"
+fi
+
 LV="${LV:-1}"
 RES="${RES:-960x540}"
 SIM="${SIM:-p1317_simulator}"
 NAV="${NAV:-p1317_nav}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIMDIR="$(cd "$SCRIPT_DIR/../../docker/sim" && pwd)"
 
 case "$LV" in 0|1|2) ;; *) echo "ОШИБКА: LV=$LV (ожидаю 0, 1 или 2)" >&2; exit 2 ;; esac
 echo "=== freefly_lv: профиль LV=$LV (${RES}) ==="

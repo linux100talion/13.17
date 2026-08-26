@@ -22,8 +22,17 @@ simulator/  nav/  mavlink_router/  — Dockerfile'ы образов
 worlds/                     — SDF-миры и модель дрона (iris_cam)
 output/                     — логи нод (make logs читает отсюда)
 spawn.md                    — шпаргалка: точка старта «где сел — там и стартуем»
-Q.txt, CMD.txt, loiter.md   — актуальные заметки (вопросы-ответы по freefly,
-                              холодный старт, переход в LOITER-на-VINS)
+env.default                 — ЭТАЛОН .env (коммитится): .env при отсутствии сеется
+                              его копией автоматически (make ensure-env / freefly_lv)
+env.md                      — шпаргалка: .env — локальный профиль бокса (кто читает,
+                              лесенка приоритетов, текущие ключи LV/BS_SF_MASTER/WORLD)
+Q.txt, CMD.txt              — актуальные заметки (вопросы-ответы по freefly,
+                              холодный старт)
+LV1_loiter.md               — путь до LOITER-на-VINS в профиле LV=1 (GPS жив на
+                              буте, глушится в полёте; легаси-селектор CH6)
+LV2_loiter.md               — то же для LV=2 «GPS отсутствует с бута» (боевой
+                              дефолт: мост нулевой позы, origin руками,
+                              лесенка SF-мастера)
 doc/old/                    — архив (FAQ*, todo*, README, laptop_move.md,
                               concept.txt, спеки flow/yaw, tune_results)
 ```

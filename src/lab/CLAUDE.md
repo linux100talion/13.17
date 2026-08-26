@@ -391,11 +391,21 @@ Drive), как требует дисциплина прогона — пошаг
 
 ### `freefly_lv.sh` — единая обёртка пилотных freefly-прогонов (флаг `LV=0/1`)
 
-Один скрипт вместо двух эталонных env-блоков (см. `docker/sim/Q.txt`):
+Один скрипт вместо двух эталонных env-блоков (см. `docker/sim/Q.txt`).
+Дефолты берёт лесенкой: **env снаружи > `docker/sim/.env` (локальный профиль
+бокса, gitignore — тот же файл, что читает compose) > дефолт скрипта (LV=1)** —
+шпаргалка по `.env` (ключи, правила разбора, грабли): `docker/sim/env.md`.
+Эталон `.env` — **`docker/sim/env.default` (в git)**: при отсутствии `.env`
+сеется его копией автоматически (make/сам скрипт), так что `LV=2` и
+`BS_SF_MASTER=1` — дефолт и на свежем клоне: голый `bash src/lab/freefly_lv.sh`
+летит боевым профилем (⚠️ реплей СТАРЫХ сценариев без "sf" запускать с
+`BS_SF_MASTER=0`):
 
 ```bash
-bash src/lab/freefly_lv.sh          # LV=1 (default): freefly-LV — центр CH6 =
-                                    #   штатный LOITER-на-VINS, GPS глушится в полёте
+bash src/lab/freefly_lv.sh          # профиль бокса из docker/sim/.env
+                                    #   (без строк в .env — LV=1: freefly-LV,
+                                    #   центр CH6 = LOITER-на-VINS, GPS глушится
+                                    #   в полёте)
 LV=0 bash src/lab/freefly_lv.sh     # базовый freefly: только наш стек, GPS жив
 LV=2 bash src/lab/freefly_lv.sh     # GPS ОТСУТСТВУЕТ С БУТА: eeprom глушит приёмник
                                     #   до старта, origin руками (BS_SET_ORIGIN=1),

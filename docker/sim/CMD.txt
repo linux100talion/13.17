@@ -1,3 +1,6 @@
+LV=2 BS_SF_MASTER=1 теперь по умолчанию
+SPAWN_POSE="-0.6018 -11.0809 0.2450 0 0 -2.95235" bash src/lab/freefly_lv.sh
+
 
 // LV=2 ДРОН ВООБЩЕ БЕЗ GPS
 LV=2 BS_SF_MASTER=1 bash src/lab/freefly_lv.sh
