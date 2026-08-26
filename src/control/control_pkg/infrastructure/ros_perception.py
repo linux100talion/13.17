@@ -65,7 +65,7 @@ class RosPerception:
                  gyro_topic=None, att_extrap=True, att_extrap_max=0.2,
                  ipm_model=None, ipm_derot=None, ipm_wz_tau=None, ipm_win=None,
                  ipm_adapt=None, ipm_vel_tau=None, ipm_alt_floor=None,
-                 ipm_scale_ref=None, alt_src='global'):
+                 ipm_scale_ref=None, alt_src='global', alt_zero=False):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -157,6 +157,19 @@ class RosPerception:
         self._att_extrap = bool(att_extrap)
         self._att_extrap_max = float(att_extrap_max)
         self._alt = None
+        # ЛАТЧ НУЛЯ ВЫСОТЫ ПЕРЦЕПЦИИ (alt_zero, источник 'local'): z EKF смещён
+        # вниз на 0.2-0.3 м — на низком полёте это БОЛЬШЕ всей высоты, и гейт
+        # земли IPM не открывается вовсе (прогоны 183305/185921, разбор в
+        # config.perc_alt_zero). Смещение постоянное, дельта точная → на арме
+        # запоминаем z земли и вычитаем. latch_alt_zero() зовёт нода на фронте
+        # armed; если local_position ещё молчит (GPS-denied — обычное дело),
+        # латч ОТЛОЖЕН и сработает на первом же сообщении.
+        # только для 'local': у 'global'/'baro' высота и так отсчитывается
+        # от дома/земли, и латч там был бы вторым нулём поверх первого
+        self._alt_zero_on = bool(alt_zero) and alt_src == 'local'
+        self._alt_zero = 0.0
+        self._alt_raw = None          # последний СЫРОЙ z (для латча)
+        self._alt_zero_pending = False
         self._lateral = self._longitudinal = self._yaw = self._conf = 0.0
         self._att_yaw = 0.0
         self._kf_dx = self._kf_dy = self._kf_logs = self._kf_rot = 0.0
@@ -257,7 +270,28 @@ class RosPerception:
     def _on_lpos_alt(self, m):
         # EKF local z ≈ высота над точкой арма (origin EKF); на ровной сцене
         # эквивалент rel_alt. Отрицательный дребезг у земли клампим нулём.
-        self._alt = max(0.0, float(m.pose.position.z))
+        z = float(m.pose.position.z)
+        self._alt_raw = z
+        if self._alt_zero_pending:            # латч ждал первого сообщения
+            self._alt_zero = z
+            self._alt_zero_pending = False
+        self._alt = max(0.0, z - self._alt_zero)
+
+    def latch_alt_zero(self):
+        """Запомнить текущую высоту как НОЛЬ земли (зовётся на фронте armed).
+
+        Возвращает залатченный z (м) или None, если сырой высоты ещё не было —
+        тогда латч отложен до первого сообщения. Выключенный alt_zero и любой
+        источник кроме 'local' — no-op (там высота и так от дома/земли)."""
+        if not self._alt_zero_on:
+            return None
+        if self._alt_raw is None:
+            self._alt_zero_pending = True
+            return None
+        self._alt_zero = self._alt_raw
+        self._alt_zero_pending = False
+        self._alt = max(0.0, self._alt_raw - self._alt_zero)
+        return self._alt_zero
 
     def _set_alt(self, alt):
         self._alt = float(alt)
@@ -310,6 +344,7 @@ class RosPerception:
         s.ipm_vfwd, s.ipm_vlat = self._ipm_vfwd, self._ipm_vlat
         s.ipm_ok = self._ipm_ok
         s.ipm_fail = self._ipm_fail
+        s.perc_alt = self._alt        # по НЕЙ судит гейт земли IPM (не rel_alt)
         s.att_yaw = self._att_yaw
         return s
 

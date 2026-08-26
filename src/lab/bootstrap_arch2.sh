@@ -166,6 +166,9 @@ ARGS=()
 [ -n "${BS_ALT_SRC:-}" ]         && ARGS+=(--alt-src "$BS_ALT_SRC")
 # высота ПЕРЦЕПЦИИ (IPM/опора): global | local (EKF z, GPS-denied) | baro (экспер.)
 [ -n "${BS_PERC_ALT_SRC:-}" ]    && ARGS+=(--perc-alt-src "$BS_PERC_ALT_SRC")
+# ноль высоты перцепции по арму (1 = вкл): чинит смещение EKF local z −0.2..−0.3 м,
+# из-за которого гейт земли IPM не открывался на полёте ниже полуметра
+[ -n "${BS_PERC_ALT_ZERO:-}" ]   && ARGS+=(--perc-alt-zero "$BS_PERC_ALT_ZERO")
 [ -n "${BS_SET_ORIGIN:-}" ]      && ARGS+=(--set-origin "$BS_SET_ORIGIN")
 # координаты origin — примерная РЕАЛЬНАЯ точка старта (EKF строит по ним модель
 # магнитного поля WMM; дефолт = дом SITL, с 2026-08-24 Киев — та же точка, что

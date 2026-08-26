@@ -118,7 +118,8 @@ class BootstrapArch2Node(Node):
                                             ipm_vel_tau=cfg.ipm_vel_tau,
                                             ipm_alt_floor=cfg.ipm_alt_floor,
                                             ipm_scale_ref=cfg.ipm_scale_ref,
-                                            alt_src=cfg.perc_alt_src)
+                                            alt_src=cfg.perc_alt_src,
+                                            alt_zero=cfg.perc_alt_zero > 0)
             # ⚠️ Высота перцепции — СВОЯ ручка (perc_alt_src), НЕ cfg.alt_src:
             # 4 прогона 2026-08-19 с баро в перцепции (сырой И EMA) дали улёты
             # 15-59 м при наборе. Кампания 2026-08-24 доказала механизм замером
@@ -353,6 +354,7 @@ class BootstrapArch2Node(Node):
         self.create_subscription(Empty, '/mission/pilot_done',
                                  lambda _m: setattr(self, '_pilot_done', True), 1)
         self._hud_st = ''      # последний st= в /mission/status (лог переходов)
+        self._armed_prev = False   # фронт armed → латч нуля высоты перцепции
         self.timer = self.create_timer(0.05, self._tick)
         self.logger.info(
             f"alt_hold_bootstrap ARCH2: mode={cfg.control_mode} alt={cfg.alt}м "
@@ -376,6 +378,17 @@ class BootstrapArch2Node(Node):
     def _tick(self):
         s = self.telemetry.snapshot()
         if self.perception is not None:
+            # ФРОНТ ARMED → ноль высоты перцепции здесь и сейчас (perc_alt_zero):
+            # EKF local z смещён вниз на 0.2-0.3 м, и на низком полёте это больше
+            # всей высоты — гейт земли IPM не открывается (разбор 183305/185921 в
+            # config.perc_alt_zero). Латчим ДО merge: снапшот этого же тика уже
+            # понесёт исправленную высоту.
+            if s.armed and not self._armed_prev:
+                z0 = self.perception.latch_alt_zero()
+                if z0 is not None:
+                    self.logger.info(f"высота перцепции: ноль земли z0={z0:+.2f} м "
+                                     f"(латч по арму)")
+            self._armed_prev = s.armed
             self.perception.merge(s)          # камера → flow_* в снапшот
         # пилот → в снапшот (домен читает pilot_* как телеметрию)
         sticks = self.pilot.sticks()
@@ -712,6 +725,10 @@ def _parse() -> tuple:
     # высота ПЕРЦЕПЦИИ (масштаб IPM/гейты опоры) — отдельно от alt_src миссии
     p.add_argument('--perc-alt-src', dest='perc_alt_src',
                    default=_D.perc_alt_src, choices=['global', 'local', 'baro'])
+    # ноль высоты перцепции по арму (см. config.perc_alt_zero): чинит смещение
+    # EKF local z, из-за которого гейт земли IPM не открывался на низком полёте
+    p.add_argument('--perc-alt-zero', dest='perc_alt_zero', type=float,
+                   default=_D.perc_alt_zero)
     p.add_argument('--set-origin', dest='set_origin', type=float,
                    default=_D.set_origin)
     # координаты origin (примерная РЕАЛЬНАЯ точка старта — см. config.origin_lat:
