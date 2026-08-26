@@ -88,7 +88,7 @@ ea = make(1.05)
 feed(ea, 6.5, 0.0)
 feed(ea, 6.5, FPS_DT)
 check("адаптивная полоса на 6.5 м жива (ipm_ok=True)", ea.ipm_ok)
-check("окно отодвинуто за базовое (x0 > 6 м)", ea._ipm_prev_x0 > 6.0)
+check("окно отодвинуто за базовое (x0 > 6 м)", ea._ipm_prev_geo[0] > 6.0)
 check("неподвижный борт → путь ~0",
       abs(ea.ipm_fwd) < 0.05 and abs(ea.ipm_lat) < 0.05)
 
@@ -102,7 +102,7 @@ for adapt, name in ((0.0, "статичная"), (1.05, "адаптивная"))
 ea3 = make(1.05)
 feed(ea3, 3.0, 0.0)
 check("на 3 м адаптив сдвигает окно лишь на сантиметры (<0.4 м)",
-      3.0 <= ea3._ipm_prev_x0 < 3.4)
+      3.0 <= ea3._ipm_prev_geo[0] < 3.4)
 
 # --- 3. КОМПЕНСАЦИЯ СДВИГА ОКНА: честный набор 5→6 м на месте не рождает хода ---
 # 30 кадров по 3.3 см набора (1 м/с). Окно уезжает на ~1.07 м; без вычитания
@@ -203,7 +203,8 @@ check("z: фильтр мостит брак → 1.0+код/10 (>0.5, код в�
 
 # --- 7. ПОЛ ВЫСОТЫ (ipm_alt_floor): у земли канал жив, масштаб врёт ограниченно ---
 # Мотив (прогоны LV2/1 174603/210917): EKF-z занижает на 0.3 м → гейт 0.5 держал
-# канал до истинных 0.9 м на взлёте. С полом: гейт земли 0.15 (сырая высота),
+# канал до истинных 0.9 м на взлёте. С полом: гейт земли _ALT_GROUND=0.08 (сырая
+# высота; было 0.15 — резало истинные <0.45 при биасе EKF-z −0.3, прогон 214015),
 # геометрия не ниже пола. Ниже пола скорость завышается в floor/h_ист раз —
 # проверяем и работу у земли, и предсказуемость масштабной ошибки.
 efl = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05, ipm_alt_floor=0.5)
@@ -211,8 +212,8 @@ efl._ipm_update(render(efl, 0.35), 0.0, 0.35, 0.0, 0.0)
 efl._ipm_update(render(efl, 0.35), FPS_DT, 0.35, 0.0, 0.0)
 check("пол: истинные 0.35 (ниже старого гейта) — канал ЖИВ, путь ~0",
       efl.ipm_ok and abs(efl.ipm_fwd) < 0.05)
-efl._ipm_update(render(efl, 0.35), 2 * FPS_DT, 0.10, 0.0, 0.0)
-check("пол: сырая высота 0.10 < 0.15 — на земле, код 1",
+efl._ipm_update(render(efl, 0.35), 2 * FPS_DT, 0.05, 0.0, 0.0)
+check("пол: сырая высота 0.05 < 0.08 — на земле, код 1",
       not efl.ipm_ok and efl.ipm_fail == 1)
 # масштаб: EKF врёт 0.5 при истинных 1.0 → канал видит ~половину хода
 efs = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05, ipm_alt_floor=0.5)
@@ -232,6 +233,54 @@ for k in range(16):
     dx += 1.0 * FPS_DT
 check(f"пол: выше пола метрика не тронута ({eq.ipm_fwd:+.3f} против "
       f"{em.ipm_fwd:+.3f} в тесте 4)", abs(eq.ipm_fwd - em.ipm_fwd) < 1e-9)
+
+# --- 8. МАСШТАБНО-ИНВАРИАНТНАЯ ПОЛОСА (ipm_scale_ref): углы не зависят от высоты ---
+# Мотив (прогоны lv2 040737/041255): фиксированные 3-6 м с 0.6 м видны под 6-11°,
+# текстура в кашу, медиана LK → 0 при «годном» канале (gain 0.91 на 2-3 м → ~0.5 →
+# ~0 у земли). Масштаб s = alt/h_ref держит углы и размер варпа константными.
+# 8а. Тождество на h_ref: s=1 → бит-в-бит с выключенным
+ez = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05, ipm_scale_ref=3.0)
+e_ref = make(1.05)
+t, dx = 0.0, 0.0
+for k in range(16):
+    fr = render(ez, 3.0, dx)
+    ez._ipm_update(fr, t, 3.0, 0.0, 0.0)
+    e_ref._ipm_update(fr, t, 3.0, 0.0, 0.0)
+    t += FPS_DT
+    dx += 1.0 * FPS_DT
+check(f"масштаб: на h_ref=3 бит-в-бит с выключенным ({ez.ipm_fwd:+.3f} = "
+      f"{e_ref.ipm_fwd:+.3f})", abs(ez.ipm_fwd - e_ref.ipm_fwd) < 1e-12
+      and abs(ez.ipm_lat - e_ref.ipm_lat) < 1e-12)
+# 8б. У земли (0.6 м — зона каши у фиксированной полосы) ход меряется метрами
+e6 = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05, ipm_scale_ref=3.0)
+e6f = make(1.05)                      # фиксированная полоса — для сравнения в печати
+t, dx = 0.0, 0.0
+for k in range(16):
+    e6._ipm_update(render(e6, 0.6, dx), t, 0.6, 0.0, 0.0)
+    e6f._ipm_update(render(e6f, 0.6, dx), t, 0.6, 0.0, 0.0)
+    t += FPS_DT
+    dx += 1.0 * FPS_DT
+check(f"масштаб: ход 0.50 м на 0.6 м высоты — намеряно {e6.ipm_fwd:+.3f} (±30%; "
+      f"фикс-полоса дала {e6f.ipm_fwd:+.3f})", 0.35 < e6.ipm_fwd < 0.65)
+check("масштаб: боковой канал при этом молчит", abs(e6.ipm_lat) < 0.1)
+# 8в. Пол + масштаб вместе: EKF врёт 0.14 при истинных 0.6 → геометрия по полу 0.5,
+# полоса ~0.5-1.0 м, намеряно ×(0.5/0.6) ≈ 0.83 от истинного хода
+e56 = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05,
+                    ipm_alt_floor=0.5, ipm_scale_ref=3.0)
+t, dx = 0.0, 0.0
+for k in range(16):
+    e56._ipm_update(render(e56, 0.6, dx), t, 0.14, 0.0, 0.0)
+    t += FPS_DT
+    dx += 1.0 * FPS_DT
+check(f"масштаб+пол: EKF 0.14/истина 0.6 — канал жив, ход {e56.ipm_fwd:+.3f} "
+      f"(ожидание ~0.42 ±40%)", e56.ipm_ok and 0.25 < e56.ipm_fwd < 0.60)
+# 8г. Ход высоты не рвёт канал: размер варпа константен (res ∝ размерам полосы)
+eh = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_adapt=1.05, ipm_scale_ref=3.0)
+eh._ipm_update(render(eh, 3.0), 0.0, 3.0, 0.0, 0.0)
+sh3 = eh._ipm_prev.shape
+eh._ipm_update(render(eh, 2.4), FPS_DT, 2.4, 0.0, 0.0)
+check("масштаб: скачок высоты 3→2.4 м — форма варпа та же, канал не сброшен "
+      f"(код {eh.ipm_fail})", eh._ipm_prev.shape == sh3 and eh.ipm_fail != 7)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ АДАПТИВНАЯ ПОЛОСА IPM OK" if ok_all else "❌ СБОЙ")

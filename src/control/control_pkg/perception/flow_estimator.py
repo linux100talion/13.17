@@ -71,7 +71,7 @@ class FlowEstimator:
                  kf_seg_cap_sec=10.0, ipm=True, ipm_x0=3.0, ipm_x1=6.0,
                  ipm_yhalf=2.0, ipm_res=0.02, ipm_win=0.5, ipm_model='legacy',
                  ipm_derot=0.0, ipm_wz_tau=0.0, ipm_adapt=0.0, ipm_vel_tau=0.0,
-                 ipm_alt_floor=0.0):
+                 ipm_alt_floor=0.0, ipm_scale_ref=0.0):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -121,8 +121,9 @@ class FlowEstimator:
         # 0 = выкл; класс-дефолт 0 нарочно (офлайн-инструменты воспроизводят старые
         # прогоны, тот же принцип, что у ipm_model). Лётный дефолт — config.ipm_adapt.
         self.ipm_adapt = float(ipm_adapt)
-        self._ipm_prev_x0 = None    # начало окна ПРОШЛОГО кадра (дельта сдвига);
-                                    # живёт строго парой с _ipm_prev
+        self._ipm_prev_geo = None   # геометрия окна ПРОШЛОГО кадра (x0, длина,
+                                    # yhalf, res) — дельта сдвига + декод сетки
+                                    # p0 в дероте; живёт строго парой с _ipm_prev
         # --- КОМПЛЕМЕНТАРНЫЙ ФИЛЬТР СКОРОСТИ (наклон тяги + коррекция МНК-наклоном) ---
         # Чем болеет чистый МНК-наклон (замеры полётов 2026-08-18): лаг ~ipm_win/2
         # (0.25 с — на нём kp=100 звенит), провал кадров = слепота (демпфер получает
@@ -153,6 +154,22 @@ class FlowEstimator:
         # пересечении. 0 = выкл (класс-дефолт: офлайн-репро старых прогонов);
         # лётный дефолт — config.ipm_alt_floor.
         self.ipm_alt_floor = float(ipm_alt_floor)
+        # --- МАСШТАБНО-ИНВАРИАНТНАЯ ПОЛОСА (углы взгляда не зависят от высоты) ---
+        # У ФИКСИРОВАННОЙ полосы 3-6 м есть и ПОЛ ВЫСОТЫ, не только потолок: с 0.6 м
+        # она видна под скользящими 6-11°, текстура после выпрямления — каша, медиана
+        # LK тянется к НУЛЮ при живом канале (прогоны lv2 040737/041255: gain к истине
+        # 0.91 на 1.8-3.5 м → 0.53-0.78 на 0.4-0.8 → ~0 в худших местах; 18% годных
+        # движущихся кадров видят |v|<0.15 при истинных >0.5). Демпфер при этом давит
+        # в упор по полуслепому сигналу — bang-bang, борт не слушается стиков.
+        # ipm_scale_ref = h_ref (м): вся геометрия полосы масштабируется s = h/h_ref —
+        # x0·s, длина·s, yhalf·s, res·s. Углы взгляда при этом КОНСТАНТНЫ (на дефолтах
+        # ~27-45° после adapt), пиксельный размер варпа не меняется вовсе (res ∝
+        # размерам), decimation-отношение кадр→варп тоже — на ЛЮБОЙ высоте канал
+        # видит ту же картинку, что сегодня на h_ref. При h = h_ref поведение
+        # тождественно выключенному (s=1, бит-в-бит). Пол ipm_alt_floor применяется
+        # ДО масштаба — у земли полоса не сжимается ниже floor·(x0..x1)/h_ref.
+        # 0 = выкл (класс-дефолт: офлайн-репро); лётный дефолт — config.ipm_scale_ref.
+        self.ipm_scale_ref = float(ipm_scale_ref)
         self._ipm_v = [0.0, 0.0]     # [vfwd, vlat(влево+)] — состояние фильтра
         self._ipm_v_t = None
         self._ipm_meas_t = -1e9      # время последнего ГОДНОГО кадра (свежесть)
@@ -512,7 +529,12 @@ class FlowEstimator:
         return [self.cx + self.fx * P[0] / P[2], self.cy + self.fy * P[1] / P[2]]
 
     _VEL_HOLD = 1.0     # сек: сколько мостим провал измерений чистым прогнозом
-    _ALT_GROUND = 0.15  # м: гейт «точно на земле» при включённом ipm_alt_floor
+    _ALT_GROUND = 0.08  # м: гейт «точно на земле» при включённом ipm_alt_floor.
+                        # Судится по EKF-z: на земле он стоит около нуля (±0.03),
+                        # а В ВОЗДУХЕ занижает на ~0.3 (вертикаль VINS) — при 0.15
+                        # гейт резал истинные <0.45 м (прогон lv2 214015: код 1 в
+                        # 77% тиков бина 0.15–0.5 истинных). 0.08 сжимает слепую
+                        # зону до ~0.38, оставаясь выше наземного шума.
                         # (по СЫРОЙ высоте; тут же сброс фильтра скорости)
 
     def _vel_reset(self):
@@ -544,7 +566,7 @@ class FlowEstimator:
         if stamp - self._ipm_meas_t <= self._VEL_HOLD:
             self.ipm_vfwd, self.ipm_vlat = self._ipm_v
 
-    def _ipm_window(self, h, pitch):
+    def _ipm_window(self, h, pitch, x0=None):
         """Начало полосы ЭТОГО кадра: базовое x0 или отодвинутое до границы видимости.
 
         Граница: земля на дистанции X видна, пока atan(h/X) не глубже нижнего края
@@ -552,26 +574,40 @@ class FlowEstimator:
         положительный = нос ВНИЗ, как в `_ipm_px` legacy), то есть клевок опускает
         границу ближе, задирание носа — отодвигает. Запас ipm_adapt (≈1.05) держит
         ближний край окна чуть дальше границы: на самой кромке фичи полугаснут.
-        None = полосы не видно вовсе (взгляд у горизонта)."""
+        None = полосы не видно вовсе (взгляд у горизонта).
+        x0 — базовое начало этого кадра (масштабно-инвариантная полоса даёт своё;
+        None = ipm_x0)."""
+        if x0 is None:
+            x0 = self.ipm_x0
         if self.ipm_adapt <= 0.0:
-            return self.ipm_x0
+            return x0
         a = self.cam_tilt + pitch + math.atan2(self.cy, self.fy)
         if a >= 0.5 * math.pi:          # смотрим отвесно вниз — видно всё
-            return self.ipm_x0
+            return x0
         if a <= 0.05:                   # нос задран к горизонту — полосы нет
             return None
-        return max(self.ipm_x0, self.ipm_adapt * h / math.tan(a))
+        return max(x0, self.ipm_adapt * h / math.tan(a))
 
-    def _ipm_rectify(self, gray, h, pitch, roll, x0=None, x1=None):
-        """Полоса земли → метрический вид сверху (1 пиксель = ipm_res метров).
-        x0/x1 — окно этого кадра (None = базовое, для офлайн-инструментов)."""
+    def _ipm_rectify(self, gray, h, pitch, roll, x0=None, x1=None,
+                     yhalf=None, res=None, dims=None):
+        """Полоса земли → метрический вид сверху (1 пиксель = res метров).
+        x0/x1/yhalf/res — геометрия этого кадра (None = базовая, для
+        офлайн-инструментов; масштабно-инвариантная полоса даёт свою).
+        dims — пиксельный размер варпа (w, hh); None = посчитать делением здесь.
+        _ipm_update передаёт размер, посчитанный ОТ БАЗОВОЙ геометрии: отношение
+        размер/res математически не зависит от масштаба s, но деление уже
+        масштабированных float даёт ±1 пиксель (199.99↔200.01) — и смена формы
+        варпа на ходе высоты рвала бы канал кодом 7."""
         if x0 is None:
             x0 = self.ipm_x0
         if x1 is None:
             x1 = self.ipm_x1
+        if yhalf is None:
+            yhalf = self.ipm_yhalf
+        if res is None:
+            res = self.ipm_res
         src = []
-        for X, Y in ((x0, -self.ipm_yhalf), (x0, self.ipm_yhalf),
-                     (x1, self.ipm_yhalf), (x1, -self.ipm_yhalf)):
+        for X, Y in ((x0, -yhalf), (x0, yhalf), (x1, yhalf), (x1, -yhalf)):
             p = self._ipm_px(X, Y, h, pitch, roll)
             if p is None:
                 return None
@@ -579,8 +615,9 @@ class FlowEstimator:
         src = np.array(src, dtype=np.float32)
         if src[:, 0].min() < -2 * self.cx or src[:, 0].max() > 4 * self.cx:
             return None                     # полоса ушла далеко за кадр — доверять нечему
-        w = max(8, int(2 * self.ipm_yhalf / self.ipm_res))
-        hh = max(8, int((x1 - x0) / self.ipm_res))
+        if dims is None:
+            dims = (max(8, int(2 * yhalf / res)), max(8, int((x1 - x0) / res)))
+        w, hh = dims
         dst = np.array([[0, hh - 1], [w - 1, hh - 1], [w - 1, 0], [0, 0]], dtype=np.float32)
         return cv2.warpPerspective(gray, cv2.getPerspectiveTransform(src, dst), (w, hh))
 
@@ -624,7 +661,7 @@ class FlowEstimator:
             self.ipm_fail = 6 if not self.ipm else 1
             self._ipm_prev = None
             self._ipm_prev_t = None
-            self._ipm_prev_x0 = None
+            self._ipm_prev_geo = None
             self._vel_reset()
             return
         if self.ipm_alt_floor > 0.0:
@@ -634,24 +671,37 @@ class FlowEstimator:
             # ipm_ok при фильтре = «скорости можно верить» (измерения свежее _VEL_HOLD)
             self._vel_predict(stamp, pitch, roll, wz)
             self.ipm_ok = (stamp - self._ipm_meas_t) <= self._VEL_HOLD
-        x0 = self._ipm_window(alt, pitch)
+        # Геометрия полосы ЭТОГО кадра. При ipm_scale_ref всё ∝ s = alt/h_ref
+        # (углы взгляда константны, см. ctor); res ∝ s держит пиксельный размер
+        # варпа НЕИЗМЕННЫМ — prev/rect совместимы на любом ходе высоты, а смена
+        # масштаба между соседними кадрами (плавная, 30 fps) читается LK как
+        # лёгкий зум с медианой ~0.
+        sc = alt / self.ipm_scale_ref if self.ipm_scale_ref > 0.0 else 1.0
+        length = (self.ipm_x1 - self.ipm_x0) * sc
+        yhalf = self.ipm_yhalf * sc
+        res = self.ipm_res * sc
+        x0 = self._ipm_window(alt, pitch, self.ipm_x0 * sc)
         if x0 is None:
             self.ipm_fail = 2
             self._ipm_prev = None
             self._ipm_prev_t = None
-            self._ipm_prev_x0 = None
+            self._ipm_prev_geo = None
             return
-        x1 = x0 + (self.ipm_x1 - self.ipm_x0)
-        rect = self._ipm_rectify(gray, alt, pitch, roll, x0, x1)
+        x1 = x0 + length
+        # размер варпа — от БАЗОВОЙ геометрии (инвариантен к s, см. _ipm_rectify);
+        # при s=1 деление тождественно прежнему — бит-в-бит с легаси
+        dims = (max(8, int(2 * self.ipm_yhalf / self.ipm_res)),
+                max(8, int((self.ipm_x1 - self.ipm_x0) / self.ipm_res)))
+        rect = self._ipm_rectify(gray, alt, pitch, roll, x0, x1, yhalf, res, dims)
         if rect is None:
             self.ipm_fail = 3
             self._ipm_prev = None
             self._ipm_prev_t = None
-            self._ipm_prev_x0 = None
+            self._ipm_prev_geo = None
             return
         prev = self._ipm_prev
         prev_t = self._ipm_prev_t
-        prev_x0 = self._ipm_prev_x0
+        prev_geo = self._ipm_prev_geo
         # ⚠️ ВРЕМЯ ОПОРНОГО КАДРА ОБНОВЛЯЕТСЯ ЗДЕСЬ ЖЕ, вместе с самим кадром. Раньше оно
         # ставилось в конце, после успешного шага потока, и три ранних `return` ниже (мало
         # точек, мало выживших, смена размера) сдвигали КАДР, но не ВРЕМЯ. Тогда `dpsi`
@@ -661,7 +711,7 @@ class FlowEstimator:
         # 2.06-2.44 м/с в трёх прогонах из пяти против 0.11-0.23 в остальных).
         self._ipm_prev = rect
         self._ipm_prev_t = stamp
-        self._ipm_prev_x0 = x0
+        self._ipm_prev_geo = (x0, length, yhalf, res)
         if prev is None or prev.shape != rect.shape:
             self.ipm_fail = 7
             return
@@ -696,11 +746,11 @@ class FlowEstimator:
         if self.ipm_derot and prev_t is not None:
             dpsi = self.ipm_derot * float(wz) * (stamp - prev_t)
             if abs(dpsi) > 1e-9:
-                Yg = p0[:, 0] * self.ipm_res - self.ipm_yhalf
-                # p0 живут в сетке ПРОШЛОГО кадра → дальний край его окна
-                Xg = (prev_x0 + (self.ipm_x1 - self.ipm_x0)) - p0[:, 1] * self.ipm_res
-                d = d - np.column_stack([Xg * dpsi / self.ipm_res,
-                                         Yg * dpsi / self.ipm_res])
+                # p0 живут в сетке ПРОШЛОГО кадра → его геометрия целиком
+                px0, plen, pyh, pres = prev_geo
+                Yg = p0[:, 0] * pres - pyh
+                Xg = (px0 + plen) - p0[:, 1] * pres
+                d = d - np.column_stack([Xg * dpsi / pres, Yg * dpsi / pres])
         # столбец = Y вправо, строка = X вперёд (строка 0 — дальний край). Это оси
         # СЕТКИ, а не знака скорости борта: фичи в полосе движутся ПРОТИВ хода борта.
         # Продольная крутизна к скорости борта +1.00/+1.03/+0.97 (вперёд = плюс).
@@ -709,11 +759,11 @@ class FlowEstimator:
         # а body-twist Gazebo — FLU (y = влево); перезамер полёта 2026-08-18 по
         # производной мировой позиции дал ipm_vlat ≈ −v_right с наклоном ~1.
         # Потребитель (DpRollRate._cmd) компенсирует минусом, как DpRollHold.
-        self.ipm_lat += float(np.median(d[:, 0])) * self.ipm_res
+        self.ipm_lat += float(np.median(d[:, 0])) * res
         # Сдвиг АДАПТИВНОГО окна между кадрами (x0 − prev_x0) неотличим для потока от
         # хода вперёд (статичная точка земли сползает вниз по сетке ровно на сдвиг),
         # но он известен ТОЧНО — вычитаем. При ipm_adapt=0 окна совпадают, дельта 0.
-        self.ipm_fwd += float(np.median(d[:, 1])) * self.ipm_res - (x0 - prev_x0)
+        self.ipm_fwd += float(np.median(d[:, 1])) * res - (x0 - prev_geo[0])
         self.ipm_ok = True
         self.ipm_fail = 0
         self._ipm_meas_t = stamp

@@ -65,7 +65,7 @@ class RosPerception:
                  gyro_topic=None, att_extrap=True, att_extrap_max=0.2,
                  ipm_model=None, ipm_derot=None, ipm_wz_tau=None, ipm_win=None,
                  ipm_adapt=None, ipm_vel_tau=None, ipm_alt_floor=None,
-                 alt_src='global'):
+                 ipm_scale_ref=None, alt_src='global'):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -121,6 +121,8 @@ class RosPerception:
             extra['ipm_vel_tau'] = float(ipm_vel_tau)
         if ipm_alt_floor is not None:
             extra['ipm_alt_floor'] = float(ipm_alt_floor)
+        if ipm_scale_ref is not None:
+            extra['ipm_scale_ref'] = float(ipm_scale_ref)
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,
                                   roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
                                   yaw_smooth_n=yaw_smooth_n, **extra)

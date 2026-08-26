@@ -61,9 +61,10 @@ class Fly:
         self.t += self.dt
         self.alt += vz * self.dt
         kw.setdefault('ipm_ok', True)
+        kw.setdefault('flow_conf', 0.5)
         alt = self.alt + wobble * math.sin(2.0 * math.pi * self.t / 3.0)
         return DroneState(flow_seq=self.seq, now_sim=self.t, flow_dt=self.dt,
-                          flow_conf=0.5, rel_alt=alt, **kw)
+                          rel_alt=alt, **kw)
 
 
 def run(ax, fly, n, vz=0.0, wobble=0.0, **kw):
@@ -240,6 +241,22 @@ psat.update(f.step(ipm_vfwd=0.0, ipm_fwd=0.0), Setpoint(), f.dt)
 psat.update(f.step(ipm_vfwd=0.0, ipm_fwd=8.0), Setpoint(), f.dt)
 check("станция: далеко от точки → цель клампится в ±pos_vmax (−1.0)",
       psat.rate_dbg()[0] == -1.0)
+
+# --- 8. АВТОРИТЕТ: здоровье оси судит ЕЁ СОБСТВЕННЫЙ канал, не полнокадровый conf ---
+# Прогон lv2_joy_20260825_214015: ниже ~1.2 м полнокадровый LK теряет фичи
+# (flow_conf 0.04–0.31) при живом IPM-канале (99% годных), и базовый blend душил
+# выход до 0–50 PWM при ошибке +5.4 м/с — «борт не слушает стики у земли».
+# Авторитет IPM-осей = 1 (_IpmGated._authority); здоровье канала сторожат
+# ipm_ok + гейты секций 1–5 с hold+fade.
+au = DpRollRate(kp=30.0, ki=0.0, kd=0.0, max_speed=0.0, alt_band=0.0, arm_frames=0)
+f = Fly()
+au.enter(DroneState(flow_seq=-1))
+check("авторитет: полнокадровый conf=0 НЕ душит IPM-ось (полный закон, +30)",
+      run(au, f, 1, ipm_vlat=1.0, flow_conf=0.0) == RC_CENTER + 30)
+# гейт самого канала при этом жив: негодный кадр не рождает новой команды
+check("авторитет: провал СВОЕГО канала (ipm_ok=False) по-прежнему гейтит "
+      "(держится +30, не пересчитан в +90)",
+      run(au, f, 1, ipm_vlat=3.0, ipm_ok=False, flow_conf=0.0) == RC_CENTER + 30)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ГЕЙТЫ ВИДА СВЕРХУ OK" if ok_all else "❌ СБОЙ")

@@ -328,6 +328,15 @@ class _FlowDamper1D(StabilizationStrategy):
         """Годен ли сигнал этой оси в этом кадре (переопределяется, где есть чем judge)."""
         return True
 
+    def _authority(self, s) -> float:
+        """Авторитет оси [0..1] — множитель выхода по здоровью ЕЁ СОБСТВЕННОГО сигнала.
+
+        База судит по flow_conf (число треков ПОЛНОКАДРОВОГО LK) — честно для осей,
+        чей сигнал из него и считается (flow_lateral, flow_yaw, kf_logs). Ось с
+        ДРУГИМ источником обязана переопределить: судить её по чужому сигналу —
+        наследованная ошибка (см. _IpmGated._authority, прогон lv2 214015)."""
+        return _blend(s.flow_conf, self.conf_min, self.conf_full)
+
     def _fdt(self, s) -> float:
         """Шаг интегрирования = время С ПРОШЛОГО ПРОДВИЖЕНИЯ КОНТУРА, а не `flow_dt`.
 
@@ -367,7 +376,7 @@ class _FlowDamper1D(StabilizationStrategy):
         elif s.flow_seq != self._last_seq:          # НОВЫЙ кадр → продвигаем PID
             self._last_seq = s.flow_seq
             fdt = self._fdt(s)
-            blend = _blend(s.flow_conf, self.conf_min, self.conf_full)
+            blend = self._authority(s)
             if self._cmd_mode == "pos":
                 self._sp_rate = self._cmd(sp) * self.cmd_gain    # ед. сигнала в секунду
                 self._sp += self._sp_rate * fdt                  # УСТАВКА ЕДЕТ
@@ -771,6 +780,9 @@ class _IpmGated(_FlowDamper1D):
     ⚠️ Метод МЕНЯЕТ СОСТОЯНИЕ — база зовёт его ровно раз на новый кадр
     (`flow_seq != _last_seq`); False замораживает PID (команда держится по часам
     `_last_ok_sim` и гаснет к 2·stale) и забывает производную.
+    ⚠️ АВТОРИТЕТ ЭТИХ ОСЕЙ = 1 (`_authority` переопределён): базовый blend по
+    flow_conf судил их по здоровью ЧУЖОГО сигнала и душил у земли — разбор в
+    самом методе.
     ⚠️ Гейт по высоте — ПО ОСЯМ РАЗНЫЙ, и это не забывчивость: боковая ось геометрически
     почти не задета (полоса не смещается вбок при смене высоты — замер: наклон +0.25
     против +0.67, насыщения крена нет ни в одном прогоне), а слепой крен на наборе
@@ -815,6 +827,17 @@ class _IpmGated(_FlowDamper1D):
             self._armed += 1
             return False
         return True
+
+    def _authority(self, s) -> float:
+        # АВТОРИТЕТ = 1: здоровье IPM-канала уже судят ipm_ok + гейты выше
+        # (_signal_ok) с hold+fade базы. Базовый blend — доверие к ПОЛНОКАДРОВОМУ
+        # потоку, то есть чужому сигналу: ниже ~1.2 м полнокадровый LK теряет
+        # фичи (conf 0.04–0.31 по бинам высоты) при живом IPM-канале (годен 99%),
+        # и оси при ошибке +5.4 м/с выдавали 0–50 PWM вместо упора 150 — «борт
+        # не слушает стики у земли». Прогон lv2_joy_20260825_214015:
+        # corr(|PWM|, blend·150)=+0.99, медианы совпали точно. На ≥1.5 м blend
+        # и так был 1.0 → для отлётанных серий изменение нейтрально.
+        return 1.0
 
 
 class DpPitchRate(_IpmGated):
