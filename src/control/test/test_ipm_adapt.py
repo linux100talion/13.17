@@ -282,6 +282,40 @@ eh._ipm_update(render(eh, 2.4), FPS_DT, 2.4, 0.0, 0.0)
 check("масштаб: скачок высоты 3→2.4 м — форма варпа та же, канал не сброшен "
       f"(код {eh.ipm_fail})", eh._ipm_prev.shape == sh3 and eh.ipm_fail != 7)
 
+# --- 9. ФВЧ ПРОГНОЗА УСКОРЕНИЯ (ipm_acc_tau): балансирующий ветер наклон не
+# интегрируется. Мотив (194912, висение 0.26 м, ветер 5 м/с): борт держит крен
+# +3.9°, прогноз a = g·sin(крен) считает это разгоном, комплементарный фильтр
+# оставляет установившуюся ошибку ≈ g·sin(крен)·ipm_vel_tau → боковая ось
+# смещена на −0.25 м/с, а демпфер зануляет то, что видит.
+ROLL = math.radians(3.92)           # крен удержания против ветра, как в прогоне
+A_EXP = 9.81 * math.sin(ROLL)       # что насчитает прогноз по наклону (м/с²)
+
+def _pred(tau, n=600, dt=FPS_DT, roll=ROLL):
+    """Прогноз ускорения после n кадров ПОСТОЯННОГО крена."""
+    e = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_acc_tau=tau)
+    out = 0.0
+    for k in range(n):
+        out = e._acc_debias(k * dt, 0.0, -9.81 * math.sin(roll))[1]
+    return out
+
+check("acc_tau=0 — прогноз как есть (прежнее поведение бит-в-бит)",
+      abs(_pred(0.0) - (-A_EXP)) < 1e-12)
+p5 = _pred(5.0)
+check(f"acc_tau=5: постоянный крен 3.9° съеден ФВЧ ({p5:+.4f} против "
+      f"{-A_EXP:+.4f} без него)", abs(p5) < 0.05 * A_EXP)
+# ⚠️ ПЕРЕМЕННАЯ часть обязана выживать — ради неё прогноз и вводился
+e = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_acc_tau=5.0)
+for k in range(300):                       # прогрев на постоянном крене
+    e._acc_debias(k * FPS_DT, 0.0, -9.81 * math.sin(ROLL))
+step = e._acc_debias(300 * FPS_DT, 0.0, -9.81 * math.sin(math.radians(20.0)))[1]
+check(f"acc_tau=5: РЕЗКИЙ крен 20° проходит ({step:+.2f} м/с², ждём около "
+      f"{-9.81 * math.sin(math.radians(20.0)) + A_EXP:+.2f})",
+      abs(step) > 0.8 * abs(-9.81 * math.sin(math.radians(20.0)) + A_EXP))
+# разгон веса (как у _wz_debias): первый отсчёт не тащится τ секунд
+e1 = FlowEstimator(FX, FY, CX, CY, np.eye(3), ipm_acc_tau=30.0)
+first = e1._acc_debias(0.0, 0.0, -A_EXP)[1]
+check("первый отсчёт становится нулём, а не течёт τ секунд", abs(first) < 1e-12)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ АДАПТИВНАЯ ПОЛОСА IPM OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

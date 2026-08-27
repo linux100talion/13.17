@@ -157,6 +157,9 @@ ARGS=()
 # пол высоты перцепции для геометрии IPM, м (гейт земли 0.15); 0 = старый гейт 0.5
 [ -n "${BS_IPM_ALT_FLOOR:-}" ] && ARGS+=(--ipm-alt-floor "$BS_IPM_ALT_FLOOR")
 [ -n "${BS_IPM_SCALE_REF:-}" ] && ARGS+=(--ipm-scale-ref "$BS_IPM_SCALE_REF")
+# ФВЧ прогноза ускорения (сек, 0 = выкл): снимает балансирующий ветер наклон, из-за
+# которого боковая ось видела −0.25 м/с и борт ехал ровно с этой скоростью
+[ -n "${BS_IPM_ACC_TAU:-}" ]   && ARGS+=(--ipm-acc-tau "$BS_IPM_ACC_TAU")
 # скорость IPM в EKF (VISION_SPEED_ESTIMATE): 1 = вкл; лечит A4-рампу в корне
 [ -n "${BS_VISION_VEL:-}" ]    && ARGS+=(--vision-vel "$BS_VISION_VEL")
 [ -n "${BS_VISION_POSE_SRC:-}" ] && ARGS+=(--vision-pose-src "$BS_VISION_POSE_SRC")

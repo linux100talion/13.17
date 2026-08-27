@@ -118,6 +118,7 @@ class BootstrapArch2Node(Node):
                                             ipm_vel_tau=cfg.ipm_vel_tau,
                                             ipm_alt_floor=cfg.ipm_alt_floor,
                                             ipm_scale_ref=cfg.ipm_scale_ref,
+                                            ipm_acc_tau=cfg.ipm_acc_tau,
                                             alt_src=cfg.perc_alt_src,
                                             alt_zero=cfg.perc_alt_zero > 0)
             # ⚠️ Высота перцепции — СВОЯ ручка (perc_alt_src), НЕ cfg.alt_src:
@@ -729,6 +730,10 @@ def _parse() -> tuple:
     # EKF local z, из-за которого гейт земли IPM не открывался на низком полёте
     p.add_argument('--perc-alt-zero', dest='perc_alt_zero', type=float,
                    default=_D.perc_alt_zero)
+    # ФВЧ прогноза ускорения в фильтре скорости IPM (см. config.ipm_acc_tau):
+    # снимает балансирующий ветер наклон, из-за которого боковая ось смещена
+    p.add_argument('--ipm-acc-tau', dest='ipm_acc_tau', type=float,
+                   default=_D.ipm_acc_tau)
     p.add_argument('--set-origin', dest='set_origin', type=float,
                    default=_D.set_origin)
     # координаты origin (примерная РЕАЛЬНАЯ точка старта — см. config.origin_lat:
