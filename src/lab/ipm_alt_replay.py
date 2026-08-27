@@ -42,8 +42,19 @@ ipm_model/derot/wz_tau/win/adapt/vel_tau/alt_floor/scale_ref задаются en
     IA_BAG=/root/sim_ws/output/joystick/.../bag python3 /lab/ipm_alt_replay.py'
 ⚠️ PYTHONPATH на ИСХОДНИКИ, а не на install: colcon КОПИРУЕТ ament_python-пакет,
 иначе стенд молча проверит версию кода на момент последнего colcon build.
+ВИЗУАЛИЗАЦИЯ (IA_WARP_MP4): рядом с метриками стенд умеет писать видео «что видит
+канал» — слева исходный кадр с НАРИСОВАННОЙ полосой земли (четыре угла, спроецированные
+БОЕВЫМ `_ipm_px`), справа сам выпрямленный варп, тот самый, по которому считается LK.
+Геометрия берётся из `_ipm_prev_geo` оценщика, а не пересчитывается стендом — рисуем
+ровно то, что канал и обработал. Строка кода причины сверху: видно, на каких кадрах
+он отваливается и почему. Сама рисовалка — в общем `ipm_panel.py`: ею же пишет
+`ipm_video.py` артефакт прогона `scene_ipm.mp4` (рядом с `scene_hud.mp4`), так что
+стенд и прогон показывают ОДНО И ТО ЖЕ.
+
 Env: IA_BAG, IA_CAM_W/IA_CAM_H (960×540), IA_T0/IA_T1 (окно воздуха, с от начала
-bag; по умолчанию считается по истинной AGL > IA_AIR), IA_CSV (дамп по кадрам).
+bag; по умолчанию считается по истинной AGL > IA_AIR), IA_CSV (дамп по кадрам),
+IA_WARP_MP4 (путь к видео варпа), IA_WARP_VAR (A/B/C, чей варп писать; default C),
+IA_WARP_ZOOM (увеличение варпа, default 3).
 """
 import math
 import os
@@ -62,11 +73,16 @@ from sensor_msgs.msg import Image
 
 from control_pkg.perception.flow_estimator import FlowEstimator
 
+from ipm_panel import FAIL_NAME, warp_panel      # общая рисовалка (см. ipm_panel.py)
+
 BAG = os.environ.get('IA_BAG', '/root/sim_ws/output/scene_bag')
 CAM_W = float(os.environ.get('IA_CAM_W', 960))
 CAM_H = float(os.environ.get('IA_CAM_H', 540))
 AIR = float(os.environ.get('IA_AIR', 0.15))       # м AGL: «в воздухе»
 CSV = os.environ.get('IA_CSV', '')
+WARP_MP4 = os.environ.get('IA_WARP_MP4', '')
+WARP_VAR = os.environ.get('IA_WARP_VAR', 'C')[0].upper()
+WARP_ZOOM = int(os.environ.get('IA_WARP_ZOOM', 3))
 # ровно то, что кладёт в оценщик bootstrap_node (FLOW_R)
 FLOW_R = [0.0, -1.0, 0.0, -0.25708, 0.0, -0.96639, 0.96639, 0.0, -0.25708]
 # ЛЁТНЫЙ конфиг прогона (config.py + .env): derot/wz_tau/win из lv2_..._183305.env,
@@ -78,10 +94,8 @@ CFG = dict(ipm_model=os.environ.get('IA_MODEL', 'exact'),
            ipm_adapt=float(os.environ.get('IA_ADAPT', 1.05)),
            ipm_vel_tau=float(os.environ.get('IA_VELTAU', 0.4)),
            ipm_alt_floor=float(os.environ.get('IA_ALTFLOOR', 0.5)),
-           ipm_scale_ref=float(os.environ.get('IA_SCALEREF', 3.0)))
-FAIL_NAME = {0: 'годен', 1: 'гейт высоты', 2: 'окно не видно', 3: 'варп за кадром',
-             4: 'мало фич (<20)', 5: 'мало выживших LK (<15)', 6: 'канал выключен',
-             7: 'нет опорного кадра'}
+           ipm_scale_ref=float(os.environ.get('IA_SCALEREF', 3.0)),
+           ipm_acc_tau=float(os.environ.get('IA_ACCTAU', 0.0)))
 
 
 def euler(q):
@@ -170,6 +184,7 @@ def main():
     r.open(StorageOptions(uri=BAG, storage_id='sqlite3'), ConverterOptions('cdr', 'cdr'))
     r.set_filter(__import__('rosbag2_py').StorageFilter(topics=['/image_color']))
     n = 0
+    warp_w, warp_frames, warp_t, warp_sz = None, [], [], None
     while r.has_next():
         _topic, raw, _ = r.read_next()
         msg = deserialize_message(raw, Image)
@@ -193,7 +208,32 @@ def main():
             est._ipm_update(gray, t, alt, pitch, roll, wz)
             rows[key].append((t - t0, est.ipm_fail, float(est.ipm_ok),
                               est.ipm_vfwd, est.ipm_vlat, alt))
+            if WARP_MP4 and key[0] == WARP_VAR and w0 <= t - t0 <= w1:
+                img = warp_panel(gray, est, alt, pitch, roll, t - t0,
+                                 zoom=WARP_ZOOM, agl=alt_true)
+                if warp_w is None:
+                    warp_frames.append(img); warp_t.append(t)
+                    if len(warp_frames) >= 60:      # оценка fps по первым кадрам
+                        dt = float(np.median(np.diff(warp_t)))
+                        fps = max(1.0, min(1.0 / dt if dt > 0 else 10.0, 60.0))
+                        warp_sz = (img.shape[1], img.shape[0])
+                        warp_w = cv2.VideoWriter(
+                            WARP_MP4, cv2.VideoWriter_fourcc(*'mp4v'), fps, warp_sz)
+                        for fr in warp_frames:
+                            warp_w.write(fr)
+                        warp_frames.clear()
+                else:
+                    # кадр чужого размера cv2 МОЛЧА выбросил бы (панель теперь
+                    # фиксирована, но терять кадры без единого слова — дороже)
+                    if (img.shape[1], img.shape[0]) != warp_sz:
+                        img = cv2.resize(img, warp_sz, interpolation=cv2.INTER_AREA)
+                    warp_w.write(img)
         n += 1
+    if WARP_MP4 and warp_w is not None:
+        warp_w.release()
+        print(f'  видео варпа (вариант {WARP_VAR}) → {WARP_MP4}')
+    elif WARP_MP4:
+        print('  ⚠️ кадров меньше пробы fps — видео варпа не записано')
     print(f'  кадров прокручено: {n}')
 
     for key in ests:

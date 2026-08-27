@@ -531,7 +531,9 @@ bag (лента событий: CH6/жесты/высоты + черновик �
 Каждый прогон `freefly_lv.sh` архивируется в `output/joystick/<NAME>/`
 (scene.mp4 + **scene_hud.mp4** — пост-рендер debug-HUD из bag «глазами пилота
 OpenHD», `hud_video.py` тем же кодом `nav_pkg/hud_renderer.py`, что живой FPV;
-`HUD_MP4=0` — выключить; + мета `.env` + bag + joy.log; `NAME=…` или автогенерат
+`HUD_MP4=0` — выключить; + **scene_ipm.mp4** — то же для КАНАЛА ВИДА СВЕРХУ
+(`ipm_video.py`: полоса земли на кадре + выпрямленный варп + лётные значения
+`/flow_dbg8|9` рядом с истиной; `IPM_MP4=0` — выключить); + мета `.env` + bag + joy.log; `NAME=…` или автогенерат
 `lv<LV>_<пилот>_<дата_время>`; `KEEP_BAG=0` — не забирать bag) — иначе
 видео/bag живут только до следующего прогона (capture_scene чистит на старте).
 JPEG-кадры в этой серии не делаются (`FRAMES=0`). Запуск поверх летящего
@@ -602,6 +604,8 @@ docker exec p1317_nav bash -lc "$SRC; python3 /lab/<tool> ..."
 | `bag_frames.py "n:wall,…"\|N` | кадры `/image_color` из bag по wall-моментам (= эпоха логов VINS) + монтаж + метрики | `/lab/bag_frames.py "init:1782653941,reboot:1782654163"` |
 | `phase_stats.py <bag>…` | тайминги фаз freefly-прогона по bag'ам (prearm → ALT_HOLD → ARMED → отрыв → init VINS → st=READY → CH6-центр → LOITER) + сводка mean/min/max; старые bag без `/mission/status` — частично | `python3 /lab/phase_stats.py /root/sim_ws/output/joystick/*/bag` |
 | `hud_video.py` | пост-рендер debug-HUD на видео из bag → `scene_hud.mp4` (HUD живёт только в FPV :5600, в bag его нет; рисует тем же `nav_pkg/hud_renderer.py`; зелёные точки фич трекера — из каналов `/feature`). Env: `SCENE_BAG`, `SCENE_HUD_MP4`, `SCENE_MAXW`, `SCENE_FPS`, `SCENE_FEAT_DOTS` | `SCENE_BAG=…/joystick/<RUN>/bag python3 /lab/hud_video.py` |
+| `ipm_video.py` | пост-рендер КАНАЛА ВИДА СВЕРХУ из bag → `scene_ipm.mp4`: слева кадр с нарисованной полосой земли (боевой `_ipm_px`), справа выпрямленный варп + `ipm` (реплей) / `rec` (`/flow_dbg8\|9`, что канал выдал в полёте) / `true` (истина Gazebo). Варп в bag не пишется — считает настоящий `FlowEstimator._ipm_update` лётным конфигом (`BS_*` окружения, для архива — из его `<NAME>.env`; сегодняшний дефолт помечается `*`). Углы/ω — истина Gazebo (в freefly-бэгах нет `/mavros/imu/data`). Env: `SCENE_BAG`, `SCENE_IPM_MP4`, `IPM_ZOOM`, `IPM_PAD`, `IPM_ALL`, `IPM_ALT_SRC` | `SCENE_BAG=…/joystick/<RUN>/bag python3 /lab/ipm_video.py` |
+| `ipm_alt_replay.py` | стенд A/B/C «что было бы при другой высоте перцепции» (EKF / истина / латч по арму) на ОДНОМ потоке кадров; `IA_WARP_MP4` — то же видео канала. Рисовалка общая с `ipm_video.py` — `ipm_panel.py` | `IA_BAG=…/bag PYTHONPATH=/root/sim_ws/src/control:$PYTHONPATH python3 /lab/ipm_alt_replay.py` |
 
 Нужен IMU в bag для FFT — писать с `TOPICS_EXTRA="/mavros/imu/data /mavros/imu/data_raw"`.
 IMU sim-частоту в рантайме подтверждает `docker/sim/scripts/imu_rate.py` (его зовёт

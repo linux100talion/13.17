@@ -297,6 +297,25 @@ if [ "${HUD_MP4:-1}" = "1" ] && [ -d "$SIMDIR/output/scene_bag" ]; then
         || echo "⚠️ hud_video.py упал — scene_hud.mp4 не будет (прогон цел)" >&2
 fi
 
+# ── 3.6) пост-рендер канала вида сверху (scene_ipm.mp4; IPM_MP4=0 — выключить) ─
+# Варп в bag не пишется — ipm_video.py пересчитывает его БОЕВЫМ FlowEstimator и
+# рисует общей с офлайн-стендом рисовалкой (ipm_panel.py): слева кадр с полосой
+# земли, справа выпрямленный варп + лётные значения из /flow_dbg8|9 рядом с
+# истиной Gazebo. Конфиг канала — из ЭТОГО окружения (те же BS_*, что летели),
+# поэтому проброс BS_* тем же автосписком, что в capture_scene.sh (рукописный
+# белый список уже терял ручки молча).
+if [ "${IPM_MP4:-1}" = "1" ] && [ -d "$SIMDIR/output/scene_bag" ]; then
+    echo "=== пост-рендер канала вида сверху (scene_ipm.mp4) ==="
+    IPM_ENVS=()
+    while IFS= read -r k; do IPM_ENVS+=(-e "$k"); done \
+        < <(env | sed -n 's/^\(BS_[A-Z0-9_]*\)=.*/\1/p' | sort)
+    docker exec "${IPM_ENVS[@]}" "$NAV" bash -lc 'source /opt/ros/humble/setup.bash;
+        source /opt/overlay/install/setup.bash;
+        source /root/sim_ws/install/setup.bash;
+        python3 /lab/ipm_video.py' \
+        || echo "⚠️ ipm_video.py упал — scene_ipm.mp4 не будет (прогон цел)" >&2
+fi
+
 # ── 4) архив прогона: docker/sim/output/joystick/<NAME>/ ─────────────────────
 # Имя: NAME=… снаружи или автогенерат lv<LV>_<пилот>_<дата_время>. Внутрь едут:
 # scene.mp4, мета <NAME>.env (все BS_*/WIND_ + commit; та же идея, что у
@@ -315,7 +334,7 @@ mkdir -p "$RUN_DIR"
     echo "# freefly_lv: $NAME (rc=$RC)"
     echo "# commit: $(git -C "$SCRIPT_DIR/../.." rev-parse --short HEAD 2>/dev/null || echo '?')"
     echo "LV=$LV  RES=$RES"
-    env | { grep -E '^(BS_|WIND_|SPAWN_|TOPICS_|GDRIVE_|MP4)' || true; } | sort
+    env | { grep -E '^(BS_|WIND_|SPAWN_|TOPICS_|GDRIVE_|MP4|HUD_MP4|IPM_MP4)' || true; } | sort
 } > "$RUN_DIR/$NAME.env"
 # Каждый артефакт — со своей громкой диагностикой: шаг 4 НЕ умирает молча и не
 # молчит о пропаже (bag прогона 2026-08-22 не доехал до архива без единого слова).
@@ -330,6 +349,12 @@ if [ -f "$SIMDIR/output/scene_img/scene_hud.mp4" ]; then
         || echo "⚠️ scene_hud.mp4 не скопировался в архив" >&2
 elif [ "${HUD_MP4:-1}" = "1" ]; then
     echo "⚠️ scene_hud.mp4 нет (hud_video.py упал или bag не писался)" >&2
+fi
+if [ -f "$SIMDIR/output/scene_img/scene_ipm.mp4" ]; then
+    cp "$SIMDIR/output/scene_img/scene_ipm.mp4" "$RUN_DIR/scene_ipm.mp4" \
+        || echo "⚠️ scene_ipm.mp4 не скопировался в архив" >&2
+elif [ "${IPM_MP4:-1}" = "1" ]; then
+    echo "⚠️ scene_ipm.mp4 нет (ipm_video.py упал или bag не писался)" >&2
 fi
 if [ "$KEEP_BAG" = "1" ]; then
     if [ -d "$SIMDIR/output/scene_bag" ]; then
