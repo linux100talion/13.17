@@ -167,7 +167,13 @@ republish полного `/image_color` — осознанная плата, п�
 
 **Апстрим:** https://github.com/dongbo19/VINS-MONO-ROS2 (ROS2 Humble, ARM64 + x86).
 **Наш форк:** https://github.com/linux100talion/VINS-MONO-ROS2, ветка `1317_debug`.
-Все патчи проекта (QoS, IMU skip, debug-вывод в imu_factor.h) живут в ветке форка.
+Все патчи проекта (QoS, IMU skip, debug-вывод в imu_factor.h, защита от стояния на
+земле — `rejectWithF` без `findFundamentalMat` при нулевом сдвиге точек (на неподвижных
+кадрах OpenCV 4.10 бросает rowRange-assert, трекер молчал 7-48 с) и сброс INITIAL при
+>300 кадрах в `all_image_frame` без ключевых) живут в ветке форка. Парный фикс на
+стороне борта: лётная нода шлёт `/restart` на фронте armed (`BS_VINS_RESTART_ARM`,
+дефолт 1) — иначе накопленное на земле окно инициализации после отрыва не решается
+за полёт (O(N³); разбор в памяти `vins-ground-stand-init`).
 C++ исходники (`feature_tracker`, `vins_estimator`) НЕ вендорены в репо — клонируются
 вручную рядом с `config_pkg`:
 ```bash

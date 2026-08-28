@@ -282,6 +282,10 @@ if [ "$LV" = "1" ] || [ "$LV" = "2" ]; then   # общие vision-добавки
     export BS_FF_LOITER="${BS_FF_LOITER:-1}"
     export BS_VISION_VEL="${BS_VISION_VEL:-1}"
     export BS_VISION_POSE_SRC="${BS_VISION_POSE_SRC:-extern}"
+    # сброс VINS по арму: окно инициализации, накопленное за стояние на земле,
+    # после отрыва не решается за полёт (ODO -- в odom_gets_borken); пишем явно,
+    # чтобы мета прогона отвечала «сброс был или нет»
+    export BS_VINS_RESTART_ARM="${BS_VINS_RESTART_ARM:-1}"
 fi
 if [ "$LV" = "1" ]; then                 # GPS есть на буте, глушится В ПОЛЁТЕ
     export BS_GPS_DISABLE="${BS_GPS_DISABLE:-1}"

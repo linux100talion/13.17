@@ -23,7 +23,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from std_msgs.msg import Empty
+from std_msgs.msg import Bool, Empty
 
 from control_pkg.application.arbiter import Arbiter
 from control_pkg.application.handover import VinsHandover
@@ -355,7 +355,15 @@ class BootstrapArch2Node(Node):
         self.create_subscription(Empty, '/mission/pilot_done',
                                  lambda _m: setattr(self, '_pilot_done', True), 1)
         self._hud_st = ''      # последний st= в /mission/status (лог переходов)
-        self._armed_prev = False   # фронт armed → латч нуля высоты перцепции
+        self._armed_prev = False   # фронт armed → латч нуля высоты перцепции, сброс VINS
+        # ФРОНТ ARMED → сброс VINS (/restart → restart_callback эстиматора). Пока
+        # борт стоит на земле, эстиматор в INITIAL копит all_image_frame (не-ключевые
+        # кадры не чистятся), и первая попытка инита после отрыва решает плотную
+        # (3N+4)² LDLT — при 3 мин стояния ~109 с на попытку, /odometry не появляется
+        # за весь полёт (odom_gets_borken, 2026-08-28). Подробно: config.vins_restart_arm.
+        self._vins_restart_pub = None
+        if cfg.vins_restart_arm > 0:
+            self._vins_restart_pub = self.create_publisher(Bool, '/restart', 1)
         self.timer = self.create_timer(0.05, self._tick)
         self.logger.info(
             f"alt_hold_bootstrap ARCH2: mode={cfg.control_mode} alt={cfg.alt}м "
@@ -378,18 +386,25 @@ class BootstrapArch2Node(Node):
 
     def _tick(self):
         s = self.telemetry.snapshot()
+        armed_front = bool(s.armed) and not self._armed_prev
+        self._armed_prev = bool(s.armed)
+        if armed_front and self._vins_restart_pub is not None:
+            # сброс VINS по арму: окно инициализации, накопленное на земле, обнуляется
+            # (см. config.vins_restart_arm); на земле одометрии ещё нет — терять нечего
+            self._vins_restart_pub.publish(Bool(data=True))
+            self.logger.info("арм: /restart → VINS (сброс окна инициализации, "
+                             "накопленного на земле)")
         if self.perception is not None:
             # ФРОНТ ARMED → ноль высоты перцепции здесь и сейчас (perc_alt_zero):
             # EKF local z смещён вниз на 0.2-0.3 м, и на низком полёте это больше
             # всей высоты — гейт земли IPM не открывается (разбор 183305/185921 в
             # config.perc_alt_zero). Латчим ДО merge: снапшот этого же тика уже
             # понесёт исправленную высоту.
-            if s.armed and not self._armed_prev:
+            if armed_front:
                 z0 = self.perception.latch_alt_zero()
                 if z0 is not None:
                     self.logger.info(f"высота перцепции: ноль земли z0={z0:+.2f} м "
                                      f"(латч по арму)")
-            self._armed_prev = s.armed
             self.perception.merge(s)          # камера → flow_* в снапшот
         # пилот → в снапшот (домен читает pilot_* как телеметрию)
         sticks = self.pilot.sticks()
@@ -730,6 +745,10 @@ def _parse() -> tuple:
     # EKF local z, из-за которого гейт земли IPM не открывался на низком полёте
     p.add_argument('--perc-alt-zero', dest='perc_alt_zero', type=float,
                    default=_D.perc_alt_zero)
+    # сброс VINS по арму (см. config.vins_restart_arm): окно инициализации,
+    # накопленное за стояние на земле, после отрыва не решается за полёт (O(N³))
+    p.add_argument('--vins-restart-arm', dest='vins_restart_arm', type=float,
+                   default=_D.vins_restart_arm)
     # ФВЧ прогноза ускорения в фильтре скорости IPM (см. config.ipm_acc_tau):
     # снимает балансирующий ветер наклон, из-за которого боковая ось смещена
     p.add_argument('--ipm-acc-tau', dest='ipm_acc_tau', type=float,
