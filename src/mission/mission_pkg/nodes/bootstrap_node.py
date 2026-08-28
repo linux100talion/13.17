@@ -825,6 +825,10 @@ def _parse() -> tuple:
                    default=_D.pitch_pos_brake_vmax)
     p.add_argument('--pitch-pos-acc', dest='pitch_pos_acc', type=float,
                    default=_D.pitch_pos_acc)
+    p.add_argument('--roll-pos-brake-v', dest='roll_pos_brake_v', type=float,
+                   default=_D.roll_pos_brake_v)
+    p.add_argument('--pitch-pos-brake-v', dest='pitch_pos_brake_v', type=float,
+                   default=_D.pitch_pos_brake_v)
     p.add_argument('--rate-anti-windup', dest='rate_anti_windup', type=float,
                    default=_D.rate_anti_windup)
     p.add_argument('--pitch-osign', dest='pitch_osign', type=float, default=_D.pitch_osign)

@@ -147,6 +147,10 @@ class BootstrapConfig:
     roll_pos_brake: float = 0.0      # безразмерный. BS_ROLL_POS_BRAKE / --roll-pos-brake
     roll_pos_brake_vmax: float = 0.0  # м/с, 0 = pos_vmax. BS_ROLL_POS_BRAKE_VMAX / --roll-pos-brake-vmax
     roll_pos_acc: float = 0.0        # м/с², 0 = без капа. BS_ROLL_POS_ACC / --roll-pos-acc
+    roll_pos_brake_v: float = 0.0    # порог входа в BRAKE по |v_изм|, м/с; 0 = 0.3
+                                     # (_POS_PIN_V). Канал видит 0.4-0.6 истины: на
+                                     # ab_brake_win5 пик 0.30 — брейк не проснулся;
+                                     # 0.25 разбудил бы. BS_ROLL_POS_BRAKE_V / --roll-pos-brake-v
     roll_max: float = 150.0
     # --- боковая ось ПО МЕТРИЧЕСКОЙ СКОРОСТИ (DpRollRate, сигнал ipm_vlat в М/С) ---
     # 30 — ИЗМЕРЕННЫЙ дефолт по свипу G (n=5 на точку, DpHoldM, `rate_gain_series.sh`):
@@ -250,6 +254,7 @@ class BootstrapConfig:
     pitch_pos_brake: float = 0.0     # зеркало roll_pos_brake. BS_PITCH_POS_BRAKE
     pitch_pos_brake_vmax: float = 0.0  # BS_PITCH_POS_BRAKE_VMAX / --pitch-pos-brake-vmax
     pitch_pos_acc: float = 0.0       # BS_PITCH_POS_ACC / --pitch-pos-acc
+    pitch_pos_brake_v: float = 0.0   # BS_PITCH_POS_BRAKE_V / --pitch-pos-brake-v
     # ANTI-WINDUP интегратора rate-осей (DpRollRate/DpPitchRate): в упоре ±max
     # И-член не наматывается (условное интегрирование). Кламп imax не спасал:
     # ab_pos13 — за 1.5 с упора +90 PWM сверх ветра, потом размотка ЗА точку.

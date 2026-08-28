@@ -35,6 +35,8 @@ anti-windup И-члена (в упоре не наматывать). Логик�
    держит интегратор, фаза BRAKE была (упор) и погасла; √-кап у точки;
 4. робастность: канал видит 0.6 истины — сходится; лаг 0.5 с — не растёт, а БЕЗ
    anti-windup на том же лаге разносит до ±1.7 м/с (awu — не косметика);
+   4b: смещённый канал (+0.08 «ухода» при истинном нуле, как ab_brake_win10 в 10 м/с)
+   — брейк выходит по |v| < 0.1, а не виснет; порог входа pos_brake_v — ручка;
 5. гистерезис: в RETURN у точки малые скорости (< 0.3) BRAKE не будят, в BRAKE до нуля;
 6. живой стик отпускает точку и гасит фазу BRAKE.
 
@@ -76,15 +78,16 @@ def axis(cls=DpRollRate, **kw):
     return cls(**kw)
 
 
-def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None):
-    """Замкнутый контур ось+плант; строки (t, v_ист, v_изм, путь, pwm, И-член)."""
+def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0):
+    """Замкнутый контур ось+плант; строки (t, v_ист, v_изм, путь, pwm, И-член).
+    bias — постоянное смещение измеренной скорости (канал в ветер «видит уход»)."""
     v, vm, pwm_act, path = V0, 0.0, 0.0, 0.0
     ax.enter(DroneState(flow_seq=-1))
     rows, t = [], 0.0
     for k in range(int(round(sec / DT))):
         t += DT
         # что видит канал: скорость через апериодику (и с долей gain), путь = её интеграл
-        vm += (gain * v - vm) * (1.0 - math.exp(-DT / tau_s))
+        vm += (gain * v + bias - vm) * (1.0 - math.exp(-DT / tau_s))
         path += vm * DT
         sp = Setpoint()
         if stick is not None:
@@ -220,6 +223,31 @@ l5n = fly(axis(**dict(BRAKE, anti_windup=False)), tau_s=0.5)
 summary('лаг 0.5 БЕЗ awu', l5n)
 check(f"лаг 0.5 БЕЗ anti-windup: разносит (хвост {tail_v(l5n):.2f} > 1.0) — awu обязателен",
       tail_v(l5n) > 1.0)
+# 4b. СМЕЩЁННЫЙ канал (ab_brake_win10: после стопа +0.01…+0.12 «ухода» при истинном
+# нуле): без выхода по |v| < _POS_BRAKE_EXIT брейк висел бы с целью −3·v ≈ −0.1 и
+# держал борт в 2 м от точки; с ним — стоп, выход, возврат.
+bx = axis(**BRAKE)
+b8 = fly(bx, gain=0.6, bias=0.08)
+summary('bias +0.08', b8)
+in_brake = [r for r in b8 if abs(r[4]) >= 149]
+# остаточный крип = bias/gain (0.13 м/с): станция держит ИЗМЕРЕННЫЙ путь у гвоздя, а
+# он ползёт со смещением — свойство смещённого канала («мягкая точка»), не брейка
+check(f"смещённый канал +0.08: брейк был (упор) и погас, борт вернулся "
+      f"(|путь| {abs(b8[-1][3]):.2f} < 0.3), крип ≤ bias/gain+0.1 (хвост {tail_v(b8):.2f} < 0.25)",
+      in_brake and not bx._pos_brake and abs(b8[-1][3]) < 0.3 and tail_v(b8) < 0.25)
+hb = axis(**BRAKE)
+hb.enter(DroneState(flow_seq=-1))
+hb._pos_sp = (0.0, 0.0)
+hb._station_target(1.0, -0.5)               # BRAKE
+hb._station_target(1.0, -0.08)              # |v| < 0.1, знак ещё «уход» → выход
+check("выход из BRAKE по |v| < 0.1 без смены знака", not hb._pos_brake)
+# порог входа — ручка (ab_brake_win5: пик канала ровно 0.30 при 0.62 истинных)
+hv = axis(**dict(BRAKE, pos_brake_v=0.25))
+hv.enter(DroneState(flow_seq=-1))
+hv._pos_sp = (0.0, 0.0)
+hv._station_target(0.5, -0.28)
+check("порог входа pos_brake_v=0.25: уход 0.28 будит BRAKE (при дефолте 0.3 — нет)",
+      hv._pos_brake)
 imax_awu = max(r[5] for r in two)
 check(f"anti-windup: в упоре И-член не наматывается (макс {imax_awu:.0f} ≤ "
       f"{WIND / ALPHA + 25:.0f} PWM)", imax_awu <= WIND / ALPHA + 25.0)

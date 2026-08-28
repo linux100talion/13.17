@@ -246,7 +246,7 @@ class _FlowDamper1D(StabilizationStrategy):
     def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_pwm=150.0,
                  conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5,
                  pos_kp=0.0, pos_vmax=1.0, pos_brake=0.0, pos_brake_vmax=0.0,
-                 pos_acc=0.0, anti_windup=False):
+                 pos_acc=0.0, anti_windup=False, pos_brake_v=0.0):
         self.kp, self.ki, self.kd = kp, ki, kd
         self.imax, self.max = imax, max_pwm
         self.conf_min, self.conf_full = conf_min, conf_full
@@ -289,9 +289,18 @@ class _FlowDamper1D(StabilizationStrategy):
         # (|v| > _POS_PIN_V) — иначе у точки дребезг фаз; малые уходы (<0.3) гасит
         # линейный RETURN сам.
         # pos_brake = 0 → одна ручка, как было (класс-дефолт: офлайн-репро);
-        # pos_brake_vmax = 0 → потолок брейка = pos_vmax; pos_acc = 0 → без √-капа.
+        # pos_brake_vmax = 0 → потолок брейка = pos_vmax; pos_acc = 0 → без √-капа;
+        # pos_brake_v — порог ВХОДА в BRAKE по |v_изм| (0 = _POS_PIN_V). Канал видит
+        # 0.4-0.6 истины (ab_brake на 0.7 м: 0.28 при истинных 0.72, ab_brake_win5 на
+        # 0.3 м: ровно 0.30 при 0.62 — брейк не проснулся), поэтому порог — ручка.
+        # ⚠️ ВЫХОД из BRAKE — не только смена знака v (v·err ≥ 0), но и |v| <
+        # _POS_BRAKE_EXIT: в ab_brake_win10 (10 м/с) канал после стопа 5 с показывал
+        # +0.01…+0.12 «ухода» при истинном нуле (смещение прогноза по наклону в
+        # ветер, пока acc_tau не сошёлся), брейк висел с целью −3·v ≈ −0.1 и держал
+        # борт на месте в 2 м от точки, возврат начался лишь на 8-й секунде.
         self.pos_brake, self.pos_brake_vmax = pos_brake, pos_brake_vmax
         self.pos_acc = pos_acc
+        self.pos_brake_v = pos_brake_v
         self._pos_brake = False   # фаза BRAKE активна (только при pos_brake > 0)
         # --- ANTI-WINDUP интегратора (условное интегрирование) ---
         # Кламп ±imax не спасает: пока выход в упоре ±max, интегратор копит дальше
@@ -320,6 +329,9 @@ class _FlowDamper1D(StabilizationStrategy):
 
     _POS_YAW_TOL = 0.3       # рад (~17°): дальше точка станции перезахватывается
     _POS_PIN_V = 0.3         # м/с: гвоздь вяжется только когда борт затормозил
+    _POS_BRAKE_EXIT = 0.1    # м/с: |v_изм| ниже — стоп состоялся, BRAKE → RETURN
+                             # (см. pos_brake_v в __init__: смещённый канал может
+                             # не пересечь ноль вовсе — ab_brake_win10)
     _POS_PIN_T = 3.0         # с: не затормозил за столько — гвоздь принудительно
                              # (иначе на злой рампе скорость никогда не падает ниже
                              # порога, гвоздь не вяжется вовсе и станция вырождается
@@ -377,9 +389,9 @@ class _FlowDamper1D(StabilizationStrategy):
         away = v * err < 0.0                     # скорость направлена ОТ точки
         if self.pos_brake > 0.0:
             if self._pos_brake:
-                if not away:                     # измеренный ноль — стоп состоялся
+                if not away or abs(v) < self._POS_BRAKE_EXIT:   # стоп состоялся
                     self._pos_brake = False
-            elif away and abs(v) > self._POS_PIN_V:
+            elif away and abs(v) > (self.pos_brake_v or self._POS_PIN_V):
                 self._pos_brake = True
         if self._pos_brake:
             vmax = self.pos_brake_vmax if self.pos_brake_vmax > 0.0 else self.pos_vmax
