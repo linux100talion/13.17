@@ -80,7 +80,8 @@ def _dp_yaw(cfg):
     return DpYawHold(cfg.yaw_kp, cfg.yaw_ki, cfg.yaw_kd, cfg.yaw_imax, cfg.yaw_max,
                      cfg.yaw_conf_min, cfg.yaw_conf_full, cfg.yaw_osign,
                      yaw_cmd_gain(cfg), leak_sec=cfg.yaw_leak,
-                     max_step=yaw_max_step(cfg), arm_frames=cfg.yaw_arm_frames)
+                     max_step=yaw_max_step(cfg), arm_frames=cfg.yaw_arm_frames,
+                     pilot_gain=cfg.yaw_pilot_gain)
 
 
 def _vins(cfg):

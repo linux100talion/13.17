@@ -810,6 +810,10 @@ def _parse() -> tuple:
                    default=_D.yaw_rate_full)
     p.add_argument('--yaw-max-rate', dest='yaw_max_rate', type=float,
                    default=_D.yaw_max_rate)
+    # ПРЯМАЯ ПЕРЕДАЧА yaw-стика (PWM при полном стике): лечение пружины курса —
+    # разбор spring 2026-08-27, контур разматывал 92–96% разворота обратно
+    p.add_argument('--yaw-pilot-gain', dest='yaw_pilot_gain', type=float,
+                   default=_D.yaw_pilot_gain)
     p.add_argument('--yaw-arm-frames', dest='yaw_arm_frames', type=int,
                    default=_D.yaw_arm_frames)
     p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=_D.flow_hold_sec)

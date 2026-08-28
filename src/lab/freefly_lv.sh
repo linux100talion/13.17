@@ -258,6 +258,12 @@ export BS_YAW_KI="${BS_YAW_KI:-0}"
 export BS_YAW_KP="${BS_YAW_KP:-0}"
 export BS_YAW_LEAK="${BS_YAW_LEAK:-8}"
 export BS_YAW_MAX_RATE="${BS_YAW_MAX_RATE:-100}"
+# ПРЯМАЯ ПЕРЕДАЧА yaw-стика (PWM при полном стике). Живому пилоту стик отдаётся
+# проводом, контур курса при живом стике обнулён. Лечение ПРУЖИНЫ (серия spring
+# 2026-08-27): kp=0 + утечка в D-члене наматывали ошибку уставки до 350–430° и
+# разматывали 92–96% разворота обратно после отпускания. 130 PWM ≈ 60°/с
+# (замер spring: ~0.45 °/с на PWM) — тот же темп, что BS_YAW_RATE_FULL. 0 = выкл.
+export BS_YAW_PILOT_GAIN="${BS_YAW_PILOT_GAIN:-130}"
 export BS_YAW_RATE_FULL="${BS_YAW_RATE_FULL:-60}"
 export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
 # /mavros/state (1 Гц) — для разбора joystick-серии: латчи режимов (LOITER!) и
