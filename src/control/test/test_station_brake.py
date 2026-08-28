@@ -45,7 +45,10 @@ anti-windup И-члена (в упоре не наматывать). Логик�
    упоре BRAKE (_BRAKE_TRIM) трим копится в упоре, набран раньше, возврат раньше,
    перебора нет; в слабый ветер (упора почти нет) база не меняется;
 5. гистерезис: в RETURN у точки малые скорости (< 0.3) BRAKE не будят, в BRAKE до нуля;
-6. живой стик отпускает точку и гасит фазу BRAKE.
+6. живой стик отпускает точку и гасит фазу BRAKE;
+7. зеркало на тангаж: станция вяжет гвоздь только на установившейся высоте
+   (pos_alt_band): на наборе гвоздя и брейка нет (фантом хода по высоте в ipm_fwd),
+   после — перезахват, фантом прощён; болтанка в полосе гвоздь не сбрасывает.
 
 Запуск:  python3 src/control/test/test_station_brake.py
 """
@@ -352,6 +355,65 @@ check("стик живой: точка отпущена и BRAKE погашен"
       s6._pos_sp is None and not s6._pos_brake)
 check("стик живой: цель = стик·cmd_gain (станция не мешает пилоту)",
       abs(s6._target - (-0.5 * s6.cmd_gain)) < 1e-9)
+
+# --- 7. ЗЕРКАЛО НА ТАНГАЖ: станция только на установившейся высоте ---
+# Ход по высоте канал читает как ход вперёд (фантом в ipm_fwd ~0.5 м/м: замер
+# ab_brake_trim). Гвоздь, переживший набор, тянул бы к фантомной точке, а брейк бил бы
+# по фантомной скорости на отрыве. pos_alt_band: высота идёт → гвоздь отпущен, цель 0.
+from control_pkg.domain.control.stabilization import DpPitchRate   # noqa: E402
+
+print("  тангаж: станция на установившейся высоте (pos_alt_band 0.2):")
+px = DpPitchRate(kp=90.0, ki=60.0, kd=0.0, imax=150.0, max_speed=0.0, alt_band=0.0,
+                 arm_frames=0, pos_alt_band=0.2, pos_alt_still=0.5, **BRAKE)
+px.enter(DroneState(flow_seq=-1))
+seq, t, path = 0, 0.0, 0.0
+
+
+def pframe(alt, vf, dpath):
+    """один кадр тангажа: высота, скорость канала, приращение пути (фантом или ход)"""
+    global seq, t, path
+    seq += 1
+    t += DT
+    path += dpath
+    rc = px.update(DroneState(flow_seq=seq, now_sim=t, flow_dt=DT, rel_alt=alt, ipm_ok=True,
+                              flow_conf=0.5, ipm_vfwd=vf, ipm_fwd=path), Setpoint(), DT)
+    return rc.pitch - RC_CENTER
+
+
+# земля → набор 0.1→0.4 м за 0.6 с с фантомом 0.8 м/с вперёд (как на отрыве)
+for k in range(6):
+    pframe(0.1, 0.0, 0.0)
+outs = [pframe(0.1 + 0.3 * k / 18, 0.8, 0.8 * DT) for k in range(18)]
+check("тангаж, набор: гвоздя нет и брейка нет (цель 0 — чистый демпфер по фантому)",
+      px._pos_sp is None and not px._pos_brake and px._target == 0.0)
+check(f"тангаж, набор: команда — только демпфер kp·0.8+И ({max(abs(o) for o in outs)} ≤ 110, "
+      "не упор брейка 150)", max(abs(o) for o in outs) <= 110)
+# высота встала: 0.5 с покоя → гвоздь ТУТ (фантом 0.48 м прощён)
+for k in range(20):
+    pframe(0.4, 0.0, 0.0)
+check(f"тангаж, высота установилась: гвоздь перезахвачен у текущего пути "
+      f"({px._pos_sp[0] if px._pos_sp else float('nan'):.2f} ≈ {path:.2f}), цель 0",
+      px._pos_sp is not None and abs(px._pos_sp[0] - path) < 0.02 and abs(px._target) < 1e-9)
+# болтанка высоты ±0.1 (в полосе) — гвоздь держится
+sp0 = px._pos_sp[0]
+for k in range(30):
+    pframe(0.4 + 0.1 * math.sin(k / 3.0), 0.0, 0.0)
+check("тангаж, болтанка ±0.1 м в полосе: гвоздь на месте", px._pos_sp is not None
+      and px._pos_sp[0] == sp0)
+# пилот поднял на 1 м с фантомом +0.5 м → гвоздь отпущен, после — перезахват, тяги нет
+for k in range(30):
+    pframe(0.4 + 1.0 * k / 30, 0.5, 0.5 * DT)
+check("тангаж, набор 1 м: гвоздь отпущен, цель 0 (к фантому не тянет)",
+      px._pos_sp is None and px._target == 0.0)
+for k in range(20):
+    pframe(1.4, 0.0, 0.0)
+check(f"тангаж, после набора: перезахват у нового пути ({px._pos_sp[0]:.2f} ≈ {path:.2f}), "
+      "фантом прощён", px._pos_sp is not None and abs(px._pos_sp[0] - path) < 0.02)
+# без высотной логики (крен): гвоздь пережил бы набор и тянул к фантому
+rx = axis(**BRAKE)
+rx.enter(DroneState(flow_seq=-1))
+check("крен (pos_alt_band=0): высотной логики нет — поведение прежнее",
+      rx._pos_alt is None)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ СТАНЦИЯ: ДВА ЗАКОНА OK" if ok_all else "❌ СБОЙ")

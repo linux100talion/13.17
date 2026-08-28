@@ -147,6 +147,9 @@ class BootstrapConfig:
     roll_pos_brake: float = 0.0      # безразмерный. BS_ROLL_POS_BRAKE / --roll-pos-brake
     roll_pos_brake_vmax: float = 0.0  # м/с, 0 = pos_vmax. BS_ROLL_POS_BRAKE_VMAX / --roll-pos-brake-vmax
     roll_pos_acc: float = 0.0        # м/с², 0 = без капа. BS_ROLL_POS_ACC / --roll-pos-acc
+    roll_pos_alt_band: float = 0.0   # станция только на установившейся высоте (полоса, м;
+                                     # 0 = без высотной логики). Крену не нужно — см.
+                                     # pitch_pos_alt_band. BS_ROLL_POS_ALT_BAND
     roll_pos_brake_v: float = 0.0    # порог входа в BRAKE по |v_изм|, м/с; 0 = 0.3
                                      # (_POS_PIN_V). Канал видит 0.4-0.6 истины: на
                                      # ab_brake_win5 пик 0.30 — брейк не проснулся;
@@ -255,6 +258,15 @@ class BootstrapConfig:
     pitch_pos_brake_vmax: float = 0.0  # BS_PITCH_POS_BRAKE_VMAX / --pitch-pos-brake-vmax
     pitch_pos_acc: float = 0.0       # BS_PITCH_POS_ACC / --pitch-pos-acc
     pitch_pos_brake_v: float = 0.0   # BS_PITCH_POS_BRAKE_V / --pitch-pos-brake-v
+    pitch_pos_alt_band: float = 0.2  # СТАНЦИЯ ТАНГАЖА только на установившейся высоте:
+                                     # ход по высоте читается каналом как ход вперёд —
+                                     # фантом в пути ipm_fwd 0.2-0.6 м на метр (замер
+                                     # ab_brake_trim: +0.4 м за набор на отрыве, −0.5 м
+                                     # за посадку). Пока высота вне полосы ±0.2 м или не
+                                     # постояла ipm_alt_still — гвоздь отпущен, чистый
+                                     # демпфер; успокоилась — перезахват, фантом прощён.
+                                     # Гейт самой оси (ipm_alt_band_fwd) не трогается.
+                                     # 0 = выкл. BS_PITCH_POS_ALT_BAND / --pitch-pos-alt-band
     # ANTI-WINDUP интегратора rate-осей (DpRollRate/DpPitchRate): в упоре ±max
     # И-член не наматывается (условное интегрирование). Кламп imax не спасал:
     # ab_pos13 — за 1.5 с упора +90 PWM сверх ветра, потом размотка ЗА точку.

@@ -328,8 +328,19 @@ export BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-90}"
 # Два закона поверх PI-демпфера (_FlowDamper1D._station_target): BRAKE — уходим
 # от точки быстрее BRAKE_V по каналу → цель −BRAKE·v_изм (кламп ±BRAKE_VMAX),
 # упор 150, фаза кончается сама на нуле; RETURN — стоим/идём к точке → KP·err,
-# потолок VMAX, √-кап ACC. Выключить станцию: BS_ROLL_POS_KP=0. Тангаж станции
-# пока НЕ имеет (BS_PITCH_POS_KP=0 — чистый демпфер), отдельный прогон-проверка.
+# потолок VMAX, √-кап ACC. Выключить станцию: BS_ROLL_POS_KP=0.
+# ТАНГАЖ — зеркально (2026-08-29, стенд test_station_brake §7), но дефолтом ЕЩЁ НЕ
+# стоит (BS_PITCH_POS_KP=0 — чистый демпфер) — полётом не доказан. Отличие от
+# крена: станция вяжет гвоздь ТОЛЬКО на установившейся высоте
+# (BS_PITCH_POS_ALT_BAND 0.2, дефолт config.py): ход по высоте канал читает как
+# ход вперёд — фантом в ipm_fwd ~0.5 м на метр (замер ab_brake_trim: +0.4 м за
+# набор на отрыве, −0.5 за посадку); пока высота идёт — гвоздь отпущен, чистый
+# демпфер, брейк молчит; встала — перезахват, фантом прощён. Прогон-кандидат:
+#   BS_PITCH_POS_KP=0.3 BS_PITCH_POS_VMAX=0.3 BS_PITCH_POS_BRAKE=3 \
+#     BS_PITCH_POS_BRAKE_VMAX=1.0 BS_PITCH_POS_ACC=0.15 BS_PITCH_POS_BRAKE_V=0.25 \
+#     WIND_SPD=10 NAME=ab_pitch bash src/lab/freefly_lv.sh
+# Смотреть: на отрыве тангаж не бьёт упором (фантом набора), после установления
+# высоты держит точку вперёд/назад; при смене высоты стиком газа — не тянет назад.
 export BS_ROLL_POS_KP="${BS_ROLL_POS_KP:-0.3}"
 export BS_ROLL_POS_VMAX="${BS_ROLL_POS_VMAX:-0.3}"
 export BS_ROLL_POS_BRAKE="${BS_ROLL_POS_BRAKE:-3}"

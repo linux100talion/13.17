@@ -246,7 +246,8 @@ class _FlowDamper1D(StabilizationStrategy):
     def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_pwm=150.0,
                  conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5,
                  pos_kp=0.0, pos_vmax=1.0, pos_brake=0.0, pos_brake_vmax=0.0,
-                 pos_acc=0.0, anti_windup=False, pos_brake_v=0.0):
+                 pos_acc=0.0, anti_windup=False, pos_brake_v=0.0, pos_alt_band=0.0,
+                 pos_alt_still=0.5):
         self.kp, self.ki, self.kd = kp, ki, kd
         self.imax, self.max = imax, max_pwm
         self.conf_min, self.conf_full = conf_min, conf_full
@@ -301,6 +302,21 @@ class _FlowDamper1D(StabilizationStrategy):
         self.pos_brake, self.pos_brake_vmax = pos_brake, pos_brake_vmax
         self.pos_acc = pos_acc
         self.pos_brake_v = pos_brake_v
+        # --- СТАНЦИЯ ТОЛЬКО НА УСТАНОВИВШЕЙСЯ ВЫСОТЕ (pos_alt_band > 0) ---
+        # Нужно ТАНГАЖУ: полоса земли лежит впереди, и ход по высоте канал читает как
+        # ход вперёд — ФАНТОМ в пути ipm_fwd ~0.2-0.6 м на метр высоты (замер по
+        # ab_brake_trim: +0.4 м за набор 0.1→0.3 м на отрыве, −0.5 м за посадку, до
+        # 1.1 м за снижение с 3 м). Станция с гвоздём, пережившим набор, тянула бы борт
+        # к фантомной точке на 0.3 м/с, а брейк бил бы по фантомной скорости набора
+        # (0.8 м/с) на самом отрыве. Поэтому: пока высота идёт (вышла из полосы ±band
+        # вокруг опорной, _AltSettled — без дифференциатора, см. её докстринг) или ещё
+        # не постояла still секунд — гвоздь отпущен, цель 0 (чистый демпфер, как до
+        # станции), брейк молчит; успокоилась — перезахват в покое, фантом прощён.
+        # Крену не нужно (боковой фантом ×3 меньше, ipm_alt_band_lat по той же причине
+        # выключен): 0 = без высотной логики, поведение прежнее. Гейт ОСИ
+        # (_IpmGated.alt_band) при этом не трогаем — демпфер на наборе работает.
+        self._pos_alt = _AltSettled(band=pos_alt_band, still=pos_alt_still) \
+            if pos_alt_band > 0.0 else None
         self._pos_brake = False   # фаза BRAKE активна (только при pos_brake > 0)
         self._trim_armed = True   # ПЕРВЫЙ брейк после enter(): трим в упоре + порог
                                   # входа без множителя _POS_BRAKE_REFIRE
@@ -405,6 +421,8 @@ class _FlowDamper1D(StabilizationStrategy):
         self._pos_wait_t = None
         self._pos_brake = False
         self._trim_armed = True
+        if self._pos_alt is not None:
+            self._pos_alt.reset()
 
     def _station_target(self, err, v):
         """Цель скорости станции по ошибке пути `err` (точка − путь) и скорости `v`.
@@ -501,7 +519,15 @@ class _FlowDamper1D(StabilizationStrategy):
                 self._advance(s, fdt)
                 cmd = self._cmd(sp)
                 pos = self._pos_signal(s) if self.pos_kp > 0.0 else None
-                if pos is not None and cmd == 0.0:
+                if pos is not None and cmd == 0.0 and self._pos_alt is not None \
+                        and self._pos_alt.update(s.now_sim, s.rel_alt) is False:
+                    # высота идёт / ещё не установилась — гвоздь отпущен, чистый
+                    # демпфер (см. pos_alt_band в __init__: фантом набора в пути)
+                    self._pos_sp = None
+                    self._pos_wait_t = None
+                    self._pos_brake = False
+                    self._target = 0.0
+                elif pos is not None and cmd == 0.0:
                     # СТАНЦИЯ: «СНАЧАЛА ТОРМОЗИ, ПОТОМ ГВОЗДЬ» (механика LOITER).
                     # Точка вяжется НЕ в момент отпускания стика: борт ещё несёт
                     # 2-3 м/с, выбег ~9 м, и станция тянула бы его назад к месту,

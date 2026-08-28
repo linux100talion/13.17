@@ -106,7 +106,8 @@ _STAB = {
         cfg.pitch_rate_cmd_gain, pos_kp=cfg.pitch_pos_kp,
         pos_vmax=cfg.pitch_pos_vmax, pos_brake=cfg.pitch_pos_brake,
         pos_brake_vmax=cfg.pitch_pos_brake_vmax, pos_acc=cfg.pitch_pos_acc,
-        pos_brake_v=cfg.pitch_pos_brake_v,
+        pos_brake_v=cfg.pitch_pos_brake_v, pos_alt_band=cfg.pitch_pos_alt_band,
+        pos_alt_still=cfg.ipm_alt_still,
         anti_windup=cfg.rate_anti_windup > 0.0,
         **_ipm_gates(cfg, cfg.ipm_alt_band_fwd)),
     # весь демпфер, но продольная ось по скорости
@@ -118,7 +119,8 @@ _STAB = {
         cfg.roll_rate_cmd_gain, pos_kp=cfg.roll_pos_kp,
         pos_vmax=cfg.roll_pos_vmax, pos_brake=cfg.roll_pos_brake,
         pos_brake_vmax=cfg.roll_pos_brake_vmax, pos_acc=cfg.roll_pos_acc,
-        pos_brake_v=cfg.roll_pos_brake_v,
+        pos_brake_v=cfg.roll_pos_brake_v, pos_alt_band=cfg.roll_pos_alt_band,
+        pos_alt_still=cfg.ipm_alt_still,
         anti_windup=cfg.rate_anti_windup > 0.0,
         **_ipm_gates(cfg, cfg.ipm_alt_band_lat)),
     # ОБЕ горизонтальные оси в метрах: демпфер целиком на виде сверху
