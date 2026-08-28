@@ -187,10 +187,13 @@ export BS_HANDOVER_VINS="${BS_HANDOVER_VINS:-1}"
 export BS_GZ_CMD_GAIN="${BS_GZ_CMD_GAIN:-4}"
 export BS_MODE_BUDGET="${BS_MODE_BUDGET:-80}"
 export BS_IPM_DEROT="${BS_IPM_DEROT:-1.0}"
-export BS_IPM_WIN="${BS_IPM_WIN:-0.5}"
+# BS_IPM_WIN 0.5 → 0.3 (шаг 2 лесенки демпфера, 2026-08-28): окно МНК скорости
+# канала вида сверху — это и есть τ_s (0.6-1.05 с), которое съедало затухание
+# от kp; режем окно — режем запаздывание. Идёт В ПАРЕ с ki=60 (см. блок гейнов).
+export BS_IPM_WIN="${BS_IPM_WIN:-0.3}"
 export BS_IPM_WZ_TAU="${BS_IPM_WZ_TAU:-2.0}"
 export BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-1}"
-# ── ГЕЙНЫ ДЕМПФЕРА: kp 30 → 90 (шаг 1 ЗАШЁЛ), ki 30 (шаг 1b откачен) ────────
+# ── ГЕЙНЫ ДЕМПФЕРА: kp 90 (шаг 1 ЗАШЁЛ), ki 60 + IPM_WIN 0.3 (шаг 2, дефолт) ──
 # ШАГ 1 ЗАШЁЛ (прогон 061854 против 034514, окно взлёта): пик боковой 1.07 →
 # 0.78 м/с и приходит раньше (2.4 → 1.8 с), снос за 5 с 3.8 → 2.8 м, откат после
 # торможения −0.64 → −0.22 м/с — звон практически ушёл. Осталась ровно ПЕРВАЯ
@@ -212,17 +215,28 @@ export BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-1}"
 #   даёт — его съедает запаздывание канала (фаза ∝ ω·τ_s), а ki поднимает ω и тем
 #   ухудшает ζ. То есть ki торгует подлёт против успокоения НАПРЯМУЮ, и узкое
 #   место теперь одно — τ_s (0.60-1.05 с).
-# Дефолт вернулся на ki=30 (последняя конфигурация, которая УСПОКАИВАЕТСЯ).
-# A/B руками (гейны едут в мету прогона, NAME — чтобы архив сам себя называл):
-#   A  BS_ROLL_RATE_KP=90 BS_ROLL_RATE_KI=30 BS_PITCH_RATE_KP=90 \
-#      BS_PITCH_RATE_KI=30 NAME=ab_kp90_ki30 bash src/lab/freefly_lv.sh
-#   B  BS_ROLL_RATE_KP=90 BS_ROLL_RATE_KI=60 BS_PITCH_RATE_KP=90 \
-#      BS_PITCH_RATE_KI=60 NAME=ab_kp90_ki60 bash src/lab/freefly_lv.sh
+# После 1b дефолт временно вернулся на ki=30 (последняя конфигурация, которая
+# УСПОКАИВАЛАСЬ).
+# ШАГ 2 (2026-08-28, ДЕФОЛТ): ki 60 + BS_IPM_WIN 0.3 — раз ki торгует подлёт
+# против успокоения через τ_s, оставляем дешёвый долг интегратора (ki=60) и
+# режем само запаздывание канала (окно МНК 0.5 → 0.3 с). Ставка: с меньшим τ_s
+# kp снова даёт затухание и ζ возвращается к ≥0.1 при подлёте шага 1b.
+# ⚠️ Полётом ПОКА НЕ ДОКАЗАН — вердикт по прогону ab_ki60_win03 (окно взлёта:
+# пик боковой, снос за 5 с, ζ/период по gain_sim.py). Если ζ не вернулось —
+# откат ki на 30 (win 0.3 оставить: τ_s меньше — хуже не бывает), либо
+# станция-кипинг BS_ROLL_POS_KP поверх ki (см. ниже).
+# A/B руками (гейны едут в мету прогона, NAME — чтобы архив сам себя называл;
+# прежние дефолты теперь надо передавать ЯВНО, включая BS_IPM_WIN):
+#   A  BS_ROLL_RATE_KI=30 BS_PITCH_RATE_KI=30 BS_IPM_WIN=0.5 \
+#      NAME=ab_ki30_win05 bash src/lab/freefly_lv.sh      # = дефолт после 1b
+#   B  BS_ROLL_RATE_KI=60 BS_PITCH_RATE_KI=60 BS_IPM_WIN=0.5 \
+#      NAME=ab_ki60_win05 bash src/lab/freefly_lv.sh      # = шаг 1b (064122)
+#   C  NAME=ab_ki60_win03 bash src/lab/freefly_lv.sh      # = дефолт (шаг 2)
 # Сравнивать честно можно только ОДИНАКОВЫЕ полёты: отрыв → руки прочь от крена
 # → висеть ~30 с на одной высоте → посадка. Прогоны 061854/064122 этим и
 # отличались (161 и 99 с с манёврами до 4.5 и 1.35 м) — участок удержания в них
 # несравним, сравнимо только окно взлёта.
-# Следующая ступень по существу — резать τ_s: BS_IPM_WIN 0.5 → 0.3 при ki=60.
+# Ступень «резать τ_s: BS_IPM_WIN 0.5 → 0.3 при ki=60» — это и есть шаг 2 (дефолт).
 # ⚠️ ki НЕ ОБНУЛЯТЬ, и это не небрежность. ki по ошибке СКОРОСТИ — это СКРЫТЫЙ
 # ПОЗИЦИОННЫЙ контур (интеграл скорости = смещение), то есть контур уже второго
 # порядка, а единственное демпфирование в нём — kp. Разбор прогона 034514:
@@ -243,13 +257,13 @@ export BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-1}"
 # всё ещё виден — не ki=90 (звенит), а СТАНЦИЯ-КИПИНГ BS_ROLL_POS_KP=0.3-0.5
 # поверх ki (явный позиционный контур с ограничением скорости возврата), либо
 # резать сам τ_s: BS_IPM_WIN 0.5 → 0.3.
-export BS_PITCH_RATE_KI="${BS_PITCH_RATE_KI:-30}"
+export BS_PITCH_RATE_KI="${BS_PITCH_RATE_KI:-60}"
 export BS_PITCH_RATE_KP="${BS_PITCH_RATE_KP:-90}"
 export BS_PITCH_RATE_CMD_GAIN="${BS_PITCH_RATE_CMD_GAIN:-5}"
 export BS_ROLL_RATE_CMD_GAIN="${BS_ROLL_RATE_CMD_GAIN:-5}"
 export BS_ROLL_IMAX="${BS_ROLL_IMAX:-150}"
 export BS_ROLL_OSIGN="${BS_ROLL_OSIGN:-1}"
-export BS_ROLL_RATE_KI="${BS_ROLL_RATE_KI:-30}"
+export BS_ROLL_RATE_KI="${BS_ROLL_RATE_KI:-60}"
 export BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-90}"
 export BS_SLEW="${BS_SLEW:-300}"
 export BS_YAW_ARM_FRAMES="${BS_YAW_ARM_FRAMES:-5}"
