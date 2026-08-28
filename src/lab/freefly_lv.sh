@@ -237,7 +237,9 @@ export BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-1}"
 # стенд test_station_brake.py): BRAKE (уходим от точки >0.3 м/с: цель −brake·v,
 # упор как при 1.3, фаза кончается сама на нуле скорости) / RETURN (pos_kp 0.3,
 # потолок 0.3, √-кап acc) + anti-windup И-члена (BS_RATE_AWU, дефолт 1).
-# Прогон-кандидат (сравнивать с ab_pos13 по стопу и с ab_ki60_win03 по тишине):
+# С 2026-08-28 ДЕФОЛТ профиля (блок экспортов ниже): KP 0.3 VMAX 0.3 BRAKE 3
+# BRAKE_VMAX 1.0 ACC 0.15 BRAKE_V 0.25 — прогон ab_brake_v025 в 10 м/с. Прежний
+# кандидат (без BRAKE_V):
 #   BS_ROLL_POS_KP=0.3 BS_ROLL_POS_VMAX=0.3 BS_ROLL_POS_BRAKE=3 \
 #     BS_ROLL_POS_BRAKE_VMAX=1.0 BS_ROLL_POS_ACC=0.15 NAME=ab_brake bash src/lab/freefly_lv.sh
 # ⚠️ BRAKE_VMAX задавать ЯВНО: без неё кламп брейка = POS_VMAX (0.3) → цель −0.3
@@ -309,6 +311,18 @@ export BS_ROLL_IMAX="${BS_ROLL_IMAX:-150}"
 export BS_ROLL_OSIGN="${BS_ROLL_OSIGN:-1}"
 export BS_ROLL_RATE_KI="${BS_ROLL_RATE_KI:-60}"
 export BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-90}"
+# ── СТАНЦИЯ КРЕНА — ДЕФОЛТ с 2026-08-28 (ab_brake_v025, 10 м/с) ─────────────
+# Два закона поверх PI-демпфера (_FlowDamper1D._station_target): BRAKE — уходим
+# от точки быстрее BRAKE_V по каналу → цель −BRAKE·v_изм (кламп ±BRAKE_VMAX),
+# упор 150, фаза кончается сама на нуле; RETURN — стоим/идём к точке → KP·err,
+# потолок VMAX, √-кап ACC. Выключить станцию: BS_ROLL_POS_KP=0. Тангаж станции
+# пока НЕ имеет (BS_PITCH_POS_KP=0 — чистый демпфер), отдельный прогон-проверка.
+export BS_ROLL_POS_KP="${BS_ROLL_POS_KP:-0.3}"
+export BS_ROLL_POS_VMAX="${BS_ROLL_POS_VMAX:-0.3}"
+export BS_ROLL_POS_BRAKE="${BS_ROLL_POS_BRAKE:-3}"
+export BS_ROLL_POS_BRAKE_VMAX="${BS_ROLL_POS_BRAKE_VMAX:-1.0}"
+export BS_ROLL_POS_ACC="${BS_ROLL_POS_ACC:-0.15}"
+export BS_ROLL_POS_BRAKE_V="${BS_ROLL_POS_BRAKE_V:-0.25}"
 export BS_SLEW="${BS_SLEW:-300}"
 export BS_YAW_ARM_FRAMES="${BS_YAW_ARM_FRAMES:-5}"
 export BS_YAW_KD="${BS_YAW_KD:-6}"
