@@ -133,6 +133,20 @@ class BootstrapConfig:
     roll_pos_kp: float = 0.0         # станция-кипинг боковой оси (путь ipm_lat), см.
                                      # pitch_pos_kp. BS_ROLL_POS_KP / --roll-pos-kp
     roll_pos_vmax: float = 1.0       # BS_ROLL_POS_VMAX / --roll-pos-vmax
+    # ДВА ЗАКОНА СТАНЦИИ (см. _FlowDamper1D.__init__): pos_kp/pos_vmax — фаза RETURN
+    # (мягкий возврат, по каскаду ≤0.3), brake — фаза BRAKE (уходим от точки быстрее
+    # 0.3 м/с: цель = −brake·v_изм, гасим скорость с авторитетом ∝ скорости — стоп
+    # как при pos_kp=1.3 в ab_pos13, но без позиционного члена, и фаза кончается сама
+    # на нуле скорости), acc — √-кап тормозного пути к точке. 0 = одна ручка, как было.
+    # Стенд test_station_brake (плант по ab_pos13, лаги 0.3+0.2 с): одна ручка 1.3 —
+    # маятник до ±2 м/с (как в полёте); brake 3 + 0.3/0.3 — стоп 1.1 с (при 1.3 — 1.6),
+    # проход точки 0.00 м/с, пики 0.48 → 0.28 → 0.16, стоит через 8 с; робастно к
+    # лагу 0.5 и к каналу, видящему 0.6 истины. Кандидат на полёт ab_brake:
+    # BS_ROLL_POS_KP=0.3 BS_ROLL_POS_VMAX=0.3 BS_ROLL_POS_BRAKE=3 BS_ROLL_POS_BRAKE_VMAX=1.0
+    # BS_ROLL_POS_ACC=0.15 (⚠️ BRAKE_VMAX явно: иначе кламп брейка = POS_VMAX, упора нет).
+    roll_pos_brake: float = 0.0      # безразмерный. BS_ROLL_POS_BRAKE / --roll-pos-brake
+    roll_pos_brake_vmax: float = 0.0  # м/с, 0 = pos_vmax. BS_ROLL_POS_BRAKE_VMAX / --roll-pos-brake-vmax
+    roll_pos_acc: float = 0.0        # м/с², 0 = без капа. BS_ROLL_POS_ACC / --roll-pos-acc
     roll_max: float = 150.0
     # --- боковая ось ПО МЕТРИЧЕСКОЙ СКОРОСТИ (DpRollRate, сигнал ipm_vlat в М/С) ---
     # 30 — ИЗМЕРЕННЫЙ дефолт по свипу G (n=5 на точку, DpHoldM, `rate_gain_series.sh`):
@@ -233,6 +247,15 @@ class BootstrapConfig:
                                      # метры). BS_PITCH_POS_KP / --pitch-pos-kp
     pitch_pos_vmax: float = 1.0      # потолок скорости возврата к точке, м/с.
                                      # BS_PITCH_POS_VMAX / --pitch-pos-vmax
+    pitch_pos_brake: float = 0.0     # зеркало roll_pos_brake. BS_PITCH_POS_BRAKE
+    pitch_pos_brake_vmax: float = 0.0  # BS_PITCH_POS_BRAKE_VMAX / --pitch-pos-brake-vmax
+    pitch_pos_acc: float = 0.0       # BS_PITCH_POS_ACC / --pitch-pos-acc
+    # ANTI-WINDUP интегратора rate-осей (DpRollRate/DpPitchRate): в упоре ±max
+    # И-член не наматывается (условное интегрирование). Кламп imax не спасал:
+    # ab_pos13 — за 1.5 с упора +90 PWM сверх ветра, потом размотка ЗА точку.
+    # Без упора поведение не меняется вовсе (отлётанные серии без станции — бит-в-бит).
+    # 1 = вкл (лётный дефолт), 0 = выкл. BS_RATE_AWU / --rate-anti-windup
+    rate_anti_windup: float = 1.0
     pitch_max: float = 150.0
     pitch_conf_min: float = 0.05
     pitch_conf_full: float = 0.20

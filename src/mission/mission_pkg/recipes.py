@@ -104,7 +104,10 @@ _STAB = {
         cfg.pitch_rate_kp, cfg.pitch_rate_ki, cfg.pitch_rate_kd, cfg.pitch_imax,
         cfg.pitch_max, cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign,
         cfg.pitch_rate_cmd_gain, pos_kp=cfg.pitch_pos_kp,
-        pos_vmax=cfg.pitch_pos_vmax, **_ipm_gates(cfg, cfg.ipm_alt_band_fwd)),
+        pos_vmax=cfg.pitch_pos_vmax, pos_brake=cfg.pitch_pos_brake,
+        pos_brake_vmax=cfg.pitch_pos_brake_vmax, pos_acc=cfg.pitch_pos_acc,
+        anti_windup=cfg.rate_anti_windup > 0.0,
+        **_ipm_gates(cfg, cfg.ipm_alt_band_fwd)),
     # весь демпфер, но продольная ось по скорости
     "DpHoldR": lambda cfg: DpHold(_dp_roll(cfg), _STAB["DpPitchRate"](cfg), _dp_yaw(cfg)),
     # Боковая ось тоже по МЕТРИЧЕСКОЙ скорости (гейны roll_rate_*), см. DpRollRate.
@@ -112,7 +115,10 @@ _STAB = {
         cfg.roll_rate_kp, cfg.roll_rate_ki, cfg.roll_rate_kd, cfg.roll_imax,
         cfg.roll_max, cfg.roll_conf_min, cfg.roll_conf_full, cfg.roll_osign,
         cfg.roll_rate_cmd_gain, pos_kp=cfg.roll_pos_kp,
-        pos_vmax=cfg.roll_pos_vmax, **_ipm_gates(cfg, cfg.ipm_alt_band_lat)),
+        pos_vmax=cfg.roll_pos_vmax, pos_brake=cfg.roll_pos_brake,
+        pos_brake_vmax=cfg.roll_pos_brake_vmax, pos_acc=cfg.roll_pos_acc,
+        anti_windup=cfg.rate_anti_windup > 0.0,
+        **_ipm_gates(cfg, cfg.ipm_alt_band_lat)),
     # ОБЕ горизонтальные оси в метрах: демпфер целиком на виде сверху
     "DpHoldM": lambda cfg: DpHold(_STAB["DpRollRate"](cfg), _STAB["DpPitchRate"](cfg),
                                   _dp_yaw(cfg)),

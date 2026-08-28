@@ -812,6 +812,21 @@ def _parse() -> tuple:
                    default=_D.roll_pos_kp)
     p.add_argument('--roll-pos-vmax', dest='roll_pos_vmax', type=float,
                    default=_D.roll_pos_vmax)
+    # два закона станции + anti-windup (см. config.py, _FlowDamper1D.__init__)
+    p.add_argument('--roll-pos-brake', dest='roll_pos_brake', type=float,
+                   default=_D.roll_pos_brake)
+    p.add_argument('--roll-pos-brake-vmax', dest='roll_pos_brake_vmax', type=float,
+                   default=_D.roll_pos_brake_vmax)
+    p.add_argument('--roll-pos-acc', dest='roll_pos_acc', type=float,
+                   default=_D.roll_pos_acc)
+    p.add_argument('--pitch-pos-brake', dest='pitch_pos_brake', type=float,
+                   default=_D.pitch_pos_brake)
+    p.add_argument('--pitch-pos-brake-vmax', dest='pitch_pos_brake_vmax', type=float,
+                   default=_D.pitch_pos_brake_vmax)
+    p.add_argument('--pitch-pos-acc', dest='pitch_pos_acc', type=float,
+                   default=_D.pitch_pos_acc)
+    p.add_argument('--rate-anti-windup', dest='rate_anti_windup', type=float,
+                   default=_D.rate_anti_windup)
     p.add_argument('--pitch-osign', dest='pitch_osign', type=float, default=_D.pitch_osign)
     p.add_argument('--pitch-cmd-gain', dest='pitch_cmd_gain', type=float, default=_D.pitch_cmd_gain)
     p.add_argument('--pitch-smooth', dest='pitch_smooth', type=int, default=_D.pitch_smooth)

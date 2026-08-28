@@ -207,6 +207,16 @@ ARGS=()
 [ -n "${BS_PITCH_POS_VMAX:-}" ] && ARGS+=(--pitch-pos-vmax "$BS_PITCH_POS_VMAX")
 [ -n "${BS_ROLL_POS_KP:-}" ]    && ARGS+=(--roll-pos-kp "$BS_ROLL_POS_KP")
 [ -n "${BS_ROLL_POS_VMAX:-}" ]  && ARGS+=(--roll-pos-vmax "$BS_ROLL_POS_VMAX")
+# два закона станции: BRAKE (уходим от точки быстрее 0.3 м/с: цель −brake·v_изм,
+# кламп ±brake_vmax) / RETURN (pos_kp/pos_vmax, √-кап acc м/с²); anti-windup И-члена
+# rate-осей (1 = вкл). См. config.py, _FlowDamper1D.__init__
+[ -n "${BS_ROLL_POS_BRAKE:-}" ]       && ARGS+=(--roll-pos-brake "$BS_ROLL_POS_BRAKE")
+[ -n "${BS_ROLL_POS_BRAKE_VMAX:-}" ]  && ARGS+=(--roll-pos-brake-vmax "$BS_ROLL_POS_BRAKE_VMAX")
+[ -n "${BS_ROLL_POS_ACC:-}" ]         && ARGS+=(--roll-pos-acc "$BS_ROLL_POS_ACC")
+[ -n "${BS_PITCH_POS_BRAKE:-}" ]      && ARGS+=(--pitch-pos-brake "$BS_PITCH_POS_BRAKE")
+[ -n "${BS_PITCH_POS_BRAKE_VMAX:-}" ] && ARGS+=(--pitch-pos-brake-vmax "$BS_PITCH_POS_BRAKE_VMAX")
+[ -n "${BS_PITCH_POS_ACC:-}" ]        && ARGS+=(--pitch-pos-acc "$BS_PITCH_POS_ACC")
+[ -n "${BS_RATE_AWU:-}" ]             && ARGS+=(--rate-anti-windup "$BS_RATE_AWU")
 [ -n "${BS_PITCH_OSIGN:-}" ]     && ARGS+=(--pitch-osign "$BS_PITCH_OSIGN")
 [ -n "${BS_PITCH_CMD_GAIN:-}" ]  && ARGS+=(--pitch-cmd-gain "$BS_PITCH_CMD_GAIN")
 [ -n "${BS_PITCH_SMOOTH:-}" ]    && ARGS+=(--pitch-smooth "$BS_PITCH_SMOOTH")

@@ -245,7 +245,8 @@ class _FlowDamper1D(StabilizationStrategy):
 
     def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_pwm=150.0,
                  conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5,
-                 pos_kp=0.0, pos_vmax=1.0):
+                 pos_kp=0.0, pos_vmax=1.0, pos_brake=0.0, pos_brake_vmax=0.0,
+                 pos_acc=0.0, anti_windup=False):
         self.kp, self.ki, self.kd = kp, ki, kd
         self.imax, self.max = imax, max_pwm
         self.conf_min, self.conf_full = conf_min, conf_full
@@ -260,6 +261,46 @@ class _FlowDamper1D(StabilizationStrategy):
         # _POS_YAW_TOL от курса захвата перезахватывает точку (снос за время разворота
         # прощаем — честнее, чем тянуть в повёрнутую сторону). 0 = выкл (как было).
         self.pos_kp, self.pos_vmax = pos_kp, pos_vmax
+        # --- ДВА ЗАКОНА СТАНЦИИ: «тормози жёстко, возвращайся мягко» ---
+        # Одна линейная pos_kp обязана выбирать между стопом и звоном: она одинаково
+        # жёстко тянет и ОТ точки (нужно — стоп), и К точке (даёт перелёт). Прогон
+        # BS_ROLL_POS_KP/ab_pos13 (2026-08-28, pos_kp=1.3): стоп за 1 с в упоре 150,
+        # но в момент стопа борт в 0.9 м от точки → цель −1.0 м/с → проходит точку
+        # на −1.2 м/с → маятник ±1.2…1.8 м/с, период 5.4 с, ζ −0.08 (РАСТЁТ).
+        # Механика: P по пути поверх PI по скорости = PID по позиции (P = kp·pos_kp
+        # + ki, I = ki·pos_kp, D = kp) → при pos_kp 1.3 внешний контур той же
+        # скорости, что внутренний (ω_n 0.9-1.2), лаг канала + контур FCU по углу
+        # съедают всё демпфирование. Правило каскада: внешний в 3-5× медленнее.
+        # Пилот «успокаивал руками» (ab_pos13_me) = стик отпускает точку + перезахват
+        # в покое — то есть сброс накопленной ошибки, не демпфирование.
+        # Решение — фазы. BRAKE: борт уходит ОТ точки быстрее _POS_PIN_V → цель
+        # = −pos_brake·v_изм (кламп ±pos_brake_vmax): гасим СКОРОСТЬ, без
+        # позиционного члена. Авторитет растёт со скоростью (k=3, канал видит 0.33
+        # → цель −1.0 → внутренняя ошибка 1.3 м/с → упор, как при 1.3), а у нуля
+        # скорости цель сама уходит в ноль — переход в RETURN без ступеньки.
+        # ⚠️ Позиционный брейк (цель pos_kp_brake·err) пробовался первым и на стенде
+        # test_station_brake дал предельный цикл ±0.6 м/с: на измеренном нуле цель
+        # прыгала с −1.0 на −0.4, привод ещё толкал, борт проходил точку на 0.6,
+        # уход > 0.3 снова будил брейк — бесконечно. Скоростной брейк заканчивается
+        # сам (цель → 0 вместе со скоростью) и раскачаться не может.
+        # RETURN: стоим или идём К точке → pos_kp/pos_vmax (мягко: по каскаду ≤0.3)
+        # + √-кап pos_acc: |цель| ≤ √(2·pos_acc·|ошибка|) — тормозной путь до точки
+        # без перелёта (как sqrt_controller ArduPilot). Гистерезис входа в BRAKE
+        # (|v| > _POS_PIN_V) — иначе у точки дребезг фаз; малые уходы (<0.3) гасит
+        # линейный RETURN сам.
+        # pos_brake = 0 → одна ручка, как было (класс-дефолт: офлайн-репро);
+        # pos_brake_vmax = 0 → потолок брейка = pos_vmax; pos_acc = 0 → без √-капа.
+        self.pos_brake, self.pos_brake_vmax = pos_brake, pos_brake_vmax
+        self.pos_acc = pos_acc
+        self._pos_brake = False   # фаза BRAKE активна (только при pos_brake > 0)
+        # --- ANTI-WINDUP интегратора (условное интегрирование) ---
+        # Кламп ±imax не спасает: пока выход в упоре ±max, интегратор копит дальше
+        # (ab_pos13: за 1.5 с упора при ошибке ~1 м/с +90 PWM сверх ветра), и потом
+        # обязан размотаться, толкая борт ЗА точку — заметная доля роста раскачки.
+        # В фазе BRAKE упор — по замыслу, поэтому без anti-windup брейк не летит.
+        # True: если выход в упоре и ошибка толкает глубже — И-член не растёт.
+        # Класс-дефолт False (прежнее поведение бит-в-бит); лётный — config.
+        self.anti_windup = bool(anti_windup)
         self._i = 0.0
         self._prev_err = 0.0
         self._last_seq = -1
@@ -323,6 +364,31 @@ class _FlowDamper1D(StabilizationStrategy):
         self._sp_rate = 0.0
         self._pos_sp = None
         self._pos_wait_t = None
+        self._pos_brake = False
+
+    def _station_target(self, err, v):
+        """Цель скорости станции по ошибке пути `err` (точка − путь) и скорости `v`.
+
+        Одна ручка (pos_brake = 0): clamp(pos_kp·err, ±pos_vmax) — как было.
+        Две фазы — см. комментарий в __init__: BRAKE, пока уходим от точки (v·err < 0)
+        после входа по |v| > _POS_PIN_V, до измеренного нуля скорости — цель
+        −pos_brake·v (скоростной брейк, без позиционного члена); RETURN — всё
+        остальное, с √-капом тормозного пути при pos_acc > 0."""
+        away = v * err < 0.0                     # скорость направлена ОТ точки
+        if self.pos_brake > 0.0:
+            if self._pos_brake:
+                if not away:                     # измеренный ноль — стоп состоялся
+                    self._pos_brake = False
+            elif away and abs(v) > self._POS_PIN_V:
+                self._pos_brake = True
+        if self._pos_brake:
+            vmax = self.pos_brake_vmax if self.pos_brake_vmax > 0.0 else self.pos_vmax
+            return clamp(-self.pos_brake * v, -vmax, vmax)
+        t = clamp(self.pos_kp * err, -self.pos_vmax, self.pos_vmax)
+        if self.pos_acc > 0.0:
+            cap = math.sqrt(2.0 * self.pos_acc * abs(err))
+            t = clamp(t, -cap, cap)
+        return t
 
     def _signal_ok(self, s) -> bool:
         """Годен ли сигнал этой оси в этом кадре (переопределяется, где есть чем judge)."""
@@ -412,22 +478,30 @@ class _FlowDamper1D(StabilizationStrategy):
                             self._pos_sp = (pos, s.att_yaw)
                             self._pos_wait_t = None
                     if self._pos_sp is not None:
-                        self._target = clamp(self.pos_kp * (self._pos_sp[0] - pos),
-                                             -self.pos_vmax, self.pos_vmax)
+                        self._target = self._station_target(self._pos_sp[0] - pos,
+                                                            self._signal(s))
                     else:
                         self._target = 0.0    # ещё тормозим — гвоздь позже
+                        self._pos_brake = False
                 else:
                     self._pos_sp = None       # стик живой → точка отпущена
                     self._pos_wait_t = None
+                    self._pos_brake = False
                     self._target = cmd * self.cmd_gain
                 err = self._signal(s) - self._target                    # velocity-assist
-            self._i = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
+            i_new = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
             dot = self._signal_dot(s)
             # разность соседних кадров уже считает производную ОШИБКИ (уставка в err),
             # готовой производной сигнала уставку надо вычесть руками
             d = (self.kd * (dot - self._sp_rate) if dot is not None
                  else self.kd * (err - self._prev_err) / fdt)
             self._prev_err = err
+            if self.anti_windup:
+                u_raw = self.kp * err + i_new + d
+                if abs(u_raw) > self.max and u_raw * err > 0.0:
+                    i_new = self._i           # выход в упоре, ошибка толкает глубже —
+                                              # И-член не наматывать (см. __init__)
+            self._i = i_new
             u = clamp(self.kp * err + self._i + d, -self.max, self.max)
             self._out = self.osign * blend * u
             self._last_frame_sim = s.now_sim
