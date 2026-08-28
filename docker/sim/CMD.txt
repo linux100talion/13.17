@@ -1,6 +1,8 @@
 LV=2 BS_SF_MASTER=1 теперь по умолчанию
 SPAWN_POSE="-0.6018 -11.0809 0.2450 0 0 -2.95235" bash src/lab/freefly_lv.sh
 
+NAME=ab_ki60_win03 bash src/lab/freefly_lv.sh
+
 
 // LV=2 ДРОН ВООБЩЕ БЕЗ GPS
 LV=2 BS_SF_MASTER=1 bash src/lab/freefly_lv.sh
@@ -8,7 +10,11 @@ LV=2 BS_SF_MASTER=1 bash src/lab/freefly_lv.sh
 LV=2 BS_SF_MASTER=1 SPAWN_POSE="-0.6018 -11.0809 0.2450 0 0 -2.95235" bash src/lab/freefly_lv.sh
 
 
-SPAWN_FROM=/usr/local/DATA/Calude/13.17/docker/sim/output/joystick/lv1_joy_20260824_211215/ bash src/lab/freefly_lv.sh
+SPAWN_FROM=/usr/local/DATA/Calude/13.17/docker/sim/output/joystick/ab_ki60_win03/ bash src/lab/freefly_lv.sh
+
+
+
+-------------------------------------------------------------
 
 
 python3 src/lab/spawn_save.py docker/sim/output/joystick/lv1_joy_20260824_224118 among_trees
