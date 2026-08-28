@@ -1,3 +1,16 @@
+
+
+BS_ROLL_POS_KP=0.3 BS_ROLL_POS_VMAX=0.3 BS_ROLL_POS_BRAKE=0.25 BS_ROLL_POS_BRAKE_VMAX=1.0 \
+  BS_ROLL_POS_ACC=0.15 NAME=ab_brake bash src/lab/freefly_lv.sh
+
+BS_ROLL_POS_KP=0.3 BS_ROLL_POS_VMAX=0.3 BS_ROLL_POS_BRAKE=3 BS_ROLL_POS_BRAKE_VMAX=1.0 \
+  BS_ROLL_POS_ACC=0.15 NAME=ab_brake bash src/lab/freefly_lv.sh
+
+
+
+-------------------------------------------------------------
+
+
 LV=2 BS_SF_MASTER=1 теперь по умолчанию
 SPAWN_POSE="-0.6018 -11.0809 0.2450 0 0 -2.95235" bash src/lab/freefly_lv.sh
 
