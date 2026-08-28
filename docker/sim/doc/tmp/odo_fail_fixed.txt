@@ -1,0 +1,18 @@
+Фиксы сделаны и проверены на земле
+
+Что изменено
+
+1. Лётная нода — /restart по арму (src/mission/mission_pkg/nodes/bootstrap_node.py): на фронте armed публикует std_msgs/Bool в /restart → restart_callback эстиматора (clearState + очистка буферов). Флаг config.vins_restart_arm (дефолт 1) → --vins-restart-arm → BS_VINS_RESTART_ARM в src/lab/bootstrap_arch2.sh; freefly_lv.sh экспортирует его явно (виден в мете прогона). Латч нуля высоты переехал на общий armed_front — поведение прежнее. /restart уже wired и в симе, и на Orin (--remap /feature_tracker/restart:=/restart в vins_service*.sh).
+2. Форк, ветка 1317_debug (/root/VINS-MONO-ROS2, через контейнер):
+   - feature_tracker.cpp rejectWithF: при max-сдвиге точек < 1e-3 px эпиполярный тест пропускается (все точки остаются); findFundamentalMat дополнительно в try/catch с throttled-warn — кадр всегда доходит до публикации, долг freq-контроля не копится.
+   - estimator.cpp processImage: страховка MAX_INIT_FRAMES=300 — в INITIAL при >300 кадрах в all_image_frame без ключевых → clearState+setParameter (то же, что /restart). Покрывает Orin-ручной режим и любой сценарий без лётной ноды.
+3. CLAUDE.md (раздел VINS-Mono) — описание патчей и парного фикса; память проекта vins-ground-stand-init.md обновлена.
+
+Проверка
+- Scratch-сборка форка ОК; все 20 тест-скриптов src/control/test + src/mission/test ✅; новый флаг парсится в BootstrapConfig (дефолт 1.0).
+- make restart-all + make wait: nav_up.sh пересобрал оба пакета (21 с), бинарники свежие и содержат патчи.
+- 4,5 мин стояния на земле на новом стеке: RSS эстиматора 41.4 → 42.2 МБ (раньше +0.4 МБ/с, т.е. было бы +110 МБ), cv::Exception = 0 (раньше шторм уже на старте), сброс окна раз в ~29 с (all_image_frame=301), /feature ровно 10.2–10.9 Гц без discontinuity.
+
+Не сделано / дальше
+- Ничего не коммитил (ни в репе, ни в форке) — скажи, и оформлю два коммита.
+- Доказательство полётом за тобой: постоять на земле 3–5 мин, армить, взлететь — ODO должен появиться через 2–4 с после отрыва, в логе строка «арм: /restart → VINS». Стек сейчас поднят свежим с патчами — можно лететь сразу.
