@@ -33,10 +33,17 @@ anti-windup И-члена (в упоре не наматывать). Логик�
    (нуль скорости ≤ 1.5 с), точка НЕ проходится быстрее 0.15 м/с, борт возвращается
    (|путь| < 0.1 м) и стоит (|v| < 0.05 последние 5 с), пики убывают монотонно, ветер
    держит интегратор, фаза BRAKE была (упор) и погасла; √-кап у точки;
-4. робастность: канал видит 0.6 истины — сходится; лаг 0.5 с — не растёт, а БЕЗ
-   anti-windup на том же лаге разносит до ±1.7 м/с (awu — не косметика);
+4. робастность: канал видит 0.6 истины — сходится; лаг 0.5 с — не растёт; БЕЗ
+   anti-windup в сильный ветер интегратор в упор 150 и проход точки 0.8 м/с
+   (awu — не косметика);
    4b: смещённый канал (+0.08 «ухода» при истинном нуле, как ab_brake_win10 в 10 м/с)
    — брейк выходит по |v| < 0.1, а не виснет; порог входа pos_brake_v — ручка;
+   4d: перевзвод — после первого брейка порог входа ×2: качание у точки брейк не будит,
+   порыв ≥0.6 м/с — будит (у порога ×1 стенд на лаге 0.5 качал 0.29 → 0.74);
+   4c: сильный ветер 104 PWM (10 м/с, толчок 0.55): со старым правилом anti-windup
+   И-член в упоре брейка стоит (полёт 3/hover: 31 на стопе, пауза 3 с); с тримом в
+   упоре BRAKE (_BRAKE_TRIM) трим копится в упоре, набран раньше, возврат раньше,
+   перебора нет; в слабый ветер (упора почти нет) база не меняется;
 5. гистерезис: в RETURN у точки малые скорости (< 0.3) BRAKE не будят, в BRAKE до нуля;
 6. живой стик отпускает точку и гасит фазу BRAKE.
 
@@ -64,7 +71,7 @@ def check(name, ok):
 ALPHA, WIND, V0 = 0.0125, 0.65, 0.25     # плант: идентификация gain_sim по ab_pos13
 DT = 1.0 / 30.0                          # кадры камеры
 BRAKE = dict(pos_kp=0.3, pos_vmax=0.3, pos_brake=3.0, pos_brake_vmax=1.0, pos_acc=0.15,
-             anti_windup=True)           # кандидат на полёт ab_brake
+             anti_windup=True)           # лётный набор (ab_brake_v025)
 
 
 def axis(cls=DpRollRate, **kw):
@@ -78,10 +85,13 @@ def axis(cls=DpRollRate, **kw):
     return cls(**kw)
 
 
-def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0):
-    """Замкнутый контур ось+плант; строки (t, v_ист, v_изм, путь, pwm, И-член).
-    bias — постоянное смещение измеренной скорости (канал в ветер «видит уход»)."""
-    v, vm, pwm_act, path = V0, 0.0, 0.0, 0.0
+def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0, wind=WIND,
+        v0=V0):
+    """Замкнутый контур ось+плант; строки (t, v_ист, v_изм, путь, pwm, И-член, brake).
+    bias — постоянное смещение измеренной скорости (канал в ветер «видит уход»),
+    wind — ветер, м/с² (0.65 = 52 PWM как 5 м/с; 1.3 = 104 PWM как 10 м/с),
+    v0 — толчок на отрыве (0.25; в 10 м/с — 0.55, как ab_brake_win10)."""
+    v, vm, pwm_act, path = v0, 0.0, 0.0, 0.0
     ax.enter(DroneState(flow_seq=-1))
     rows, t = [], 0.0
     for k in range(int(round(sec / DT))):
@@ -97,8 +107,8 @@ def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0):
                        sp, DT)
         pwm = rc.roll - RC_CENTER
         pwm_act += (pwm - pwm_act) * (1.0 - math.exp(-DT / tau_a))   # привод (FCU по углу)
-        v += (-ALPHA * pwm_act + WIND) * DT
-        rows.append((t, v, vm, path, pwm, ax._i))
+        v += (-ALPHA * pwm_act + wind) * DT
+        rows.append((t, v, vm, path, pwm, ax._i, ax._pos_brake))
     return rows
 
 
@@ -219,10 +229,18 @@ pk5, _ = summary('лаг 0.5', l5)
 late5 = [abs(p[1]) for p in pk5 if p[0] > 8.0]
 check(f"лаг канала 0.5 с: не растёт (пики после 8 с ≤ 0.35: {max(late5):.2f}), "
       f"хвост {tail_v(l5):.2f} < 0.35", max(late5) <= 0.35 and tail_v(l5) < 0.35)
+# без anti-windup: с порогом перевзвода ×2 (4d) раскачка уже не разносит, но в
+# сильный ветер интегратор в упоре брейка наматывается до 150 и борт проходит точку
+# на 0.8 м/с вместо 0.07 — awu по-прежнему обязателен, просто ловится в другом месте
 l5n = fly(axis(**dict(BRAKE, anti_windup=False)), tau_s=0.5)
 summary('лаг 0.5 БЕЗ awu', l5n)
-check(f"лаг 0.5 БЕЗ anti-windup: разносит (хвост {tail_v(l5n):.2f} > 1.0) — awu обязателен",
-      tail_v(l5n) > 1.0)
+check(f"лаг 0.5 БЕЗ anti-windup: хуже, чем с ним (хвост {tail_v(l5n):.2f} > {tail_v(l5):.2f})",
+      tail_v(l5n) > tail_v(l5))
+w10n = fly(axis(**dict(BRAKE, anti_windup=False)), 25.0, gain=0.6, wind=1.3, v0=0.55)
+summary('сильный ветер БЕЗ awu', w10n)
+check(f"сильный ветер БЕЗ anti-windup: интегратор в упор (макс {max(r[5] for r in w10n):.0f} ≥ 140) "
+      f"и проход точки {crossing_speed(w10n):.2f} ≥ 0.5 м/с — awu обязателен",
+      max(r[5] for r in w10n) >= 140.0 and crossing_speed(w10n) >= 0.5)
 # 4b. СМЕЩЁННЫЙ канал (ab_brake_win10: после стопа +0.01…+0.12 «ухода» при истинном
 # нуле): без выхода по |v| < _POS_BRAKE_EXIT брейк висел бы с целью −3·v ≈ −0.1 и
 # держал борт в 2 м от точки; с ним — стоп, выход, возврат.
@@ -248,6 +266,64 @@ hv._pos_sp = (0.0, 0.0)
 hv._station_target(0.5, -0.28)
 check("порог входа pos_brake_v=0.25: уход 0.28 будит BRAKE (при дефолте 0.3 — нет)",
       hv._pos_brake)
+# 4c. СИЛЬНЫЙ ВЕТЕР (104 PWM ≈ 10 м/с, толчок 0.55, канал 0.6): в упоре брейка
+# anti-windup замораживал И-член, трим ветра не набирался, после стопа борт стоял
+# ~3 с (3/hover: И-член −5…10 весь брейк, 31 на стопе). _BRAKE_TRIM: в упоре БРЕЙКА
+# И-член копит чистую скорость (трим), вне упора — прежняя ошибка. Стенд упор держит
+# короче полёта (канал слабее), поэтому сверяем ОТНОШЕНИЯ старое/новое, не абсолют.
+
+
+def trim_stats(rows, trim):
+    """(И-член на выходе из брейка, t достижения 90% трима, путь к 8 с)."""
+    i_exit = next((rows[k][5] for k in range(1, len(rows)) if rows[k - 1][6] and not rows[k][6]),
+                  None)
+    t90 = next((r[0] for r in rows if r[5] >= 0.9 * trim), None)
+    p8 = next(r[3] for r in rows if r[0] >= 8.0)
+    return i_exit, t90, p8
+
+
+print("  сильный ветер 104 PWM (как 10 м/с), толчок 0.55, канал 0.6:")
+W10 = 1.3
+DpRollRate._BRAKE_TRIM = False
+old = fly(axis(**BRAKE), 25.0, gain=0.6, wind=W10, v0=0.55)
+DpRollRate._BRAKE_TRIM = True
+new = fly(axis(**BRAKE), 25.0, gain=0.6, wind=W10, v0=0.55)
+summary('без трима (старое)', old)
+summary('трим в упоре BRAKE', new)
+io, t90o, p8o = trim_stats(old, W10 / ALPHA)
+i_n, t90n, p8n = trim_stats(new, W10 / ALPHA)
+print(f"    И-член на выходе из брейка {io:.0f}/{i_n:.0f}, 90% трима ({0.9 * W10 / ALPHA:.0f}) "
+      f"к {t90o:.1f}/{t90n:.1f} с, путь к 8 с {p8o:.2f}/{p8n:.2f} м (старое/новое)")
+check(f"сильный ветер: в упоре брейка трим копится (на выходе {i_n:.0f} ≥ {io:.0f}+10)",
+      i_n >= io + 10.0)
+check(f"сильный ветер: трим набран раньше (90% к {t90n:.1f} ≤ {t90o:.1f}−0.3 с)",
+      t90n <= t90o - 0.3)
+check(f"сильный ветер: возврат раньше (путь к 8 с {p8n:.2f} < {p8o:.2f})", p8n < p8o)
+check(f"сильный ветер: перебора трима нет (И-член макс {max(r[5] for r in new):.0f} ≤ "
+      f"{W10 / ALPHA + 15:.0f}), вернулся (|путь| {abs(new[-1][3]):.2f} < 0.3), стоит "
+      f"(хвост {tail_v(new):.2f} < 0.15)",
+      max(r[5] for r in new) <= W10 / ALPHA + 15.0 and abs(new[-1][3]) < 0.3
+      and tail_v(new) < 0.15)
+base_old_trim = DpRollRate._BRAKE_TRIM
+DpRollRate._BRAKE_TRIM = False
+base_off = fly(axis(**BRAKE))
+DpRollRate._BRAKE_TRIM = base_old_trim
+check("слабый ветер (упор — пара кадров): трим-правило меняет выход ≤ 5 PWM — база прежняя",
+      max(abs(x[4] - y[4]) for x, y in zip(two, base_off)) <= 5)
+# 4d. ПЕРЕВЗВОД: после первого брейка порог входа ×_POS_BRAKE_REFIRE (0.3 → 0.6):
+# качание у точки с амплитудой у порога брейк не будит (стенд, лаг 0.5: с порогом
+# ×1 брейк бил на каждом качке и качал до 0.74; см. секцию «лаг 0.5» выше — там уже
+# ×2), а порыв/отпущенный стик на ≥0.6 м/с — будит.
+rf = axis(**BRAKE)
+rf.enter(DroneState(flow_seq=-1))
+rf._pos_sp = (0.0, 0.0)
+rf._station_target(0.5, -0.4)               # первый брейк
+rf._station_target(0.5, 0.05)               # вышли
+check("перевзвод: после первого брейка уход 0.4 м/с брейк НЕ будит (порог ×2 = 0.6)",
+      not rf._trim_armed and not (rf._station_target(0.5, -0.4) < -0.15 or rf._pos_brake))
+rf._station_target(0.8, -0.7)
+check("перевзвод: уход 0.7 м/с (порыв / отпущенный стик) — брейк будит",
+      rf._pos_brake)
 imax_awu = max(r[5] for r in two)
 check(f"anti-windup: в упоре И-член не наматывается (макс {imax_awu:.0f} ≤ "
       f"{WIND / ALPHA + 25:.0f} PWM)", imax_awu <= WIND / ALPHA + 25.0)
