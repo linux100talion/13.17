@@ -193,6 +193,9 @@ export BS_IPM_DEROT="${BS_IPM_DEROT:-1.0}"
 export BS_IPM_WIN="${BS_IPM_WIN:-0.3}"
 export BS_IPM_WZ_TAU="${BS_IPM_WZ_TAU:-2.0}"
 export BS_IPM_WZ_GATE="${BS_IPM_WZ_GATE:-0.1}"
+export BS_ATT_INTERP="${BS_ATT_INTERP:-1}"
+export BS_ATT_LATENCY="${BS_ATT_LATENCY:-0.02}"
+export BS_PITCH_SOFT_NOISE="${BS_PITCH_SOFT_NOISE:-0.02}"
 export BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-1}"
 # ── ГЕЙНЫ ДЕМПФЕРА: kp 90 (шаг 1 ЗАШЁЛ), ki 60 + IPM_WIN 0.3 (шаг 2 ЗАШЁЛ) ──
 # ШАГ 1 ЗАШЁЛ (прогон 061854 против 034514, окно взлёта): пик боковой 1.07 →
@@ -469,6 +472,19 @@ export BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-90}"
 # Смотреть: шум пути на 10/17.5 м (реплей/разбор) — с 101/386 мм к ~20/70; тангаж
 # на высоте тише, чем в ab_soft; у земли без изменений. Шаг 2 (после): заменить
 # высотную мягкость на шумовую — BS_PITCH_SOFT_ALT=0 BS_PITCH_SOFT_NOISE=0.02.
+# ВЕРДИКТ ab_interp / ab_noise (2026-08-29, до 17–19 м; Андрей: «всё супер, оставил
+# бы мягкость по шуму»). ATTITUDE в bag — 50 Гц (20 мс), т.е. в полёте была
+# ступенька 20 мс + транспорт. Шум пути за кадр, мм (эталон ab_soft без интерп.):
+#   ~0.5 м: 33 → 17/20;  5–7 м: 58 → 32/41;  10 м: 101 → 57/62;  17–19 м: 386 → 49/59
+# — интерполяция сняла рост с высоты (17 м = уровень 10 м; пол с точными углами
+# 6–11 мм — остаток EKF/LK). Тангаж на 10–19 м руки-прочь: ab_interp (мягкость по
+# высоте, soft 0.12–0.19) PWM σ 51–56, тангаж σ 4°, брейк ≤1.4/10 с; ab_noise
+# (по шуму, soft ≈ 0.57 — шум после интерполяции ниже) PWM σ 77, тангаж σ 5.5°,
+# брейк ≤2.3/10 с — авторитета на высоте больше, качания нет (было PWM σ 109,
+# тангаж 6.7°, брейк 33). С 2026-08-29 ДЕФОЛТ: BS_ATT_INTERP=1 BS_ATT_LATENCY=0.02
+# BS_PITCH_SOFT_NOISE=0.02 (BS_PITCH_SOFT_ALT остаётся 0; крен без мягкости).
+# Ручка на будущее: порог 0.02 → 0.015 даст на высоте soft ~0.4 (мягче), если
+# захочется тише; выкл — BS_PITCH_SOFT_NOISE=0.
 export BS_ROLL_POS_KP="${BS_ROLL_POS_KP:-0.3}"
 export BS_ROLL_POS_VMAX="${BS_ROLL_POS_VMAX:-0.3}"
 export BS_ROLL_POS_BRAKE="${BS_ROLL_POS_BRAKE:-3}"
