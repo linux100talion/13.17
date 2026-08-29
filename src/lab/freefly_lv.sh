@@ -420,7 +420,9 @@ export BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-90}"
 # 0.33 м. С 2026-08-29 ДЕФОЛТ: BS_STATION_FRAME=yaw BS_IPM_WZ_GATE=0.1
 # BS_YAW_V_GATE=0.8 (откат: body / 0 / 0). Оговорка: YAW_V_GATE сравнивает
 # скорость КАНАЛА (гейн 0.5–0.7): 0.8 ≈ 1.1–1.6 м/с истинных, на ходу 1.2 м/с
-# гейт ещё мигает (169–173 с: размах 36°) — резерв 0.5.
+# гейт ещё мигал (169–173 с: размах 36°) → с 2026-08-29 дефолт 0.5 (≈0.7–1.0 м/с
+# истинных; выше шума канала в висении ≤0.36 и потолка возврата станции 0.3 —
+# в висении и на возврате картинка про курс работает, в брейке и на ходу — FCU).
 # В /mission/status t= — sim-штамп строки: стики rcr/rcp/rcy и рама sx/sy/spx/spy
 # выравниваются по нему, не по времени bag.
 export BS_ROLL_POS_KP="${BS_ROLL_POS_KP:-0.3}"
@@ -448,7 +450,7 @@ export BS_YAW_MAX_RATE="${BS_YAW_MAX_RATE:-100}"
 # разматывали 92–96% разворота обратно после отпускания. 130 PWM ≈ 60°/с
 # (замер spring: ~0.45 °/с на PWM) — тот же темп, что BS_YAW_RATE_FULL. 0 = выкл.
 export BS_YAW_PILOT_GAIN="${BS_YAW_PILOT_GAIN:-130}"
-export BS_YAW_V_GATE="${BS_YAW_V_GATE:-0.8}"
+export BS_YAW_V_GATE="${BS_YAW_V_GATE:-0.5}"
 export BS_STATION_FRAME="${BS_STATION_FRAME:-yaw}"
 export BS_YAW_RATE_FULL="${BS_YAW_RATE_FULL:-60}"
 export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
