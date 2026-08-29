@@ -121,6 +121,14 @@ check("ipm: мост фильтром → ipm=1 при ipmf=5", d['ipm'] == '1' 
 d = kv(hud_status(DroneState(now_sim=5.0, ipm_ok=True, ipm_fail=0), FRESH))
 check("ipm: годен → ipm=1 ipmf=0", d['ipm'] == '1' and d['ipmf'] == '0')
 
+# 7. Стики пилота в статусе: сырой PWM − центр, тумблер (для разбора bag без /joy)
+d = kv(hud_status(DroneState(now_sim=5.0, pilot_roll=1700, pilot_pitch=1300,
+                             pilot_throttle=1500, pilot_yaw=1450, pilot_switch=1), FRESH))
+check("стики: rcr/rcp/rct/rcy = PWM − 1500, sw = тумблер",
+      (d['rcr'], d['rcp'], d['rct'], d['rcy'], d['sw']) == ('200', '-200', '0', '-50', '1'))
+d = kv(hud_status(DroneState(now_sim=5.0), FRESH))
+check("стики по умолчанию (центр): все 0", (d['rcr'], d['rcp'], d['rct'], d['rcy']) == ('0', '0', '0', '0'))
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

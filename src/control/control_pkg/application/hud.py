@@ -33,6 +33,8 @@ WaitEkfPos (step.py) пускает арм: свежий /mavros/local_position 
 # Свежесть позиции EKF — зеркало fresh_sec у WaitEkfPos (step.py) и гейта
 # GPS-kill в bootstrap_node: одна правда «EKF держит позицию».
 EKF_FRESH_SEC = 2.0
+# Центр стика (1500): стики пилота в статусе — смещение от него, а не сырой PWM.
+RC_CENTER = 1500
 
 
 def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5) -> str:
@@ -69,8 +71,18 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5) -> str:
     # ТРЕТЬЮ высоту — у неё свой источник и своё смещение. ipm/ipmf — состояние
     # самого канала (ipm_ok + код причины брака кадра, таблица — FlowEstimator).
     palt = f"{s.perc_alt:.1f}" if s.perc_alt is not None else "--"
+    # rcr/rcp/rct/rcy — СТИКИ ПИЛОТА глазами ноды (сырой PWM − центр, как их видит
+    # арбитр и стек: pilot_* снапшота), sw — тумблер авто/ручной. Зачем в статусе:
+    # /joy в bag штампован стеночным временем джойстик-ноды, и при плавающем RTF
+    # его не выровнять с sim-временем (прогон lv2_joy_20260829_153405: сдвиг
+    # «плывёт» −2…−5 с по полёту) — толчок пилота приходилось угадывать по целям
+    # осей. Здесь стик лежит в той же строке и с тем же sim-штампом, что и всё
+    # остальное. HUD эти поля не рисует (парсер k=v лишнее игнорирует).
     return (f"st={st} why={why} ekf={ekf} extnav={int(s.extnav_ready)} "
             f"odom={s.vins_odom_count} age={min(age, 999.0):.1f} "
             f"alt={(s.rel_alt or 0.0):.1f} zekf={zekf} palt={palt} "
             f"ipm={int(s.ipm_ok)} ipmf={s.ipm_fail} "
-            f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f}")
+            f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f} "
+            f"rcr={s.pilot_roll - RC_CENTER} rcp={s.pilot_pitch - RC_CENTER} "
+            f"rct={s.pilot_throttle - RC_CENTER} rcy={s.pilot_yaw - RC_CENTER} "
+            f"sw={s.pilot_switch}")
