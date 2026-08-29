@@ -113,6 +113,7 @@ class BootstrapArch2Node(Node):
                                             ipm_model=cfg.ipm_model,
                                             ipm_derot=cfg.ipm_derot,
                                             ipm_wz_tau=cfg.ipm_wz_tau,
+                                            ipm_wz_gate=cfg.ipm_wz_gate,
                                             ipm_win=cfg.ipm_win,
                                             ipm_adapt=cfg.ipm_adapt,
                                             ipm_vel_tau=cfg.ipm_vel_tau,
@@ -435,7 +436,7 @@ class BootstrapArch2Node(Node):
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
         # /mission/status: гейт LOITER-на-VINS для debug-HUD стримера + bag
         line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt)
-        st = line.split(' ', 1)[0]
+        st = next((w for w in line.split() if w.startswith('st=')), '')   # первое слово теперь t=
         if st != self._hud_st:      # переход статуса — в лог (виден и в sim_nav.log)
             self._hud_st = st
             self.logger.info(f"HUD: {line}")
@@ -766,6 +767,7 @@ def _parse() -> tuple:
     p.add_argument('--origin-alt', dest='origin_alt', type=float,
                    default=_D.origin_alt)
     p.add_argument('--ipm-wz-tau', dest='ipm_wz_tau', type=float, default=_D.ipm_wz_tau)
+    p.add_argument('--ipm-wz-gate', dest='ipm_wz_gate', type=float, default=_D.ipm_wz_gate)
     p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
     p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,
                    default=_D.ipm_max_speed)
@@ -841,6 +843,10 @@ def _parse() -> tuple:
                    default=_D.pitch_pos_alt_band)
     p.add_argument('--rate-anti-windup', dest='rate_anti_windup', type=float,
                    default=_D.rate_anti_windup)
+    p.add_argument('--station-frame', dest='station_frame', choices=('body', 'yaw'),
+                   default=_D.station_frame)
+    p.add_argument('--station-heading', dest='station_heading', choices=('fcu',),
+                   default=_D.station_heading)
     p.add_argument('--pitch-osign', dest='pitch_osign', type=float, default=_D.pitch_osign)
     p.add_argument('--pitch-cmd-gain', dest='pitch_cmd_gain', type=float, default=_D.pitch_cmd_gain)
     p.add_argument('--pitch-smooth', dest='pitch_smooth', type=int, default=_D.pitch_smooth)
@@ -862,6 +868,7 @@ def _parse() -> tuple:
     # разбор spring 2026-08-27, контур разматывал 92–96% разворота обратно
     p.add_argument('--yaw-pilot-gain', dest='yaw_pilot_gain', type=float,
                    default=_D.yaw_pilot_gain)
+    p.add_argument('--yaw-v-gate', dest='yaw_v_gate', type=float, default=_D.yaw_v_gate)
     p.add_argument('--yaw-arm-frames', dest='yaw_arm_frames', type=int,
                    default=_D.yaw_arm_frames)
     p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=_D.flow_hold_sec)

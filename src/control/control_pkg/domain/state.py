@@ -106,6 +106,12 @@ class DroneState:
     # corr 0.40-0.83 и разброс цены метра в 14 раз.
     ipm_fwd: float = 0.0             # путь вперёд от точки удержания, М
     ipm_lat: float = 0.0             # путь вбок, М
+    # --- Рама станции в осях курса (StationFrame пишет сама, раз на кадр) ---
+    st_frame: int = 0                # 1 = рама активна (станция в осях курса)
+    st_x: float = 0.0                # мировая позиция рамы, м (ψ от att_yaw)
+    st_y: float = 0.0
+    st_px: float = float('nan')      # гвоздь рамы, м; nan = гвоздя нет
+    st_py: float = float('nan')
     ipm_vfwd: float = 0.0            # продольная скорость, М/С
     ipm_vlat: float = 0.0            # боковая скорость, М/С
     ipm_ok: bool = False             # кадр выпрямился и поток посчитан

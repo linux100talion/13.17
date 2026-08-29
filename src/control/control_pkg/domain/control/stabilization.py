@@ -349,6 +349,8 @@ class _FlowDamper1D(StabilizationStrategy):
         self._pos_sp = None      # станция rate-оси: (путь в точке захвата, курс захвата)
         self._pos_wait_t = None  # начало торможения (для принудительного гвоздя)
         self._i_hold = False     # И-член заморожен: от живого стика до гвоздя (_TRIM_LATCH)
+        self.frame = None        # StationFrame — общая рама крена/тангажа (оси курса);
+                                 # None = станция в осях борта (как было). Вешает композит
         self._target = 0.0       # ЦЕЛЬ rate-оси (c_*·cmd_gain) — записи команды у этих
                                  # осей не было вовсе: /flow_dbg5 шлёт только pos-оси, и
                                  # калибровку R1 пришлось резать по истинной скорости,
@@ -541,6 +543,7 @@ class _FlowDamper1D(StabilizationStrategy):
             self._last_seq = s.flow_seq
             fdt = self._fdt(s)
             blend = self._authority(s)
+            fr = None                    # рама станции — только у rate-осей со станцией
             if self._cmd_mode == "pos":
                 self._sp_rate = self._cmd(sp) * self.cmd_gain    # ед. сигнала в секунду
                 self._sp += self._sp_rate * fdt                  # УСТАВКА ЕДЕТ
@@ -556,6 +559,14 @@ class _FlowDamper1D(StabilizationStrategy):
                 self._advance(s, fdt)
                 cmd = self._cmd(sp)
                 pos = self._pos_signal(s) if self.pos_kp > 0.0 else None
+                fr = self.frame if (self.frame is not None and pos is not None) else None
+                if fr is not None:
+                    # общая рама: мировая позиция из приращений пути (раз на кадр,
+                    # идемпотентно по flow_seq), стик этой оси — раме, И-член этой
+                    # оси = компонента мирового вектора трима вдоль оси ТЕКУЩЕГО курса
+                    fr.advance(s)
+                    fr.stick(self._axis, cmd != 0.0)
+                    self._i = fr.trim_body(self._axis)
                 if pos is not None and cmd == 0.0 and self._pos_alt is not None \
                         and self._pos_alt.update(s.now_sim, s.rel_alt) is False:
                     # высота идёт / ещё не установилась — гвоздь отпущен, чистый
@@ -572,7 +583,11 @@ class _FlowDamper1D(StabilizationStrategy):
                     # (полёт 2026-08-18). Пока |скорость| ≥ _POS_PIN_V — цель 0
                     # (чистое торможение демпфером), гвоздь — где остановился.
                     # Перезахват при уходе курса: путь копится в body-осях.
+                    # В осях курса (рама) точка мировая и с курсом не едет — перезахват
+                    # по уходу курса нужен только пока ДРУГАЯ ось везёт пилота (эта
+                    # держит «линию», и линия должна повернуться вместе с ходом).
                     if (self._pos_sp is not None
+                            and (fr is None or fr.any_stick())
                             and abs(math.atan2(math.sin(s.att_yaw - self._pos_sp[1]),
                                                math.cos(s.att_yaw - self._pos_sp[1])))
                             > self._POS_YAW_TOL):
@@ -585,9 +600,15 @@ class _FlowDamper1D(StabilizationStrategy):
                             self._pos_sp = (pos, s.att_yaw)
                             self._pos_wait_t = None
                             self._i_hold = False      # гвоздь взят — трим снова учится
+                            if fr is not None:
+                                fr.set_pin()          # ОДИН 2D-гвоздь на обе оси
                     if self._pos_sp is not None:
-                        self._target = self._station_target(self._pos_sp[0] - pos,
-                                                            self._signal(s))
+                        err_pos = (fr.body_err(self._axis) if fr is not None
+                                   else self._pos_sp[0] - pos)
+                        if err_pos is None:           # рама без гвоздя (сброшен) — взять
+                            fr.set_pin()
+                            err_pos = 0.0
+                        self._target = self._station_target(err_pos, self._signal(s))
                     else:
                         self._target = 0.0    # ещё тормозим — гвоздь позже
                         self._pos_brake = False
@@ -621,6 +642,8 @@ class _FlowDamper1D(StabilizationStrategy):
                              if self._pos_brake and self._BRAKE_TRIM and self._trim_armed
                              else self._i)
             self._i = i_new
+            if fr is not None:
+                fr.set_trim_body(self._axis, self._i)   # компонента → мировой вектор
             u = clamp(self.kp * err + self._i + d, -self.max, self.max)
             self._out = self.osign * blend * u
             self._last_frame_sim = s.now_sim
@@ -829,13 +852,23 @@ class DpYawHold(_FlowDamper1D):
     def __init__(self, kp=0.0, ki=0.0, kd=6.0, imax=200.0, max_pwm=150.0,
                  conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=9.28,
                  stale_sec=0.5, leak_sec=8.0, max_step=32.4, arm_frames=5,
-                 pilot_gain=0.0):
+                 pilot_gain=0.0, v_gate=0.0):
         super().__init__(kp, ki, kd, imax, max_pwm, conf_min, conf_full,
                          osign, cmd_gain, stale_sec)
         self.leak = leak_sec
         self.max_step = max_step
         self.arm_frames = arm_frames
         self.pilot_gain = pilot_gain
+        # v_gate (м/с): на ходу быстрее этого картинке про курс НЕ ВЕРИТЬ — кадр
+        # засчитывается как «вращения нет» (накопитель и D-член не двигаются), курс
+        # держит сам FCU. Замер ab_frame (лобовой flow_yaw против истинной ω_z):
+        # |v| < 0.3 м/с — наклон 0.90, corr 0.95, остаток 5 °/с; 0.3–1 — 0.96/0.96/6;
+        # > 1 м/с — 0.74/0.58/21 °/с: параллакс хода читается как разворот, D-член
+        # (kd=6) отвечает на него ±110 PWM, и борт на прямой в 2 м/с «ворочается»
+        # ±40 °/с (scene_hud 25–31 с). Скорость — из канала вида сверху (ipm_v*),
+        # он от разворота уже очищен деротом. 0 = без гейта.
+        self.v_gate = v_gate
+        self._gated = 0           # кадров, отброшенных гейтом хода (диагностика)
         self._head = 0.0
         self._dot = 0.0           # замеренная скорость последнего кадра — для D-члена
         self._armed = 0           # сколько подряд кадров картинке уже можно верить
@@ -847,6 +880,7 @@ class DpYawHold(_FlowDamper1D):
         self._dot = 0.0
         self._armed = 0
         self._rejects = 0
+        self._gated = 0
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
         # ПРЯМАЯ ПЕРЕДАЧА (см. docstring): стик жив → PWM со стика, контур обнулён.
@@ -891,6 +925,9 @@ class DpYawHold(_FlowDamper1D):
 
     def _advance(self, s, fdt) -> None:
         step = s.flow_yaw
+        if self.v_gate > 0.0 and math.hypot(s.ipm_vfwd, s.ipm_vlat) > self.v_gate:
+            self._gated += 1
+            step = 0.0            # ход: параллакс ≠ разворот (см. v_gate в __init__)
         # ОТСЕВ НЕВОЗМОЖНОГО: 43.8 px/кадр это 135 °/с (S=0.324) у висящего борта —
         # столько он не поворачивается. Полный стик даёт 28.65 °/с, так что потолок
         # 100 °/с (max_step = S·100 = 32.4) оставляет команде троекратный запас и при
@@ -1183,15 +1220,123 @@ class DpRollRate(_IpmGated):
         return -sp.c_right
 
 
+class StationFrame:
+    """РАМА СТАНЦИИ В ОСЯХ КУРСА — общая для крена и тангажа.
+
+    Зачем. Станция и трим ветра жили в осях БОРТА: путь ipm_lat/ipm_fwd копится
+    покомпонентно без поворота, гвоздь — точка на этом пути, И-член каждой оси —
+    компонента трима вдоль оси борта. Разворот всё это ломает: полёт
+    lv2_joy_20260829_153405, разворот 200° за 4 с в 5 м/с — стиков крена/тангажа
+    нет, цели станции 0, а борт разгоняется с 0.06 до 1.38 м/с: трим (−50 PWM в
+    тангаже) после разворота смотрит В ОБРАТНУЮ сторону и толкает ПО ветру, гвоздь
+    сбрасывался каждые 17° курса, точка терялась. Здесь всё три вещи — мировые:
+    - позиция (x, y): приращения пути IPM (тело: вперёд/влево) поворачиваются
+      курсом ψ и суммируются — раз на кадр, идемпотентно по flow_seq;
+    - гвоздь (px, py): ОДИН на обе оси, ставится осью, которая только что
+      затормозила (set_pin); ошибка оси = компонента (гвоздь − позиция) вдоль
+      её оси ТЕКУЩЕГО курса — после разворота точка на месте;
+    - трим (tx, ty): вектор PWM в мировых осях; ось читает компоненту вдоль
+      себя (trim_body), интегрирует по своему закону и пишет обратно
+      (set_trim_body — другая компонента не тронута). После разворота трим
+      сам поворачивается в оси борта — толчка по ветру нет.
+    КУРС — ПОДКЛЮЧАЕМЫЙ ВХОД: `heading(s) → рад (ENU, как att_yaw)`. Сейчас —
+    курс FCU (гиро + компас EKF; в симе идеален, им же считается порог 17°);
+    для борта без компаса сюда встанет визуальный курс (лобовой или поворот
+    полосы IPM) — станцию при этом переделывать не надо.
+    Условности осей: тело = (вперёд, влево) — как ipm_vfwd/ipm_vlat; мир = ψ от
+    оси x против часовой (ENU-курс). Сброс пути перцепцией (ipm_* = 0 на новом
+    сегменте) распознаётся по точному нулю пары и приращения не даёт."""
+
+    def __init__(self, heading=None):
+        self.heading = heading if heading is not None else (lambda s: s.att_yaw)
+        self.reset()
+
+    def reset(self):
+        self._seq = -1
+        self._prev = None
+        self.x = self.y = 0.0
+        self.psi = 0.0
+        self.pin = None
+        self.trim = [0.0, 0.0]
+        self._live = {}
+
+    def _rot(self):
+        return math.cos(self.psi), math.sin(self.psi)
+
+    def advance(self, s) -> None:
+        if s.flow_seq == self._seq:
+            return
+        self._seq = s.flow_seq
+        self.psi = float(self.heading(s))
+        cur = (float(s.ipm_fwd), float(s.ipm_lat))
+        if self._prev is not None and not (cur[0] == 0.0 and cur[1] == 0.0):
+            df, dl = cur[0] - self._prev[0], cur[1] - self._prev[1]
+            c, si = self._rot()
+            self.x += df * c - dl * si
+            self.y += df * si + dl * c
+        self._prev = cur
+        # телеметрия рамы — в снапшот (→ /mission/status: sf/sx/sy/spx/spy)
+        s.st_frame = 1
+        s.st_x, s.st_y = self.x, self.y
+        if self.pin is not None:
+            s.st_px, s.st_py = self.pin
+        else:
+            s.st_px = s.st_py = float('nan')
+
+    def set_pin(self) -> None:
+        self.pin = (self.x, self.y)
+
+    def drop_pin(self) -> None:
+        self.pin = None
+
+    def body_err(self, axis):
+        """Компонента (гвоздь − позиция) вдоль оси тела: 'pitch' → вперёд, 'roll' → влево."""
+        if self.pin is None:
+            return None
+        ex, ey = self.pin[0] - self.x, self.pin[1] - self.y
+        c, si = self._rot()
+        return ex * c + ey * si if axis == "pitch" else -ex * si + ey * c
+
+    def trim_body(self, axis) -> float:
+        tx, ty = self.trim
+        c, si = self._rot()
+        return tx * c + ty * si if axis == "pitch" else -tx * si + ty * c
+
+    def set_trim_body(self, axis, value) -> None:
+        f, l = self.trim_body("pitch"), self.trim_body("roll")
+        if axis == "pitch":
+            f = float(value)
+        else:
+            l = float(value)
+        c, si = self._rot()
+        self.trim = [f * c - l * si, f * si + l * c]
+
+    def stick(self, axis, live: bool) -> None:
+        self._live[axis] = bool(live)
+
+    def any_stick(self) -> bool:
+        return any(self._live.values())
+
+
 class DpHold(StabilizationStrategy):
     """Демпфер по ВСЕМ трём осям — композит DpRollHold+DpPitchHold+DpYawHold. Каждая
-    ось читает свой сигнал потока (разные единицы), поэтому композит, а не одна база."""
+    ось читает свой сигнал потока (разные единицы), поэтому композит, а не одна база.
+
+    `frame` — StationFrame (станция в осях курса): вешается на rate-оси крена и
+    тангажа; None — станция в осях борта, как было."""
     axes = frozenset({"roll", "pitch", "yaw"})
 
-    def __init__(self, roll=None, pitch=None, yaw=None):
+    def __init__(self, roll=None, pitch=None, yaw=None, frame=None):
         self._subs = [roll or DpRollHold(), pitch or DpPitchHold(), yaw or DpYawHold()]
+        self.frame = frame
+        if frame is not None:
+            for x in self._subs:
+                if hasattr(x, "frame") and getattr(x, "_axis", None) in ("roll", "pitch"):
+                    x.frame = frame
 
     def enter(self, s: DroneState) -> None:
+        if self.frame is not None:
+            self.frame.reset()
         for x in self._subs:
             x.enter(s)
 

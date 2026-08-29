@@ -295,6 +295,28 @@ off.update(st(1, yaw=0.0, now=0.05), Setpoint(c_yaw=0.3), 0.05)
 check("передача выкл (0): команда идёт через уставку, как раньше",
       off.hold_dbg()[0] < 0.0)
 
+# --- DpYawHold: гейт по скорости хода (v_gate) — параллакс хода ≠ разворот ---
+# Замер ab_frame: лобовой flow_yaw против истинной ω_z — в висении corr 0.95, на ходу
+# > 1 м/с corr 0.58 и остаток 21 °/с; D-член отвечал ±110 PWM, борт «ворочался».
+print("  DpYawHold: гейт по скорости хода")
+vg = _yh(kp=0.0, kd=6.0, leak_sec=0.0, max_step=0.0, v_gate=0.8)
+vg.enter(st(0))
+s_fast = DroneState(flow_seq=1, flow_yaw=20.0, flow_conf=0.5, flow_dt=0.05, now_sim=0.05,
+                    ipm_vfwd=2.0, ipm_vlat=0.0)
+rc = vg.update(s_fast, Setpoint(), 0.05)
+check("v_gate: на ходу 2 м/с кадр flow_yaw=20 не двигает накопитель и D-член (PWM 0)",
+      vg._head == 0.0 and vg._dot == 0.0 and rc.yaw == RC_CENTER and vg._gated == 1)
+s_slow = DroneState(flow_seq=2, flow_yaw=20.0, flow_conf=0.5, flow_dt=0.05, now_sim=0.10,
+                    ipm_vfwd=0.2, ipm_vlat=0.1)
+rc = vg.update(s_slow, Setpoint(), 0.05)
+check("v_gate: в висении (0.22 м/с) тот же кадр принят — D-член работает (PWM ≠ 0)",
+      vg._dot == 20.0 and rc.yaw != RC_CENTER)
+ng = _yh(kp=0.0, kd=6.0, leak_sec=0.0, max_step=0.0)
+ng.enter(st(0))
+rc = ng.update(s_fast, Setpoint(), 0.05)
+check("без гейта (0): тот же ход-кадр принят — прежнее поведение", ng._dot == 20.0
+      and rc.yaw != RC_CENTER)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ФЛОУ-СТАБИЛИЗАТОРЫ OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

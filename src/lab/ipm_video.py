@@ -83,7 +83,7 @@ ALL_FRAMES = os.environ.get('IPM_ALL', '0') == '1'
 ALT_SRC = os.environ.get('IPM_ALT_SRC', 'auto')
 FPS_PROBE_N = 60                 # кадров на авто-оценку fps
 # ручки канала, которые кладёт в оценщик bootstrap_node (те же BS_-имена)
-IPM_KNOBS = ('ipm_model', 'ipm_derot', 'ipm_wz_tau', 'ipm_win', 'ipm_adapt',
+IPM_KNOBS = ('ipm_model', 'ipm_derot', 'ipm_wz_tau', 'ipm_wz_gate', 'ipm_win', 'ipm_adapt',
              'ipm_vel_tau', 'ipm_alt_floor', 'ipm_scale_ref', 'ipm_acc_tau')
 
 

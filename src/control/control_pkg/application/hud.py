@@ -78,11 +78,23 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5) -> str:
     # «плывёт» −2…−5 с по полёту) — толчок пилота приходилось угадывать по целям
     # осей. Здесь стик лежит в той же строке и с тем же sim-штампом, что и всё
     # остальное. HUD эти поля не рисует (парсер k=v лишнее игнорирует).
-    return (f"st={st} why={why} ekf={ekf} extnav={int(s.extnav_ready)} "
+    # t — sim-время снапшота. /mission/status — String без header: в bag он лежит по
+    # СТЕНОЧНОМУ времени приёма, а RTF плывёт, и стики/раму из него было не выровнять
+    # с истиной Gazebo (ab_frame: сдвиг −2…−5 с) — та же болезнь, что у /joy.
+    return (f"t={s.now_sim:.2f} st={st} why={why} ekf={ekf} extnav={int(s.extnav_ready)} "
             f"odom={s.vins_odom_count} age={min(age, 999.0):.1f} "
             f"alt={(s.rel_alt or 0.0):.1f} zekf={zekf} palt={palt} "
             f"ipm={int(s.ipm_ok)} ipmf={s.ipm_fail} "
             f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f} "
             f"rcr={s.pilot_roll - RC_CENTER} rcp={s.pilot_pitch - RC_CENTER} "
             f"rct={s.pilot_throttle - RC_CENTER} rcy={s.pilot_yaw - RC_CENTER} "
-            f"sw={s.pilot_switch}")
+            f"sw={s.pilot_switch}" + _frame_fields(s))
+
+
+def _frame_fields(s) -> str:
+    """Рама станции в осях курса (StationFrame): позиция и гвоздь, м. Только когда
+    рама активна — «чего нет в источниках, того нет и в строке»."""
+    if not getattr(s, 'st_frame', 0):
+        return ""
+    pin = (f"{s.st_px:.2f}", f"{s.st_py:.2f}") if s.st_px == s.st_px else ("--", "--")
+    return f" sf=1 sx={s.st_x:.2f} sy={s.st_y:.2f} spx={pin[0]} spy={pin[1]}"

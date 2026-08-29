@@ -129,6 +129,22 @@ check("стики: rcr/rcp/rct/rcy = PWM − 1500, sw = тумблер",
 d = kv(hud_status(DroneState(now_sim=5.0), FRESH))
 check("стики по умолчанию (центр): все 0", (d['rcr'], d['rcp'], d['rct'], d['rcy']) == ('0', '0', '0', '0'))
 
+# 8. Рама станции (StationFrame): поля только когда активна; гвоздя нет → "--"
+d = kv(hud_status(DroneState(now_sim=5.0), FRESH))
+check("рама неактивна: полей sf/sx/spx в строке нет", 'sf' not in d and 'sx' not in d)
+d = kv(hud_status(DroneState(now_sim=5.0, st_frame=1, st_x=1.234, st_y=-0.5,
+                             st_px=1.0, st_py=-0.25), FRESH))
+check("рама активна: sf=1 sx/sy/spx/spy", (d['sf'], d['sx'], d['sy'], d['spx'], d['spy'])
+      == ('1', '1.23', '-0.50', '1.00', '-0.25'))
+d = kv(hud_status(DroneState(now_sim=5.0, st_frame=1), FRESH))
+check("рама без гвоздя: spx/spy = --", d['spx'] == '--' and d['spy'] == '--')
+
+# 9. sim-штамп строки: t = now_sim (для выравнивания bag без header)
+d = kv(hud_status(DroneState(now_sim=123.456), FRESH))
+check("t = now_sim с сотыми (123.46)", d['t'] == '123.46')
+check("st по-прежнему первое СЛОВО после t (лог переходов в ноде режет по нему)",
+      hud_status(DroneState(now_sim=1.0), FRESH).split(' ')[1].startswith('st='))
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

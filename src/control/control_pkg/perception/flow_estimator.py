@@ -71,7 +71,8 @@ class FlowEstimator:
                  kf_seg_cap_sec=10.0, ipm=True, ipm_x0=3.0, ipm_x1=6.0,
                  ipm_yhalf=2.0, ipm_res=0.02, ipm_win=0.5, ipm_model='legacy',
                  ipm_derot=0.0, ipm_wz_tau=0.0, ipm_adapt=0.0, ipm_vel_tau=0.0,
-                 ipm_alt_floor=0.0, ipm_scale_ref=0.0, ipm_acc_tau=0.0):
+                 ipm_alt_floor=0.0, ipm_scale_ref=0.0, ipm_acc_tau=0.0,
+                 ipm_wz_gate=0.0):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -189,6 +190,15 @@ class FlowEstimator:
         # Смещение своё у каждого прогона (и, вероятно, у каждого включения), поэтому оно
         # ОЦЕНИВАЕТСЯ на ходу, а не вбивается константой.
         self.ipm_wz_tau = float(ipm_wz_tau)
+        # ipm_wz_gate (рад/с): оценку НУЛЯ ω_z двигать только пока борт НЕ разворачивается
+        # (|ω_z − оценка| < gate). Без гейта ФВЧ с τ=2 с за разворот принимает сам
+        # разворот за смещение: полёт ab_frame (5 м/с, рама станции) — за развороты
+        # 70…335° при 40…60 °/с канал наматывает ФАНТОМНЫЙ боковой путь +0.9…+4.8 м
+        # (∫(канал − гейн·истина)dt), демпфер гонит борт по фантому, а рама станции
+        # уносит гвоздь — снос 2–4 м за 5 с после каждого разворота. С гейтом оценка
+        # замерзает на развороте и продолжает в висении, где ω_z ≈ 0 (FCU держит
+        # курс) и смещение видно чище всего. 0 = без гейта (прежнее правило).
+        self.ipm_wz_gate = float(ipm_wz_gate)
         self._wz_bias = None
         self._wz_t = None
         self._wz_n = 0
@@ -695,6 +705,8 @@ class FlowEstimator:
             return 0.0
         dt = stamp - self._wz_t
         self._wz_t = stamp
+        if self.ipm_wz_gate > 0.0 and abs(wz - self._wz_bias) > self.ipm_wz_gate:
+            return wz - self._wz_bias   # разворот: оценку нуля не трогаем
         self._wz_n += 1
         if dt > 0.0:
             # ⚠️ РАЗГОН ОЦЕНКИ. Один отсчёт ω_z шумит на 0.13 рад/с — вшестеро больше самого

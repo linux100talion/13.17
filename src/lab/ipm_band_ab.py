@@ -118,7 +118,7 @@ CSV = os.environ.get('IB_CSV', '')
 FLOW_R = [0.0, -1.0, 0.0, -0.25708, 0.0, -0.96639, 0.96639, 0.0, -0.25708]
 FLOW_ROTSIGN = 1.0
 # ручки канала, которые кладёт в оценщик bootstrap_node (те же BS_-имена, что ipm_video)
-IPM_KNOBS = ('ipm_model', 'ipm_derot', 'ipm_wz_tau', 'ipm_win', 'ipm_adapt',
+IPM_KNOBS = ('ipm_model', 'ipm_derot', 'ipm_wz_tau', 'ipm_wz_gate', 'ipm_win', 'ipm_adapt',
              'ipm_vel_tau', 'ipm_alt_floor', 'ipm_scale_ref', 'ipm_acc_tau')
 # базовая геометрия полосы = класс-дефолты FlowEstimator (ими и летаем)
 BASE = (2.0, 200, 3.0, 6.0)

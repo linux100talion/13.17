@@ -66,7 +66,7 @@ class RosPerception:
                  ipm_model=None, ipm_derot=None, ipm_wz_tau=None, ipm_win=None,
                  ipm_adapt=None, ipm_vel_tau=None, ipm_alt_floor=None,
                  ipm_scale_ref=None, ipm_acc_tau=None, alt_src='global',
-                 alt_zero=False):
+                 alt_zero=False, ipm_wz_gate=None):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -114,6 +114,8 @@ class RosPerception:
             extra['ipm_derot'] = float(ipm_derot)
         if ipm_wz_tau is not None:
             extra['ipm_wz_tau'] = float(ipm_wz_tau)
+        if ipm_wz_gate is not None:
+            extra['ipm_wz_gate'] = float(ipm_wz_gate)
         if ipm_win is not None:
             extra['ipm_win'] = float(ipm_win)
         if ipm_adapt is not None:

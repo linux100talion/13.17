@@ -24,7 +24,7 @@ from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.excitation import NoExcitation
 from control_pkg.domain.control.stabilization import (
     DpHold, DpPitchBack, DpPitchHold, DpPitchRate, DpRollHold, DpRollRate, DpYawHold, GzHold, GzPitchHold,
-    GzPosHold, GzRollHold, GzYawHold, VinsHold)
+    GzPosHold, GzRollHold, GzYawHold, StationFrame, VinsHold)
 from control_pkg.domain.control.trajectory import RcTransmitter, Shuttle
 
 CONTROL_MODES = ("shuttle", "assisted", "manual", "flow_assist")
@@ -39,6 +39,21 @@ def _gz_alias(klass, cfg):
                  # темп разворота — из ОБЩЕГО yaw_rate_full, а не из класс-дефолта:
                  # иначе один токен yaw_l30 даёт разный угол под Gz и под Dp
                  yaw_cmd_gain=math.radians(cfg.yaw_rate_full))
+
+
+# Источники курса для рамы станции (StationFrame.heading): подключаемый вход.
+# 'fcu' — att_yaw (гиро + компас EKF); визуальный курс — следующее приращение.
+_HEADINGS = {"fcu": lambda s: s.att_yaw}
+
+
+def _station_frame(cfg):
+    """Рама станции в осях курса — или None (станция в осях борта, как было)."""
+    if cfg.station_frame != "yaw":
+        return None
+    if cfg.station_heading not in _HEADINGS:
+        raise ValueError(f"station_heading={cfg.station_heading!r}: нет такого источника "
+                         f"курса, есть {sorted(_HEADINGS)}")
+    return StationFrame(heading=_HEADINGS[cfg.station_heading])
 
 
 def _dp_roll(cfg):
@@ -81,7 +96,7 @@ def _dp_yaw(cfg):
                      cfg.yaw_conf_min, cfg.yaw_conf_full, cfg.yaw_osign,
                      yaw_cmd_gain(cfg), leak_sec=cfg.yaw_leak,
                      max_step=yaw_max_step(cfg), arm_frames=cfg.yaw_arm_frames,
-                     pilot_gain=cfg.yaw_pilot_gain)
+                     pilot_gain=cfg.yaw_pilot_gain, v_gate=cfg.yaw_v_gate)
 
 
 def _vins(cfg):
@@ -111,7 +126,8 @@ _STAB = {
         anti_windup=cfg.rate_anti_windup > 0.0,
         **_ipm_gates(cfg, cfg.ipm_alt_band_fwd)),
     # весь демпфер, но продольная ось по скорости
-    "DpHoldR": lambda cfg: DpHold(_dp_roll(cfg), _STAB["DpPitchRate"](cfg), _dp_yaw(cfg)),
+    "DpHoldR": lambda cfg: DpHold(_dp_roll(cfg), _STAB["DpPitchRate"](cfg), _dp_yaw(cfg),
+                                  frame=_station_frame(cfg)),
     # Боковая ось тоже по МЕТРИЧЕСКОЙ скорости (гейны roll_rate_*), см. DpRollRate.
     "DpRollRate": lambda cfg: DpRollRate(
         cfg.roll_rate_kp, cfg.roll_rate_ki, cfg.roll_rate_kd, cfg.roll_imax,
@@ -125,7 +141,7 @@ _STAB = {
         **_ipm_gates(cfg, cfg.ipm_alt_band_lat)),
     # ОБЕ горизонтальные оси в метрах: демпфер целиком на виде сверху
     "DpHoldM": lambda cfg: DpHold(_STAB["DpRollRate"](cfg), _STAB["DpPitchRate"](cfg),
-                                  _dp_yaw(cfg)),
+                                  _dp_yaw(cfg), frame=_station_frame(cfg)),
     # ЗОНД канала: команда демпфера по такту/амплитуде, но выпрямлена назад (u=−|u|)
     "DpPitchBack": lambda cfg: _dp_pitch(cfg, DpPitchBack),
     "DpYawHold":   _dp_yaw,
