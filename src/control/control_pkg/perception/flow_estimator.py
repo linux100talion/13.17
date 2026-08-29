@@ -229,6 +229,10 @@ class FlowEstimator:
         self._ipm_hist = []          # (t, путь вперёд, путь вбок) — окно для скорости
         self.ipm_fwd = self.ipm_lat = 0.0
         self.ipm_vfwd = self.ipm_vlat = 0.0
+        # ШУМ КАНАЛА онлайн, м/кадр (≈0.8σ покадрового шума пути) — считается у
+        # приращения пути ниже; растёт с тайминг-ошибкой углов ∝ высоте (замер
+        # lv2_joy_20260829_182126: 14 → 95 мм на 0.3 → 8.3 м; ab_soft: 231 мм на 17.5).
+        self.ipm_noise_fwd = self.ipm_noise_lat = 0.0
         self.ipm_ok = False
         # ПРИЧИНА, почему ЭТОТ кадр не дал измерения (0 = дал). Мотив: разбор
         # LV2/1 (2026-08-25) упёрся в бинарный ipm_ok — 31% слепоты канала на
@@ -829,11 +833,24 @@ class FlowEstimator:
         # а body-twist Gazebo — FLU (y = влево); перезамер полёта 2026-08-18 по
         # производной мировой позиции дал ipm_vlat ≈ −v_right с наклоном ~1.
         # Потребитель (DpRollRate._cmd) компенсирует минусом, как DpRollHold.
-        self.ipm_lat += float(np.median(d[:, 0])) * res
+        d_lat = float(np.median(d[:, 0])) * res
+        self.ipm_lat += d_lat
         # Сдвиг АДАПТИВНОГО окна между кадрами (x0 − prev_x0) неотличим для потока от
         # хода вперёд (статичная точка земли сползает вниз по сетке ровно на сдвиг),
         # но он известен ТОЧНО — вычитаем. При ipm_adapt=0 окна совпадают, дельта 0.
-        self.ipm_fwd += float(np.median(d[:, 1])) * res - (x0 - prev_geo[0])
+        d_fwd = float(np.median(d[:, 1])) * res - (x0 - prev_geo[0])
+        self.ipm_fwd += d_fwd
+        # ШУМ КАНАЛА онлайн: |приращение за кадр − v̂·dt| (v̂ — отфильтрованная скорость
+        # ПРОШЛОГО кадра), сглажено τ=2 с; ≈0.8σ покадрового шума пути (м/кадр).
+        # Проверено реплеем ab_soft/182126 против истины Gazebo: corr 0.97–0.99,
+        # масштаб 0.81–0.93. Невязка МНК в окне для этого НЕ годится (случайное
+        # блуждание пути в окне почти линейно — недооценка в 8×). Потребитель —
+        # мягкость демпфера по измеренному шуму (_IpmGated.soft_noise).
+        if prev_t is not None and stamp > prev_t:
+            dtf = stamp - prev_t
+            a_n = 1.0 - math.exp(-dtf / 2.0)
+            self.ipm_noise_fwd += a_n * (abs(d_fwd - self._ipm_v[0] * dtf) - self.ipm_noise_fwd)
+            self.ipm_noise_lat += a_n * (abs(d_lat - self._ipm_v[1] * dtf) - self.ipm_noise_lat)
         self.ipm_ok = True
         self.ipm_fail = 0
         self._ipm_meas_t = stamp
@@ -1110,6 +1127,7 @@ class FlowEstimator:
                     # --- канал вида сверху: МЕТРЫ и м/с ---
                     ipm_fwd=self.ipm_fwd, ipm_lat=self.ipm_lat,
                     ipm_vfwd=self.ipm_vfwd, ipm_vlat=self.ipm_vlat,
+                    ipm_noise_fwd=self.ipm_noise_fwd, ipm_noise_lat=self.ipm_noise_lat,
                     ipm_ok=self.ipm_ok, ipm_fail=self.ipm_fail,
                     # --- диагностика для flow_derotation_check ---
                     resid_rms=float(np.sqrt(np.mean(np.sum(tr ** 2, axis=1)))),

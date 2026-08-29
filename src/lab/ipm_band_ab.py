@@ -113,6 +113,16 @@ AIR = float(os.environ.get('IB_AIR', 0.15))
 ALT_SRC = os.environ.get('IB_ALT_SRC', 'latch')
 DETAIL = os.environ.get('IB_DETAIL', '0') == '1'
 CSV = os.environ.get('IB_CSV', '')
+# ДИАГНОСТИКА ТАЙМИНГА УГЛОВ: IB_ATT_DELAY (с) — брать истинные углы на delay раньше
+# штампа кадра (эмуляция устаревшей ориентации); IB_ATT_HOLD_HZ — «ступенька»
+# (sample-and-hold с таким темпом, как ATTITUDE-сообщения); IB_T0/IB_T1 — окно
+# реплея по sim-времени от первого odom (ускоряет прогон одного участка).
+ATT_DELAY = float(os.environ.get('IB_ATT_DELAY', '0'))
+ATT_HOLD_HZ = float(os.environ.get('IB_ATT_HOLD_HZ', '0'))
+# IB_ATT_EXTRAP=1 — «ступеньку» дотягивать до кадра истинной ω (эмуляция att_extrap
+# ноды с хорошим гироскопом): угол = удержанный отсчёт + ω·(t − t_отсчёта).
+ATT_EXTRAP = os.environ.get('IB_ATT_EXTRAP', '0') == '1'
+T_WIN = (float(os.environ.get('IB_T0', '-1')), float(os.environ.get('IB_T1', '1e9')))
 # ровно то, что кладёт в оценщик bootstrap_node (FLOW_R / FLOW_ROTSIGN); сам
 # bootstrap_node не импортируем — он тянет rclpy и весь ROS-стек (на хосте нет mavros)
 FLOW_R = [0.0, -1.0, 0.0, -0.25708, 0.0, -0.96639, 0.96639, 0.0, -0.25708]
@@ -309,8 +319,17 @@ def main():
                 rows[name], corners[name] = [], Counter()
             print(f'  кадр {W}×{H} → fx=fy={fx:.0f}; варианты: '
                   + ', '.join(n_ for n_, _ in variants))
-        roll = float(np.interp(t, od[:, 0], od[:, 2]))
-        pitch = float(np.interp(t, od[:, 0], od[:, 3]))
+        if not (T_WIN[0] <= t - t0 <= T_WIN[1]):
+            continue
+        ta = t - ATT_DELAY
+        if ATT_HOLD_HZ > 0:
+            ta = math.floor(ta * ATT_HOLD_HZ) / ATT_HOLD_HZ
+        roll = float(np.interp(ta, od[:, 0], od[:, 2]))
+        pitch = float(np.interp(ta, od[:, 0], od[:, 3]))
+        if ATT_EXTRAP and ta < t:
+            # дотяжка гироскопом (тело: p = ω_x → крен, q = ω_y → тангаж, как attitude_at)
+            roll += float(np.interp(ta, od[:, 0], od[:, 7])) * (t - ta)
+            pitch += float(np.interp(ta, od[:, 0], od[:, 8])) * (t - ta)
         wz = float(np.interp(t, od[:, 0], od[:, 9]))
         alt = float(np.interp(t, alt_ts, alt_v))
         in_air = w0 <= t <= w1
@@ -319,7 +338,7 @@ def main():
             est._ipm_update(gray, t, alt, pitch, roll, wz)
             rows[name].append((t, est.ipm_fail, float(est.ipm_ok), est.ipm_vfwd,
                                est.ipm_vlat, est.ipm_fwd, est.ipm_lat, proxy.n_in,
-                               proxy.n_ok, alt))
+                               proxy.n_ok, alt, est.ipm_noise_fwd, est.ipm_noise_lat))
             g = est._ipm_prev_geo
             if g is not None and in_air:
                 # углы полосы, которую канал ТОЛЬКО ЧТО обработал, за кадром → чёрные
@@ -440,12 +459,12 @@ def main():
 
     if CSV:
         with open(CSV, 'w') as f:
-            f.write('t,variant,fail,ok,vfwd,vlat,ipm_fwd,ipm_lat,n_in,n_ok,alt\n')
+            f.write('t,variant,fail,ok,vfwd,vlat,ipm_fwd,ipm_lat,n_in,n_ok,alt,noise_fwd,noise_lat\n')
             for name, _v in variants:
                 for row in rows[name]:
                     f.write(f'{row[0]-t0:.3f},{name},{int(row[1])},{row[2]:.0f},'
                             f'{row[3]:.4f},{row[4]:.4f},{row[5]:.4f},{row[6]:.4f},'
-                            f'{row[7]},{row[8]},{row[9]:.3f}\n')
+                            f'{row[7]},{row[8]},{row[9]:.3f},{row[10]:.4f},{row[11]:.4f}\n')
         print(f'\nдамп по кадрам → {CSV}')
 
 

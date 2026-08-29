@@ -110,6 +110,9 @@ class BootstrapArch2Node(Node):
                                             kf_seg_min_sec=cfg.kf_seg_min_sec,
                                             kf_seg_frac=cfg.kf_seg_frac,
                                             att_extrap=cfg.att_extrap,
+                                            att_interp=cfg.att_interp,
+                                            att_latency=cfg.att_latency,
+                                            att_wait_max=cfg.att_wait_max,
                                             ipm_model=cfg.ipm_model,
                                             ipm_derot=cfg.ipm_derot,
                                             ipm_wz_tau=cfg.ipm_wz_tau,
@@ -720,6 +723,9 @@ def _parse() -> tuple:
     p.add_argument('--kf-alt-hold', dest='kf_alt_hold', type=float, default=_D.kf_alt_hold)
     p.add_argument('--yaw-trans-fix', dest='yaw_trans_fix', type=int, default=_D.yaw_trans_fix)
     p.add_argument('--att-extrap', dest='att_extrap', type=int, default=_D.att_extrap)
+    p.add_argument('--att-interp', dest='att_interp', type=int, default=_D.att_interp)
+    p.add_argument('--att-latency', dest='att_latency', type=float, default=_D.att_latency)
+    p.add_argument('--att-wait-max', dest='att_wait_max', type=float, default=_D.att_wait_max)
     p.add_argument('--ipm-model', dest='ipm_model', default=_D.ipm_model,
                    choices=['legacy', 'rsign', 'exact'])
     p.add_argument('--ipm-derot', dest='ipm_derot', type=float, default=_D.ipm_derot)
@@ -773,6 +779,14 @@ def _parse() -> tuple:
                    default=_D.ipm_max_speed)
     p.add_argument('--ipm-alt-band-fwd', dest='ipm_alt_band_fwd', type=float,
                    default=_D.ipm_alt_band_fwd)
+    p.add_argument('--pitch-soft-alt', dest='pitch_soft_alt', type=float,
+                   default=_D.pitch_soft_alt)
+    p.add_argument('--roll-soft-alt', dest='roll_soft_alt', type=float,
+                   default=_D.roll_soft_alt)
+    p.add_argument('--pitch-soft-noise', dest='pitch_soft_noise', type=float,
+                   default=_D.pitch_soft_noise)
+    p.add_argument('--roll-soft-noise', dest='roll_soft_noise', type=float,
+                   default=_D.roll_soft_noise)
     p.add_argument('--ipm-alt-band-lat', dest='ipm_alt_band_lat', type=float,
                    default=_D.ipm_alt_band_lat)
     p.add_argument('--ipm-alt-still', dest='ipm_alt_still', type=float,

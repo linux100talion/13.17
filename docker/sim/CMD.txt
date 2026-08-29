@@ -1,5 +1,16 @@
 
 
+
+
+
+
+
+
+
+
+
+------------------------------------------------------------------
+
 BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KI_TRIM=60 BS_PITCH_RATE_KI=30 \
   BS_PITCH_RATE_KI_TRIM=60 WIND_SPD=5 bash src/lab/freefly_lv.sh
 

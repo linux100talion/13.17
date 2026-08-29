@@ -114,6 +114,8 @@ class DroneState:
     st_py: float = float('nan')
     ipm_vfwd: float = 0.0            # продольная скорость, М/С
     ipm_vlat: float = 0.0            # боковая скорость, М/С
+    ipm_noise_fwd: float = 0.0       # шум пути канала за кадр (EMA |Δ − v̂·dt|), М/КАДР
+    ipm_noise_lat: float = 0.0
     ipm_ok: bool = False             # кадр выпрямился и поток посчитан
     ipm_fail: int = 7                # причина брака кадра, 0 = годен
                                      # (коды — FlowEstimator.ipm_fail)

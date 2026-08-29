@@ -13,6 +13,7 @@ import math
 
 import numpy as np
 
+from ..perception.attitude_buffer import AttitudeBuffer
 from ..perception.flow_estimator import FlowEstimator
 
 
@@ -66,7 +67,8 @@ class RosPerception:
                  ipm_model=None, ipm_derot=None, ipm_wz_tau=None, ipm_win=None,
                  ipm_adapt=None, ipm_vel_tau=None, ipm_alt_floor=None,
                  ipm_scale_ref=None, ipm_acc_tau=None, alt_src='global',
-                 alt_zero=False, ipm_wz_gate=None):
+                 alt_zero=False, ipm_wz_gate=None, att_interp=False, att_latency=0.0,
+                 att_wait_max=0.15):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -134,6 +136,7 @@ class RosPerception:
         self._omega = np.zeros(3)
         self._ipm_fwd = self._ipm_lat = 0.0
         self._ipm_vfwd = self._ipm_vlat = 0.0
+        self._ipm_noise = (0.0, 0.0)
         self._ipm_ok = False
         self._ipm_fail = 7   # причина брака кадра IPM (коды — FlowEstimator)
         # ω НЕ «последняя пришедшая», а СРЕДНЯЯ ЗА МЕЖКАДРОВЫЙ ИНТЕРВАЛ. Оценщик
@@ -161,6 +164,15 @@ class RosPerception:
         self._att_t = None                  # штамп САМОГО сообщения ориентации
         self._att_extrap = bool(att_extrap)
         self._att_extrap_max = float(att_extrap_max)
+        # интерполяция ориентации на штамп кадра (AttitudeBuffer): кадр ждёт отсчёт
+        # ориентации со штампом ≥ кадр + latency, не дольше wait_max (дальше — как было:
+        # последнее пришедшее ± дотяжка)
+        self._att_interp = bool(att_interp)
+        self._att_latency = float(att_latency)
+        self._att_wait_max = float(att_wait_max)
+        self._att_buf = AttitudeBuffer()
+        self._pending = []                   # кадры, ждущие ориентацию: (stamp, gray)
+        self._att_waited = 0                 # диагностика: кадров, обработанных по таймауту
         self._alt = None
         # ЛАТЧ НУЛЯ ВЫСОТЫ ПЕРЦЕПЦИИ (alt_zero, источник 'local'): z EKF смещён
         # вниз на 0.2-0.3 м — на низком полёте это БОЛЬШЕ всей высоты, и гейт
@@ -237,6 +249,9 @@ class RosPerception:
         self._att_yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                                    1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         self._att_t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        self._att_buf.push(self._att_t, self._pitch, self._roll)
+        if self._att_interp and self._pending:
+            self._flush_pending()
 
     def _on_gyro(self, m, own=False):
         if own and not self._gyro_own:
@@ -306,9 +321,34 @@ class RosPerception:
             return
         gray = np.frombuffer(m.data, dtype=np.uint8).reshape(m.height, m.width)
         stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        if not self._att_interp:
+            pitch, roll = self._att_for(stamp)
+            self._process(gray, stamp, pitch, roll)
+            return
+        self._pending.append((stamp, gray))
+        self._flush_pending()
+
+    def _flush_pending(self):
+        """Обработать по порядку кадры, для которых уже есть ориентация со штампом
+        ≥ кадр + latency (интерполяция); кадры старше wait_max (относительно самого
+        свежего кадра) или лишние в очереди — по прежнему правилу (удержание/дотяжка)."""
+        newest = self._pending[-1][0] if self._pending else None
+        while self._pending:
+            stamp, gray = self._pending[0]
+            tq = stamp + self._att_latency
+            if self._att_buf.ready(tq):
+                pitch, roll = self._att_buf.at(tq)
+            elif newest - stamp > self._att_wait_max or len(self._pending) > 5:
+                pitch, roll = self._att_for(stamp)
+                self._att_waited += 1
+            else:
+                break
+            self._pending.pop(0)
+            self._process(gray, stamp, pitch, roll)
+
+    def _process(self, gray, stamp, pitch, roll):
         omega = self._omega_for(stamp)
         self._prev_img_stamp = stamp
-        pitch, roll = self._att_for(stamp)
         res = self._est.process(gray, stamp, omega, pitch, self._alt,
                                 roll=roll)
         if res is None:
@@ -326,6 +366,7 @@ class RosPerception:
         self._kf_segs, self._kf_rejects = res['kf_segs'], res['kf_rejects']
         self._ipm_fwd, self._ipm_lat = res['ipm_fwd'], res['ipm_lat']
         self._ipm_vfwd, self._ipm_vlat = res['ipm_vfwd'], res['ipm_vlat']
+        self._ipm_noise = (res.get('ipm_noise_fwd', 0.0), res.get('ipm_noise_lat', 0.0))
         self._ipm_ok = res['ipm_ok']
         self._ipm_fail = res['ipm_fail']
         self._dt = res['dt']
@@ -347,6 +388,7 @@ class RosPerception:
         s.kf_segs, s.kf_rejects = self._kf_segs, self._kf_rejects
         s.ipm_fwd, s.ipm_lat = self._ipm_fwd, self._ipm_lat
         s.ipm_vfwd, s.ipm_vlat = self._ipm_vfwd, self._ipm_vlat
+        s.ipm_noise_fwd, s.ipm_noise_lat = self._ipm_noise
         s.ipm_ok = self._ipm_ok
         s.ipm_fail = self._ipm_fail
         s.perc_alt = self._alt        # по НЕЙ судит гейт земли IPM (не rel_alt)

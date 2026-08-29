@@ -97,12 +97,32 @@ bash src/lab/freefly_lv.sh без переменных = станция на о�
 
 
 
+Полёт нужен, двумя шагами, до 18 м как в ab_soft:
+BS_ATT_INTERP=1 BS_ATT_LATENCY=0.02 BS_PITCH_SOFT_ALT=2 WIND_SPD=5 NAME=ab_interp bash src/lab/freefly_lv.sh
+
+Смотреть по разбору: шум пути на 10 / 17.5 м — сейчас 101 / 386 мм за кадр,
+ожидаю ~20 / 70; тангаж на высоте тише, чем в ab_soft, у земли без изменений. 
+
+Шаг 2 после него — 
+BS_PITCH_SOFT_ALT=0 BS_PITCH_SOFT_NOISE=0.02 (мягкость по шуму вместо высоты).
 
 
+------------------------------------------
+
+Мягкость по высоте.
+$ BS_ATT_INTERP=1 BS_ATT_LATENCY=0.02 BS_PITCH_SOFT_ALT=2 WIND_SPD=5 NAME=ab_interp bash src/lab/freefly_lv.sh
 
 
+Мягкость по шуму
+BS_ATT_INTERP=1 BS_ATT_LATENCY=0.02 BS_PITCH_SOFT_ALT=0 BS_PITCH_SOFT_NOISE=0.02 WIND_SPD=5 NAME=ab_noise bash src/lab/freefly_lv.sh
+
+Что в ней:
+- BS_ATT_INTERP=1 BS_ATT_LATENCY=0.02 — углы на штамп кадра интерполяцией (шаг 1, лечит причину);
+- BS_PITCH_SOFT_ALT=0 — высотную мягкость выключаем (дефолт в freefly_lv.sh и так 0, но явно надёжнее);
+- BS_PITCH_SOFT_NOISE=0.02 — мягчить по измеренному шуму канала (м/кадр); крен не трогаем (BS_ROLL_SOFT_NOISE остаётся 0).
 
 
+------------------------------------------
 
 
 

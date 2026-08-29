@@ -349,6 +349,8 @@ class _FlowDamper1D(StabilizationStrategy):
         self._pos_sp = None      # станция rate-оси: (путь в точке захвата, курс захвата)
         self._pos_wait_t = None  # начало торможения (для принудительного гвоздя)
         self._i_hold = False     # И-член заморожен: от живого стика до гвоздя (_TRIM_LATCH)
+        self._soft = 1.0         # МЯГКОСТЬ по высоте (_IpmGated.soft_alt): kp, pos_kp ×soft^_SOFT_KP_EXP,
+                                 # ki ×soft^_SOFT_KI_EXP, пороги гвоздя/брейка ÷soft; 1.0 = как было
         self.frame = None        # StationFrame — общая рама крена/тангажа (оси курса);
                                  # None = станция в осях борта (как было). Вешает композит
         self._target = 0.0       # ЦЕЛЬ rate-оси (c_*·cmd_gain) — записи команды у этих
@@ -397,6 +399,16 @@ class _FlowDamper1D(StabilizationStrategy):
                              # колебанием — стенд на лаге 0.5 разнёс (0.29 → 0.85).
                              # Дальше в полёте трим уже в интеграторе, в упоре —
                              # прежняя заморозка. False — прежнее правило.
+    _SOFT_KP_EXP = 0.5       # МЯГКОСТЬ ПО ВЫСОТЕ, показатели: kp/pos_kp ×soft^0.5,
+    _SOFT_KI_EXP = 1.0       # ki ×soft^1. Свип стенда test_soft_alt (шум канала ∝ h,
+                             # ветер 52 PWM, 5/8.3/15 м, 40 с + порыв 1 м/с): kp и ki
+                             # оба ×soft (1/1) — тише всего по PWM, но на 15 м борт
+                             # плывёт (σ_v 1.49, размах 26 м, брейк 49 кадров); kp
+                             # ×√soft + ki ×soft (0.5/1) — брейк молчит на всех высотах,
+                             # PWM σ вдвое ниже базы (62/76/98 → 35/37/43), σ_v ниже
+                             # базы (0.52/0.58/0.83 → 0.39/0.51/0.76), трим 58–59,
+                             # размах на 15 м 12 м против 26. ki без мягкости (·/0) —
+                             # интегратор шума гуляет, брейк будится (29–108 кадров).
     _TRIM_LATCH = True       # ЗАЩЁЛКА ТРИМА НА ТОЛЧОК ПИЛОТА (станция, pos_kp > 0):
                              # И-член заморожен от живого стика до гвоздя. Полёт
                              # ab_brake_trim/win0 (крен, ветер 0), толчок 2.5 м/с:
@@ -462,6 +474,10 @@ class _FlowDamper1D(StabilizationStrategy):
         if self._pos_alt is not None:
             self._pos_alt.reset()
 
+    def _soft_factor(self, s) -> float:
+        """Мягкость по высоте, 1.0 = полная жёсткость. Хук: база не знает высоты."""
+        return 1.0
+
     def _station_target(self, err, v):
         """Цель скорости станции по ошибке пути `err` (точка − путь) и скорости `v`.
 
@@ -469,22 +485,25 @@ class _FlowDamper1D(StabilizationStrategy):
         Две фазы — см. комментарий в __init__: BRAKE, пока уходим от точки (v·err < 0)
         после входа по |v| > _POS_PIN_V, до измеренного нуля скорости — цель
         −pos_brake·v (скоростной брейк, без позиционного члена); RETURN — всё
-        остальное, с √-капом тормозного пути при pos_acc > 0."""
+        остальное, с √-капом тормозного пути при pos_acc > 0.
+        Пороги скорости делятся на `_soft` (шум канала растёт с высотой — см.
+        _IpmGated.soft_alt), pos_kp умножается."""
+        soft = self._soft
         away = v * err < 0.0                     # скорость направлена ОТ точки
         if self.pos_brake > 0.0:
             if self._pos_brake:
-                if not away or abs(v) < self._POS_BRAKE_EXIT:   # стоп состоялся
+                if not away or abs(v) < self._POS_BRAKE_EXIT / soft:   # стоп состоялся
                     self._pos_brake = False
                     self._trim_armed = False      # первый брейк отработан: трим ветра
                                                   # выучен, дальше порог входа ×REFIRE
-            elif away and abs(v) > ((self.pos_brake_v or self._POS_PIN_V)
+            elif away and abs(v) > ((self.pos_brake_v or self._POS_PIN_V) / soft
                                     * (1.0 if self._trim_armed else self._POS_BRAKE_REFIRE)) \
                     and (self._trim_armed or abs(err) >= self._POS_BRAKE_REFIRE_DIST):
                 self._pos_brake = True
         if self._pos_brake:
             vmax = self.pos_brake_vmax if self.pos_brake_vmax > 0.0 else self.pos_vmax
             return clamp(-self.pos_brake * v, -vmax, vmax)
-        t = clamp(self.pos_kp * err, -self.pos_vmax, self.pos_vmax)
+        t = clamp(self.pos_kp * soft ** self._SOFT_KP_EXP * err, -self.pos_vmax, self.pos_vmax)
         if self.pos_acc > 0.0:
             cap = math.sqrt(2.0 * self.pos_acc * abs(err))
             t = clamp(t, -cap, cap)
@@ -543,6 +562,7 @@ class _FlowDamper1D(StabilizationStrategy):
             self._last_seq = s.flow_seq
             fdt = self._fdt(s)
             blend = self._authority(s)
+            self._soft = self._soft_factor(s)
             fr = None                    # рама станции — только у rate-осей со станцией
             if self._cmd_mode == "pos":
                 self._sp_rate = self._cmd(sp) * self.cmd_gain    # ед. сигнала в секунду
@@ -595,7 +615,7 @@ class _FlowDamper1D(StabilizationStrategy):
                     if self._pos_sp is None:
                         if self._pos_wait_t is None:
                             self._pos_wait_t = s.now_sim
-                        if (abs(self._signal(s)) < self._POS_PIN_V
+                        if (abs(self._signal(s)) < self._POS_PIN_V / self._soft
                                 or s.now_sim - self._pos_wait_t > self._POS_PIN_T):
                             self._pos_sp = (pos, s.att_yaw)
                             self._pos_wait_t = None
@@ -623,7 +643,11 @@ class _FlowDamper1D(StabilizationStrategy):
                 err = sig - self._target                                # velocity-assist
             # первый брейк после enter() (трим ещё не выучен) — интегрируем со
             # скоростью ki_trim и вне упора: ошибка там 4v, набор трима быстрее всего
-            ki = self.ki_trim if (self._pos_brake and self._trim_armed) else self.ki
+            # мягкость по высоте и на ki: интегратор шума — случайное блуждание ∝ ki
+            # (стенд test_soft_alt: при ki 30 и шуме 0.72 м/с И-член гулял ±100 PWM за
+            # 40 с); ki_trim первого брейка не масштабируем — трим ветра нужен быстро
+            ki = (self.ki_trim if (self._pos_brake and self._trim_armed)
+                  else self.ki * self._soft ** self._SOFT_KI_EXP)
             i_new = (self._i if self._i_hold
                      else clamp(self._i + ki * err * fdt, -self.imax, self.imax))
             dot = self._signal_dot(s)
@@ -633,7 +657,7 @@ class _FlowDamper1D(StabilizationStrategy):
                  else self.kd * (err - self._prev_err) / fdt)
             self._prev_err = err
             if self.anti_windup:
-                u_raw = self.kp * err + i_new + d
+                u_raw = self.kp * self._soft ** self._SOFT_KP_EXP * err + i_new + d
                 if abs(u_raw) > self.max and u_raw * err > 0.0 and not self._i_hold:
                     # выход в упоре, ошибка толкает глубже — И-член не наматывать
                     # (см. __init__); в упоре БРЕЙКА — копить трим ветра (_BRAKE_TRIM)
@@ -644,7 +668,8 @@ class _FlowDamper1D(StabilizationStrategy):
             self._i = i_new
             if fr is not None:
                 fr.set_trim_body(self._axis, self._i)   # компонента → мировой вектор
-            u = clamp(self.kp * err + self._i + d, -self.max, self.max)
+            u = clamp(self.kp * self._soft ** self._SOFT_KP_EXP * err + self._i + d,
+                      -self.max, self.max)
             self._out = self.osign * blend * u
             self._last_frame_sim = s.now_sim
             self._last_ok_sim = s.now_sim
@@ -1073,15 +1098,55 @@ class _IpmGated(_FlowDamper1D):
     """
 
     def __init__(self, *a, max_speed=0.0, alt_band=0.0, alt_still=0.5,
-                 arm_frames=0, **kw):
+                 arm_frames=0, soft_alt=0.0, soft_min=0.1, soft_noise=0.0, **kw):
         super().__init__(*a, **kw)
         self.max_speed = max_speed
         self.alt_band = alt_band
         self.arm_frames = arm_frames
+        # МЯГКОСТЬ ПО ВЫСОТЕ. Полоса лежит впереди на 1.5·h, её продольный пиксельный
+        # след на земле ∝ дальность²/h ∝ h — шум канала растёт с высотой, и только
+        # вдоль хода. Замер lv2_joy_20260829_182126 (960×540): шум скорости вперёд
+        # 0.19 м/с на 0.4 м, 0.27 на 3.9, 0.46 на 5.0, 0.72 на 8.3 (вбок 0.15–0.18 —
+        # плоско); шум пути за кадр 23 → 51 → 75 → 161 мм. На 8 м разброс ±1 м/с
+        # выше порога перевзвода брейка (0.5): брейк будился шумом 90 раз за 35 с,
+        # упор ±150, борт качало ±1.7 м/с с периодом 4.7 с, тангаж ±11°; на 5 м —
+        # то же в зачатке (18 брейков, PWM RMS 79). Крен на той же высоте спокоен.
+        # Выше soft_alt: soft = clamp(soft_alt/h, soft_min, 1): kp, ki и pos_kp ×soft
+        # (демпфер мягкий, не дерётся с шумом; интегратор шума — случайное блуждание
+        # ∝ ki), пороги гвоздя/брейка ÷soft (шум брейк не будит); ki_trim первого
+        # брейка и сам И-член НЕ трогаем — трим ветра нужен на любой высоте, учится
+        # медленнее (на 8 м ki 7: ~7 с на 52 PWM). 0 = выкл (как было). Высота —
+        # rel_alt, та же, что у _AltSettled.
+        self.soft_alt = float(soft_alt)
+        self.soft_min = float(soft_min)
+        # МЯГКОСТЬ ПО ИЗМЕРЕННОМУ ШУМУ: soft_noise (м/кадр) — шум канала (ipm_noise_*,
+        # EMA |Δпуть − v̂·dt|), выше которого демпфер смягчается: soft = ref/σ̂ (пол
+        # soft_min); с высотным правилом — минимум из двух. Высота — лишь суррогат шума:
+        # ab_soft на 9.9 м модель ∝ h ждала 0.82 м/с, реально 0.39 (смягчили в 5×, где
+        # хватило бы 2); шум зависит от текстуры, скорости, освещения и — главное —
+        # от тайминга углов (после интерполяции ATTITUDE он падает, и soft сам
+        # вернётся к 1). Оценщик проверен реплеем: corr 0.97–0.99 с истиной. 0 = выкл.
+        self.soft_noise = float(soft_noise)
         self._alt = _AltSettled(band=alt_band, still=alt_still)
         self._armed = 0
         self._rejects = 0        # кадров отброшено (диагностика, не управление)
         self._alt_blocks = 0     # кадров закрыто по неустановившейся высоте
+
+    def _noise_signal(self, s) -> float:
+        """Шум канала вдоль ЭТОЙ оси, м/кадр — хук наследников."""
+        return 0.0
+
+    def _soft_factor(self, s) -> float:
+        soft = 1.0
+        if self.soft_alt > 0.0:
+            h = float(s.rel_alt or 0.0)
+            if h > self.soft_alt:
+                soft = min(soft, clamp(self.soft_alt / h, self.soft_min, 1.0))
+        if self.soft_noise > 0.0:
+            n = float(self._noise_signal(s) or 0.0)
+            if n > self.soft_noise:
+                soft = min(soft, clamp(self.soft_noise / n, self.soft_min, 1.0))
+        return soft
 
     def enter(self, s: DroneState) -> None:
         super().enter(s)
@@ -1159,6 +1224,8 @@ class DpPitchRate(_IpmGated):
 
     def _signal(self, s): return s.ipm_vfwd
 
+    def _noise_signal(self, s): return s.ipm_noise_fwd
+
     def _pos_signal(self, s):
         # путь вперёд, М (та же лево/вперёд-конвенция, что у скорости → знаки
         # станции сходятся автоматически: цель = pos_kp·(точка − путь))
@@ -1202,6 +1269,8 @@ class DpRollRate(_IpmGated):
     _cmd_mode = "rate"
 
     def _signal(self, s): return s.ipm_vlat
+
+    def _noise_signal(self, s): return s.ipm_noise_lat
 
     def _pos_signal(self, s):
         return s.ipm_lat        # путь вбок, М (лево+, как ipm_vlat)
