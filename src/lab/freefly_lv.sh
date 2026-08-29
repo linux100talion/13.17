@@ -192,6 +192,7 @@ export BS_IPM_DEROT="${BS_IPM_DEROT:-1.0}"
 # от kp; режем окно — режем запаздывание. Идёт В ПАРЕ с ki=60 (см. блок гейнов).
 export BS_IPM_WIN="${BS_IPM_WIN:-0.3}"
 export BS_IPM_WZ_TAU="${BS_IPM_WZ_TAU:-2.0}"
+export BS_IPM_WZ_GATE="${BS_IPM_WZ_GATE:-0.1}"
 export BS_PITCH_OSIGN="${BS_PITCH_OSIGN:-1}"
 # ── ГЕЙНЫ ДЕМПФЕРА: kp 90 (шаг 1 ЗАШЁЛ), ki 60 + IPM_WIN 0.3 (шаг 2 ЗАШЁЛ) ──
 # ШАГ 1 ЗАШЁЛ (прогон 061854 против 034514, окно взлёта): пик боковой 1.07 →
@@ -386,7 +387,7 @@ export BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-90}"
 # IPM, повёрнутых курсом; ОДИН 2D-гвоздь на обе оси; трим — вектор в мировых осях
 # (после разворота сам поворачивается в оси борта). Курс — подключаемый вход
 # (BS_STATION_HEADING=fcu: att_yaw; визуальный курс — следующее приращение).
-# Дефолт пока body (полётом не доказано). Кандидат:
+# ДЕФОЛТ с 2026-08-29 (ab_gate, ниже). Первый полёт рамы — ab_frame:
 #   BS_STATION_FRAME=yaw WIND_SPD=5 NAME=ab_frame bash src/lab/freefly_lv.sh
 # Смотреть: разворот на месте в ветер — борт стоит (было ~1.4 м/с сноса, 2–3 м);
 # после разворота трим не переучивается (PWM крена/тангажа меняются плавно, без
@@ -409,12 +410,19 @@ export BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-90}"
 #     −0.6/+0.8 (сумма 12.9 → 4.5 м); заодно боковой гейн канала ВНЕ разворотов
 #     0.30 → 0.75 и средний остаток +0.09 → +0.04 м/с — ФВЧ портила канал и в
 #     висении, оценка нуля ездила за качанием курса.
-# Кандидат (рама + оба гейта):
-#   BS_STATION_FRAME=yaw BS_IPM_WZ_GATE=0.1 BS_YAW_V_GATE=0.8 WIND_SPD=5 \
-#     NAME=ab_gate bash src/lab/freefly_lv.sh
-# Смотреть: прямая на 2 м/с — курс не ворочается (yaw PWM без ±100 при стике 0);
-# после разворота на месте снос < 1 м; в /mission/status t= — sim-штамп строки,
-# стики rcr/rcp/rcy и рама sx/sy/spx/spy теперь выравниваются по нему.
+# ВЕРДИКТ ab_gate (2026-08-29, 5 м/с; рама + оба гейта) — ДОКАЗАНО, Андрей:
+# «определённо успех». Против ab_frame: развороты без стика (n=9 vs 6) —
+# смещение за разворот+5 с медиана 4.33 → 1.28 м, |v|max после 1.41 → 0.51 м/с;
+# фантом дерота за разворот медиана 1.50 → 0.24 м (сумма 12.6 → 4.0), боковой
+# гейн канала вне разворотов 0.28 → 0.54; курс на прямой (ход >1 м/с): yaw PWM
+# RMS 17 → 11, ω RMS 12.6 → 7.3 °/с, размах курса медиана 13 → 10°, худший
+# 131° → 36°; рама против истины Gazebo corr 0.97/0.91; 604° подряд — снос
+# 0.33 м. С 2026-08-29 ДЕФОЛТ: BS_STATION_FRAME=yaw BS_IPM_WZ_GATE=0.1
+# BS_YAW_V_GATE=0.8 (откат: body / 0 / 0). Оговорка: YAW_V_GATE сравнивает
+# скорость КАНАЛА (гейн 0.5–0.7): 0.8 ≈ 1.1–1.6 м/с истинных, на ходу 1.2 м/с
+# гейт ещё мигает (169–173 с: размах 36°) — резерв 0.5.
+# В /mission/status t= — sim-штамп строки: стики rcr/rcp/rcy и рама sx/sy/spx/spy
+# выравниваются по нему, не по времени bag.
 export BS_ROLL_POS_KP="${BS_ROLL_POS_KP:-0.3}"
 export BS_ROLL_POS_VMAX="${BS_ROLL_POS_VMAX:-0.3}"
 export BS_ROLL_POS_BRAKE="${BS_ROLL_POS_BRAKE:-3}"
@@ -440,6 +448,8 @@ export BS_YAW_MAX_RATE="${BS_YAW_MAX_RATE:-100}"
 # разматывали 92–96% разворота обратно после отпускания. 130 PWM ≈ 60°/с
 # (замер spring: ~0.45 °/с на PWM) — тот же темп, что BS_YAW_RATE_FULL. 0 = выкл.
 export BS_YAW_PILOT_GAIN="${BS_YAW_PILOT_GAIN:-130}"
+export BS_YAW_V_GATE="${BS_YAW_V_GATE:-0.8}"
+export BS_STATION_FRAME="${BS_STATION_FRAME:-yaw}"
 export BS_YAW_RATE_FULL="${BS_YAW_RATE_FULL:-60}"
 export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
 # /mavros/state (1 Гц) — для разбора joystick-серии: латчи режимов (LOITER!) и
