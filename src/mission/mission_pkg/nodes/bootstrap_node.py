@@ -797,6 +797,10 @@ def _parse() -> tuple:
                    default=_D.pitch_rate_ki)
     p.add_argument('--pitch-rate-kd', dest='pitch_rate_kd', type=float,
                    default=_D.pitch_rate_kd)
+    p.add_argument('--roll-rate-ki-trim', dest='roll_rate_ki_trim', type=float,
+                   default=_D.roll_rate_ki_trim)
+    p.add_argument('--pitch-rate-ki-trim', dest='pitch_rate_ki_trim', type=float,
+                   default=_D.pitch_rate_ki_trim)
     # cmd_gain rate-осей: стик пилота = ЦЕЛЕВАЯ СКОРОСТЬ демпфера (м/с при полном
     # стике), 0 = чистое удержание. Без аргумента поле повторяло судьбу ki/kd выше:
     # в DpHoldM стики roll/pitch молча игнорировались (полёт 2026-08-17 — полный

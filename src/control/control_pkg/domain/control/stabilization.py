@@ -247,8 +247,16 @@ class _FlowDamper1D(StabilizationStrategy):
                  conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5,
                  pos_kp=0.0, pos_vmax=1.0, pos_brake=0.0, pos_brake_vmax=0.0,
                  pos_acc=0.0, anti_windup=False, pos_brake_v=0.0, pos_alt_band=0.0,
-                 pos_alt_still=0.5):
+                 pos_alt_still=0.5, ki_trim=0.0):
         self.kp, self.ki, self.kd = kp, ki, kd
+        # ki_trim — скорость набора ТРИМА ВЕТРА в упоре ПЕРВОГО брейка (_BRAKE_TRIM),
+        # отдельно от ki. Зачем две: ki по скорости — это скрытая ПРУЖИНА по положению
+        # (I = ki·∫v = ki·Δx), и она же задаёт жёсткость звона станции (стенд
+        # test_station_brake §9: ki 60 → 30 даёт ζ порыва 0.05 → 0.4), а трим на отрыве
+        # в 10 м/с (104 PWM) при ki 30 набирался бы вдвое дольше (стоп 6 с вместо 3).
+        # Упор первого брейка копит ∫v со скоростью ki_trim — отрыв бит-в-бит как при
+        # ki 60, пружина вне упора вдвое мягче. 0 = ki (прежнее поведение).
+        self.ki_trim = ki_trim if ki_trim > 0.0 else ki
         self.imax, self.max = imax, max_pwm
         self.conf_min, self.conf_full = conf_min, conf_full
         self.osign, self.cmd_gain, self.stale = osign, cmd_gain, stale_sec
@@ -340,6 +348,7 @@ class _FlowDamper1D(StabilizationStrategy):
         self._sp_rate = 0.0      # её текущая скорость — для D-члена и отладки
         self._pos_sp = None      # станция rate-оси: (путь в точке захвата, курс захвата)
         self._pos_wait_t = None  # начало торможения (для принудительного гвоздя)
+        self._i_hold = False     # И-член заморожен: от живого стика до гвоздя (_TRIM_LATCH)
         self._target = 0.0       # ЦЕЛЬ rate-оси (c_*·cmd_gain) — записи команды у этих
                                  # осей не было вовсе: /flow_dbg5 шлёт только pos-оси, и
                                  # калибровку R1 пришлось резать по истинной скорости,
@@ -358,6 +367,17 @@ class _FlowDamper1D(StabilizationStrategy):
                              # и качал (стенд, лаг 0.5: 0.29 → 0.74; рефрактерный
                              # период не помог — цикл подстраивался под него). Порыв
                              # слабее 0.5 м/с гасят RETURN + PI (прежний демпфер).
+    _POS_BRAKE_REFIRE_DIST = 0.5  # м: ПЕРЕВЗВОД брейка (не первый) — только дальше
+                             # этого от гвоздя. Стенд §10 (лаги 0.4/0.26, канал 1:1):
+                             # брейк, разбуженный качанием у точки на |v| > 0.5,
+                             # командует обратный ход −3v (до 1 м/с), лаги проносят
+                             # борт сквозь гвоздь — и качание ±0.45 м живёт вечно
+                             # (277 brake-кадров, |v| 0.82 в хвосте). Уход от гвоздя
+                             # быстрее 0.5 м/с БЛИЖЕ 0.5 м — это качание контура, а не
+                             # снос: ветер разгоняет плавно (порыв +5 м/с: брейк
+                             # через 1.7 с и 1.05 м вместо 1.02 — цена ноль). Первый
+                             # брейк (отрыв, гвоздь только что взят, err ≈ 0) —
+                             # без ограничения. 0 = прежнее правило.
     _BRAKE_TRIM = True       # anti-windup В УПОРЕ БРЕЙКА: вместо заморозки И-член
                              # копит ВЕТРОВОЙ ТРИМ — интеграл чистой скорости (что
                              # нужно, чтобы держать ноль), а не ошибки до цели брейка
@@ -375,6 +395,21 @@ class _FlowDamper1D(StabilizationStrategy):
                              # колебанием — стенд на лаге 0.5 разнёс (0.29 → 0.85).
                              # Дальше в полёте трим уже в интеграторе, в упоре —
                              # прежняя заморозка. False — прежнее правило.
+    _TRIM_LATCH = True       # ЗАЩЁЛКА ТРИМА НА ТОЛЧОК ПИЛОТА (станция, pos_kp > 0):
+                             # И-член заморожен от живого стика до гвоздя. Полёт
+                             # ab_brake_trim/win0 (крен, ветер 0), толчок 2.5 м/с:
+                             # в выбеге после отпускания И-член намотал ki·путь
+                             # торможения = +73 PWM при тримe 0 — это пружина с
+                             # опорой ТАМ, ГДЕ НАЧАЛСЯ тормоз, а гвоздь станция
+                             # вяжет там, где борт ВСТАЛ; две опоры дерутся: стоп →
+                             # откат −0.93 м/с → брейк −124 → перелёт +0.65 → звон
+                             # 1.0 → 0.33 м за 14 с. Во время самого толчка И-член
+                             # тоже мусорил (−44 при нуле ветра): цель пилота в
+                             # единицах канала (gain < 1) недостижима, интегратор
+                             # «чинил» гейн. Трим ветра толчком пилота не меняется —
+                             # его и держим; учится он в висении (гвоздь взят) и в
+                             # первом брейке на отрыве (_BRAKE_TRIM, стик не жил —
+                             # защёлка не ставится). False — прежнее правило.
     _POS_PIN_T = 3.0         # с: не затормозил за столько — гвоздь принудительно
                              # (иначе на злой рампе скорость никогда не падает ниже
                              # порога, гвоздь не вяжется вовсе и станция вырождается
@@ -421,6 +456,7 @@ class _FlowDamper1D(StabilizationStrategy):
         self._pos_wait_t = None
         self._pos_brake = False
         self._trim_armed = True
+        self._i_hold = False
         if self._pos_alt is not None:
             self._pos_alt.reset()
 
@@ -440,7 +476,8 @@ class _FlowDamper1D(StabilizationStrategy):
                     self._trim_armed = False      # первый брейк отработан: трим ветра
                                                   # выучен, дальше порог входа ×REFIRE
             elif away and abs(v) > ((self.pos_brake_v or self._POS_PIN_V)
-                                    * (1.0 if self._trim_armed else self._POS_BRAKE_REFIRE)):
+                                    * (1.0 if self._trim_armed else self._POS_BRAKE_REFIRE)) \
+                    and (self._trim_armed or abs(err) >= self._POS_BRAKE_REFIRE_DIST):
                 self._pos_brake = True
         if self._pos_brake:
             vmax = self.pos_brake_vmax if self.pos_brake_vmax > 0.0 else self.pos_vmax
@@ -547,6 +584,7 @@ class _FlowDamper1D(StabilizationStrategy):
                                 or s.now_sim - self._pos_wait_t > self._POS_PIN_T):
                             self._pos_sp = (pos, s.att_yaw)
                             self._pos_wait_t = None
+                            self._i_hold = False      # гвоздь взят — трим снова учится
                     if self._pos_sp is not None:
                         self._target = self._station_target(self._pos_sp[0] - pos,
                                                             self._signal(s))
@@ -558,9 +596,15 @@ class _FlowDamper1D(StabilizationStrategy):
                     self._pos_wait_t = None
                     self._pos_brake = False
                     self._target = cmd * self.cmd_gain
+                    # трим ветра ЗАЩЁЛКНУТ на время толчка и выбега (_TRIM_LATCH)
+                    self._i_hold = bool(self._TRIM_LATCH and pos is not None)
                 sig = self._signal(s)
                 err = sig - self._target                                # velocity-assist
-            i_new = clamp(self._i + self.ki * err * fdt, -self.imax, self.imax)
+            # первый брейк после enter() (трим ещё не выучен) — интегрируем со
+            # скоростью ki_trim и вне упора: ошибка там 4v, набор трима быстрее всего
+            ki = self.ki_trim if (self._pos_brake and self._trim_armed) else self.ki
+            i_new = (self._i if self._i_hold
+                     else clamp(self._i + ki * err * fdt, -self.imax, self.imax))
             dot = self._signal_dot(s)
             # разность соседних кадров уже считает производную ОШИБКИ (уставка в err),
             # готовой производной сигнала уставку надо вычесть руками
@@ -569,10 +613,11 @@ class _FlowDamper1D(StabilizationStrategy):
             self._prev_err = err
             if self.anti_windup:
                 u_raw = self.kp * err + i_new + d
-                if abs(u_raw) > self.max and u_raw * err > 0.0:
+                if abs(u_raw) > self.max and u_raw * err > 0.0 and not self._i_hold:
                     # выход в упоре, ошибка толкает глубже — И-член не наматывать
                     # (см. __init__); в упоре БРЕЙКА — копить трим ветра (_BRAKE_TRIM)
-                    i_new = (clamp(self._i + self.ki * sig * fdt, -self.imax, self.imax)
+                    i_new = (clamp(self._i + self.ki_trim * sig * fdt,
+                                   -self.imax, self.imax)
                              if self._pos_brake and self._BRAKE_TRIM and self._trim_armed
                              else self._i)
             self._i = i_new

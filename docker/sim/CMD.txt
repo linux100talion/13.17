@@ -1,5 +1,8 @@
 
 
+BS_ROLL_RATE_KI=30 BS_ROLL_RATE_KI_TRIM=60 BS_PITCH_RATE_KI=30 \
+  BS_PITCH_RATE_KI_TRIM=60 WIND_SPD=5 bash src/lab/freefly_lv.sh
+
 Короче - сейчас летаем с такой командой. Все включено.
 $ WIND_SPD=5 NAME=ab_brake_trim_win5 bash src/lab/freefly_lv.sh
 

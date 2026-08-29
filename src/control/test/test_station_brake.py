@@ -49,6 +49,18 @@ anti-windup И-члена (в упоре не наматывать). Логик�
 7. зеркало на тангаж: станция вяжет гвоздь только на установившейся высоте
    (pos_alt_band): на наборе гвоздя и брейка нет (фантом хода по высоте в ipm_fwd),
    после — перезахват, фантом прощён; болтанка в полосе гвоздь не сбрасывает.
+8. ЗАЩЁЛКА ТРИМА на толчок пилота (_TRIM_LATCH): И-член от живого стика до гвоздя
+   заморожен — трим ветра переживает толчок; без защёлки выбег после отпускания
+   наматывает ki·путь торможения (полёт win0: +73 PWM при триме 0), трим теряется
+   (54 → −9), борт откатывает 0.79 м/с и добуживает брейк;
+9. ki_trim: трим ветра в ПЕРВОМ брейке копится со скоростью ki_trim, вне его — ki.
+   ki 30 + ki_trim 60 = отрыв как при ki 60 (стоп/выбег/трим в 0, 5, 10 м/с), а
+   пружина скрытого позиционного контура (I = ki·Δx) вдвое мягче: порыв в висении
+   гаснет за 6.5 с вместо 9.8, второй пик 0.20 вместо 0.37; ki 30 без ki_trim —
+   стоп в 10 м/с 6.1 с вместо 2.8 (трим не успевает);
+10. перевзвод брейка только дальше _POS_BRAKE_REFIRE_DIST (0.5 м) от гвоздя: на лагах
+   0.4/0.26 брейк, разбуженный качанием у точки, держит предельный цикл ±0.45 м
+   (277 brake-кадров, |v| 0.82 в хвосте); с дистанцией — 46 кадров, |v| 0.03.
 
 Запуск:  python3 src/control/test/test_station_brake.py
 """
@@ -75,6 +87,10 @@ ALPHA, WIND, V0 = 0.0125, 0.65, 0.25     # плант: идентификаци�
 DT = 1.0 / 30.0                          # кадры камеры
 BRAKE = dict(pos_kp=0.3, pos_vmax=0.3, pos_brake=3.0, pos_brake_vmax=1.0, pos_acc=0.15,
              anti_windup=True)           # лётный набор (ab_brake_v025)
+FLIGHT = dict(BRAKE, pos_brake_v=0.25)   # + порог брейка 0.25 = дефолт freefly_lv.sh
+                                         # (BS_ROLL_POS_BRAKE_V); секции 8-10 — на нём:
+                                         # с порогом 0.3 перевзвод ×2 = 0.6 и качание
+                                         # у точки брейк не будит — эффекта не видно
 
 
 def axis(cls=DpRollRate, **kw):
@@ -89,7 +105,7 @@ def axis(cls=DpRollRate, **kw):
 
 
 def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0, wind=WIND,
-        v0=V0):
+        v0=V0, gust=None):
     """Замкнутый контур ось+плант; строки (t, v_ист, v_изм, путь, pwm, И-член, brake).
     bias — постоянное смещение измеренной скорости (канал в ветер «видит уход»),
     wind — ветер, м/с² (0.65 = 52 PWM как 5 м/с; 1.3 = 104 PWM как 10 м/с),
@@ -99,6 +115,8 @@ def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0, wind
     rows, t = [], 0.0
     for k in range(int(round(sec / DT))):
         t += DT
+        if gust is not None and abs(t - gust[0]) < DT / 2:
+            v += gust[1]                                     # порыв: скачок скорости
         # что видит канал: скорость через апериодику (и с долей gain), путь = её интеграл
         vm += (gain * v + bias - vm) * (1.0 - math.exp(-DT / tau_s))
         path += vm * DT
@@ -111,7 +129,8 @@ def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0, wind
         pwm = rc.roll - RC_CENTER
         pwm_act += (pwm - pwm_act) * (1.0 - math.exp(-DT / tau_a))   # привод (FCU по углу)
         v += (-ALPHA * pwm_act + wind) * DT
-        rows.append((t, v, vm, path, pwm, ax._i, ax._pos_brake))
+        rows.append((t, v, vm, path, pwm, ax._i, ax._pos_brake,
+                     ax._pos_sp[0] if ax._pos_sp else None))   # [7] = гвоздь
     return rows
 
 
@@ -414,6 +433,98 @@ rx = axis(**BRAKE)
 rx.enter(DroneState(flow_seq=-1))
 check("крен (pos_alt_band=0): высотной логики нет — поведение прежнее",
       rx._pos_alt is None)
+
+
+
+# --- 8. защёлка трима на толчок пилота (_TRIM_LATCH) ---
+# Полёт ab_brake_trim/win0 (крен, ветер 0), толчок 2.5 м/с: в выбеге после отпускания
+# И-член намотал ki·путь торможения = +73 PWM при триме 0 — пружина с опорой там, где
+# НАЧАЛСЯ тормоз; гвоздь станция вяжет там, где борт ВСТАЛ; две опоры дерутся: откат
+# −0.93 м/с → брейк −124 → перелёт → звон 1.0 → 0.33 м за 14 с. Здесь: висим 5 с в
+# ветер (трим 52 набран), толчок стиком 0.5 три секунды, отпускаем.
+print("  защёлка трима на толчок пилота:")
+def push_run(latch):
+    old = DpRollRate._TRIM_LATCH
+    DpRollRate._TRIM_LATCH = latch
+    try:
+        ax8 = axis(**FLIGHT)
+        rows = fly(ax8, stick=lambda t: 0.5 if 5.0 < t <= 8.0 else 0.0)
+    finally:
+        DpRollRate._TRIM_LATCH = old
+    i_rel = next(r[5] for r in rows if r[0] > 8.0)
+    after = [r for r in rows if r[0] > 8.0]
+    z = next(r for r in after if r[1] >= 0.0)          # толчок в минус: первый ноль
+    rev = max(r[1] for r in after)                     # откат в плюс
+    i_min = min(r[5] for r in rows if 5.0 < r[0] <= 8.0)
+    return ax8, rows, i_rel, i_min, z, rev
+ax8, rows8, i_rel8, i_min8, z8, rev8 = push_run(True)
+_, rows8n, i_rel8n, i_min8n, z8n, rev8n = push_run(False)
+check(f"защёлка: И-член в толчке не мусорит (min {i_min8:.0f} = отпускание {i_rel8:.0f} "
+      f"≈ трим {WIND / ALPHA:.0f})", abs(i_min8 - i_rel8) < 1.0 and abs(i_rel8 - WIND / ALPHA) < 5.0)
+check(f"защёлка: И-член на стопе = трим ({z8[5]:.0f} ≈ {i_rel8:.0f}; без защёлки {z8n[5]:.0f})",
+      abs(z8[5] - i_rel8) < 3.0 and z8n[5] < 10.0)
+check(f"защёлка: откат после стопа {rev8:.2f} < 0.3 м/с (без защёлки {rev8n:.2f})",
+      rev8 < 0.3 and rev8n > 0.6)
+pin8 = next(r[7] for r in rows8 if r[0] > 8.0 and r[7] is not None)
+check(f"защёлка: к 20 с у гвоздя (|путь − гвоздь| {abs(rows8[-1][3] - pin8):.2f} < 0.1, "
+      f"|v| хвост {tail_v(rows8):.2f} < 0.15)",
+      abs(rows8[-1][3] - pin8) < 0.1 and tail_v(rows8) < 0.15)
+check("защёлка: после гвоздя трим снова учится (_i_hold снят)", not ax8._i_hold
+      and ax8._pos_sp is not None)
+
+# --- 9. ki_trim: трим в первом брейке — быстро, пружина вне его — мягко ---
+print("  ki 30 + ki_trim 60 против ki 60:")
+def takeoff(kw_ax, **kw):
+    a = dict(FLIGHT); a.update(kw_ax)
+    rows = fly(axis(**a), **kw)
+    path = [r[3] for r in rows]
+    settle = next((rows[i][0] for i in range(len(rows))
+                   if all(abs(p) < 0.15 for p in path[i:])), float('nan'))
+    return (first_zero(rows), max(abs(p) for p in path), settle, rows[-1][5], rows)
+W10 = dict(tau_s=0.5, gain=0.6, wind=1.3, v0=0.55)          # как §4c
+for tag, kw in (("10 м/с", W10), ("5 м/с", {}), ("0 м/с", dict(wind=0.0))):
+    z60, pk60, st60, i60, _ = takeoff(dict(ki=60.0), **kw)
+    z30, pk30, st30, i30, _ = takeoff(dict(ki=30.0, ki_trim=60.0), **kw)
+    check(f"ki_trim, отрыв {tag}: стоп {z30:.1f} ≈ {z60:.1f} с, выбег {pk30:.2f} ≈ {pk60:.2f} м, "
+          f"трим {i30:.0f} ≈ {kw.get('wind', WIND) / ALPHA:.0f}",
+          abs(z30 - z60) < 0.3 and pk30 <= pk60 + 0.05
+          and abs(i30 - kw.get('wind', WIND) / ALPHA) < 8.0)
+z30n, pk30n, _, _, _ = takeoff(dict(ki=30.0), **W10)
+check(f"ki 30 БЕЗ ki_trim: отрыв 10 м/с — стоп {z30n:.1f} с (трим не успевает), ki_trim нужен",
+      z30n > 4.0)
+def gust_peaks(kw_ax):
+    *_, rows = takeoff(kw_ax, sec=30.0, gust=(10.0, 0.6))
+    pin = next(r[7] for r in rows if r[0] > 9.9 and r[7] is not None)
+    xs = [(r[0], r[3] - pin) for r in rows if r[0] > 10.0]
+    pk = [xs[i][1] for i in range(1, len(xs) - 1)
+          if (xs[i][1] - xs[i-1][1]) * (xs[i+1][1] - xs[i][1]) < 0 and abs(xs[i][1]) > 0.01]
+    calm = next((xs[i][0] - 10.0 for i in range(len(xs)) if all(abs(q[1]) < 0.1 for q in xs[i:])),
+                float('nan'))
+    return pk, calm
+pk60, calm60 = gust_peaks(dict(ki=60.0))
+pk30, calm30 = gust_peaks(dict(ki=30.0, ki_trim=60.0))
+check(f"ki_trim, порыв 0.6 в висении: второй пик {abs(pk30[1]):.2f} < {abs(pk60[1]):.2f} (ki 60), "
+      f"покой за {calm30:.1f} < {calm60:.1f} с",
+      abs(pk30[1]) < 0.7 * abs(pk60[1]) and calm30 < 0.8 * calm60)
+
+# --- 10. перевзвод брейка только дальше 0.5 м от гвоздя ---
+print("  перевзвод брейка по дистанции (_POS_BRAKE_REFIRE_DIST):")
+def refire_run(dist):
+    old = DpRollRate._POS_BRAKE_REFIRE_DIST
+    DpRollRate._POS_BRAKE_REFIRE_DIST = dist
+    try:
+        *_, rows = takeoff(dict(ki=30.0, ki_trim=60.0), sec=30.0, tau_s=0.4, tau_a=0.26,
+                           wind=0.0, v0=0.0, gust=(10.0, 0.6))
+    finally:
+        DpRollRate._POS_BRAKE_REFIRE_DIST = old
+    return sum(1 for r in rows if r[0] > 10.0 and r[6]), tail_v(rows)
+b0, t0 = refire_run(0.0)
+b5, t5 = refire_run(0.5)
+check(f"перевзвод без дистанции (лаги 0.4/0.26): предельный цикл ({b0} brake-кадров, "
+      f"|v| хвост {t0:.2f})", b0 > 150 and t0 > 0.5)
+check(f"перевзвод дальше 0.5 м: качание гаснет ({b5} brake-кадров, |v| хвост {t5:.2f})",
+      b5 < 80 and t5 < 0.1)
+check("дефолт класса _POS_BRAKE_REFIRE_DIST = 0.5", DpRollRate._POS_BRAKE_REFIRE_DIST == 0.5)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ СТАНЦИЯ: ДВА ЗАКОНА OK" if ok_all else "❌ СБОЙ")

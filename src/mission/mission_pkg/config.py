@@ -169,6 +169,10 @@ class BootstrapConfig:
     # Тренд не выдохся → 15 стоит проверить отдельной серией.
     roll_rate_kp: float = 30.0
     roll_rate_ki: float = 0.0
+    roll_rate_ki_trim: float = 0.0   # ki в упоре ПЕРВОГО брейка станции (набор трима
+                                     # ветра), 0 = ki. Ручка — BS_ROLL_RATE_KI_TRIM /
+                                     # --roll-rate-ki-trim; смысл — stabilization.py,
+                                     # _FlowDamper1D.__init__ (ki_trim)
     roll_rate_kd: float = 0.0
     roll_rate_cmd_gain: float = 0.0   # м/с при полном стике (0 = чистое удержание:
                                       # стик roll в DpHoldM игнорируется). Ручка —
@@ -240,6 +244,7 @@ class BootstrapConfig:
     # Цена против 200: снос втрое больше, платим сознательно за отсутствие раскачки.
     pitch_rate_kp: float = 100.0
     pitch_rate_ki: float = 0.0
+    pitch_rate_ki_trim: float = 0.0  # зеркало roll_rate_ki_trim: BS_PITCH_RATE_KI_TRIM
     pitch_rate_kd: float = 0.0       # производная скорости = ускорение, шумно; пока 0
     pitch_rate_cmd_gain: float = 0.0  # м/с при полном стике (0 = чистое удержание:
                                       # стик pitch в DpHoldM игнорируется — полёт
