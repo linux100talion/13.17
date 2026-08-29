@@ -429,6 +429,8 @@ class BootstrapArch2Node(Node):
         self.debug.publish_hold(self._hold_dbg('pitch'))       # /flow_dbg5: уставка тангажа
         # /flow_dbg7: цель крена по скорости + PWM (единственная запись roll-команды)
         self.debug.publish_rate_roll(self._rate_dbg('roll'))
+        # /flow_dbg10: цель тангажа по скорости + PWM (зеркало /flow_dbg7 для станции на тангаж)
+        self.debug.publish_rate_pitch(self._rate_dbg('pitch'))
         # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
         # /mission/status: гейт LOITER-на-VINS для debug-HUD стримера + bag

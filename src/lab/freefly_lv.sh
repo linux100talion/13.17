@@ -329,8 +329,8 @@ export BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-90}"
 # от точки быстрее BRAKE_V по каналу → цель −BRAKE·v_изм (кламп ±BRAKE_VMAX),
 # упор 150, фаза кончается сама на нуле; RETURN — стоим/идём к точке → KP·err,
 # потолок VMAX, √-кап ACC. Выключить станцию: BS_ROLL_POS_KP=0.
-# ТАНГАЖ — зеркально (2026-08-29, стенд test_station_brake §7), но дефолтом ЕЩЁ НЕ
-# стоит (BS_PITCH_POS_KP=0 — чистый демпфер) — полётом не доказан. Отличие от
+# ТАНГАЖ — зеркально, ДЕФОЛТ с 2026-08-29 (ab_pitch, 10 м/с; вердикт ниже).
+# Выключить: BS_PITCH_POS_KP=0 (чистый демпфер). Отличие от
 # крена: станция вяжет гвоздь ТОЛЬКО на установившейся высоте
 # (BS_PITCH_POS_ALT_BAND 0.2, дефолт config.py): ход по высоте канал читает как
 # ход вперёд — фантом в ipm_fwd ~0.5 м на метр (замер ab_brake_trim: +0.4 м за
@@ -338,15 +338,36 @@ export BS_ROLL_RATE_KP="${BS_ROLL_RATE_KP:-90}"
 # демпфер, брейк молчит; встала — перезахват, фантом прощён. Прогон-кандидат:
 #   BS_PITCH_POS_KP=0.3 BS_PITCH_POS_VMAX=0.3 BS_PITCH_POS_BRAKE=3 \
 #     BS_PITCH_POS_BRAKE_VMAX=1.0 BS_PITCH_POS_ACC=0.15 BS_PITCH_POS_BRAKE_V=0.25 \
-#     WIND_SPD=10 NAME=ab_pitch bash src/lab/freefly_lv.sh
+#     WIND_SPD=10 NAME=ab_pitch bash src/lab/freefly_lv.sh   (теперь = дефолт)
 # Смотреть: на отрыве тангаж не бьёт упором (фантом набора), после установления
 # высоты держит точку вперёд/назад; при смене высоты стиком газа — не тянет назад.
+# ВЕРДИКТ ab_pitch (2026-08-29, 10 м/с поперёк носа, висение 0.75 м, полёт 1.1 м):
+# все три пункта ЗАШЛИ. Отрыв: пик тангажа +61 PWM (чистый демпфер в trim10 дал
+# +42 — это фантом набора, не станция), гвоздь через 2.7 с после отрыва на
+# установившейся высоте. Висение 15 с руки-прочь: точка держится (СКО 0.17 м,
+# звон период 5.9 с, размах 0.31→0.17 м, ζ≈0.08); чистый демпфер там же уезжал
+# 0.64 м/16 с. Четыре толчка вперёд 1.7–3.5 м/с: демпфер тормозит упором 140–150,
+# ОТСКОК назад 0.9–1.4 м/с (≈35% пика), контр-упор −130..−150, у гвоздя ±0.1–0.2 м
+# через 5.4–7.5 с. Набор газом 0.66→1.10 м: назад не тянет (PWM = трим 14–20),
+# перезахват на новом месте. ⚠️ Звон и отскок — НЕ порок тангажа: станция КРЕНА в
+# win0 (ветер 0) звенит так же (1.01→0.33 м/14 с, отскок 0.7–0.9 м/с). В 10 м/с
+# крен выглядел идеально потому, что ветер дул ВДОЛЬ его оси — квадратичное
+# сопротивление даёт оси по ветру вдвое больше демпфирования (2k|V| против k|V|
+# поперёк). Резерв следующего шага общий для обеих осей: демпфирование контура
+# станции (лаг канала τ_s против петлевого гейна), + глушить сам демпфер тангажа
+# на ходу высоты (уход 1.2 м назад на отрыве — от фантома, не от станции).
 export BS_ROLL_POS_KP="${BS_ROLL_POS_KP:-0.3}"
 export BS_ROLL_POS_VMAX="${BS_ROLL_POS_VMAX:-0.3}"
 export BS_ROLL_POS_BRAKE="${BS_ROLL_POS_BRAKE:-3}"
 export BS_ROLL_POS_BRAKE_VMAX="${BS_ROLL_POS_BRAKE_VMAX:-1.0}"
 export BS_ROLL_POS_ACC="${BS_ROLL_POS_ACC:-0.15}"
 export BS_ROLL_POS_BRAKE_V="${BS_ROLL_POS_BRAKE_V:-0.25}"
+export BS_PITCH_POS_KP="${BS_PITCH_POS_KP:-0.3}"
+export BS_PITCH_POS_VMAX="${BS_PITCH_POS_VMAX:-0.3}"
+export BS_PITCH_POS_BRAKE="${BS_PITCH_POS_BRAKE:-3}"
+export BS_PITCH_POS_BRAKE_VMAX="${BS_PITCH_POS_BRAKE_VMAX:-1.0}"
+export BS_PITCH_POS_ACC="${BS_PITCH_POS_ACC:-0.15}"
+export BS_PITCH_POS_BRAKE_V="${BS_PITCH_POS_BRAKE_V:-0.25}"
 export BS_SLEW="${BS_SLEW:-300}"
 export BS_YAW_ARM_FRAMES="${BS_YAW_ARM_FRAMES:-5}"
 export BS_YAW_KD="${BS_YAW_KD:-6}"
@@ -368,7 +389,7 @@ export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
 # показывает переходы «VINS READY t=…» в ленте событий.
 # /feature — счётчик фич трекера для строки FEAT пост-рендера HUD (hud_video.py);
 # PointCloud 10 sim-Гц — копейки против /image_color.
-export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /mission/status /feature /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9}"
+export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /mission/status /feature /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /flow_dbg10}"
 export GDRIVE_UP="${GDRIVE_UP:-0}"
 export MP4="${MP4:-1}"
 export FRAMES="${FRAMES:-0}"    # JPEG-кадры не нужны (просьба 2026-08-22): только mp4

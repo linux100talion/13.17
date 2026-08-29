@@ -68,7 +68,7 @@ DRY_RUN="${DRY_RUN:-0}"
 # прогон снимется без него молча (strip_bags теперь берёт /flow_dbg* префиксом, а вот
 # запись — нет). /flow_dbg9 = боковая скорость канала, единственный её источник в
 # прогоне без крен-контура.
-TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /flow_dbg5 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
+TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /flow_dbg5 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /flow_dbg10 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
 
 # Бюджеты фаз — как в эталонном прогоне bootstrap_arch2 (CPU-бокс, низкий RTF).
 export BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-1800}"

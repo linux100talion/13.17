@@ -48,6 +48,12 @@ class RosDebugSink:
         # второй источник в /flow_dbg5: pos-осей стало две, и «первый ответивший»
         # молча подменил бы диагностику тангажа рысканием.
         self._pub6 = node.create_publisher(Vector3Stamped, '/flow_dbg6', 10)
+        # /flow_dbg10 = ТАНГАЖ-контур по скорости (DpPitchRate): (цель, ошибка, PWM) —
+        # зеркало /flow_dbg7 для крена. До него цель тангажа не писалась НИКУДА:
+        # /flow_dbg5 берёт только pos-оси (DpPitchHold), а станция на тангаж (7f1a3e9)
+        # живёт в rate-оси. Разбор ab_pitch (2026-08-29) остался без фаз станции —
+        # брейк/возврат/гвоздь неотличимы по одному PWM из /flow_dbg2.
+        self._pub10 = node.create_publisher(Vector3Stamped, '/flow_dbg10', 10)
         # /mission/status = статус гейта LOITER-на-VINS (String, "k=v k=v ...").
         # ЕДИНСТВЕННЫЙ источник правды для debug-HUD: openhd_streamer рисует
         # баннер «VINS READY» ровно из этого топика, а не из своей оценки
@@ -88,6 +94,15 @@ class RosDebugSink:
         if dbg is None:
             return
         self._publish_hold(self._pub7, dbg)
+
+    def publish_rate_pitch(self, dbg) -> None:
+        """/flow_dbg10 = ТАНГАЖ-контур целиком: (цель по скорости, ошибка до неё, PWM).
+        Зеркало `publish_rate_roll`: тангаж со станцией — тоже `rate`-ось, и без записи
+        цели фазы станции (гвоздь/брейк/возврат) по PWM из /flow_dbg2 не восстановить.
+        dbg=None (pos-ось DpPitchHold) — не шлём."""
+        if dbg is None:
+            return
+        self._publish_hold(self._pub10, dbg)
 
     def publish_hold_yaw(self, hold, yaw_off: float = 0.0) -> None:
         """/flow_dbg6 = КУРС-контур целиком: (курс-уставка, ошибка до неё, PWM на выходе).
