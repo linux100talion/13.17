@@ -230,6 +230,35 @@ tick_until(r, clock, 3.0, lvl=2, odom=700, vins_age=0.1, extnav=True)
 check("без ff_loiter: LOITER не слался", "LOITER" not in mode.modes)
 check("без ff_loiter: потолок 2 живёт на VinsHold", names(stack) == ['yawd', 'vins'])
 
+# --- 10. ladder_state(): правда лесенки для /mission/status (HUD-блок режимов).
+# Активный ярус и возраст незалатченного LOITER берутся ОТСЮДА (гистерезисы по
+# снапшоту не восстановимы); без sf_master — None (HUD рисует голый гейт) ---
+r, clock, mode, stack, vins = make()
+s = tick_until(r, clock, 2.0, lvl=2, odom=10, vins_age=0.1)
+ls = r.steps[0].ladder_state(s)
+check("ladder_state: потолок 2, ярус 0 (VINS не готов), латча нет",
+      (ls.level, ls.tier, ls.latch_age) == (2, 0, -1.0))
+s = tick_until(r, clock, 1.0, lvl=2, odom=100, vins_age=0.1)
+check("ladder_state: VINS готов → ярус 1",
+      r.steps[0].ladder_state(s).tier == 1)
+s = tick_until(r, clock, 3.0, lvl=2, odom=700, vins_age=0.1, extnav=True)
+ls = r.steps[0].ladder_state(s)
+check("ladder_state: LOITER послан, FCU не подтвердил — ярус 1, lat ≈ 3 с",
+      ls.tier == 1 and 2.5 < ls.latch_age <= 3.05)
+s = tick_until(r, clock, 1.0, lvl=2, odom=700, vins_age=0.1, extnav=True,
+               mode="LOITER")
+ls = r.steps[0].ladder_state(s)
+check("ladder_state: латч состоялся — ярус 2, lat=-1",
+      (ls.tier, ls.latch_age) == (2, -1.0))
+s = tick_until(r, clock, 1.0, lvl=2, sw=1, odom=700, vins_age=0.1, extnav=True,
+               mode="LOITER")
+check("ladder_state: MANUAL — поля живут (sw красит HUD сам)",
+      r.steps[0].ladder_state(s) is not None)
+step_legacy = Freefly("ff", FakeStack([DAMPER]), pilot_stabs=[DAMPER],
+                      sf_master=False)
+check("ladder_state: без sf_master → None (голый гейт LOITER в HUD)",
+      step_legacy.ladder_state(snap(0.0)) is None)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FREEFLY LADDER OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

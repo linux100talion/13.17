@@ -12,7 +12,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from control_pkg.application.hud import hud_status                   # noqa: E402
+from control_pkg.application.hud import (hud_status, LadderState,    # noqa: E402
+                                         loiter_gate, vinshold_gate)
 from control_pkg.domain.state import DroneState                      # noqa: E402
 
 FRESH = 2.0
@@ -144,6 +145,60 @@ d = kv(hud_status(DroneState(now_sim=123.456), FRESH))
 check("t = now_sim с сотыми (123.46)", d['t'] == '123.46')
 check("st по-прежнему первое СЛОВО после t (лог переходов в ноде режет по нему)",
       hud_status(DroneState(now_sim=1.0), FRESH).split(' ')[1].startswith('st='))
+
+# 10. ЛЕСЕНКА SF-мастера в статусе (разбор ab_noise 2026-08-30: баннер «VINS
+# WAIT» при живом VINS 10 Гц — st/why описывают гейт ОДНОГО яруса, LOITER; HUD
+# теперь рисует потолок SC, активный ярус и гейт КАЖДОГО яруса).
+# Без лесенки (None) — полей нет вовсе: старый bag/легаси-селектор → голый гейт
+d = kv(hud_status(s(odom=320, last=10.0, now=10.1, extnav=True, alt=0.3), FRESH,
+                  loiter_alt=0.5))
+check("без ladder: полей lvl/tier/t1 нет", 'tier' not in d and 't1' not in d)
+check("пороги гейта LOITER всегда: lalt/rsec/rcnt (ripe=-1 без odom → тут есть)",
+      d['lalt'] == '0.5' and 'ripe' in d and 'rsec' in d and 'rcnt' in d)
+# ab_noise 55 с: SC 2, ярус 1 (VinsHold), LOITER закрыт землёй — VINS при этом жив
+st = s(odom=320, last=10.0, now=10.1, extnav=True, alt=0.3)
+st.vins_first_sim = -20.0
+d = kv(hud_status(st, FRESH, loiter_alt=0.5, ladder=LadderState(2, 1),
+                  vins_min=300, ripe_sec=30.0, ripe_min=300))
+check("ab_noise/ground: lvl=2 tier=1, гейт LOITER WAIT/ground, ярус 1 READY",
+      (d['lvl'], d['tier'], d['st'], d['why'], d['t1'], d['w1'])
+      == ('2', '1', 'WAIT', 'ground', 'READY', '-'))
+check("пороги: vmin=300 rsec=30 rcnt=300, ripe = сек от первой одометрии (30.1)",
+      (d['vmin'], d['rsec'], d['rcnt'], d['ripe']) == ('300', '30', '300', '30.1'))
+check("lat=-1.0 — LOITER не латчим", d['lat'] == '-1.0')
+# ab_noise 45 с: очередь extnav ещё не прошла, odom 250 < vins_min → ярус 1 ждёт счётчик
+d = kv(hud_status(s(odom=250, last=10.0, now=10.1, extnav=False, alt=0.3), FRESH,
+                  loiter_alt=0.5, ladder=LadderState(2, 0), vins_min=300))
+check("ab_noise/extnav: tier=0, LOITER WAIT/extnav, ярус 1 WAIT/odom",
+      (d['tier'], d['st'], d['why'], d['t1'], d['w1'])
+      == ('0', 'WAIT', 'extnav', 'WAIT', 'odom'))
+# ярус 1 = ЗЕРКАЛО VinsHandover.vins_ready: odom ≥ vins_min И свежесть < fresh
+check("vinshold_gate: odom≥min + свежий → READY",
+      vinshold_gate(s(odom=300, last=10.0, now=10.1), FRESH, 300) == ('READY', '-'))
+check("vinshold_gate: odom<min → WAIT/odom",
+      vinshold_gate(s(odom=299, last=10.0, now=10.1), FRESH, 300) == ('WAIT', 'odom'))
+check("vinshold_gate: fresh≤age≤3×fresh → WAIT/stale (гистерезис спуска лесенки)",
+      vinshold_gate(s(odom=700, last=10.0, now=13.0), FRESH, 300) == ('WAIT', 'stale'))
+check("vinshold_gate: age>3×fresh → DEAD/stale",
+      vinshold_gate(s(odom=700, last=10.0, now=17.0), FRESH, 300) == ('DEAD', 'stale'))
+check("vinshold_gate: 0 odom → DEAD/no_odom",
+      vinshold_gate(s(), FRESH, 300) == ('DEAD', 'no_odom'))
+check("loiter_gate = то же, что st/why строки",
+      loiter_gate(s(odom=700, last=10.0, now=10.1, extnav=True, alt=3.2), FRESH, 0.5)
+      == ('READY', '-'))
+# латч: LOITER выбран, FCU режим не подтвердил — возраст в lat=
+d = kv(hud_status(s(odom=700, last=10.0, now=10.1, extnav=True, alt=3.0), FRESH,
+                  loiter_alt=0.5, ladder=LadderState(2, 1, 6.5), vins_min=300))
+check("латч: гейт READY, tier=1, lat=6.5 (FCU не латчит)",
+      d['st'] == 'READY' and d['tier'] == '1' and d['lat'] == '6.5')
+# MANUAL (SF не-вверх): лесенка не ведёт, sw=1 — HUD красит шапку; поля остаются
+d = kv(hud_status(DroneState(now_sim=5.0, pilot_switch=1), FRESH,
+                  ladder=LadderState(2, 0), vins_min=300))
+check("MANUAL: sw=1 при живой лесенке, поля lvl/tier на месте",
+      d['sw'] == '1' and d['lvl'] == '2' and d['tier'] == '0')
+check("st по-прежнему первое слово, лесенка — хвостом до рамы",
+      hud_status(DroneState(now_sim=1.0, st_frame=1), FRESH,
+                 ladder=LadderState(0, 0)).split(' sf=')[0].endswith('vmin=0'))
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")

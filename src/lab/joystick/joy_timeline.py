@@ -98,12 +98,14 @@ def read_bag(bag, joy_topic, ref_topic, state_topic='/mavros/state',
             m = deserialize_message(raw, State)
             fcu.append((t_ns, bool(m.armed), m.mode))
         elif topic == hud_topic:
-            # гейт LOITER-на-VINS от лётной ноды (debug-HUD, "k=v k=v ...")
+            # /mission/status лётной ноды (debug-HUD, "k=v k=v ..."): гейт
+            # LOITER-на-VINS (st/why) + лесенка SF-мастера (tier/lvl; в старых
+            # bag полей нет — переходов яруса в ленте тогда не будет)
             from std_msgs.msg import String
             m = deserialize_message(raw, String)
             kv = dict(p.split('=', 1) for p in m.data.split() if '=' in p)
             hud.append((t_ns, kv.get('st', '?'), kv.get('why', '-'),
-                        kv.get('odom', '?')))
+                        kv.get('odom', '?'), kv.get('tier'), kv.get('lvl')))
     return (np.array(joy_ns, dtype=np.int64), np.array(joy_axes),
             np.array(ref), fcu, hud)
 
@@ -275,14 +277,22 @@ def main():
         hud_ns = np.array([h[0] for h in hud], dtype=np.int64)
         hud_sim = (np.interp(hud_ns, ref[:, 0], ref[:, 1]) if len(ref) >= 2
                    else (hud_ns - joy_ns[0]) / 1e9)
-        prev_st = None
-        for (t_ns, st, why, odom), t_s in zip(hud, hud_sim):
+        # гейт яруса LOITER (st/why) — под своим именем, не «VINS»: живость
+        # VINS в ленте не отражается, только готовность ЯРУСА (ab_noise
+        # 2026-08-30: VINS 10 Гц при «WAIT»); ярус лесенки (tier/lvl) — отдельно
+        tier_name = {'0': 'DAMPER', '1': 'VINSHOLD', '2': 'LOITER'}
+        prev_st, prev_tier = None, None
+        for (t_ns, st, why, odom, tier, lvl), t_s in zip(hud, hud_sim):
             if prev_st is not None and st != prev_st:
-                label = {'READY': f'HUD: VINS READY (odom={odom})',
-                         'WAIT': f'HUD: VINS WAIT ({why})'}.get(
+                label = {'READY': f'HUD: LOITER READY (odom={odom})',
+                         'WAIT': f'HUD: LOITER WAIT ({why})'}.get(
                              st, f'HUD: NO VINS ({why})')
                 events.append((t_s - t0, 'alt', label))
-            prev_st = st
+            if tier is not None and prev_tier is not None and tier != prev_tier:
+                events.append((t_s - t0, 'alt',
+                               f'HUD: ярус {tier} {tier_name.get(tier, "?")} '
+                               f'(потолок SC {lvl})'))
+            prev_st, prev_tier = st, tier
     if len(alt_t):
         up = np.where(alt_v > LIFTOFF_ALT)[0]
         if len(up):

@@ -516,8 +516,8 @@ export BS_YAW_RATE_FULL="${BS_YAW_RATE_FULL:-60}"
 export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
 # /mavros/state (1 Гц) — для разбора joystick-серии: латчи режимов (LOITER!) и
 # арм/дизарм видны в bag (двойной щелчок CH6 в полёте 182409 без него не объяснить).
-# /mission/status — гейт LOITER-на-VINS от лётной ноды (debug-HUD): joy_timeline
-# показывает переходы «VINS READY t=…» в ленте событий.
+# /mission/status — лесенка SF-мастера + гейт LOITER-на-VINS от лётной ноды
+# (debug-HUD): joy_timeline показывает переходы «HUD: LOITER READY» / «HUD: ярус …».
 # /feature — счётчик фич трекера для строки FEAT пост-рендера HUD (hud_video.py);
 # PointCloud 10 sim-Гц — копейки против /image_color.
 export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /mission/status /feature /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /flow_dbg10 /mavros/imu/data}"

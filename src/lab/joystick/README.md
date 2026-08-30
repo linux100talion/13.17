@@ -26,8 +26,9 @@
      bash src/lab/joystick/analyze.sh                # или свежий output/scene_bag
    → в каталог прогона (или output/joystick/ без RUN):
        report.txt          — лента: CH6, жесты арм/дизарм, высоты, переходы
-                             гейта LOITER-на-VINS («HUD: VINS READY» из
-                             /mission/status, если он в bag), сегменты стиков
+                             гейта LOITER-на-VINS («HUD: LOITER READY») и
+                             яруса лесенки («HUD: ярус 1 VINSHOLD») из
+                             /mission/status, если он в bag; сегменты стиков
        scenario_draft.json — черновик сценария (жесты уже заменены якорями)
        raw.jsonl           — сырой таймлайн /joy (для валидации канала)
 

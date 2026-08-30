@@ -17,6 +17,17 @@ LoiterHold пускают штатный LOITER (extnav_ready + свежий VIN
   st=DEAD  — VINS-одометрии нет (why: no_odom — не было вовсе; stale — молчит
              дольше 3×fresh — гистерезис выхода Freefly из LOITER).
 
+⚠️ st/why — гейт ЯРУСА LOITER, а не живость VINS (разбор ab_noise 2026-08-30:
+на 35-58 с bag VINS шёл 10 Гц, а баннер писал «VINS WAIT (extnav)» — ждала
+очередь зрелости EK3_SRC1_*, потом «(ground)» — баро 0.3 м < loiter_alt 0.5).
+Живость VINS в HUD — строка ODO (собственный замер стримера); баннер и блок
+режимов говорят про ЛЕСЕНКУ SF-мастера: потолок SC, активный ярус и гейт
+каждого яруса (поля lvl/tier/lat/t1/w1 + пороги vmin/lalt/ripe/rsec/rcnt —
+см. LadderState и _ladder_fields). Ярус 1 (VinsHold) судится ЗЕРКАЛОМ
+VinsHandover.vins_ready (odom ≥ vins_min, свежесть), ярус 2 — st/why выше,
+ярус 0 (демпфер) — ipm/ipmf. Ту же лесенку ведёт Freefly._ladder_*: активный
+ярус берётся оттуда (Freefly.ladder_state), не пересчитывается.
+
 Отдельно поля высот и канала зрения (palt=/ipm=/ipmf=) — диагностика демпфера у
 земли: см. комментарий у их формирования ниже.
 
@@ -30,6 +41,26 @@ WaitEkfPos (step.py) пускает арм: свежий /mavros/local_position 
 оффлайн как handover (test_hud_status.py).
 """
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class LadderState:
+    """Состояние лесенки SF-мастера (Freefly._ladder_*) для строки статуса:
+    level — потолок SC (0 демпфер / 1 +VinsHold / 2 +штатный LOITER), tier —
+    активный ярус, latch_age — сколько сим-секунд LOITER уже выбран, а FCU режим
+    не подтвердил («requires position», ре-ассерт идёт); −1 = не латчим. Отдаёт
+    Freefly.ladder_state(); у планов без лесенки (легаси-селектор, миссии с
+    loiter<t>) — None, и полей лесенки в строке нет (HUD рисует голый гейт)."""
+    level: int
+    tier: int
+    latch_age: float = -1.0
+
+
+# Имена ярусов лесенки — общие для лога ноды, HUD (ASCII: Hershey-шрифт OpenCV
+# кириллицу не рисует) и ленты joy_timeline.
+TIER_NAMES = {0: "DAMPER", 1: "VINSHOLD", 2: "LOITER"}
+
 # Свежесть позиции EKF — зеркало fresh_sec у WaitEkfPos (step.py) и гейта
 # GPS-kill в bootstrap_node: одна правда «EKF держит позицию».
 EKF_FRESH_SEC = 2.0
@@ -37,25 +68,55 @@ EKF_FRESH_SEC = 2.0
 RC_CENTER = 1500
 
 
-def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5) -> str:
+def loiter_gate(s, fresh_sec: float, loiter_alt: float):
+    """Гейт ЯРУСА 2 (штатный LOITER-на-VINS) → (st, why). Ровно условие
+    Freefly._mode_target / LoiterHold: extnav_ready + свежий VINS + в воздухе.
+    Порядок фиксирован: no_odom → stale(DEAD, 3×fresh — гистерезис выхода) →
+    extnav → stale(WAIT) → ground → READY."""
+    age = s.now_sim - s.vins_last_sim
+    if s.vins_odom_count == 0:
+        return 'DEAD', 'no_odom'
+    if age > 3.0 * fresh_sec:
+        return 'DEAD', 'stale'
+    if not s.extnav_ready:
+        return 'WAIT', 'extnav'
+    if age >= fresh_sec:
+        return 'WAIT', 'stale'
+    if (s.rel_alt or 0.0) <= loiter_alt:
+        return 'WAIT', 'ground'
+    return 'READY', '-'
+
+
+def vinshold_gate(s, fresh_sec: float, vins_min: int):
+    """Гейт ЯРУСА 1 (VinsHold нашего стека) → (st, why): зеркало
+    VinsHandover.vins_ready — odom ≥ vins_min (BS_VINS_MIN, в LV-профилях 300) и
+    свежесть < fresh. Градации как у LOITER (DEAD/stale по 3×fresh — гистерезис
+    спуска Freefly._ladder_tier); своя причина «odom» — счётчик ниже порога."""
+    age = s.now_sim - s.vins_last_sim
+    if s.vins_odom_count == 0:
+        return 'DEAD', 'no_odom'
+    if age > 3.0 * fresh_sec:
+        return 'DEAD', 'stale'
+    if s.vins_odom_count < vins_min:
+        return 'WAIT', 'odom'
+    if age >= fresh_sec:
+        return 'WAIT', 'stale'
+    return 'READY', '-'
+
+
+def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
+               vins_min: int = 0, ripe_sec: float = 0.0, ripe_min: int = 0) -> str:
     """Строка "k=v k=v ..." для /mission/status по снапшоту DroneState.
 
     loiter_alt — гейт «в воздухе» (м): обязан совпадать с cfg.loiter_alt лётной
-    ноды (bootstrap передаёт его сам); дефолт 1.5 — легаси для старых вызовов."""
+    ноды (bootstrap передаёт его сам); дефолт 1.5 — легаси для старых вызовов.
+    ladder — LadderState лесенки SF-мастера (None = полей лесенки нет);
+    vins_min — порог яруса 1 (VinsHandover.min_count); ripe_sec/ripe_min —
+    пороги зрелости очереди extnav (bootstrap: ripe_sec/ripe_min) — HUD рисует
+    по ним ПРОГРЕСС ожидания «extnav», а не голое слово."""
     ekf = int(s.now_sim - s.ekf_pos_last_sim < EKF_FRESH_SEC)
     age = s.now_sim - s.vins_last_sim
-    if s.vins_odom_count == 0:
-        st, why = 'DEAD', 'no_odom'
-    elif age > 3.0 * fresh_sec:
-        st, why = 'DEAD', 'stale'
-    elif not s.extnav_ready:
-        st, why = 'WAIT', 'extnav'
-    elif age >= fresh_sec:
-        st, why = 'WAIT', 'stale'
-    elif (s.rel_alt or 0.0) <= loiter_alt:
-        st, why = 'WAIT', 'ground'
-    else:
-        st, why = 'READY', '-'
+    st, why = loiter_gate(s, fresh_sec, loiter_alt)
     # res/rat — диагностика детектора зрелости (ripeness.py): residual
     # «поза/скорость» (м/с; тихо < 0.15) и вертикальный ratio VINS/rel_alt
     # (зрел в [0.8,1.25]); -1 = ещё нет данных. Рисуются мелкой строкой HUD.
@@ -88,7 +149,32 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5) -> str:
             f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f} "
             f"rcr={s.pilot_roll - RC_CENTER} rcp={s.pilot_pitch - RC_CENTER} "
             f"rct={s.pilot_throttle - RC_CENTER} rcy={s.pilot_yaw - RC_CENTER} "
-            f"sw={s.pilot_switch}" + _frame_fields(s))
+            f"sw={s.pilot_switch}"
+            + _gate_fields(s, loiter_alt, ripe_sec, ripe_min)
+            + _ladder_fields(s, ladder, fresh_sec, vins_min)
+            + _frame_fields(s))
+
+
+def _gate_fields(s, loiter_alt, ripe_sec, ripe_min) -> str:
+    """Пороги гейта LOITER и прогресс зрелости extnav: lalt — loiter_alt (для
+    «ground 0.3<0.5m» в HUD), ripe — сим-секунд от ПЕРВОЙ одометрии (−1 = не
+    было), rsec/rcnt — ripe_sec/ripe_min очереди EK3_SRC1_* (время потока И
+    счётчик, оба обязаны пройти). Всегда: гейт LOITER есть и без лесенки."""
+    ripe = (min(s.now_sim - s.vins_first_sim, 999.0)
+            if s.vins_first_sim > -1e8 else -1.0)
+    return f" lalt={loiter_alt:g} ripe={ripe:.1f} rsec={ripe_sec:g} rcnt={ripe_min}"
+
+
+def _ladder_fields(s, ladder, fresh_sec, vins_min) -> str:
+    """Лесенка SF-мастера: lvl — потолок SC, tier — активный ярус (правда
+    Freefly, не пересчёт), lat — возраст незалатченного LOITER (−1 = не латчим),
+    t1/w1 — гейт яруса 1 (vinshold_gate), vmin — его порог. Только при живой
+    лесенке — «чего нет в источниках, того нет и в строке»."""
+    if ladder is None:
+        return ""
+    t1, w1 = vinshold_gate(s, fresh_sec, vins_min)
+    return (f" lvl={ladder.level} tier={ladder.tier} lat={ladder.latch_age:.1f}"
+            f" t1={t1} w1={w1} vmin={vins_min}")
 
 
 def _frame_fields(s) -> str:

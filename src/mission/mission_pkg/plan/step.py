@@ -10,6 +10,7 @@ ctx.elapsed()/try_cmd()/keep_mode() — ни строчки rclpy.
 """
 import math
 
+from control_pkg.application.hud import LadderState
 from control_pkg.domain.control.throttle_latch import ThrottleLatch
 from control_pkg.domain.rc import RC_CENTER, RcCommand
 
@@ -592,6 +593,20 @@ class Freefly(Step):
         if lvl >= 2 and self._in_loiter and s.mode == "LOITER":
             tier = 2
         return tier
+
+    def ladder_state(self, s):
+        """Состояние лесенки для /mission/status (HUD-блок режимов, лента
+        joy_timeline): потолок SC, активный ярус, возраст незалатченного LOITER.
+        Правда ОТСЮДА, не пересчёт: гистерезисы ярусов (3×fresh на спуске,
+        _in_loiter) живут в _ladder_tier/_mode_target и по снапшоту не
+        восстановимы. None — лесенка не ведётся (легаси-селектор): HUD рисует
+        голый гейт LOITER."""
+        if not (self.sf_master and self._pilot_stabs is not None):
+            return None
+        latch = (s.now_sim - self._loiter_since
+                 if self._in_loiter and s.mode != "LOITER" else -1.0)
+        return LadderState(level=self._level if self._level is not None else 0,
+                           tier=self._tier, latch_age=latch)
 
     def _ladder_apply(self, ctx, s) -> None:
         """Применить ярус: стек по ярусу, пересев опор от текущей точки."""

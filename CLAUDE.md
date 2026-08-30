@@ -81,8 +81,9 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   `tools/nn2_route/` (подход 2: route-координаты −∇V, концепт-ветка) — офлайн-скрипты.
 - **`openhd_streamer`** — подписан на `/image_color` + `/nn1/detections` +
   `/nn2/scene`, кэширует последние детекции, рисует на каждом кадре
-  (`cv2.rectangle/putText`), ужимает до 640×360, кодирует H.264 (GStreamer →
-  `udpsink :5600`). Видео на полном fps независимо от инференса; рамки «залипают»
+  (`cv2.rectangle/putText`): рамки NN — на полном кадре, затем ужимает до
+  640×360, debug-HUD — уже на ужатом (текст нативно, без размытия ресайзом),
+  кодирует H.264 (GStreamer → `udpsink :5600`). Видео на полном fps независимо от инференса; рамки «залипают»
   между обновлениями (для FPV норм). **Debug-HUD** (параметр `hud`, default true):
   баннер гейта LOITER-на-VINS (зел/жёлт/крас) из **`/mission/status`** — его
   публикует лётная нода `bootstrap_arch2` (ТОТ ЖЕ гейт, что пускает LOITER —
@@ -106,7 +107,11 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   PWM-смещения демпферов `/flow_dbg*`, дрейф `/nn1/drift`. Без лётной ноды
   (голый стример на Orin) баннер гейта не рисуется, остальное живёт.
   `/mission/status` пишется в bag (`freefly_lv.sh`), `joy_timeline` показывает
-  переходы «HUD: VINS READY» в ленте событий. В scene.mp4 HUD НЕТ по построению
+  переходы «HUD: LOITER READY» / «HUD: ярус 1 VINSHOLD» в ленте событий; баннер
+  и блок режимов (3.2/3.6 в `hud.md`) — ЛЕСЕНКА SF-мастера (потолок SC, активный
+  ярус, гейт каждого яруса с прогрессом), живость VINS — только строка `ODO`
+  (разбор ab_noise 2026-08-30: «VINS WAIT» при живом VINS — ждал ярус, не VINS).
+  В scene.mp4 HUD НЕТ по построению
   (это чистый `/image_color`); полёт «глазами пилота» — **`scene_hud.mp4`**:
   пост-рендер из bag тем же кодом (`nav_pkg/hud_renderer.py`, без ROS) через
   `src/lab/hud_video.py` (freefly_lv.sh делает сам, `HUD_MP4=0` — выкл).

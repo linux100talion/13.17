@@ -210,6 +210,10 @@ class BootstrapArch2Node(Node):
         # (first_sim/count не сбрасываются) — свежесть ловит vins_fresh.
         ripe_sec = 5.0 if self._has_calm_steps else cfg.ripe_sec
         ripe_min = 50 if self._has_calm_steps else cfg.vins_min
+        # пороги — в /mission/status (rsec/rcnt): HUD рисует прогресс «extnav»
+        self._ripe_sec, self._ripe_min = ripe_sec, ripe_min
+        # порог яруса VinsHold (t1/vmin в статусе); 0 — хэндовера нет
+        self._vins_min = cfg.vins_min if handover is not None else 0
 
         def _ripe_time(s):
             return (s.vins_first_sim > -1e8
@@ -437,10 +441,18 @@ class BootstrapArch2Node(Node):
         self.debug.publish_rate_pitch(self._rate_dbg('pitch'))
         # /flow_dbg6: уставка курса + PWM рыскания (единственная запись yaw-команды)
         self.debug.publish_hold_yaw(self._hold_dbg('yaw'), rc.yaw - RC_CENTER)
-        # /mission/status: гейт LOITER-на-VINS для debug-HUD стримера + bag
-        line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt)
-        st = next((w for w in line.split() if w.startswith('st=')), '')   # первое слово теперь t=
-        if st != self._hud_st:      # переход статуса — в лог (виден и в sim_nav.log)
+        # /mission/status: лесенка SF-мастера (потолок/ярус/гейты ярусов) +
+        # гейт LOITER-на-VINS для debug-HUD стримера + bag. Активный ярус —
+        # правда шага Freefly (ladder_state), у прочих шагов лесенки нет.
+        step = None if self.runner.finished else self.runner.steps[self.runner.i]
+        ladder = (step.ladder_state(s)
+                  if step is not None and hasattr(step, 'ladder_state') else None)
+        line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt,
+                          ladder=ladder, vins_min=self._vins_min,
+                          ripe_sec=self._ripe_sec, ripe_min=self._ripe_min)
+        # переход гейта LOITER ИЛИ яруса — в лог (виден и в sim_nav.log)
+        st = ' '.join(w for w in line.split() if w.startswith(('st=', 'tier=')))
+        if st != self._hud_st:
             self._hud_st = st
             self.logger.info(f"HUD: {line}")
         self.debug.publish_status(line)

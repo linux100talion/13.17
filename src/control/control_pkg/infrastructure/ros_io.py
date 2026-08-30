@@ -54,9 +54,10 @@ class RosDebugSink:
         # живёт в rate-оси. Разбор ab_pitch (2026-08-29) остался без фаз станции —
         # брейк/возврат/гвоздь неотличимы по одному PWM из /flow_dbg2.
         self._pub10 = node.create_publisher(Vector3Stamped, '/flow_dbg10', 10)
-        # /mission/status = статус гейта LOITER-на-VINS (String, "k=v k=v ...").
-        # ЕДИНСТВЕННЫЙ источник правды для debug-HUD: openhd_streamer рисует
-        # баннер «VINS READY» ровно из этого топика, а не из своей оценки
+        # /mission/status = лесенка SF-мастера + гейты ярусов (String,
+        # "k=v k=v ..."). ЕДИНСТВЕННЫЙ источник правды для debug-HUD:
+        # openhd_streamer рисует баннер яруса и блок режимов ровно из этого
+        # топика, а не из своей оценки
         # (полёт lv1_joy_20260822_232043: гейт молча держал, пилот щёлкал CH6
         # вслепую). Заодно попадает в bag → joy_timeline показывает переходы.
         self._pub_status = node.create_publisher(String, '/mission/status', 10)

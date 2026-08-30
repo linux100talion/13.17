@@ -15,9 +15,16 @@
 #   /nn1/detections  vision_msgs/Detection2DArray  — якорные ориентиры (NN1)
 #   /nn2/scene       std_msgs/String               — метка сцены (NN2)
 #
-# Рамки от NN1 заданы в координатах ПОЛНОГО кадра; оверлей рисуется на полном
-# кадре, и только потом картинка ужимается до out_width x out_height — поэтому
-# масштабировать боксы вручную не нужно.
+# Порядок отрисовки (2026-08-30): рамки NN1 заданы в координатах ПОЛНОГО кадра
+# и рисуются на нём ДО ужатия (масштабировать боксы не нужно); картинка
+# ужимается до out_width x out_height; debug-HUD рисуется ПОСЛЕ ужатия, прямо на
+# выходном кадре. Раньше HUD рисовался на полном кадре и проходил через
+# cv2.resize вместе с картинкой — тонкие штрихи текста размывались
+# интерполяцией, и в FPV (640×360) HUD читался заметно хуже, чем в
+# scene_hud.mp4 (hud_video.py всегда рисовал нативно после даунскейла).
+# Теперь текст растрируется в выходном разрешении (HudRenderer сам берёт
+# k = w/1280 от ВЫХОДНОГО кадра); точки фич трекера (координаты полного кадра)
+# домножаются на out_width/width входа.
 #
 # ── Debug-HUD (параметр hud, default true) ──────────────────────────────────
 # Мотив: полёт lv1_joy_20260822_232043 — LOITER не залатчился, потому что VINS
@@ -84,6 +91,7 @@ class OpenHDStreamer(Node):
         self.bridge = CvBridge()
         self.last_detections = None   # vision_msgs/Detection2DArray
         self.renderer = HudRenderer()
+        self._feat_scale = None       # out_width / ширина входного кадра (для точек фич)
 
         pipeline = (
             "appsrc ! videoconvert ! "
@@ -135,10 +143,15 @@ class OpenHDStreamer(Node):
 
     def on_feat(self, msg):
         # каналы feature_tracker: [id, u, v, vx, vy]; u,v — ПИКСЕЛИ кадра
-        # камеры (наш кадр /image_color той же величины → координаты 1:1)
+        # камеры (наш кадр /image_color той же величины). HUD рисуется на
+        # УЖАТОМ кадре → домножаем на out_width/width входа; до первого кадра
+        # масштаб неизвестен — точки не рисуем (счётчик FEAT живёт).
         pts = None
-        if self.hud_features and len(msg.channels) >= 3:
-            pts = list(zip(msg.channels[1].values, msg.channels[2].values))
+        if (self.hud_features and len(msg.channels) >= 3
+                and self._feat_scale is not None):
+            s = self._feat_scale
+            pts = [(u * s, v * s) for u, v in
+                   zip(msg.channels[1].values, msg.channels[2].values)]
         self.renderer.set_feat(len(msg.points), self._now(), pts)
 
     def on_state(self, msg):
@@ -158,12 +171,14 @@ class OpenHDStreamer(Node):
         if not self.writer.isOpened():
             return
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-        self._draw_overlays(frame)
+        self._feat_scale = self.ow / frame.shape[1]
+        self._draw_boxes(frame)                     # NN1 — на полном кадре
         out = cv2.resize(frame, (self.ow, self.oh))
+        self._draw_hud(out)                         # HUD — нативно на выходном
         self.writer.write(out)
 
-    def _draw_overlays(self, frame):
-        # NN1: рамки якорных ориентиров (зелёные).
+    def _draw_boxes(self, frame):
+        # NN1: рамки якорных ориентиров (зелёные) — координаты полного кадра.
         if self.last_detections is not None:
             for det in self.last_detections.detections:
                 bb = det.bbox
@@ -175,11 +190,15 @@ class OpenHDStreamer(Node):
                 if label:
                     cv2.putText(frame, label, (x1, max(0, y1 - 6)),
                                 FONT, 0.6, (0, 255, 0), 2)
+
+    def _draw_hud(self, out):
+        # debug-HUD — на УЖАТОМ кадре (текст растрируется в выходном
+        # разрешении, без размытия ресайзом); масштаб k рендерер берёт сам.
         if self.hud:
-            self.renderer.draw(frame, self._now())
+            self.renderer.draw(out, self._now())
         elif self.renderer.scene:
             # HUD выключен — прежний одинокий баннер сцены (жёлтый).
-            cv2.putText(frame, f"scene: {self.renderer.scene}", (10, 30),
+            cv2.putText(out, f"scene: {self.renderer.scene}", (10, 30),
                         FONT, 0.8, HUD_SCENE, 2)
 
 

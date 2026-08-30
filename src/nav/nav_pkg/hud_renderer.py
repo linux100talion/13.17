@@ -34,6 +34,17 @@ HUD_SCENE = (0, 255, 255)
 # рисует (вышли бы «?»), поэтому подписи английские, как и остальной HUD.
 IPM_FAIL = {0: "OK", 1: "ALT GATE", 2: "NO WINDOW", 3: "WARP OOB",
             4: "FEW PTS", 5: "FEW LK", 6: "OFF", 7: "NO REF"}
+# Ярусы лесенки SF-мастера (tier=/lvl= в /mission/status) — копия
+# control_pkg.application.hud.TIER_NAMES (nav_pkg control_pkg не импортирует).
+TIER_NAMES = {0: "DAMPER", 1: "VINSHOLD", 2: "LOITER"}
+# FCU не подтверждает LOITER дольше этого — «refuses» (зеркало _latch_warned
+# в Freefly._mode_target: предупреждение в лог через 5 с ре-ассерта).
+LATCH_REFUSE_SEC = 5.0
+# Общий коэффициент размера шрифта HUD (просьба 2026-08-30: «на ~30 % мельче»):
+# масштабирует глифы, толщину, подложку и межстрочный шаг всех строк разом —
+# пропорции строк между собой (баннеры 1.0 / строки 0.8 / ярусы 0.7 / res 0.6)
+# не меняются. 1.0 = прежний размер.
+FONT_K = 0.7
 
 
 class HudRenderer:
@@ -90,18 +101,190 @@ class HudRenderer:
         self.scene = s
 
     # --- отрисовка ---
-    def _line(self, frame, k, y, text, color, scale=0.8, fill=None):
-        """Строка HUD на подложке (читаемость поверх любой сцены); вернёт next y."""
-        (tw, th), base = cv2.getTextSize(text, FONT, scale * k,
-                                         max(1, round(2 * k)))
-        x = round(10 * k)
-        pad = round(6 * k)
+    @staticmethod
+    def _metrics(k, text, scale):
+        """(tw, th, base, thickness) текста при масштабе кадра k и FONT_K."""
+        f = k * FONT_K
+        thick = max(1, round(2 * f))
+        (tw, th), base = cv2.getTextSize(text, FONT, scale * f, thick)
+        return tw, th, base, thick
+
+    def _box(self, frame, k, x, y, text, color, scale, fill):
+        """Текст с подложкой (читаемость поверх любой сцены) в точке базовой
+        линии (x, y); вернёт (tw, th, base)."""
+        f = k * FONT_K
+        tw, th, base, thick = self._metrics(k, text, scale)
+        pad = round(6 * f)
         cv2.rectangle(frame, (x - pad, y - th - pad),
-                      (x + tw + pad, y + base + round(4 * k)),
+                      (x + tw + pad, y + base + round(4 * f)),
                       (0, 0, 0) if fill is None else fill, -1)
-        cv2.putText(frame, text, (x, y), FONT, scale * k,
-                    color if fill is None else (0, 0, 0), max(1, round(2 * k)))
-        return y + th + base + round(18 * k)
+        cv2.putText(frame, text, (x, y), FONT, scale * f,
+                    color if fill is None else (0, 0, 0), thick)
+        return tw, th, base
+
+    def _line(self, frame, k, y, text, color, scale=0.8, fill=None):
+        """Строка левой стопки HUD (отступ 10 px @1280); вернёт next y."""
+        _tw, th, base = self._box(frame, k, round(10 * k), y, text, color,
+                                  scale, fill)
+        return y + th + base + round(18 * k * FONT_K)
+
+    def _line_right(self, frame, k, y, text, color, scale=0.8, fill=None):
+        """Строка ПРАВОЙ стопки (якорь по правому краю, отступ 10 px @1280);
+        вернёт next y."""
+        tw, th, base, _thick = self._metrics(k, text, scale)
+        x = frame.shape[1] - tw - round(10 * k)
+        self._box(frame, k, x, y, text, color, scale, fill)
+        return y + th + base + round(18 * k * FONT_K)
+
+    def _line_bottom_center(self, frame, k, text, color, scale=0.8, fill=None):
+        """Строка, заякоренная по ЦЕНТРУ НИЗА кадра (отступ 14 px @1280):
+        высота — как приборная лента у пилота, не в общей стопке слева."""
+        tw, _th, base, _thick = self._metrics(k, text, scale)
+        x = (frame.shape[1] - tw) // 2
+        y = frame.shape[0] - base - round(4 * k * FONT_K) - round(14 * k)
+        self._box(frame, k, x, y, text, color, scale, fill)
+
+    # --- лесенка: гейты ярусов по полям /mission/status ---
+    def _num(self, key, default=None):
+        try:
+            return float(self.status[key])
+        except (KeyError, ValueError):
+            return default
+
+    def _tier_gate(self, i):
+        """(st, text) яруса i по полям статуса: st — READY/WAIT/DEAD, text —
+        причина с ПРОГРЕССОМ (счётчик к порогу, секунды к порогу, высота к
+        loiter_alt) — пилоту и разбору важно «сколько ещё», а не голое слово.
+        Ярус 0 — канал вида сверху (ipm/ipmf); 1 — VinsHold (t1/w1, зеркало
+        VinsHandover.vins_ready); 2 — штатный LOITER (st/why + латч lat=)."""
+        odom = self.status.get("odom", "?")
+        age = self._num("age")
+        age_s = f"{age:.1f}s" if age is not None else "?"
+        if i == 0:
+            ok, fail = int(self._num("ipm", 0)), int(self._num("ipmf", 0))
+            if ok:
+                return "READY", "OK"
+            return "WAIT", f"BLIND {IPM_FAIL.get(fail, f'?{fail}')}"
+        if i == 1:
+            st, why = self.status.get("t1", "?"), self.status.get("w1", "-")
+            vmin = self.status.get("vmin", "?")
+            if st == "READY":
+                return st, f"OK odom {odom}"
+            if why == "odom":
+                return st, f"WAIT odom {odom}/{vmin}"
+        else:
+            st, why = self.status.get("st", "?"), self.status.get("why", "-")
+            lat = self._num("lat", -1.0)
+            if lat is not None and lat >= 0.0:
+                if lat > LATCH_REFUSE_SEC:
+                    return "DEAD", f"FCU REFUSES {lat:.0f}s"
+                return "WAIT", f"LATCH {lat:.0f}s"
+            if st == "READY":
+                return st, "OK"
+            if why == "extnav":
+                ripe, rsec = self._num("ripe", -1.0), self._num("rsec", 0.0)
+                rcnt = self.status.get("rcnt", "?")
+                return st, (f"WAIT extnav {odom}/{rcnt} "
+                            f"{max(ripe, 0.0):.0f}/{rsec:.0f}s")
+            if why == "ground":
+                alt, lalt = self._num("alt"), self._num("lalt")
+                a = f"{alt:.1f}" if alt is not None else "?"
+                la = f"{lalt:g}" if lalt is not None else "?"
+                return st, f"WAIT ground {a}<{la}m"
+        if st == "DEAD":
+            return st, ("NO VINS" if why == "no_odom" else f"NO VINS stale {age_s}")
+        if why == "stale":
+            return st, f"WAIT stale {age_s}"
+        return st, f"{st} {why}"
+
+    def _next_tier(self):
+        """Ярус, на который лесенка ПЫТАЕТСЯ подняться (tier+1, пока ярус ниже
+        потолка SC и пилот не в MANUAL); None — лесенка на месте."""
+        if self.status.get("sw") == "1":
+            return None
+        tier, lvl = int(self._num("tier", 0)), int(self._num("lvl", 0))
+        return tier + 1 if tier < lvl and tier + 1 in TIER_NAMES else None
+
+    def _tier_rows(self):
+        """Строки блока лесенки: [(text, color, fill)] по ярусам 0..2. Маркер
+        «>» — ярус, которого лесенка ждёт (следующий над активным при потолке
+        выше): его причина и есть ответ «почему не выше» — раньше она
+        дублировалась в баннере, теперь живёт только здесь."""
+        tier, lvl = int(self._num("tier", 0)), int(self._num("lvl", 0))
+        nxt = self._next_tier()
+        rows = []
+        for i in (0, 1, 2):
+            st, text = self._tier_gate(i)
+            col = (HUD_GREEN if st == "READY" else
+                   HUD_YELLOW if st == "WAIT" else HUD_RED)
+            fill = None
+            if i == tier:
+                fill = col                     # активный ярус — заливка
+            elif i > lvl:
+                col = HUD_WHITE                # выше потолка SC — не выбран
+            mark = ">" if i == nxt else " "
+            rows.append((f"{mark} {i} {TIER_NAMES[i]}  {text}", col, fill))
+        return rows
+
+    def _tier_banner(self):
+        """(text, color) большого баннера: ТОЛЬКО «TIER n NAME» и цвет — всё
+        остальное (причина следующего яруса, латч, MANUAL) живёт в блоке
+        ярусов под строкой режима, здесь бы дублировалось. Цвет:
+          зелёный — ярус = потолок SC, гейт активного яруса открыт;
+          жёлтый  — лесенка ниже потолка (ждёт следующий ярус — см. «>» в
+                    блоке) или активный ярус держится на гистерезисе;
+          красный — следующий ярус мёртв (VINS нет) / FCU не латчит LOITER;
+          белый   — MANUAL (SF не-вверх): лесенка борт не ведёт, ярус — что
+                    держало бы без перехвата.
+        Без лесенки (старый bag, легаси-селектор, миссия) — гейт LOITER под
+        своим именем: LOITER READY / LOITER WAIT (why) / NO VINS (why) —
+        блока ярусов там нет, причина остаётся в баннере."""
+        if "tier" not in self.status:
+            st = self.status.get("st", "")
+            why = self.status.get("why", "-")
+            if st == "READY":
+                return "LOITER READY", HUD_GREEN
+            if st == "WAIT":
+                return f"LOITER WAIT ({why})", HUD_YELLOW
+            return f"NO VINS ({why})", HUD_RED
+        tier = int(self._num("tier", 0))
+        text = f"TIER {tier} {TIER_NAMES.get(tier, '?')}"
+        if self.status.get("sw") == "1":
+            return text, HUD_WHITE
+        nxt = self._next_tier()
+        if nxt is None:
+            st, _ = self._tier_gate(tier)
+            return text, HUD_GREEN if st == "READY" else HUD_YELLOW
+        st, _ = self._tier_gate(nxt)
+        return text, HUD_RED if st == "DEAD" else HUD_YELLOW
+
+    def _draw_mode_block(self, frame, k, y, now):
+        """Режим FCU + armed + ЛЕСЕНКА: шапка «<MODE> ARM · SC n · TIER n» и по
+        строке на ярус (0 DAMPER / 1 VINSHOLD / 2 LOITER) с гейтом и прогрессом
+        каждого. Активный ярус — заливка; закрытый — жёлтым с причиной; мёртвый
+        — красным; выше потолка SC — белым (не выбран); «>» — ярус, которого
+        лесенка ждёт. MANUAL (SF не-вверх, sw=1) — красная шапка: лесенка не
+        ведёт борт. Шапка живёт и без /mission/status (только режим FCU, 5 с),
+        ярусы — только при свежем статусе с tier=. Вернёт next y."""
+        fcu_ok = self.fcu_t is not None and now - self.fcu_t < 5.0
+        ladder = (self.status_t is not None and now - self.status_t < 3.0
+                  and "tier" in self.status)
+        if not (fcu_ok or ladder):
+            return y
+        head = []
+        if fcu_ok:
+            head.append(f"{self.fcu_mode} {'ARM' if self.fcu_armed else 'DISARM'}")
+        manual = ladder and self.status.get("sw") == "1"
+        if ladder:
+            head.append("MANUAL (SF)" if manual else
+                        f"SC {self.status.get('lvl', '?')}  "
+                        f"TIER {self.status.get('tier', '?')}")
+        y = self._line(frame, k, y, "  ".join(head),
+                       HUD_RED if manual else HUD_WHITE)
+        if ladder:
+            for text, col, fill in self._tier_rows():
+                y = self._line(frame, k, y, text, col, scale=0.7, fill=fill)
+        return y
 
     def draw(self, frame, now: float) -> None:
         k = frame.shape[1] / 1280.0
@@ -115,9 +298,14 @@ class HudRenderer:
             r = max(2, round(3 * k))
             for u, v in self.feat_pts:
                 cv2.circle(frame, (round(u), round(v)), r, (0, 255, 0), -1)
-        y = round(34 * k)
-        # 1) баннер гейта — правда лётной ноды, тухнет за 3 с без /mission/status
-        if self.status_t is not None and now - self.status_t < 3.0:
+        # Раскладка (просьбы 2026-08-30): ЛЕВАЯ стопка — режимы (баннеры
+        # статуса борта и яруса, режим FCU + ярусы, DRIFT, scene); ПРАВАЯ
+        # стопка сверху — датчики/каналы (IPM, res/rat, FEAT, ODO, CMD); НИЗ по
+        # центру — высота ALT. Отсутствующий источник места не оставляет.
+        st_ok = self.status_t is not None and now - self.status_t < 3.0
+        # ---------------- ЛЕВАЯ стопка: режимы ----------------
+        y = round(34 * k * FONT_K)
+        if st_ok:
             # 1a) статус борта — ПОСТОЯННЫЙ баннер (машина состояний):
             #   EKF WARMUP (жёлт) → EKF READY - TAKEOFF OK (зел) → после
             #   арма ARMED (зел) → после дизарма снова READY/WARMUP по ekf=.
@@ -140,37 +328,37 @@ class HudRenderer:
                 else:
                     y = self._line(frame, k, y, "EKF WARMUP", HUD_YELLOW,
                                    scale=1.0, fill=HUD_YELLOW)
-            st = self.status.get("st", "")
-            why = self.status.get("why", "-")
-            if st == "READY":
-                y = self._line(frame, k, y, "VINS READY", HUD_GREEN,
-                               scale=1.0, fill=HUD_GREEN)
-            elif st == "WAIT":
-                y = self._line(frame, k, y, f"VINS WAIT ({why})", HUD_YELLOW,
-                               scale=1.0, fill=HUD_YELLOW)
-            else:
-                y = self._line(frame, k, y, f"NO VINS ({why})", HUD_RED,
-                               scale=1.0, fill=HUD_RED)
-            # 1b) диагностика детектора зрелости (мелко, под баннером):
-            # res — residual «поза/скорость» (тихо < 0.15 м/с), rat —
-            # вертикальный ratio VINS/rel_alt (зрел в [0.8,1.25]); «--» =
-            # данных ещё нет (-1 от лётной ноды / старый bag без полей)
-            res, rat = self.status.get("res"), self.status.get("rat")
-            if res is not None:
-                def _f(v):
-                    try:
-                        x = float(v)
-                    except (TypeError, ValueError):
-                        return "--"
-                    return "--" if x < 0 else f"{x:.2f}"
-                y = self._line(frame, k, y, f"res {_f(res)}  rat {_f(rat)}",
-                               HUD_WHITE, scale=0.6)
-            # 1c) высота ТРЕМЯ источниками: baro — высота миссии (alt=,
-            # rel_alt: баро при BS_ALT_SRC=baro), ekf — z local_position
-            # глазами EKF3 (zekf=), perc — высота ПЕРЦЕПЦИИ (palt=), по
-            # которой судит гейт земли IPM. Третья не от жадности: разбор
-            # 183305 упёрся ровно в то, что HUD показывал первые две, а
-            # канал закрывала ТРЕТЬЯ (perc_alt_src=local, смещение −0.27 м).
+            # 1b) баннер ЯРУСА (лесенка SF-мастера): что держит борт сейчас.
+            # Раньше тут был «VINS READY/WAIT» — по st/why, т.е. по гейту
+            # ОДНОГО яруса (LOITER), а назывался именем VINS: разбор ab_noise
+            # 2026-08-30 — VINS шёл 10 Гц, баннер писал «VINS WAIT». Живость
+            # VINS — строка ODO справа; здесь — режимы. Bag/план без лесенки
+            # (нет tier=) — голый гейт LOITER под честным именем.
+            text, col = self._tier_banner()
+            y = self._line(frame, k, y, text, col, scale=1.0, fill=col)
+        # 2) режим FCU + лесенка — СРАЗУ под баннером яруса: баннер говорит
+        # «какой ярус», блок под ним — «почему не выше»; между ними ничего не
+        # вклинивается. Живёт и без статуса (одна строка режима).
+        y = self._draw_mode_block(frame, k, y, now)
+        # 3) поправка NN1: засечки редкие, старше 10 с — показываем возраст
+        if self.drift is not None:
+            d, t = self.drift
+            age = now - t
+            txt = f"DRIFT {d:.2f}m" + (f" ({age:.0f}s)" if age > 10.0 else "")
+            y = self._line(frame, k, y, txt, HUD_WHITE)
+        # 4) семантика сцены NN2 (бывший одинокий баннер)
+        if self.scene:
+            self._line(frame, k, y, f"scene: {self.scene}", HUD_SCENE)
+        # ---------------- НИЗ по центру: высота ----------------
+        if st_ok:
+            # 5) высота ТРЕМЯ источниками — якорь по центру нижнего края (не
+            # в стопках: читается как приборная лента, отдельно от режимов).
+            # baro — высота миссии (alt=, rel_alt: баро при BS_ALT_SRC=baro),
+            # ekf — z local_position глазами EKF3 (zekf=), perc — высота
+            # ПЕРЦЕПЦИИ (palt=), по которой судит гейт земли IPM. Третья не от
+            # жадности: разбор 183305 упёрся ровно в то, что HUD показывал
+            # первые две, а канал закрывала ТРЕТЬЯ (perc_alt_src=local,
+            # смещение −0.27 м).
             # ⚠️ Порог жёлтого ОТНОСИТЕЛЬНЫЙ: max(0.2, 0.2·baro). Прежние
             # фиксированные 0.5 м на низком полёте бесполезны — в 183305
             # расхождение 0.3 м было ровно 100% высоты полёта и не
@@ -195,8 +383,11 @@ class HudRenderer:
                 txt = f"ALT baro {_t(a)}m  ekf {_t(z)}m"
                 if "palt" in self.status:
                     txt += f"  perc {_t(pa)}m"
-                y = self._line(frame, k, y, txt, col)
-            # 1d) КАНАЛ ВИДА СВЕРХУ — на чём стоит демпфер у земли. Мгновенный
+                self._line_bottom_center(frame, k, txt, col)
+        # ---------------- ПРАВАЯ стопка: датчики и каналы ----------------
+        yr = round(34 * k * FONT_K)
+        if st_ok:
+            # 6) КАНАЛ ВИДА СВЕРХУ — на чём стоит демпфер у земли. Мгновенный
             # код (ipmf=) + доля годных за окно 3 с: гейт высоты у земли
             # дребезжит, и по одному кадру «10% годных» неотличимы от нуля.
             # Зелёный — годен; жёлтый — фильтр ipm_vel_tau мостит брак кадра
@@ -212,13 +403,33 @@ class HudRenderer:
                 col = (HUD_GREEN if ok and not fail else
                        HUD_YELLOW if ok else HUD_RED)
                 name = IPM_FAIL.get(fail, f"?{fail}")
-                y = self._line(frame, k, y,
-                               f"IPM {name} {share:3.0f}%", col)
-        # 2) режим FCU + armed
-        if self.fcu_t is not None and now - self.fcu_t < 5.0:
-            arm = "ARM" if self.fcu_armed else "DISARM"
-            y = self._line(frame, k, y, f"{self.fcu_mode} {arm}", HUD_WHITE)
-        # 3) /odometry: Гц (окно 3 с) + возраст; красный ODO -- = VINS без init
+                yr = self._line_right(frame, k, yr,
+                                      f"IPM {name} {share:3.0f}%", col)
+            # 7) диагностика детектора зрелости (мелко): res — residual
+            # «поза/скорость» (тихо < 0.15 м/с), rat — вертикальный ratio
+            # VINS/rel_alt (зрел в [0.8,1.25]); «--» = данных ещё нет (-1 от
+            # лётной ноды / старый bag без полей)
+            res, rat = self.status.get("res"), self.status.get("rat")
+            if res is not None:
+                def _f(v):
+                    try:
+                        x = float(v)
+                    except (TypeError, ValueError):
+                        return "--"
+                    return "--" if x < 0 else f"{x:.2f}"
+                yr = self._line_right(frame, k, yr,
+                                      f"res {_f(res)}  rat {_f(rat)}",
+                                      HUD_WHITE, scale=0.6)
+        # 8) фичи трекера: замолк при живой камере — это ЧП, красним
+        if self.feat_t is not None:
+            if now - self.feat_t < 3.0:
+                yr = self._line_right(frame, k, yr, f"FEAT {self.feat_n}",
+                                      HUD_WHITE)
+            else:
+                yr = self._line_right(frame, k, yr, "FEAT --", HUD_RED)
+        # 9) /odometry: Гц (окно 3 с) + возраст; красный ODO -- = VINS без
+        # init. Единственная строка про ЖИВОСТЬ VINS — собственный замер
+        # стримера, независим от лётной ноды.
         if self.odom_times:
             age = now - self.odom_times[-1]
             win = [t for t in self.odom_times if now - t < 3.0]
@@ -226,26 +437,12 @@ class HudRenderer:
                   if len(win) >= 2 and win[-1] > win[0] else 0.0)
             col = (HUD_GREEN if age < 0.5 else
                    HUD_YELLOW if age < 1.5 else HUD_RED)
-            y = self._line(frame, k, y, f"ODO {hz:4.1f}Hz {age:4.1f}s", col)
+            yr = self._line_right(frame, k, yr,
+                                  f"ODO {hz:4.1f}Hz {age:4.1f}s", col)
         else:
-            y = self._line(frame, k, y, "ODO --", HUD_RED)
-        # 4) фичи трекера: замолк при живой камере — это ЧП, красним
-        if self.feat_t is not None:
-            if now - self.feat_t < 3.0:
-                y = self._line(frame, k, y, f"FEAT {self.feat_n}", HUD_WHITE)
-            else:
-                y = self._line(frame, k, y, "FEAT --", HUD_RED)
-        # 5) PWM-смещения крена/тангажа от стека (/flow_dbg, /flow_dbg2)
+            yr = self._line_right(frame, k, yr, "ODO --", HUD_RED)
+        # 10) PWM-смещения крена/тангажа от стека (/flow_dbg, /flow_dbg2)
         if self.cmd_t is not None and now - self.cmd_t < 2.0:
-            y = self._line(frame, k, y,
-                           f"CMD R{self.cmd_roll:+04.0f} "
-                           f"P{self.cmd_pitch:+04.0f}", HUD_WHITE)
-        # 6) поправка NN1: засечки редкие, старше 10 с — показываем возраст
-        if self.drift is not None:
-            d, t = self.drift
-            age = now - t
-            txt = f"DRIFT {d:.2f}m" + (f" ({age:.0f}s)" if age > 10.0 else "")
-            y = self._line(frame, k, y, txt, HUD_WHITE)
-        # 7) семантика сцены NN2 (бывший одинокий баннер)
-        if self.scene:
-            self._line(frame, k, y, f"scene: {self.scene}", HUD_SCENE)
+            self._line_right(frame, k, yr,
+                             f"CMD R{self.cmd_roll:+04.0f} "
+                             f"P{self.cmd_pitch:+04.0f}", HUD_WHITE)
