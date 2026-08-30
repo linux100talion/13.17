@@ -246,8 +246,11 @@ def main():
                    ff[-1].stack is ffs.stack and ff[-1]._pilot_stabs is ffs._pilot_stabs))
     checks.append(("freefly: газ снижения SoftLand = центр − dz − 0.15/3.16·span = 1381",
                    ff[-1].descent == 1381))
-    checks.append(("freefly: дефолт гейта SA = 2 м / 1 м/с, снижение 0.15 м/с",
-                   (cfg.land_alt_max, cfg.land_v_max, cfg.land_rate) == (2.0, 1.0, 0.15)))
+    checks.append(("freefly: дефолт гейта SA = 5 м / 1 м/с, снижение 0.15 м/с",
+                   (cfg.land_alt_max, cfg.land_v_max, cfg.land_rate) == (5.0, 1.0, 0.15)))
+    checks.append(("freefly: бюджет SoftLand = max(land_budget, 2·alt_max/rate) ≈ 66.7 с",
+                   abs(ff[-1].budget - max(cfg.land_budget, 2 * 5.0 / 0.15)) < 1e-6
+                   and ff[-1].budget > cfg.land_budget))
     cfg_noland = replace(cfg, ff_land=0.0)
     ff0 = compile_mission(cfg_noland, "freefly", "DpRollHold+DpYawHold", live_pilot=True)
     checks.append(("freefly ff_land=0: план = prearm + freefly (сажает пилот), гейта нет",

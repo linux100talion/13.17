@@ -164,7 +164,12 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         if soft_land:
             # кнопка SA → Freefly отдаёт NEXT (FREEFLY_LAND) → сюда; дизарм
             # руками по-прежнему завершает миссию из самого Freefly (FINISH)
-            plan.append(SoftLand("land", stack, cfg.ground_z, cfg.land_budget,
+            # бэкстоп касания: снижение alt_max/rate (5 м / 0.15 = 33 с) с
+            # двукратным запасом (реальный темп ALT_HOLD у мёртвой зоны ниже
+            # формулы), не меньше общего land_budget
+            soft_budget = max(cfg.land_budget,
+                              2.0 * cfg.land_alt_max / max(cfg.land_rate, 1e-3))
+            plan.append(SoftLand("land", stack, cfg.ground_z, soft_budget,
                                  pilot_stabs=pilot_stabs, handover=handover,
                                  rate=cfg.land_rate, alt_dz=cfg.alt_dz,
                                  alt_span=cfg.alt_span,

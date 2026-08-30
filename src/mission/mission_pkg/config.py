@@ -882,9 +882,12 @@ class BootstrapConfig:
     ff_land: float = 1.0             # 1 = кнопка SA сажает (шаг SoftLand в плане
                                      # freefly); 0 = как раньше (сажает пилот).
                                      # BS_FF_LAND / --ff-land
-    land_alt_max: float = 2.0        # гейт кнопки: rel_alt ≤ этого, м (выше —
+    land_alt_max: float = 5.0        # гейт кнопки: rel_alt ≤ этого, м (выше —
                                      # игнор с предупреждением; LAND сам сядет с
                                      # любой высоты, но кнопка задумана «у земли»).
+                                     # Бюджет шага SoftLand растёт с ним: max(
+                                     # land_budget, 2·alt_max/land_rate) — 5 м на
+                                     # 0.15 м/с = 33 с номинала, 45 с бэкстопа мало.
                                      # BS_LAND_ALT_MAX / --land-alt-max
     land_v_max: float = 1.0          # гейт кнопки: |v| ≤ этого, м/с (источник по
                                      # доступности: IPM → VINS → gt; нет ни одного
