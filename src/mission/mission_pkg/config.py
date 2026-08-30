@@ -865,6 +865,43 @@ class BootstrapConfig:
                                      # (перцепция на земле умирает), а перехват — SF
                                      # не-вверх (всегда ALT_HOLD).
                                      # BS_LOITER_ALT / --loiter-alt
+    # --- МЯГКАЯ ПОСАДКА ПО КНОПКЕ (SA на TX12) в freefly ---
+    # Идея: «посадить сразу» одной кнопкой, в т.ч. ДО инициализации VINS. Мягкость
+    # — это СКОРОСТЬ касания (0.15 м/с), а не доля газа ховера: 70-80 % ховера в
+    # разомкнутом контуре дают 2-2.4 м/с об землю с 1 м (a=0.2-0.3 g), а 98-99 %
+    # не выставить точнее ошибки самой оценки MOT_THST_HOVER. Замкнутый контур
+    # vz уже есть у FCU (газ = MOT_THST_HOVER + PID по vz) — им и снижаемся.
+    # Две ветки SoftLand по тому, ЧТО держит горизонт (стики в LAND трактуются
+    # по-разному: position-LAND — уставка скорости, nogps-LAND — наклон, и в
+    # LV=2 FCU выбирает position-ветку даже на нулевой позе моста до VINS):
+    #   pos    — FCU уже в LOITER (позиция на EKF-от-VINS доказана латчем) →
+    #            set_mode LAND, стек пуст, спуск LAND_SPEED (sitl-extra.parm);
+    #   damper/vinshold — иначе: остаёмся в ALT_HOLD (стик = наклон — семантика
+    #            демпфера/VinsHold сохранена), газ ниже зоны на land_rate,
+    #            касание → газ в пол → дизарм сервисом (force через 5 с).
+    ff_land: float = 1.0             # 1 = кнопка SA сажает (шаг SoftLand в плане
+                                     # freefly); 0 = как раньше (сажает пилот).
+                                     # BS_FF_LAND / --ff-land
+    land_alt_max: float = 2.0        # гейт кнопки: rel_alt ≤ этого, м (выше —
+                                     # игнор с предупреждением; LAND сам сядет с
+                                     # любой высоты, но кнопка задумана «у земли»).
+                                     # BS_LAND_ALT_MAX / --land-alt-max
+    land_v_max: float = 1.0          # гейт кнопки: |v| ≤ этого, м/с (источник по
+                                     # доступности: IPM → VINS → gt; нет ни одного
+                                     # → пускаем с предупреждением).
+                                     # BS_LAND_V_MAX / --land-v-max
+    land_rate: float = 0.15          # скорость снижения ветки ALT_HOLD, м/с (PWM
+                                     # газа считается по alt_dz/alt_span/
+                                     # alt_rate_full — той же формулой, что AltHold).
+                                     # Ветка LAND — LAND_SPEED в sitl-extra.parm (15).
+                                     # BS_LAND_RATE / --land-rate
+    land_joy: str = 'b0'             # где кнопка в /joy: 'b<i>' — buttons[i],
+                                     # 'a<i>' — axes[i] > 0.5; '' — нет (только
+                                     # /mission/land). Дефолт b0 = первая кнопка:
+                                     # TX12 отдаёт 7 осей + 24 кнопки, SA в
+                                     # миксере пока ни к чему не привязан — привязать
+                                     # к CH8 и сверить фронт в ленте joy_timeline.
+                                     # BS_LAND_JOY / --land-joy
     loiter_gate_budget: float = 60.0 # токен loiter<t>: сколько ждать готовности
                                      # extnav+VINS (sim-сек) в стабилизированном hover;
                                      # вышел — шаг пропускается (LOITER_SKIP, миссия

@@ -147,6 +147,21 @@ class DroneState:
     # завершает БЕССРОЧНЫЙ pilot-сегмент (токен `pilot` без числа) → миссия идёт дальше
     # (land). Узел выставляет на ОДИН тик; вне живого пилот-сегмента игнорируется.
     pilot_done: bool = False
+    # Кнопка ПОСАДКИ пульта (SA на TX12; источник — config.land_joy / --land-joy:
+    # кнопка или ось /joy, CH8 у RosPilot; плюс one-shot /mission/land, make
+    # sa-land). УРОВЕНЬ, не фронт: фронт «нажали» ловит сам шаг Freefly и пускает
+    # мягкую посадку (SoftLand) через гейт «низко и почти стоим»
+    # (config.land_alt_max / land_v_max). Вне freefly игнорируется.
+    pilot_land: bool = False
+
+    # --- Детектор посадки FCU (/mavros/extended_state ← EXTENDED_SYS_STATE) ---
+    # MAV_LANDED_STATE: 1 ON_GROUND, 2 IN_AIR, 3 TAKEOFF, 4 LANDING; -1 = данных
+    # нет (стрим EXTENDED_STATUS не запрошен / старый bag). Это тот самый
+    # land_complete, которым FCU гейтит дизарм — детект касания у SoftLand
+    # берёт его В ДОПОЛНЕНИЕ к баро/gt: после касания баро застревает на
+    # 1.4-1.5 м (урок 2026-08-23), а gt на борту нет.
+    fcu_landed: int = -1
+    fcu_landed_sim: float = -1e9          # sim-время последнего extended_state
 
     # --- время ---
     now_sim: float = 0.0                   # проставляет адаптер из Clock (sim-время по /clock)

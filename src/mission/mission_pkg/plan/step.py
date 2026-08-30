@@ -12,7 +12,7 @@ import math
 
 from control_pkg.application.hud import LadderState
 from control_pkg.domain.control.throttle_latch import ThrottleLatch
-from control_pkg.domain.rc import RC_CENTER, RcCommand
+from control_pkg.domain.rc import RC_CENTER, RC_MIN_THR, RcCommand
 
 # статусы результата шага
 RUN, NEXT, GOTO, FINISH = "run", "next", "goto", "finish"
@@ -50,6 +50,20 @@ def _overlay_stack(step, ctx, s, rc) -> None:
         ctx.log.info(f"    {step.name}: стек активирован")
     ctrl = step.stack.update(s)
     rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
+
+
+def ground_speed(s, fresh_sec):
+    """|v| борта над землёй (м/с, источник) для гейта кнопки посадки — по
+    ДОСТУПНОСТИ: канал вида сверху (ipm_ok — метрический, живёт без VINS) →
+    свежая одометрия VINS → истина Gazebo (сим-оракул). Ни одного → (None, None):
+    на борту до VINS и с ослепшим IPM скорость судить нечем."""
+    if s.ipm_ok:
+        return math.hypot(s.ipm_vfwd, s.ipm_vlat), "ipm"
+    if s.vins_valid and (s.now_sim - s.vins_last_sim) < fresh_sec:
+        return math.hypot(s.vins_vx, s.vins_vy), "vins"
+    if s.gt_valid:
+        return math.hypot(s.gt_vx, s.gt_vy), "gt"
+    return None, None
 
 
 class Step:
@@ -446,12 +460,17 @@ class Freefly(Step):
 
     def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
                  handover=None, loiter_center=False, vins_fresh=2.0,
-                 sf_master=False, loiter_alt=1.5):
+                 sf_master=False, loiter_alt=1.5, land_gate=None):
         self.name = name
         self.stack = stack
         self.keep = keep
         self._pilot_stabs = pilot_stabs
         self.loiter_alt = loiter_alt   # гейт «в воздухе» (см. config.loiter_alt)
+        # Кнопка посадки (SA): (alt_max, v_max) — фронт «нажали» при rel_alt ≤
+        # alt_max и |v| ≤ v_max завершает freefly → следующий шаг плана
+        # (SoftLand). None — кнопки нет (ff_land=0), сажает пилот руками.
+        self.land_gate = land_gate
+        self._land_prev = False
         # handover Flow→Vins: срабатывает ТОЛЬКО в позиции селектора «наш стек»
         # (−1 или тумблер не трогали) — «вверх» = лучший доступный стек (демпфер
         # до готовности VINS, VinsHold после); центр/MANUAL свапом не трогаем.
@@ -490,6 +509,42 @@ class Freefly(Step):
         self._disarm_since = None
         self._gesture_last = 0.0
         self._disarm_warned = False
+        # зажатая на входе кнопка — не фронт (getattr: дамми-снапшоты тестов без поля)
+        self._land_prev = bool(getattr(s, 'pilot_land', False))
+
+    def _land_press(self, ctx, s) -> bool:
+        """Фронт кнопки посадки через гейт «низко и почти стоим». Ловим ФРОНТ
+        (уровень → нажали), чтобы зажатая кнопка не долбила гейт каждый тик;
+        отказ — одно предупреждение на нажатие с причиной. MANUAL (SF не вверх)
+        — отказ: Арбитр отдаёт пилоту все четыре оси сырыми, наш газ снижения
+        до FCU не дошёл бы. Скорость судим по ground_speed; источника нет —
+        пускаем с предупреждением: кнопка — осознанное действие пилота, а с
+        ≤ alt_max посадка безопасна и без оценки скорости."""
+        now = bool(getattr(s, 'pilot_land', False))
+        pressed = now and not self._land_prev
+        self._land_prev = now
+        if not pressed:
+            return False
+        alt_max, v_max = self.land_gate
+        if s.pilot_switch == 1:
+            ctx.log.warn("    SA: MANUAL (SF не вверх) — посадка кнопкой только "
+                         "под стеком, верни SF вверх")
+            return False
+        alt = s.rel_alt
+        if alt is None or alt > alt_max:
+            ctx.log.warn(f"    SA: гейт закрыт — rel_alt "
+                         f"{'--' if alt is None else f'{alt:.2f}'} > {alt_max:g} м, "
+                         f"снизься")
+            return False
+        v, src = ground_speed(s, self.vins_fresh)
+        if v is not None and v > v_max:
+            ctx.log.warn(f"    SA: гейт закрыт — |v| {v:.2f} > {v_max:g} м/с ({src}), "
+                         f"останови борт")
+            return False
+        ctx.log.info("    SA: ПОСАДКА — rel_alt {:.2f} м, |v| {} → SoftLand".format(
+            alt, f"{v:.2f} м/с ({src})" if v is not None else
+            "неизвестна (нет IPM/VINS/gt) — пускаю"))
+        return True
 
     def _loiter_selected(self) -> bool:
         """Позиция селектора «хочу штатный LOITER»: легаси-центр или потолок 2."""
@@ -674,6 +729,9 @@ class Freefly(Step):
         if not s.armed:
             ctx.log.info("    пилот дизармил — freefly завершён")
             return _finish(rc, "FREEFLY_DONE")
+        # кнопка посадки (SA) — фронт через гейт → следующий шаг (SoftLand)
+        if self.land_gate is not None and self._land_press(ctx, s):
+            return _next(rc, "FREEFLY_LAND")
         # страховка дизарма (см. docstring): жест на земле дольше порога →
         # дизармим за FCU сами (сервис → force). Пороги PWM — как жесты
         # joy_timeline (GESTURE_LVL 0.85 → центр−340). «На земле» — баро ИЛИ
@@ -749,6 +807,176 @@ class Land(Step):
         if ctx.elapsed() > self.budget:
             ctx.log.warn(f"⚠️ касание не подтверждено (rel_alt={s.rel_alt}) — выходим")
             return _finish(rc)
+        return _run(rc)
+
+
+class SoftLand(Step):
+    """МЯГКАЯ ПОСАДКА ПО КНОПКЕ (SA) — эпилог freefly после Freefly.FREEFLY_LAND.
+
+    Мягкость = скорость касания (≈0.15 м/с), замкнутым контуром vz самого FCU
+    (газ = MOT_THST_HOVER + PID по vz), а не долей газа ховера: 70-80 % ховера в
+    разомкнутом контуре — это 2-2.4 м/с об землю с 1 м (см. config.ff_land).
+
+    ДВЕ ВЕТКИ по тому, кто держит горизонт (в LAND ArduCopter стики трактуются
+    по-разному: position-LAND — уставка СКОРОСТИ до WPNAV_ACCEL/2, nogps-LAND —
+    НАКЛОН; ветку FCU выбирает сам по position_ok() на входе, наружу не отдаёт,
+    и в LV=2 берёт position-ветку даже на нулевой позе моста ДО VINS):
+      pos    — FCU УЖЕ в LOITER (позиция на EKF-от-VINS доказана латчем — тот
+               же критерий, что ярус 2 лесенки): set_mode LAND, стек ПУСТ
+               (стики центр; демпфер в этой ветке командовал бы скорость, а его
+               трим ветра ~44 PWM ≈ 0.14 м/с стал бы постоянным «ехать»),
+               спуск LAND_SPEED (sitl-extra.parm 15 см/с), FCU дизармит сам.
+               Не залатчил LAND за 3 с / вышел из LAND / VINS протух > 3×fresh
+               → ветка alt (семантика стиков в LAND тогда неизвестна — уходим
+               туда, где известна). Только вниз: обратно в pos не возвращаемся.
+      alt    — иначе (ярусы 0/1, «сесть сразу, до VINS»): остаёмся в ALT_HOLD,
+               стик = наклон — та же семантика, в которой демпфер/VinsHold
+               летали; ярус как у лесенки (VinsHold по готовности, вниз при
+               протухании); газ ниже мёртвой зоны на land_rate (PWM по формуле
+               AltHold: центр − dz − rate/rate_full·span → 1381 при 0.15 м/с);
+               опора пересеивается на входе (держим от точки нажатия).
+    КАСАНИЕ (обе ветки) = баро ≤ ground_z ИЛИ gt ≤ ground_z (сим-оракул) ИЛИ
+    детектор посадки FCU (extended_state ON_GROUND, свежий): баро после касания
+    застревает на 1.4-1.5 м (урок 2026-08-23), на борту gt нет. После касания —
+    газ В ПОЛ (детектору посадки FCU нужен низкий газ), стики центр; ветка alt
+    дизармит сервисом через 1 с, force — через 5 с (штатный отвергнут → сломан
+    детектор посадки, на земле с газом в полу это безопасно — та же логика, что
+    страховка дизарма Freefly); ветка pos ждёт самодизарм LAND, страховка
+    через 8/12 с. Дизарм → LAND_DONE. Не сели за budget → LAND_TIMEOUT (error,
+    борт в воздухе под ALT_HOLD — сажает пилот); касание без дизарма 30 с →
+    LAND_STUCK (борт заармлен — громкий error, запись обязана остановиться).
+    land_state() — ключ LAND_NAMES для /mission/status (баннер LANDING в HUD)."""
+
+    TOUCH_FRESH_SEC = 3.0        # свежесть extended_state для детекта FCU
+
+    def __init__(self, name, stack, ground_z, budget, pilot_stabs=None, handover=None,
+                 rate=0.15, alt_dz=100.0, alt_span=400.0, alt_rate_full=3.16,
+                 fresh_sec=2.0, keep="ALT_HOLD", throttle_hold=RC_CENTER):
+        self.name = name
+        self.stack = stack
+        self.ground_z = ground_z
+        self.budget = budget
+        self._pilot_stabs = pilot_stabs
+        self.handover = handover
+        self.fresh_sec = fresh_sec
+        self.keep = keep
+        self.throttle_hold = throttle_hold
+        # газ снижения ветки alt: та же карта «PWM → vz», что у AltHold
+        self.descent = int(round(RC_CENTER - (alt_dz + rate / alt_rate_full * alt_span)))
+        self.enter(None, None)
+
+    def enter(self, ctx, s) -> None:
+        self._branch = None          # 'pos' | 'alt'
+        self._tier = 0               # ярус ветки alt: 0 демпфер / 1 VinsHold
+        self._t_pos = None           # sim-время отправки LAND
+        self._pos_latched = False
+        self._touch_t = None         # sim-время касания
+        self._disarm_warned = False
+
+    def land_state(self):
+        if self._touch_t is not None:
+            return "touch"
+        if self._branch == "pos":
+            return "pos"
+        if self._branch == "alt":
+            return "vinshold" if self._tier == 1 else "damper"
+        return None
+
+    def _touched(self, s) -> bool:
+        return ((s.rel_alt is not None and s.rel_alt <= self.ground_z)
+                or (s.gt_valid and s.gt_z <= self.ground_z)
+                or (s.fcu_landed == 1
+                    and s.now_sim - s.fcu_landed_sim < self.TOUCH_FRESH_SEC))
+
+    def _vins_stale(self, s) -> bool:
+        return s.now_sim - s.vins_last_sim > 3.0 * self.fresh_sec
+
+    def _enter_alt(self, ctx, s, why) -> None:
+        """Ветка alt: ALT_HOLD + наш стек по готовности VINS, опора от текущей точки."""
+        self._branch = "alt"
+        if self._pilot_stabs is not None:
+            ho = self.handover
+            self._tier = 1 if (ho is not None and ho.vins_ready(s)) else 0
+            stabs = (ho.vins_stabs(self._pilot_stabs, s) if self._tier == 1
+                     else self._pilot_stabs)
+            self.stack.switch_stabilization(stabs)
+        ctx.reset_keyframe()
+        self.stack.enter(s)
+        ctx.log.info("    {}: {} — снижение в ALT_HOLD под {} (газ {}), стик = наклон"
+                     .format(self.name, why, "VINSHOLD" if self._tier == 1 else "ДЕМПФЕРОМ",
+                             self.descent))
+
+    def _decide(self, ctx, s) -> None:
+        if s.mode == "LOITER":
+            self._branch = "pos"
+            self._t_pos = s.now_sim
+            self.stack.switch_stabilization([])
+            ctx.log.info(f"    {self.name}: FCU держит позицию (LOITER) → LAND, "
+                         f"стек пуст (в position-LAND стик = уставка скорости)")
+        else:
+            self._enter_alt(ctx, s, f"FCU без доказанной позиции (mode={s.mode})")
+
+    def tick(self, ctx, s) -> StepResult:
+        if self._branch is None:
+            self._decide(ctx, s)
+        rc = RcCommand(throttle=self.throttle_hold)
+        if not s.armed:
+            ctx.log.info(f"    {self.name}: дизарм — посадка завершена "
+                         f"(rel_alt={s.rel_alt}, ветка {self._branch})")
+            return _finish(RcCommand(throttle=RC_MIN_THR), "LAND_DONE")
+        if self._touch_t is None and self._touched(s):
+            self._touch_t = s.now_sim
+            ctx.log.info(f"    {self.name}: касание (rel_alt={s.rel_alt}, "
+                         f"fcu_landed={s.fcu_landed}) — газ в пол, ждём дизарм")
+        if self._branch == "pos":
+            ctx.try_cmd(lambda: ctx.mode.set_mode("LAND"))
+            if s.mode == "LAND":
+                self._pos_latched = True
+            elif self._pos_latched:
+                ctx.log.warn(f"    {self.name}: FCU вышел из LAND (mode={s.mode})")
+                self._enter_alt(ctx, s, "FCU вышел из LAND")
+            elif s.now_sim - self._t_pos > 3.0:
+                ctx.log.warn(f"    {self.name}: LAND не залатчился (mode={s.mode})")
+                self._enter_alt(ctx, s, "LAND не залатчился")
+            # протухший VINS — независимо от латча: FCU мог тихо уйти в nogps
+            # (EKF-failsafe режим не меняет), семантика стиков там другая
+            if (self._branch == "pos" and self._touch_t is None
+                    and self._vins_stale(s)):
+                ctx.log.warn(f"    {self.name}: VINS протух в LAND — семантика стиков "
+                             f"FCU неизвестна (nogps?)")
+                self._enter_alt(ctx, s, "VINS протух")
+        if self._branch == "alt":
+            ctx.keep_mode(s, self.keep)
+            if self._tier == 1 and self._vins_stale(s):
+                self._tier = 0
+                if self._pilot_stabs is not None:
+                    self.stack.switch_stabilization(self._pilot_stabs)
+                    self.stack.enter(s)
+                ctx.log.warn(f"    {self.name}: VINS протух — ярус ДЕМПФЕР")
+            if self._touch_t is None:
+                rc = RcCommand(throttle=self.descent)
+                ctrl = self.stack.update(s)
+                rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
+        if self._touch_t is not None:
+            rc = RcCommand(throttle=RC_MIN_THR)       # стики центр, газ в пол
+            held = s.now_sim - self._touch_t
+            # ветка alt дизармим сами (1 с / force 5 с); pos — LAND сам, страховка 8/12
+            t_arm, t_force = (1.0, 5.0) if self._branch == "alt" else (8.0, 12.0)
+            if held > 30.0:
+                ctx.log.error(f"    {self.name}: дизарм не прошёл даже force — "
+                              f"завершаю, БОРТ ОСТАЛСЯ ЗААРМЛЕННЫМ")
+                return _finish(rc, "LAND_STUCK")
+            if held > t_force and hasattr(ctx.mode, "force_disarm"):
+                if not self._disarm_warned:
+                    self._disarm_warned = True
+                    ctx.log.warn(f"    {self.name}: штатный дизарм отвергнут — force")
+                ctx.try_cmd(ctx.mode.force_disarm)
+            elif held > t_arm:
+                ctx.try_cmd(lambda: ctx.mode.arm(False))
+        elif ctx.elapsed() > self.budget:
+            ctx.log.error(f"    {self.name}: касание не подтверждено за {self.budget:g} с "
+                          f"(rel_alt={s.rel_alt}) — завершаю, борт в воздухе, сажает пилот")
+            return _finish(rc, "LAND_TIMEOUT")
         return _run(rc)
 
 

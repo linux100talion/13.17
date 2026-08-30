@@ -47,6 +47,17 @@
 #       лесенки зрелости (вверх демпфер / центр +VinsHold / вниз +LOITER).
 #       ⚠️ Требует SF → CH7 в миксере EdgeTX; НЕ включать под старые реплеи
 #       (их сценарии без "sf" полетят целиком на сырых стиках).
+#   Кнопка SA = МЯГКАЯ ПОСАДКА (BS_FF_LAND=1 — дефолт ноды): при rel_alt ≤ 2 м
+#       (BS_LAND_ALT_MAX) и |v| ≤ 1 м/с (BS_LAND_V_MAX) freefly уходит в шаг
+#       SoftLand: борт в LOITER → штатный LAND на EKF-от-VINS (стек пуст,
+#       LAND_SPEED 15 см/с); иначе (в т.ч. ДО инициализации VINS) — снижение в
+#       ALT_HOLD под нашим демпфером/VinsHold на BS_LAND_RATE 0.15 м/с, касание →
+#       газ в пол → дизарм сервисом. Где кнопка в /joy — BS_LAND_JOY ('b0' =
+#       buttons[0]; на пульте проекта SA измерена как b1 → docker/sim/.env
+#       BS_LAND_JOY=b1; CH8 НЕ использовать — делит ось axes[6] с CH7/SF,
+#       квирк HID TX12; где кнопка — src/lab/joystick/js_probe.py на хосте,
+#       в ленте joy_timeline — «JOY: кнопка b<i>»). С хоста без пульта:
+#       `make sa-land`. Выкл: BS_FF_LAND=0.
 #   SPAWN_FROM=docker/sim/output/joystick/lv1_joy_20260824_140447 \
 #       bash src/lab/freefly_lv.sh   # стартовать с места посадки того прогона
 # Любой параметр (BS_*, WIND_SPD, RES, GDRIVE_UP, MP4, TOPICS_EXTRA...)

@@ -66,6 +66,12 @@ TIER_NAMES = {0: "DAMPER", 1: "VINSHOLD", 2: "LOITER"}
 EKF_FRESH_SEC = 2.0
 # Центр стика (1500): стики пилота в статусе — смещение от него, а не сырой PWM.
 RC_CENTER = 1500
+# Состояния мягкой посадки (land= в статусе; SoftLand.land_state) — общие для
+# лога ноды, HUD (ASCII) и ленты joy_timeline: pos — режим LAND FCU, позицию
+# держит EKF (стек пуст); damper/vinshold — снижение в ALT_HOLD под нашим
+# стеком (стик = наклон); touch — касание, ждём дизарм.
+LAND_NAMES = {'pos': 'FCU POS', 'damper': 'DAMPER', 'vinshold': 'VINSHOLD',
+              'touch': 'TOUCHDOWN'}
 
 
 def loiter_gate(s, fresh_sec: float, loiter_alt: float):
@@ -105,7 +111,8 @@ def vinshold_gate(s, fresh_sec: float, vins_min: int):
 
 
 def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
-               vins_min: int = 0, ripe_sec: float = 0.0, ripe_min: int = 0) -> str:
+               vins_min: int = 0, ripe_sec: float = 0.0, ripe_min: int = 0,
+               land=None) -> str:
     """Строка "k=v k=v ..." для /mission/status по снапшоту DroneState.
 
     loiter_alt — гейт «в воздухе» (м): обязан совпадать с cfg.loiter_alt лётной
@@ -113,7 +120,10 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
     ladder — LadderState лесенки SF-мастера (None = полей лесенки нет);
     vins_min — порог яруса 1 (VinsHandover.min_count); ripe_sec/ripe_min —
     пороги зрелости очереди extnav (bootstrap: ripe_sec/ripe_min) — HUD рисует
-    по ним ПРОГРЕСС ожидания «extnav», а не голое слово."""
+    по ним ПРОГРЕСС ожидания «extnav», а не голое слово.
+    land — состояние мягкой посадки (SoftLand.land_state: ключ LAND_NAMES);
+    None = шаг посадки не активен, поля land= в строке нет. Кнопка посадки
+    пилота (sa=) — всегда: её фронт в ленте joy_timeline объясняет переход."""
     ekf = int(s.now_sim - s.ekf_pos_last_sim < EKF_FRESH_SEC)
     age = s.now_sim - s.vins_last_sim
     st, why = loiter_gate(s, fresh_sec, loiter_alt)
@@ -149,7 +159,8 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
             f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f} "
             f"rcr={s.pilot_roll - RC_CENTER} rcp={s.pilot_pitch - RC_CENTER} "
             f"rct={s.pilot_throttle - RC_CENTER} rcy={s.pilot_yaw - RC_CENTER} "
-            f"sw={s.pilot_switch}"
+            f"sw={s.pilot_switch} sa={int(bool(getattr(s, 'pilot_land', False)))}"
+            + (f" land={land}" if land else "")
             + _gate_fields(s, loiter_alt, ripe_sec, ripe_min)
             + _ladder_fields(s, ladder, fresh_sec, vins_min)
             + _frame_fields(s))

@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from control_pkg.application.hud import (hud_status, LadderState,    # noqa: E402
-                                         loiter_gate, vinshold_gate)
+                                         LAND_NAMES, loiter_gate, vinshold_gate)
 from control_pkg.domain.state import DroneState                      # noqa: E402
 
 FRESH = 2.0
@@ -199,6 +199,23 @@ check("MANUAL: sw=1 при живой лесенке, поля lvl/tier на м�
 check("st по-прежнему первое слово, лесенка — хвостом до рамы",
       hud_status(DroneState(now_sim=1.0, st_frame=1), FRESH,
                  ladder=LadderState(0, 0)).split(' sf=')[0].endswith('vmin=0'))
+
+# 11. Кнопка посадки SA и мягкая посадка (SoftLand.land_state → land=):
+# sa= всегда (фронт кнопки в ленте joy_timeline объясняет переход), land= —
+# только при живом шаге посадки (None → поля нет: «чего нет в источниках…»)
+d = kv(hud_status(DroneState(now_sim=5.0), FRESH))
+check("sa=0 по умолчанию, land= отсутствует", d['sa'] == '0' and 'land' not in d)
+d = kv(hud_status(DroneState(now_sim=5.0, pilot_land=True), FRESH, land='damper'))
+check("кнопка нажата + SoftLand в ALT_HOLD под демпфером: sa=1 land=damper",
+      d['sa'] == '1' and d['land'] == 'damper')
+for name in ('pos', 'vinshold', 'touch'):
+    check(f"land={name} — ключ LAND_NAMES (общий словарь HUD/ленты)",
+          kv(hud_status(DroneState(now_sim=5.0), FRESH, land=name))['land'] == name
+          and name in LAND_NAMES)
+check("land= стоит ДО полей гейта (lalt) — парсер k=v порядок не читает, лог ноды "
+      "режет по префиксу", hud_status(DroneState(now_sim=5.0), FRESH, land='pos')
+      .index(' land=pos') < hud_status(DroneState(now_sim=5.0), FRESH, land='pos')
+      .index(' lalt='))
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")

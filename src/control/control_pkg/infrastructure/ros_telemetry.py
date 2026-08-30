@@ -46,6 +46,21 @@ class RosTelemetry:
         # (гейт WaitEkfPos перед армом, урок LV4). QoS sensor: совместим с любым.
         node.create_subscription(PoseStamped, '/mavros/local_position/pose',
                                  self._on_lpos, qos_profile_sensor_data)
+        # Детектор посадки FCU (EXTENDED_SYS_STATE.landed_state) — для детекта
+        # касания SoftLand в дополнение к баро/gt. Нужен стрим EXTENDED_STATUS
+        # (nav_up.sh, stream_id 2); без него топик молчит → fcu_landed=-1, детект
+        # живёт на баро/gt как раньше. Ленивый импорт: как State/RCIn, но
+        # отдельным try — старым образам без сообщения не мешаем.
+        try:
+            from mavros_msgs.msg import ExtendedState
+            node.create_subscription(ExtendedState, '/mavros/extended_state',
+                                     self._on_ext, 10)
+        except ImportError:
+            pass
+
+    def _on_ext(self, m):
+        self._s.fcu_landed = int(m.landed_state)
+        self._s.fcu_landed_sim = self._clock.now_sim()
 
     def _on_state(self, m):
         self._s.mode = m.mode

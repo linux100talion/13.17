@@ -161,6 +161,9 @@ if ! pgrep -f "mavros_node" >/dev/null; then
         #   1  RAW_SENSORS → RAW_IMU → /mavros/imu/data_raw (вход VINS, FFT гиро)
         #   6  POSITION    → LOCAL_POSITION_NED + GLOBAL_POSITION_INT → pose + rel_alt
         #   10 EXTRA1      → ATTITUDE → /mavros/imu/data (ориентация → угол, attitude.py)
+        #   2  EXTENDED_STATUS (2 Гц) → EXTENDED_SYS_STATE → /mavros/extended_state:
+        #      landed_state (детектор посадки FCU) — детект касания SoftLand
+        #      (кнопка SA) в дополнение к баро/gt. Копейки трафика.
         # ⚠️ IMU-телеметрия в этом SITL капается ~24-34 sim-Гц (200 не отдаёт; потолок
         # SCHED_LOOP=100 телеметрией тоже недостижим) — лимит SITL, не конфига.
         for _ in $(seq 1 20); do
@@ -170,6 +173,8 @@ if ! pgrep -f "mavros_node" >/dev/null; then
                 '{stream_id: 6, message_rate: 25, on_off: true}' >> "$LOG/mavros.log" 2>&1
             ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
                 '{stream_id: 10, message_rate: 50, on_off: true}' >> "$LOG/mavros.log" 2>&1
+            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
+                '{stream_id: 2, message_rate: 2, on_off: true}' >> "$LOG/mavros.log" 2>&1
             # Подтверждаем по SIM-частоте data_raw (на низком RTF wall-rate мизер).
             hz=$(python3 /scripts/imu_rate.py 40 15 2>/dev/null | tail -1)
             echo "  stream_rate: /mavros/imu/data_raw ≈ ${hz:-?} sim-Гц (EXTRA1 запрошен)" >> "$LOG/mavros.log"

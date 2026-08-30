@@ -414,6 +414,12 @@ LV=2 bash src/lab/freefly_lv.sh     # GPS ОТСУТСТВУЕТ С БУТА: ee
                                     #   gps_denied), с init VINS топик у ray_tracer;
                                     #   LOITER-на-VINS без секунды GPS
 WIND_SPD=5 bash src/lab/freefly_lv.sh   # любой env поверх дефолтов
+BS_LAND_JOY=b1 bash src/lab/freefly_lv.sh   # кнопка SA (мягкая посадка) — на buttons[1]
+                                    #   (так измерено на пульте проекта 2026-08-30 →
+                                    #   уже в docker/sim/.env; дефолт ноды b0; CH8
+                                    #   делит ось с SF — не годится; где кнопка —
+                                    #   src/lab/joystick/js_probe.py на хосте);
+                                    #   BS_FF_LAND=0 — выкл (шапка скрипта)
 BS_SF_MASTER=1 bash src/lab/freefly_lv.sh   # схема «SF-мастер»: SF (CH7)
                                     #   не-вверх = СЫРЫЕ СТИКИ при любом SC;
                                     #   SF вверх → SC (CH6) = потолок лесенки

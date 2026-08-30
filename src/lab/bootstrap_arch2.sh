@@ -266,6 +266,13 @@ ARGS=()
 # штатный LOITER-на-VINS: freefly-центр CH6 (BS_FF_LOITER=1) и бюджет гейта loiter<t>
 [ -n "${BS_FF_LOITER:-}" ]       && ARGS+=(--ff-loiter "$BS_FF_LOITER")
 [ -n "${BS_LOITER_ALT:-}" ]      && ARGS+=(--loiter-alt "$BS_LOITER_ALT")
+# мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
+# скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
+[ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")
+[ -n "${BS_LAND_ALT_MAX:-}" ]    && ARGS+=(--land-alt-max "$BS_LAND_ALT_MAX")
+[ -n "${BS_LAND_V_MAX:-}" ]      && ARGS+=(--land-v-max "$BS_LAND_V_MAX")
+[ -n "${BS_LAND_RATE:-}" ]       && ARGS+=(--land-rate "$BS_LAND_RATE")
+[ -n "${BS_LAND_JOY+x}" ]        && ARGS+=(--land-joy "$BS_LAND_JOY")
 [ -n "${BS_LOITER_GATE_BUDGET:-}" ] && ARGS+=(--loiter-gate-budget "$BS_LOITER_GATE_BUDGET")
 [ -n "${BS_EKF_POS_BUDGET:-}" ]  && ARGS+=(--ekf-pos-budget "$BS_EKF_POS_BUDGET")
 [ -n "${BS_ALT:-}" ]              && ARGS+=(--alt "$BS_ALT")

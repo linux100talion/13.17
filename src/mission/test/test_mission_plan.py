@@ -13,6 +13,7 @@
 """
 import os
 import sys
+from dataclasses import replace
 
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_here, "..", "..", "..", "src", "control"))
@@ -233,9 +234,25 @@ def main():
     # --- миссия freefly: весь цикл руками пилота, миссия-одиночка ---
     ff = compile_mission(cfg, "freefly", "DpRollHold+DpYawHold", live_pilot=True)
     ff_names = [st.name for st in ff]
-    checks.append(("freefly: план = prearm + freefly, БЕЗ Arm и Land",
-                   ff_names == ["prearm", "freefly"]))
-    ffs = ff[-1]
+    # ff_land (дефолт ВКЛ): эпилог SoftLand — кнопка SA → Freefly NEXT → 'land';
+    # Arm'а нет (руддер-арм руками), дизарм руками завершает из самого Freefly
+    checks.append(("freefly: план = prearm + freefly + land (SoftLand), БЕЗ Arm",
+                   ff_names == ["prearm", "freefly", "land"]
+                   and type(ff[-1]).__name__ == "SoftLand"))
+    ffs = ff[1]
+    checks.append(("freefly: гейт кнопки SA = (land_alt_max, land_v_max)",
+                   ffs.land_gate == (cfg.land_alt_max, cfg.land_v_max)))
+    checks.append(("freefly: SoftLand делит стек и стабы яруса 0 с Freefly",
+                   ff[-1].stack is ffs.stack and ff[-1]._pilot_stabs is ffs._pilot_stabs))
+    checks.append(("freefly: газ снижения SoftLand = центр − dz − 0.15/3.16·span = 1381",
+                   ff[-1].descent == 1381))
+    checks.append(("freefly: дефолт гейта SA = 2 м / 1 м/с, снижение 0.15 м/с",
+                   (cfg.land_alt_max, cfg.land_v_max, cfg.land_rate) == (2.0, 1.0, 0.15)))
+    cfg_noland = replace(cfg, ff_land=0.0)
+    ff0 = compile_mission(cfg_noland, "freefly", "DpRollHold+DpYawHold", live_pilot=True)
+    checks.append(("freefly ff_land=0: план = prearm + freefly (сажает пилот), гейта нет",
+                   [st.name for st in ff0] == ["prearm", "freefly"]
+                   and ff0[-1].land_gate is None))
     checks.append(("freefly: стек с RcTransmitter и селектором",
                    type(ffs.stack.traj).__name__ == "RcTransmitter"
                    and ffs._pilot_stabs is not None))
@@ -380,13 +397,13 @@ def main():
                    ffs.loiter_center is False))
     cfg_lo = BootstrapConfig(mv_level=0.3, ff_loiter=1.0)
     ffl = compile_mission(cfg_lo, "freefly", "DpRollHold+DpYawHold", live_pilot=True)
-    ffls = ffl[-1]
+    ffls = next(st for st in ffl if st.name == "freefly")
     checks.append(("freefly+ff_loiter: loiter_center включён", ffls.loiter_center))
     # гонка бута (прогон 2026-08-20): арм до aiding EKF → const_pos весь полёт,
     # LOITER невозможен. ff_loiter несёт тот же ekf_warmup, что и loiter-токен:
     # газ прижат — руддер-арм невозможен, пока EKF не держит позицию.
-    checks.append(("freefly+ff_loiter: план = prearm + ekf_warmup + freefly",
-                   [st.name for st in ffl] == ["prearm", "ekf_warmup", "freefly"]))
+    checks.append(("freefly+ff_loiter: план = prearm + ekf_warmup + freefly + land",
+                   [st.name for st in ffl] == ["prearm", "ekf_warmup", "freefly", "land"]))
     fctx2 = _LCtx()
     ffls.enter(fctx2, None)
     s_arm2 = DroneState(armed=True, now_sim=1.0)            # гейт закрыт (нет extnav)
@@ -413,8 +430,8 @@ def main():
     # честность при отказе FCU (прогон 2026-08-20): гейт открыт, LOITER затребован,
     # но полётник >5 с остаётся в ALT_HOLD (requires position) — ОДНО честное WARN
     # («фактически ALT_HOLD»), цель не меняем (ре-ассерт продолжается)
-    ffl2s = compile_mission(cfg_lo, "freefly", "DpRollHold+DpYawHold",
-                            live_pilot=True)[-1]
+    ffl2s = next(st for st in compile_mission(cfg_lo, "freefly", "DpRollHold+DpYawHold",
+                                              live_pilot=True) if st.name == "freefly")
     fctx3 = _LCtx()
     ffl2s.enter(fctx3, None)
     s_c0 = DroneState(mode="ALT_HOLD", armed=True, rel_alt=3.0, pilot_switch=0,

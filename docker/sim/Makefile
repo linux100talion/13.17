@@ -156,6 +156,9 @@ land:            ## посадка (режим LAND)
 pilot-done:      ## живой полёт: завершить бессрочный pilot-сегмент (миссия идёт дальше → land)
 	docker exec $(NAV) bash -lc 'source /opt/ros/humble/setup.bash; ros2 topic pub --once /mission/pilot_done std_msgs/msg/Empty "{}"'
 
+sa-land:         ## freefly: «кнопка SA» с хоста (мягкая посадка SoftLand; гейт: rel_alt ≤ 2 м и |v| ≤ 1 м/с)
+	docker exec $(NAV) bash -lc 'source /opt/ros/humble/setup.bash; ros2 topic pub --once /mission/land std_msgs/msg/Empty "{}"'
+
 disarm:          ## дизарм
 	docker exec $(NAV) bash /lab/disarm.sh
 

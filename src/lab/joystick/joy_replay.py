@@ -50,8 +50,9 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Joy
 
 AXES = ('roll', 'pitch', 'thr', 'yaw')          # семантические оси = /joy 0..3
-STEP_KEYS = {'note', 'sticks', 'sw', 'sf', 'hold', 'arm', 'disarm',
+STEP_KEYS = {'note', 'sticks', 'sw', 'sf', 'land', 'hold', 'arm', 'disarm',
              'wait_alt', 'wait_mode', 'ramp'}
+N_BUTTONS = 24           # столько кнопок отдаёт TX12 в /joy (bag 2026-08-30)
 ALT_BASELINE_N = 40      # сэмплов gt-z на базлайн «земли» (нода стартует до арма)
 SK_ALT_MIN = 1.0         # станция-кипинг только в воздухе (ниже — руки прочь:
                          # чистые стики нужны детектору посадки и руддер-жестам)
@@ -93,8 +94,9 @@ def load_scenario(path):
 
 
 def load_raw(path):
-    """jsonl из joy_timeline.py: {"t": сек от старта, "axes": [сырые /joy]}."""
-    ts, axes = [], []
+    """jsonl из joy_timeline.py: {"t": сек от старта, "axes": [сырые /joy],
+    "btn": [индексы нажатых кнопок] (опц., кнопка посадки SA)}."""
+    ts, axes, btns = [], [], []
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -103,10 +105,11 @@ def load_raw(path):
             d = json.loads(line)
             ts.append(float(d['t']))
             axes.append([float(a) for a in d['axes']])
+            btns.append([int(i) for i in d.get('btn', [])])
     if not ts:
         sys.exit(f"ОШИБКА: {path} пуст")
     t0 = ts[0]
-    return [t - t0 for t in ts], axes
+    return [t - t0 for t in ts], axes, btns
 
 
 class JoyReplay(Node):
@@ -133,6 +136,10 @@ class JoyReplay(Node):
         self._fence = float(args.fence)
 
         self._raw = None
+        # кнопка посадки SA (SoftLand): индекс в /joy.buttons — зеркало
+        # config.land_joy 'b<i>' лётной ноды (дефолт b0)
+        self._land_btn = int(args.land_btn)
+        self._land = 0
         if args.raw:
             self._raw = load_raw(args.raw)
             self._raw_i = 0
@@ -228,7 +235,7 @@ class JoyReplay(Node):
         return -k * fwd, -k * left
 
     # ---------- публикация ----------
-    def _publish(self, raw_axes=None):
+    def _publish(self, raw_axes=None, raw_btn=None):
         if raw_axes is None:
             p_add, r_add = self._sk_correction()
             sem = dict(self._sem)
@@ -237,10 +244,16 @@ class JoyReplay(Node):
             raw_axes = [sem[a] * self._signs[i] for i, a in enumerate(AXES)]
             # axes[4]=CH5 (не трогаем), [5]=CH6, [6]=CH7/SF-мастер
             raw_axes += [0.0, float(self._sw), float(self._sf)]
+            raw_btn = [self._land_btn] if self._land else []
         m = Joy()
         m.header.stamp = self.get_clock().now().to_msg()
         m.axes = [float(v) for v in (list(raw_axes) + [0.0] * 8)[:8]]
-        m.buttons = []
+        # кнопки как у живого TX12 (24 шт.): нажатые — по индексам
+        btn = [0] * N_BUTTONS
+        for i in (raw_btn or []):
+            if 0 <= i < N_BUTTONS:
+                btn[i] = 1
+        m.buttons = btn
         self._pub.publish(m)
 
     # ---------- главный цикл ----------
@@ -252,11 +265,11 @@ class JoyReplay(Node):
             self._t0 = now
             self.get_logger().info(f"старт (sim t={now:.1f})")
         if self._raw is not None:
-            ts, axes = self._raw
+            ts, axes, btns = self._raw
             el = now - self._t0
             while self._raw_i + 1 < len(ts) and ts[self._raw_i + 1] <= el:
                 self._raw_i += 1
-            self._publish(axes[self._raw_i])
+            self._publish(axes[self._raw_i], btns[self._raw_i])
             return
         # геозабор (gt): дальше fence метров от старта → аварийная посадка;
         # работает и после конца сценария (зависший борт может дрейфовать)
@@ -328,6 +341,9 @@ class JoyReplay(Node):
         if 'sf' in step:
             self._sf = int(step['sf'])
             return True
+        if 'land' in step:              # кнопка посадки SA: 1 = нажата (уровень)
+            self._land = int(step['land'])
+            return True
         if set(step) == {'note'}:
             return True
         if 'hold' in step:
@@ -396,6 +412,9 @@ def main():
                     help='частота публикации /joy, sim-Гц (50)')
     ap.add_argument('--alt-topic', default='/model/iris_cam/odometry',
                     help='ground-truth одометрия для wait_alt/геозабора')
+    ap.add_argument('--land-btn', dest='land_btn', type=int, default=0,
+                    help='индекс кнопки посадки SA в /joy.buttons для шага '
+                         '{"land": 1} (зеркало BS_LAND_JOY=b<i> ноды, дефолт 0)')
     ap.add_argument('--fence', type=float, default=0.0,
                     help='геозабор, м от точки старта по gt (0 = выкл; '
                          'перекрывает "fence" сценария). Уход дальше → '

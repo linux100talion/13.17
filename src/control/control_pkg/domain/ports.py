@@ -34,6 +34,8 @@ class PilotInput(Protocol):
     def mode_switch(self) -> int: ...    # тумблер авто/ручной — для арбитража
     def stab_level(self) -> int: ...     # потолок лесенки SC 0..2 (схема SF-мастер);
                                          # вне схемы адаптеры отдают 0
+    def land_switch(self) -> bool: ...   # кнопка посадки (SA): уровень «нажата»;
+                                         # адаптеры без источника отдают False
 
 
 class Logger(Protocol):

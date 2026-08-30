@@ -42,6 +42,12 @@ ControlStack(build_stabilizers(spec) + профиль-сегмент): один 
                           дизармит. Газ СЫРОЙ (без защёлки и AltHold), ГЕОЗАБОР
                           ИГНОРИРУЕТСЯ, селектор CH6 работает как в pilot.
                           Завершение миссии = дизарм. Требует --pilot joy/ros.
+                          Кнопка SA (cfg.ff_land, дефолт ВКЛ): при rel_alt ≤
+                          land_alt_max и |v| ≤ land_v_max — МЯГКАЯ ПОСАДКА
+                          шагом SoftLand (LAND на EKF-от-VINS, если FCU уже в
+                          LOITER; иначе снижение в ALT_HOLD под нашим стеком —
+                          «сесть сразу, до VINS»). Кнопка — /joy (cfg.land_joy)
+                          или `make sa-land`. ff_land=0 — сажает пилот.
 
 Реестр именованных заданий — MISSIONS (значение = список токенов или callable(cfg)).
 Инлайн-список ('climb3,mv_fwd2 …') парсится напрямую (запятые/пробелы).
@@ -57,7 +63,7 @@ from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
 from .step import (Arm, AwaitMode, Climb, Control, Freefly, Land, LoiterHold,
-                   WaitEkfPos)
+                   SoftLand, WaitEkfPos)
 
 _TOKEN = re.compile(r'^([a-z_]+?)(-?\d+(?:\.\d+)?)?$')
 
@@ -141,14 +147,31 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         # ждёт позицию EKF, газ прижат — руддер-арм физически невозможен.
         warmup = ([WaitEkfPos("ekf_warmup", RC_MIN_THR, cfg.ekf_pos_budget)]
                   if cfg.ff_loiter > 0 else [])
-        return [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget)] + warmup + [
+        # ОДИН набор стабов яруса 0 на Freefly и SoftLand: лесенка кладёт в стек
+        # именно эти объекты, посадка продолжает их состояние (трим ветра)
+        pilot_stabs = build_stabilizers(cfg, stab_spec)
+        soft_land = cfg.ff_land > 0
+        plan = [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget)] + warmup + [
                 Freefly("freefly", stack, keep=keep,
-                        pilot_stabs=build_stabilizers(cfg, stab_spec),
+                        pilot_stabs=pilot_stabs,
                         handover=handover,
                         loiter_center=cfg.ff_loiter > 0,
                         vins_fresh=cfg.vins_fresh_sec,
                         sf_master=cfg.sf_master > 0,
-                        loiter_alt=cfg.loiter_alt)]
+                        loiter_alt=cfg.loiter_alt,
+                        land_gate=((cfg.land_alt_max, cfg.land_v_max)
+                                   if soft_land else None))]
+        if soft_land:
+            # кнопка SA → Freefly отдаёт NEXT (FREEFLY_LAND) → сюда; дизарм
+            # руками по-прежнему завершает миссию из самого Freefly (FINISH)
+            plan.append(SoftLand("land", stack, cfg.ground_z, cfg.land_budget,
+                                 pilot_stabs=pilot_stabs, handover=handover,
+                                 rate=cfg.land_rate, alt_dz=cfg.alt_dz,
+                                 alt_span=cfg.alt_span,
+                                 alt_rate_full=cfg.alt_rate_full,
+                                 fresh_sec=cfg.vins_fresh_sec, keep=keep,
+                                 throttle_hold=cfg.throttle_hold))
+        return plan
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold
     lvl = cfg.mv_level

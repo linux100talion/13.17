@@ -37,6 +37,12 @@ IPM_FAIL = {0: "OK", 1: "ALT GATE", 2: "NO WINDOW", 3: "WARP OOB",
 # Ярусы лесенки SF-мастера (tier=/lvl= в /mission/status) — копия
 # control_pkg.application.hud.TIER_NAMES (nav_pkg control_pkg не импортирует).
 TIER_NAMES = {0: "DAMPER", 1: "VINSHOLD", 2: "LOITER"}
+# Мягкая посадка по кнопке SA (land= в /mission/status, SoftLand.land_state) —
+# копия control_pkg.application.hud.LAND_NAMES. Баннер «LANDING <x>»: зелёный —
+# позицию держит FCU (LAND на EKF-от-VINS) или касание; жёлтый — снижение в
+# ALT_HOLD под нашим стеком (демпфер/VinsHold, стик = наклон).
+LAND_NAMES = {"pos": "FCU POS", "damper": "DAMPER", "vinshold": "VINSHOLD",
+              "touch": "TOUCHDOWN"}
 # FCU не подтверждает LOITER дольше этого — «refuses» (зеркало _latch_warned
 # в Freefly._mode_target: предупреждение в лог через 5 с ре-ассерта).
 LATCH_REFUSE_SEC = 5.0
@@ -238,7 +244,13 @@ class HudRenderer:
                     держало бы без перехвата.
         Без лесенки (старый bag, легаси-селектор, миссия) — гейт LOITER под
         своим именем: LOITER READY / LOITER WAIT (why) / NO VINS (why) —
-        блока ярусов там нет, причина остаётся в баннере."""
+        блока ярусов там нет, причина остаётся в баннере.
+        Мягкая посадка (land=, шаг SoftLand после кнопки SA) — поверх всего:
+        LANDING FCU POS / DAMPER / VINSHOLD / TOUCHDOWN."""
+        land = self.status.get("land")
+        if land:
+            col = HUD_GREEN if land in ("pos", "touch") else HUD_YELLOW
+            return f"LANDING {LAND_NAMES.get(land, land.upper())}", col
         if "tier" not in self.status:
             st = self.status.get("st", "")
             why = self.status.get("why", "-")
@@ -279,6 +291,11 @@ class HudRenderer:
             head.append("MANUAL (SF)" if manual else
                         f"SC {self.status.get('lvl', '?')}  "
                         f"TIER {self.status.get('tier', '?')}")
+        # кнопка посадки нажата (sa=1) — видно и до того, как шаг сменился
+        # (гейт «низко и стоим» мог не пустить: причина в логе ноды)
+        if (self.status_t is not None and now - self.status_t < 3.0
+                and self.status.get("sa") == "1"):
+            head.append("SA LAND")
         y = self._line(frame, k, y, "  ".join(head),
                        HUD_RED if manual else HUD_WHITE)
         if ladder:

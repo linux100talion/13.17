@@ -362,6 +362,11 @@ class BootstrapArch2Node(Node):
         self._pilot_done = False
         self.create_subscription(Empty, '/mission/pilot_done',
                                  lambda _m: setattr(self, '_pilot_done', True), 1)
+        # «кнопка SA» с хоста (make sa-land): one-shot → уровень pilot_land на
+        # ОДИН тик → Freefly видит фронт как от пульта (тот же гейт)
+        self._land_req = False
+        self.create_subscription(Empty, '/mission/land',
+                                 lambda _m: setattr(self, '_land_req', True), 1)
         self._hud_st = ''      # последний st= в /mission/status (лог переходов)
         self._armed_prev = False   # фронт armed → латч нуля высоты перцепции, сброс VINS
         # ФРОНТ ARMED → сброс VINS (/restart → restart_callback эстиматора). Пока
@@ -382,9 +387,9 @@ class BootstrapArch2Node(Node):
         if kind == 'joy':
             if cfg.joy_signs:
                 return JoyPilot(self, signs=tuple(float(x) for x in cfg.joy_signs.split(',')),
-                                sf_master=sf)
+                                sf_master=sf, land_src=cfg.land_joy)
             # знаки — JOY_SIGNS_DEFAULT (выверены полётом TX12)
-            return JoyPilot(self, sf_master=sf)
+            return JoyPilot(self, sf_master=sf, land_src=cfg.land_joy)
         if kind == 'ros':
             return RosPilot(self, sf_master=sf)
         # flow_assist — НЕЙТРАЛЬНЫЙ пилот (центр): флоу-демпфер держит снос сам;
@@ -421,6 +426,9 @@ class BootstrapArch2Node(Node):
         s.pilot_switch = self.pilot.mode_switch()
         s.pilot_level = self.pilot.stab_level()   # потолок лесенки SC (SF-мастер)
         s.pilot_done, self._pilot_done = self._pilot_done, False   # one-shot
+        # кнопка посадки: пульт (уровень) ИЛИ one-shot /mission/land
+        s.pilot_land = bool(self.pilot.land_switch()) or self._land_req
+        self._land_req = False
         s.extnav_ready = self._extnav_ready()    # гейт штатного LOITER-на-VINS
 
         self._send_origin()              # безжпсный бут: origin до подтверждения
@@ -447,11 +455,16 @@ class BootstrapArch2Node(Node):
         step = None if self.runner.finished else self.runner.steps[self.runner.i]
         ladder = (step.ladder_state(s)
                   if step is not None and hasattr(step, 'ladder_state') else None)
+        # мягкая посадка (SoftLand.land_state): баннер LANDING в HUD
+        land = (step.land_state()
+                if step is not None and hasattr(step, 'land_state') else None)
         line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt,
                           ladder=ladder, vins_min=self._vins_min,
-                          ripe_sec=self._ripe_sec, ripe_min=self._ripe_min)
-        # переход гейта LOITER ИЛИ яруса — в лог (виден и в sim_nav.log)
-        st = ' '.join(w for w in line.split() if w.startswith(('st=', 'tier=')))
+                          ripe_sec=self._ripe_sec, ripe_min=self._ripe_min,
+                          land=land)
+        # переход гейта LOITER, яруса ИЛИ посадки — в лог (виден и в sim_nav.log)
+        st = ' '.join(w for w in line.split()
+                      if w.startswith(('st=', 'tier=', 'land=')))
         if st != self._hud_st:
             self._hud_st = st
             self.logger.info(f"HUD: {line}")
@@ -916,6 +929,15 @@ def _parse() -> tuple:
     # гейт «в воздухе» LOITER-на-VINS, м (одна правда: Freefly+LoiterHold+HUD)
     p.add_argument('--loiter-alt', dest='loiter_alt', type=float,
                    default=_D.loiter_alt)
+    # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
+    p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
+    p.add_argument('--land-alt-max', dest='land_alt_max', type=float,
+                   default=_D.land_alt_max)
+    p.add_argument('--land-v-max', dest='land_v_max', type=float,
+                   default=_D.land_v_max)
+    p.add_argument('--land-rate', dest='land_rate', type=float, default=_D.land_rate)
+    p.add_argument('--land-joy', dest='land_joy', default=_D.land_joy,
+                   help="кнопка посадки в /joy: 'b<i>' buttons[i] | 'a<i>' axes[i] | ''")
     p.add_argument('--loiter-gate-budget', dest='loiter_gate_budget', type=float,
                    default=_D.loiter_gate_budget)
     p.add_argument('--ekf-pos-budget', dest='ekf_pos_budget', type=float,

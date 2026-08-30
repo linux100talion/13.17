@@ -80,6 +80,7 @@ def read_bag(bag, joy_topic, ref_topic, state_topic='/mavros/state',
     r.open(StorageOptions(uri=bag, storage_id='sqlite3'),
            ConverterOptions('cdr', 'cdr'))
     joy_ns, joy_axes, ref, fcu, hud = [], [], [], [], []
+    joy_btn = []          # нажатые кнопки /joy: индексы (TX12 отдаёт 24 кнопки)
     while r.has_next():
         topic, raw, t_ns = r.read_next()
         if topic == joy_topic:
@@ -88,6 +89,7 @@ def read_bag(bag, joy_topic, ref_topic, state_topic='/mavros/state',
             a = list(m.axes) + [0.0] * 7
             joy_ns.append(t_ns)
             joy_axes.append(a[:7])
+            joy_btn.append(tuple(i for i, v in enumerate(m.buttons) if v))
         elif topic == ref_topic:
             m = deserialize_message(raw, Odometry)
             st = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
@@ -104,10 +106,12 @@ def read_bag(bag, joy_topic, ref_topic, state_topic='/mavros/state',
             from std_msgs.msg import String
             m = deserialize_message(raw, String)
             kv = dict(p.split('=', 1) for p in m.data.split() if '=' in p)
+            # land=/sa= — мягкая посадка по кнопке SA (SoftLand) и сама кнопка
             hud.append((t_ns, kv.get('st', '?'), kv.get('why', '-'),
-                        kv.get('odom', '?'), kv.get('tier'), kv.get('lvl')))
+                        kv.get('odom', '?'), kv.get('tier'), kv.get('lvl'),
+                        kv.get('land'), kv.get('sa')))
     return (np.array(joy_ns, dtype=np.int64), np.array(joy_axes),
-            np.array(ref), fcu, hud)
+            np.array(ref), fcu, hud, joy_btn)
 
 
 def zoh(t_src, v_src, grid):
@@ -189,8 +193,8 @@ def main():
     signs = (tuple(float(x) for x in args.signs.split(','))
              if args.signs else default_signs())
 
-    joy_ns, joy_axes, ref, fcu, hud = read_bag(args.bag, args.joy_topic,
-                                               args.ref_topic)
+    joy_ns, joy_axes, ref, fcu, hud, joy_btn = read_bag(args.bag, args.joy_topic,
+                                                        args.ref_topic)
     if len(joy_ns) == 0:
         sys.exit(f"ОШИБКА: в {args.bag} нет {args.joy_topic}. Полёт был с "
                  f"BS_PILOT=joy и /joy в TOPICS_EXTRA?")
@@ -281,8 +285,10 @@ def main():
         # VINS в ленте не отражается, только готовность ЯРУСА (ab_noise
         # 2026-08-30: VINS 10 Гц при «WAIT»); ярус лесенки (tier/lvl) — отдельно
         tier_name = {'0': 'DAMPER', '1': 'VINSHOLD', '2': 'LOITER'}
-        prev_st, prev_tier = None, None
-        for (t_ns, st, why, odom, tier, lvl), t_s in zip(hud, hud_sim):
+        land_name = {'pos': 'LAND на EKF (FCU POS)', 'damper': 'ALT_HOLD под ДЕМПФЕРОМ',
+                     'vinshold': 'ALT_HOLD под VINSHOLD', 'touch': 'КАСАНИЕ'}
+        prev_st, prev_tier, prev_land, prev_sa = None, None, None, None
+        for (t_ns, st, why, odom, tier, lvl, land, sa), t_s in zip(hud, hud_sim):
             if prev_st is not None and st != prev_st:
                 label = {'READY': f'HUD: LOITER READY (odom={odom})',
                          'WAIT': f'HUD: LOITER WAIT ({why})'}.get(
@@ -292,7 +298,28 @@ def main():
                 events.append((t_s - t0, 'alt',
                                f'HUD: ярус {tier} {tier_name.get(tier, "?")} '
                                f'(потолок SC {lvl})'))
-            prev_st, prev_tier = st, tier
+            # кнопка посадки SA (sa=) глазами ноды и ветка SoftLand (land=):
+            # фронт кнопки без последующего land= — гейт «низко и стоим» не
+            # пустил (причина — в логе ноды, sim_nav.log «SA: гейт закрыт»)
+            if sa is not None and prev_sa is not None and sa != prev_sa:
+                events.append((t_s - t0, 'alt',
+                               'HUD: кнопка SA НАЖАТА' if sa == '1'
+                               else 'HUD: кнопка SA отпущена'))
+            if land != prev_land and land is not None:
+                events.append((t_s - t0, 'alt',
+                               f'HUD: ПОСАДКА — {land_name.get(land, land)}'))
+            prev_st, prev_tier, prev_land, prev_sa = st, tier, land, sa
+    # фронты кнопок /joy (сырые индексы): так ищут, куда микшер положил SA
+    # (config.land_joy 'b<i>'); TX12 отдаёт 24 кнопки, в полётах до 2026-08-30
+    # ни одна не нажималась
+    prev_b = set()
+    for t, b in zip(sim_joy, joy_btn):
+        b = set(b)
+        for i in sorted(b - prev_b):
+            events.append((t - t0, 'alt', f'JOY: кнопка b{i} нажата'))
+        for i in sorted(prev_b - b):
+            events.append((t - t0, 'alt', f'JOY: кнопка b{i} отпущена'))
+        prev_b = b
     if len(alt_t):
         up = np.where(alt_v > LIFTOFF_ALT)[0]
         if len(up):
@@ -395,9 +422,12 @@ def main():
     with open(os.path.join(args.out, 'scenario_draft.json'), 'w') as f:
         json.dump(scenario, f, ensure_ascii=False, indent=2)
     with open(os.path.join(args.out, 'raw.jsonl'), 'w') as f:
-        for t, a in zip(sim_joy, joy_axes):
-            f.write(json.dumps({'t': round(float(t - t0), 4),
-                                'axes': [round(float(x), 4) for x in a]}) + '\n')
+        for t, a, b in zip(sim_joy, joy_axes, joy_btn):
+            rec = {'t': round(float(t - t0), 4),
+                   'axes': [round(float(x), 4) for x in a]}
+            if b:                       # нажатые кнопки — только когда есть (SA)
+                rec['btn'] = list(b)
+            f.write(json.dumps(rec) + '\n')
     report = '\n'.join(rep) + '\n'
     with open(os.path.join(args.out, 'report.txt'), 'w') as f:
         f.write(report)
