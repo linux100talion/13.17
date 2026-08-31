@@ -309,7 +309,7 @@ class HudRenderer:
                 cv2.circle(frame, (round(u), round(v)), r, (0, 255, 0), -1)
         # Раскладка (просьбы 2026-08-30): ЛЕВАЯ стопка — режимы (баннеры
         # статуса борта и яруса, блок ярусов, DRIFT, scene); ПРАВАЯ
-        # стопка сверху — датчики/каналы (IPM, FEAT, ODO, CMD); НИЗ по
+        # стопка сверху — датчики/каналы (IPM, ODO, FEAT, CMD); НИЗ по
         # центру — высота ALT. Отсутствующий источник места не оставляет.
         st_ok = self.status_t is not None and now - self.status_t < 3.0
         # ---------------- ЛЕВАЯ стопка: режимы ----------------
@@ -417,14 +417,7 @@ class HudRenderer:
             # больше нет (просьба 2026-08-31): пилоту в полёте она не нужна,
             # а разбору — есть res=/rat= в /mission/status (bag). Прогресс
             # очереди зрелости виден в блоке ярусов: «WAIT extnav n/N s/S».
-        # 8) фичи трекера: замолк при живой камере — это ЧП, красним
-        if self.feat_t is not None:
-            if now - self.feat_t < 3.0:
-                yr = self._line_right(frame, k, yr, f"FEAT {self.feat_n}",
-                                      HUD_WHITE)
-            else:
-                yr = self._line_right(frame, k, yr, "FEAT --", HUD_RED)
-        # 9) /odometry: Гц (окно 3 с) + возраст; красный ODO -- = VINS без
+        # 7) /odometry: Гц (окно 3 с) + возраст; красный ODO -- = VINS без
         # init. Единственная строка про ЖИВОСТЬ VINS — собственный замер
         # стримера, независим от лётной ноды.
         if self.odom_times:
@@ -438,7 +431,16 @@ class HudRenderer:
                                   f"ODO {hz:4.1f}Hz {age:4.1f}s", col)
         else:
             yr = self._line_right(frame, k, yr, "ODO --", HUD_RED)
-        # 10) PWM-смещения крена/тангажа от стека (/flow_dbg, /flow_dbg2)
+        # 8) фичи трекера — СРАЗУ под ODO (просьба 2026-08-31: пара «жив ли
+        # VINS / за что он цепляется» читается вместе); замолк при живой
+        # камере — это ЧП, красним
+        if self.feat_t is not None:
+            if now - self.feat_t < 3.0:
+                yr = self._line_right(frame, k, yr, f"FEAT {self.feat_n}",
+                                      HUD_WHITE)
+            else:
+                yr = self._line_right(frame, k, yr, "FEAT --", HUD_RED)
+        # 9) PWM-смещения крена/тангажа от стека (/flow_dbg, /flow_dbg2)
         if self.cmd_t is not None and now - self.cmd_t < 2.0:
             self._line_right(frame, k, yr,
                              f"CMD R{self.cmd_roll:+04.0f} "
