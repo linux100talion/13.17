@@ -11,7 +11,7 @@
 # Контракт времени: все set_* принимают t = «часы вызывающего» (node clock у
 # стримера: sim в симе, wall на Orin; sim-штампы сообщений у пост-рендера).
 # draw(frame, now) меряет возрасты в этих же часах → пороги RTF-независимы.
-# Протухший источник гаснет сам (баннер гейта — 3 с, режим — 5 с, CMD — 2 с);
+# Протухший источник гаснет сам (баннеры и лесенка — 3 с, CMD — 2 с);
 # чего в источниках нет — того нет и на экране (честная деградация: на Orin
 # без лётной ноды нет баннера, в bag без /feature нет строки FEAT).
 #
@@ -48,7 +48,7 @@ LAND_NAMES = {"pos": "FCU POS", "damper": "DAMPER", "vinshold": "VINSHOLD",
 LATCH_REFUSE_SEC = 5.0
 # Общий коэффициент размера шрифта HUD (просьба 2026-08-30: «на ~30 % мельче»):
 # масштабирует глифы, толщину, подложку и межстрочный шаг всех строк разом —
-# пропорции строк между собой (баннеры 1.0 / строки 0.8 / ярусы 0.7 / res 0.6)
+# пропорции строк между собой (баннеры 1.0 / строки 0.8 / ярусы 0.7)
 # не меняются. 1.0 = прежний размер.
 FONT_K = 0.7
 
@@ -211,13 +211,19 @@ class HudRenderer:
         tier, lvl = int(self._num("tier", 0)), int(self._num("lvl", 0))
         return tier + 1 if tier < lvl and tier + 1 in TIER_NAMES else None
 
-    def _tier_rows(self):
+    def _tier_rows(self, now=None):
         """Строки блока лесенки: [(text, color, fill)] по ярусам 0..2. Маркер
         «>» — ярус, которого лесенка ждёт (следующий над активным при потолке
         выше): его причина и есть ответ «почему не выше» — раньше она
-        дублировалась в баннере, теперь живёт только здесь."""
+        дублировалась в баннере, теперь живёт только здесь.
+        В ХВОСТ строки АКТИВНОГО яруса — режим FCU из /mavros/state (просьба
+        2026-08-31: отдельной строки режима больше нет, а имя режима нигде
+        больше не показано). Только имя, без ARM/DISARM (armed — баннер 3.1);
+        протух (>5 с) или нет mavros_msgs — хвоста нет, строка как была."""
         tier, lvl = int(self._num("tier", 0)), int(self._num("lvl", 0))
         nxt = self._next_tier()
+        mode = (self.fcu_mode if (now is not None and self.fcu_t is not None
+                                  and now - self.fcu_t < 5.0) else "")
         rows = []
         for i in (0, 1, 2):
             st, text = self._tier_gate(i)
@@ -226,6 +232,8 @@ class HudRenderer:
             fill = None
             if i == tier:
                 fill = col                     # активный ярус — заливка
+                if mode:
+                    text = f"{text}  {mode}"   # режим FCU — в хвост активного
             elif i > lvl:
                 col = HUD_WHITE                # выше потолка SC — не выбран
             mark = ">" if i == nxt else " "
@@ -235,7 +243,7 @@ class HudRenderer:
     def _tier_banner(self):
         """(text, color) большого баннера: ТОЛЬКО «TIER n NAME» и цвет — всё
         остальное (причина следующего яруса, латч, MANUAL) живёт в блоке
-        ярусов под строкой режима, здесь бы дублировалось. Цвет:
+        ярусов под баннером, здесь бы дублировалось. Цвет:
           зелёный — ярус = потолок SC, гейт активного яруса открыт;
           жёлтый  — лесенка ниже потолка (ждёт следующий ярус — см. «>» в
                     блоке) или активный ярус держится на гистерезисе;
@@ -270,37 +278,21 @@ class HudRenderer:
         st, _ = self._tier_gate(nxt)
         return text, HUD_RED if st == "DEAD" else HUD_YELLOW
 
-    def _draw_mode_block(self, frame, k, y, now):
-        """Режим FCU + armed + ЛЕСЕНКА: шапка «<MODE> ARM · SC n · TIER n» и по
-        строке на ярус (0 DAMPER / 1 VINSHOLD / 2 LOITER) с гейтом и прогрессом
-        каждого. Активный ярус — заливка; закрытый — жёлтым с причиной; мёртвый
-        — красным; выше потолка SC — белым (не выбран); «>» — ярус, которого
-        лесенка ждёт. MANUAL (SF не-вверх, sw=1) — красная шапка: лесенка не
-        ведёт борт. Шапка живёт и без /mission/status (только режим FCU, 5 с),
-        ярусы — только при свежем статусе с tier=. Вернёт next y."""
-        fcu_ok = self.fcu_t is not None and now - self.fcu_t < 5.0
-        ladder = (self.status_t is not None and now - self.status_t < 3.0
-                  and "tier" in self.status)
-        if not (fcu_ok or ladder):
+    def _draw_ladder_block(self, frame, k, y, now):
+        """ЛЕСЕНКА: по строке на ярус (0 DAMPER / 1 VINSHOLD / 2 LOITER) с
+        гейтом и прогрессом каждого. Активный ярус — заливка; закрытый —
+        жёлтым с причиной; мёртвый — красным; выше потолка SC — белым (не
+        выбран); «>» — ярус, которого лесенка ждёт; режим FCU — в хвосте строки
+        активного яруса. Шапки «<MODE> ARM · SC n · TIER n» больше нет (просьба
+        2026-08-31): потолок SC и активный ярус читаются по самому блоку
+        (заливка = активный ярус, «>» = куда лезем), armed — по баннеру статуса
+        борта (3.1), режим уехал в хвост активной строки. Блок живёт ТОЛЬКО при свежем (<3 с)
+        статусе с tier=; без лесенки строк нет вовсе. Вернёт next y."""
+        if not (self.status_t is not None and now - self.status_t < 3.0
+                and "tier" in self.status):
             return y
-        head = []
-        if fcu_ok:
-            head.append(f"{self.fcu_mode} {'ARM' if self.fcu_armed else 'DISARM'}")
-        manual = ladder and self.status.get("sw") == "1"
-        if ladder:
-            head.append("MANUAL (SF)" if manual else
-                        f"SC {self.status.get('lvl', '?')}  "
-                        f"TIER {self.status.get('tier', '?')}")
-        # кнопка посадки нажата (sa=1) — видно и до того, как шаг сменился
-        # (гейт «низко и стоим» мог не пустить: причина в логе ноды)
-        if (self.status_t is not None and now - self.status_t < 3.0
-                and self.status.get("sa") == "1"):
-            head.append("SA LAND")
-        y = self._line(frame, k, y, "  ".join(head),
-                       HUD_RED if manual else HUD_WHITE)
-        if ladder:
-            for text, col, fill in self._tier_rows():
-                y = self._line(frame, k, y, text, col, scale=0.7, fill=fill)
+        for text, col, fill in self._tier_rows(now):
+            y = self._line(frame, k, y, text, col, scale=0.7, fill=fill)
         return y
 
     def draw(self, frame, now: float) -> None:
@@ -316,8 +308,8 @@ class HudRenderer:
             for u, v in self.feat_pts:
                 cv2.circle(frame, (round(u), round(v)), r, (0, 255, 0), -1)
         # Раскладка (просьбы 2026-08-30): ЛЕВАЯ стопка — режимы (баннеры
-        # статуса борта и яруса, режим FCU + ярусы, DRIFT, scene); ПРАВАЯ
-        # стопка сверху — датчики/каналы (IPM, res/rat, FEAT, ODO, CMD); НИЗ по
+        # статуса борта и яруса, блок ярусов, DRIFT, scene); ПРАВАЯ
+        # стопка сверху — датчики/каналы (IPM, FEAT, ODO, CMD); НИЗ по
         # центру — высота ALT. Отсутствующий источник места не оставляет.
         st_ok = self.status_t is not None and now - self.status_t < 3.0
         # ---------------- ЛЕВАЯ стопка: режимы ----------------
@@ -353,10 +345,9 @@ class HudRenderer:
             # (нет tier=) — голый гейт LOITER под честным именем.
             text, col = self._tier_banner()
             y = self._line(frame, k, y, text, col, scale=1.0, fill=col)
-        # 2) режим FCU + лесенка — СРАЗУ под баннером яруса: баннер говорит
-        # «какой ярус», блок под ним — «почему не выше»; между ними ничего не
-        # вклинивается. Живёт и без статуса (одна строка режима).
-        y = self._draw_mode_block(frame, k, y, now)
+        # 2) лесенка — СРАЗУ под баннером яруса: баннер говорит «какой ярус»,
+        # блок под ним — «почему не выше»; между ними ничего не вклинивается.
+        y = self._draw_ladder_block(frame, k, y, now)
         # 3) поправка NN1: засечки редкие, старше 10 с — показываем возраст
         if self.drift is not None:
             d, t = self.drift
@@ -422,21 +413,10 @@ class HudRenderer:
                 name = IPM_FAIL.get(fail, f"?{fail}")
                 yr = self._line_right(frame, k, yr,
                                       f"IPM {name} {share:3.0f}%", col)
-            # 7) диагностика детектора зрелости (мелко): res — residual
-            # «поза/скорость» (тихо < 0.15 м/с), rat — вертикальный ratio
-            # VINS/rel_alt (зрел в [0.8,1.25]); «--» = данных ещё нет (-1 от
-            # лётной ноды / старый bag без полей)
-            res, rat = self.status.get("res"), self.status.get("rat")
-            if res is not None:
-                def _f(v):
-                    try:
-                        x = float(v)
-                    except (TypeError, ValueError):
-                        return "--"
-                    return "--" if x < 0 else f"{x:.2f}"
-                yr = self._line_right(frame, k, yr,
-                                      f"res {_f(res)}  rat {_f(rat)}",
-                                      HUD_WHITE, scale=0.6)
+            # Строки «res/rat» (диагностика детектора зрелости VINS) здесь
+            # больше нет (просьба 2026-08-31): пилоту в полёте она не нужна,
+            # а разбору — есть res=/rat= в /mission/status (bag). Прогресс
+            # очереди зрелости виден в блоке ярусов: «WAIT extnav n/N s/S».
         # 8) фичи трекера: замолк при живой камере — это ЧП, красним
         if self.feat_t is not None:
             if now - self.feat_t < 3.0:

@@ -38,7 +38,8 @@
 #     только после init → зелёный ODO = «VINS инициализировался и жив»);
 #   - FEAT: счётчик фич feature_tracker (в симе топик remap'нут в /feature, на
 #     борту /feature_tracker/feature — подписка на оба, издатель ровно один);
-#   - режим+armed из /mavros/state; демпферы (PWM-смещения) из /flow_dbg*;
+#   - armed из /mavros/state (баннер статуса борта); демпферы (PWM-смещения)
+#     из /flow_dbg*;
 #   - DRIFT: норма поправки NN1 (/nn1/drift), засечки редкие → показываем возраст.
 # Сама отрисовка и пороги — в nav_pkg/hud_renderer.py (БЕЗ ROS): тем же кодом
 # hud_video.py (src/lab/) пост-рендерит scene_hud.mp4 из bag. Здесь — только
@@ -58,7 +59,8 @@ from vision_msgs.msg import Detection2DArray
 from nav_pkg.hud_renderer import HUD_SCENE, HudRenderer
 
 # mavros_msgs в наших образах есть (MAVROS живёт в том же контейнере), но
-# стримеру он не обязателен: без него HUD просто не рисует строку режима.
+# стримеру он не обязателен: без него баннер статуса борта живёт на одном
+# ekf= статуса (ARMED показать нечем).
 try:
     from mavros_msgs.msg import State
 except ImportError:
