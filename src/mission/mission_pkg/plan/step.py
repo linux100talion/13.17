@@ -52,6 +52,34 @@ def _overlay_stack(step, ctx, s, rc) -> None:
     rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
 
 
+def _yaw_stabs(stabs):
+    """Состав яруса LOITER лесенки: от пилотского стека остаются ТОЛЬКО yaw-стабы
+    (композит DpHold отдаёт свой yaw-суб через `yaw_sub`), roll/pitch — сырой
+    passthrough (в LOITER это уставки скорости для контроллера FCU).
+
+    ПОЧЕМУ НЕ ПУСТОЙ СТЕК (разбор lv2_joy_20260831_074358): с пустым стеком yaw-стик
+    уходил в FCU сырым (±400 PWM = 202.5 °/с полного стика, PILOT_Y_RATE) — втрое
+    быстрее, чем ярусы 0/1 отдают прямой передачей DpYawHold (pilot_gain 130 ≈ 66 °/с).
+    А в LOITER стики roll/pitch — уставки скорости В ОСЯХ БОРТА: быстрый разворот
+    на ходу вращает уставку (95° за секунду при 3.5 м/с), контроллер позиции FCU
+    получает ошибку скорости 5–6 м/с и бьёт наклон в упор ANGLE_MAX (тангаж/крен
+    до 30° против ≤12° на тех же манёврах в ALT_HOLD-ярусах) — «ныряет и почти
+    кувыркается». EKF/VINS при этом чисты (расхождение с истиной < 1 м за окно).
+    Тот же DpYawHold в ярусе LOITER = одинаковая ручка курса на ВСЕХ ярусах и темп
+    разворота, за которым контур FCU успевает (v·ω < LOIT_ACC_MAX). Визуальный
+    демпфер оси в LOITER почти нем (курс держит FCU → flow_yaw ≈ 0; на ходу его
+    глушит v_gate) — остаётся именно передача стика."""
+    out = []
+    for st in stabs or []:
+        axes = getattr(st, "axes", frozenset())
+        if "yaw" not in axes:
+            continue
+        st = st if axes == frozenset({"yaw"}) else getattr(st, "yaw_sub", None)
+        if st is not None:
+            out.append(st)
+    return out
+
+
 def ground_speed(s, fresh_sec):
     """|v| борта над землёй (м/с, источник) для гейта кнопки посадки — по
     ДОСТУПНОСТИ: канал вида сверху (ipm_ok — метрический, живёт без VINS) →
@@ -456,7 +484,11 @@ class Freefly(Step):
     ALT_HOLD (в легаси-центре борт при закрытом гейте дрейфовал с ветром — прогон
     2026-08-20); деградация симметрична (VINS протух в LOITER → демпфер, VinsHold
     с протухшим VINS мёртв так же). Вход/выход LOITER ведёт тот же _mode_target
-    (гейт + гистерезис легаси-центра, ярусу нужен loiter_center=True)."""
+    (гейт + гистерезис легаси-центра, ярусу нужен loiter_center=True). Ярус LOITER
+    держит yaw через тот же DpYawHold, что ярусы 0/1 (roll/pitch — сырой
+    passthrough): сырой yaw-стик в LOITER ронял борт в нырок до 30° — см.
+    _yaw_stabs. Легаси-центр НЕ трогаем: старые реплеи с BS_SF_MASTER=0
+    сохраняют пустой стек как было."""
 
     def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
                  handover=None, loiter_center=False, vins_fresh=2.0,
@@ -610,10 +642,12 @@ class Freefly(Step):
     # --- Лесенка SF-мастера (sf_master): SC задаёт ПОТОЛОК, летим на лучшей
     # ДОСТУПНОЙ ступени: 0 демпфер → 1 VinsHold (готовность VINS) → 2 штатный
     # LOITER (вход/выход ведёт _mode_target — тот же гейт и гистерезис, что у
-    # легаси-центра). Стек яруса LOITER пустеет ТОЛЬКО когда FCU фактически
-    # залатчил режим (урок LoiterHold: бросать свои законы ДО смены режима
-    # нельзя — центр-стики в ALT_HOLD никого не держат); пока идёт ре-ассерт,
-    # продолжаем VinsHold/демпфер в семантике ALT_HOLD. ---
+    # легаси-центра). Стек яруса LOITER сжимается до yaw-стаба (см. _yaw_stabs:
+    # roll/pitch — уставки скорости FCU, yaw — та же ручка, что в ярусах 0/1)
+    # и ТОЛЬКО когда FCU фактически залатчил режим (урок LoiterHold: бросать
+    # свои законы ДО смены режима нельзя — центр-стики в ALT_HOLD никого не
+    # держат); пока идёт ре-ассерт, продолжаем VinsHold/демпфер в семантике
+    # ALT_HOLD. ---
 
     def _ladder_select(self, ctx, s) -> None:
         """Прочитать пульт: потолок SC + пересев опор на выходе из MANUAL.
@@ -671,12 +705,16 @@ class Freefly(Step):
         self._tier = tier
         stabs = (self._pilot_stabs if tier == 0
                  else self.handover.vins_stabs(self._pilot_stabs, s) if tier == 1
-                 else [])                # LOITER: позицию держит FCU, стики =
-        self.stack.switch_stabilization(stabs)    # уставки скорости (passthrough)
+                 # LOITER: позицию держит FCU, roll/pitch = уставки скорости
+                 # (passthrough); yaw — тот же DpYawHold, что в ярусах 0/1
+                 # (сырой стик ронял борт в нырок — см. _yaw_stabs)
+                 else _yaw_stabs(self._pilot_stabs))
+        self.stack.switch_stabilization(stabs)
         self.stack.enter(s)              # пересев опор: держим ОТ ТЕКУЩЕЙ точки
         ctx.log.info("    ЛЕСЕНКА: ярус {} (потолок SC={})".format(
             {0: "ДЕМПФЕР", 1: "VINSHOLD",
-             2: "LOITER — стики = уставки скорости"}[tier], self._level))
+             2: "LOITER — стики = уставки скорости, yaw у демпфера"}[tier],
+            self._level))
 
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=s.pilot_throttle)

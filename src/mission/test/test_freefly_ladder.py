@@ -5,8 +5,10 @@
 - потолок 0 (SC вверх): только демпфер — свапа на VinsHold НЕТ даже при зрелом VINS;
 - потолок 1: демпфер → VinsHold по готовности; вниз — с гистерезисом 3×fresh
   (мигание свежести у порога стек не дёргает, настоящий протух — честный демпфер);
-- потолок 2: VinsHold держит, нода шлёт LOITER; стек пустеет ТОЛЬКО после
-  фактического латча режима FCU (урок LoiterHold); протух в LOITER → откат
+- потолок 2: VinsHold держит, нода шлёт LOITER; стек сжимается до yaw-стаба
+  ТОЛЬКО после фактического латча режима FCU (урок LoiterHold; yaw остаётся —
+  сырой стик в LOITER ронял борт в нырок, разбор lv2_joy_20260831_074358;
+  композит DpHold отдаёт yaw-суб); протух в LOITER → откат
   на ярус ниже (не в голый ALT_HOLD);
 - MANUAL (SF не-вверх → pilot_switch=+1): режим ALT_HOLD; возврат из MANUAL —
   пересев опор (держим от текущей точки, а не тянем в точку до перехвата);
@@ -171,7 +173,8 @@ check("гистерезис: age=4с (< 3×fresh) VinsHold держится",
 tick_until(r, clock, 1.0, lvl=1, odom=100, vins_age=7.0)    # > 3×fresh
 check("протух (age=7с): откат на демпфер", names(stack) == ['damper', 'yawd'])
 
-# --- 4. потолок 2: VinsHold держит, LOITER шлётся; стек пустеет ПОСЛЕ латча ---
+# --- 4. потолок 2: VinsHold держит, LOITER шлётся; стек сжимается до yaw ПОСЛЕ
+# латча (сырой yaw-стик в LOITER ронял борт в нырок — lv2_joy_20260831_074358) ---
 r, clock, mode, stack, vins = make()
 tick_until(r, clock, 2.0, lvl=2, odom=700, vins_age=0.1, extnav=True)
 check("потолок 2 до латча: LOITER запрошен", "LOITER" in mode.modes)
@@ -179,8 +182,8 @@ check("потолок 2 до латча: стек ещё VinsHold (законы 
       names(stack) == ['yawd', 'vins'])
 tick_until(r, clock, 1.0, lvl=2, odom=700, vins_age=0.1, extnav=True,
            mode="LOITER")
-check("LOITER залатчен: стек пуст (стики = уставки скорости)",
-      names(stack) == [])
+check("LOITER залатчен: стек = yaw-стаб (roll/pitch = уставки скорости)",
+      names(stack) == ['yawd'])
 
 # --- 5. VINS протух в LOITER → откат на ярус ниже (демпфер: VinsHold мёртв) ---
 tick_until(r, clock, 3.0, lvl=2, odom=700, vins_age=8.0, extnav=True,
@@ -193,7 +196,7 @@ check("протух в LOITER: стек — демпфер (не голый ALT_
 r, clock, mode, stack, vins = make()
 tick_until(r, clock, 2.0, lvl=2, odom=700, vins_age=0.1, extnav=True,
            mode="LOITER")
-check("подготовка: в LOITER, стек пуст", names(stack) == [])
+check("подготовка: в LOITER, стек = yaw-стаб", names(stack) == ['yawd'])
 tick_until(r, clock, 2.0, lvl=2, sw=1, odom=700, vins_age=0.1, extnav=True,
            mode="LOITER")
 check("MANUAL при LOITER: ALT_HOLD ре-ассертится (seize в «стик = наклон»)",
@@ -230,7 +233,26 @@ tick_until(r, clock, 3.0, lvl=2, odom=700, vins_age=0.1, extnav=True)
 check("без ff_loiter: LOITER не слался", "LOITER" not in mode.modes)
 check("без ff_loiter: потолок 2 живёт на VinsHold", names(stack) == ['yawd', 'vins'])
 
-# --- 10. ladder_state(): правда лесенки для /mission/status (HUD-блок режимов).
+# --- 10. ярус LOITER с КОМПОЗИТОМ (боевой DpHoldM: один стаб на все три оси):
+# в стек идёт его yaw-суб (yaw_sub), а не композит целиком и не пусто ---
+yaw_part = FakeStab('yaw_part', ('yaw',))
+composite = FakeStab('dphold', ('roll', 'pitch', 'yaw'))
+composite.yaw_sub = yaw_part
+clock, mode = FakeClock(), FakeMode()
+vins = FakeVins()
+stack = FakeStack([composite])
+step = Freefly("freefly", stack, pilot_stabs=[composite],
+               handover=VinsHandover(vins, min_count=40, fresh_sec=2.0),
+               loiter_center=True, vins_fresh=2.0, sf_master=True)
+r = PlanRunner([step], clock, mode, FakeLog())
+tick_until(r, clock, 2.0, lvl=2, odom=700, vins_age=0.1, extnav=True,
+           mode="LOITER")
+check("композит в LOITER: стек = yaw-суб композита", names(stack) == ['yaw_part'])
+tick_until(r, clock, 1.0, lvl=0, odom=700, vins_age=0.1, extnav=True)
+check("композит: потолок 2→0 возвращает композит целиком",
+      names(stack) == ['dphold'])
+
+# --- 11. ladder_state(): правда лесенки для /mission/status (HUD-блок режимов).
 # Активный ярус и возраст незалатченного LOITER берутся ОТСЮДА (гистерезисы по
 # снапшоту не восстановимы); без sf_master — None (HUD рисует голый гейт) ---
 r, clock, mode, stack, vins = make()

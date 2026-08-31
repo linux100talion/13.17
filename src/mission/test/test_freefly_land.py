@@ -234,7 +234,8 @@ r, clock, mode, log, stack, ff, land = make()
 tick_until(r, clock, 1.0)
 tick_until(r, clock, 3.0, alt=3.0, odom=700, vins_age=0.1, extnav=True, lvl=2,
            mode="LOITER")                                   # ярус 2 залатчен
-check("подготовка: ярус 2, стек пуст", names(stack) == [] and ff._tier == 2)
+check("подготовка: ярус 2, стек = yaw-стаб",
+      names(stack) == ['yawd'] and ff._tier == 2)
 tick_until(r, clock, 0.2, alt=0.9, ipm=(0.0, 0.0), odom=700, vins_age=0.1,
            extnav=True, lvl=2, mode="LOITER", sa=True)
 check("кнопка в LOITER: шаг land", cur(r) == "land")

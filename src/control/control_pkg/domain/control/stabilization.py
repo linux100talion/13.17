@@ -1403,6 +1403,18 @@ class DpHold(StabilizationStrategy):
                 if hasattr(x, "frame") and getattr(x, "_axis", None) in ("roll", "pitch"):
                     x.frame = frame
 
+    @property
+    def yaw_sub(self):
+        """Yaw-суб композита ОТДЕЛЬНО — ярусу LOITER лесенки (Freefly._ladder_apply)
+        нужен только он: roll/pitch там уставки скорости FCU (passthrough), а yaw
+        обязан идти той же ручкой, что в ярусах 0/1 (pilot_gain, не сырые ±400 PWM —
+        разбор ныряния lv2_joy_20260831_074358). Экземпляр ОБЩИЙ с композитом:
+        ярусы активны по одному, а состояние сбрасывает stack.enter на переходе."""
+        for x in self._subs:
+            if "yaw" in x.axes:
+                return x
+        return None
+
     def enter(self, s: DroneState) -> None:
         if self.frame is not None:
             self.frame.reset()
