@@ -281,12 +281,14 @@ src/control/                       # ament_python пакет control_pkg
                      gz_hold.py vins_hold.py passthrough.py      # Gz*/VINS/легаси
                      flow_damper.py flow_axes.py ipm_axes.py     # база Dp* + оси поток/IPM
                      alt_settled.py station_frame.py             # гейт высоты, рама станции
+                     station_keeper.py    # автомат станции (фазы RELEASED/SETTLING/HOLD/BRAKE)
     application/     control_stack.py arbiter.py
     infrastructure/  ros_clock.py ros_telemetry.py mavros_actuator.py ros_io.py
                      ros_pilot.py ros_perception.py
     perception/      flow_estimator.py           # КАНОНИЧНАЯ копия (борт self-contained; вариант A)
   test/              test_profile_motion.py test_pilot_strategies.py test_families.py
                      test_flow_strategies.py test_multiaxis_stack.py test_handover.py
+                     test_ports.py        # порты ↔ адаптеры: AST-сверка сигнатур без ROS
 
 src/mission/                       # ament_python пакет mission_pkg (потребитель control)
   package.xml setup.py setup.cfg resource/mission_pkg

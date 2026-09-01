@@ -2,9 +2,11 @@
 """_FlowDamper1D — общий одноосевой флоу-демпфер, база семейства Dp*.
 
 Гасит визуальную скорость к цели по ОДНОЙ оси: покадровая интеграция (flow_seq),
-conf-blend, hold+fade на провалах сигнала, режимы команды rate/pos, станция-кипинг
-(гвоздь, BRAKE/RETURN, трим ветра) и мягкость по высоте/шуму. Конкретные оси:
-flow_axes.py (полнокадровый поток) и ipm_axes.py (канал вида сверху).
+conf-blend, hold+fade на провалах сигнала, режимы команды rate/pos и мягкость по
+высоте/шуму. Автомат станции-кипинга (гвоздь, фазы BRAKE/RETURN, защёлки трима) —
+StationKeeper (station_keeper.py), демпфер держит его в `self.station` (плюс
+делегаты исторических имён _pos_* для стендов). Конкретные оси: flow_axes.py
+(полнокадровый поток) и ipm_axes.py (канал вида сверху).
 Выделен из stabilization.py (там — реэкспорт).
 """
 import math
@@ -14,6 +16,7 @@ from ..setpoint import Setpoint
 from ..state import DroneState
 from .alt_settled import _AltSettled
 from .base import StabilizationStrategy
+from .station_keeper import StationKeeper
 
 
 def _blend(conf, conf_min, conf_full):
@@ -85,7 +88,6 @@ class _FlowDamper1D(StabilizationStrategy):
         # при развороте на месте она поехала бы с курсом, поэтому уход курса больше
         # _POS_YAW_TOL от курса захвата перезахватывает точку (снос за время разворота
         # прощаем — честнее, чем тянуть в повёрнутую сторону). 0 = выкл (как было).
-        self.pos_kp, self.pos_vmax = pos_kp, pos_vmax
         # --- ДВА ЗАКОНА СТАНЦИИ: «тормози жёстко, возвращайся мягко» ---
         # Одна линейная pos_kp обязана выбирать между стопом и звоном: она одинаково
         # жёстко тянет и ОТ точки (нужно — стоп), и К точке (даёт перелёт). Прогон
@@ -123,9 +125,6 @@ class _FlowDamper1D(StabilizationStrategy):
         # +0.01…+0.12 «ухода» при истинном нуле (смещение прогноза по наклону в
         # ветер, пока acc_tau не сошёлся), брейк висел с целью −3·v ≈ −0.1 и держал
         # борт на месте в 2 м от точки, возврат начался лишь на 8-й секунде.
-        self.pos_brake, self.pos_brake_vmax = pos_brake, pos_brake_vmax
-        self.pos_acc = pos_acc
-        self.pos_brake_v = pos_brake_v
         # --- СТАНЦИЯ ТОЛЬКО НА УСТАНОВИВШЕЙСЯ ВЫСОТЕ (pos_alt_band > 0) ---
         # Нужно ТАНГАЖУ: полоса земли лежит впереди, и ход по высоте канал читает как
         # ход вперёд — ФАНТОМ в пути ipm_fwd ~0.2-0.6 м на метр высоты (замер по
@@ -139,11 +138,18 @@ class _FlowDamper1D(StabilizationStrategy):
         # Крену не нужно (боковой фантом ×3 меньше, ipm_alt_band_lat по той же причине
         # выключен): 0 = без высотной логики, поведение прежнее. Гейт ОСИ
         # (_IpmGated.alt_band) при этом не трогаем — демпфер на наборе работает.
-        self._pos_alt = _AltSettled(band=pos_alt_band, still=pos_alt_still) \
-            if pos_alt_band > 0.0 else None
-        self._pos_brake = False   # фаза BRAKE активна (только при pos_brake > 0)
-        self._trim_armed = True   # ПЕРВЫЙ брейк после enter(): трим в упоре + порог
-                                  # входа без множителя _POS_BRAKE_REFIRE
+        # Автомат станции (фазы RELEASED/SETTLING/HOLD/BRAKE + защёлки трима) живёт
+        # в StationKeeper (station_keeper.py); ручки выше и константы _POS_* класса
+        # снимаются им здесь, при конструировании — история решений остаётся при них.
+        self.station = StationKeeper(
+            kp=pos_kp, vmax=pos_vmax, brake=pos_brake, brake_vmax=pos_brake_vmax,
+            acc=pos_acc, brake_v=pos_brake_v,
+            alt_gate=(_AltSettled(band=pos_alt_band, still=pos_alt_still)
+                      if pos_alt_band > 0.0 else None),
+            yaw_tol=self._POS_YAW_TOL, pin_v=self._POS_PIN_V,
+            brake_exit=self._POS_BRAKE_EXIT, refire=self._POS_BRAKE_REFIRE,
+            refire_dist=self._POS_BRAKE_REFIRE_DIST, pin_t=self._POS_PIN_T,
+            kp_exp=self._SOFT_KP_EXP)
         # --- ANTI-WINDUP интегратора (условное интегрирование) ---
         # Кламп ±imax не спасает: пока выход в упоре ±max, интегратор копит дальше
         # (ab_pos13: за 1.5 с упора при ошибке ~1 м/с +90 PWM сверх ветра), и потом
@@ -162,9 +168,6 @@ class _FlowDamper1D(StabilizationStrategy):
                                   # задаёт шаг интегрирования), эти часы — нет
         self._sp = 0.0           # pos-режим: точка удержания (0 = опорный кадр)
         self._sp_rate = 0.0      # её текущая скорость — для D-члена и отладки
-        self._pos_sp = None      # станция rate-оси: (путь в точке захвата, курс захвата)
-        self._pos_wait_t = None  # начало торможения (для принудительного гвоздя)
-        self._i_hold = False     # И-член заморожен: от живого стика до гвоздя (_TRIM_LATCH)
         self._soft = 1.0         # МЯГКОСТЬ по высоте (_IpmGated.soft_alt): kp, pos_kp ×soft^_SOFT_KP_EXP,
                                  # ki ×soft^_SOFT_KI_EXP, пороги гвоздя/брейка ÷soft; 1.0 = как было
         self.frame = None        # StationFrame — общая рама крена/тангажа (оси курса);
@@ -282,13 +285,7 @@ class _FlowDamper1D(StabilizationStrategy):
         # Захват текущего сигнала здесь был бы гонкой со сбросом — см. docstring класса.
         self._sp = 0.0
         self._sp_rate = 0.0
-        self._pos_sp = None
-        self._pos_wait_t = None
-        self._pos_brake = False
-        self._trim_armed = True
-        self._i_hold = False
-        if self._pos_alt is not None:
-            self._pos_alt.reset()
+        self.station.reset()
 
     def _soft_factor(self, s) -> float:
         """Мягкость по высоте, 1.0 = полная жёсткость. Хук: база не знает высоты."""
@@ -297,33 +294,10 @@ class _FlowDamper1D(StabilizationStrategy):
     def _station_target(self, err, v):
         """Цель скорости станции по ошибке пути `err` (точка − путь) и скорости `v`.
 
-        Одна ручка (pos_brake = 0): clamp(pos_kp·err, ±pos_vmax) — как было.
-        Две фазы — см. комментарий в __init__: BRAKE, пока уходим от точки (v·err < 0)
-        после входа по |v| > _POS_PIN_V, до измеренного нуля скорости — цель
-        −pos_brake·v (скоростной брейк, без позиционного члена); RETURN — всё
-        остальное, с √-капом тормозного пути при pos_acc > 0.
-        Пороги скорости делятся на `_soft` (шум канала растёт с высотой — см.
-        _IpmGated.soft_alt), pos_kp умножается."""
-        soft = self._soft
-        away = v * err < 0.0                     # скорость направлена ОТ точки
-        if self.pos_brake > 0.0:
-            if self._pos_brake:
-                if not away or abs(v) < self._POS_BRAKE_EXIT / soft:   # стоп состоялся
-                    self._pos_brake = False
-                    self._trim_armed = False      # первый брейк отработан: трим ветра
-                                                  # выучен, дальше порог входа ×REFIRE
-            elif away and abs(v) > ((self.pos_brake_v or self._POS_PIN_V) / soft
-                                    * (1.0 if self._trim_armed else self._POS_BRAKE_REFIRE)) \
-                    and (self._trim_armed or abs(err) >= self._POS_BRAKE_REFIRE_DIST):
-                self._pos_brake = True
-        if self._pos_brake:
-            vmax = self.pos_brake_vmax if self.pos_brake_vmax > 0.0 else self.pos_vmax
-            return clamp(-self.pos_brake * v, -vmax, vmax)
-        t = clamp(self.pos_kp * soft ** self._SOFT_KP_EXP * err, -self.pos_vmax, self.pos_vmax)
-        if self.pos_acc > 0.0:
-            cap = math.sqrt(2.0 * self.pos_acc * abs(err))
-            t = clamp(t, -cap, cap)
-        return t
+        Хук: стендовые сабклассы подменяют ЗАКОН, не трогая автомат (гвоздь/фазы
+        остаются в StationKeeper). Дефолт — StationKeeper.target: BRAKE/RETURN,
+        обоснование — комментарий pos_brake в __init__."""
+        return self.station.target(err, v, self._soft)
 
     def _signal_ok(self, s) -> bool:
         """Годен ли сигнал этой оси в этом кадре (переопределяется, где есть чем judge)."""
@@ -403,58 +377,19 @@ class _FlowDamper1D(StabilizationStrategy):
                     fr.advance(s)
                     fr.stick(self._axis, cmd != 0.0)
                     self._i = fr.trim_body(self._axis)
-                if pos is not None and cmd == 0.0 and self._pos_alt is not None \
-                        and self._pos_alt.update(s.now_sim, s.rel_alt) is False:
-                    # высота идёт / ещё не установилась — гвоздь отпущен, чистый
-                    # демпфер (см. pos_alt_band в __init__: фантом набора в пути)
-                    self._pos_sp = None
-                    self._pos_wait_t = None
-                    self._pos_brake = False
-                    self._target = 0.0
-                elif pos is not None and cmd == 0.0:
-                    # СТАНЦИЯ: «СНАЧАЛА ТОРМОЗИ, ПОТОМ ГВОЗДЬ» (механика LOITER).
-                    # Точка вяжется НЕ в момент отпускания стика: борт ещё несёт
-                    # 2-3 м/с, выбег ~9 м, и станция тянула бы его назад к месту,
-                    # которое пилот уже мысленно покинул — «рулю против резинки»
-                    # (полёт 2026-08-18). Пока |скорость| ≥ _POS_PIN_V — цель 0
-                    # (чистое торможение демпфером), гвоздь — где остановился.
-                    # Перезахват при уходе курса: путь копится в body-осях.
-                    # В осях курса (рама) точка мировая и с курсом не едет — перезахват
-                    # по уходу курса нужен только пока ДРУГАЯ ось везёт пилота (эта
-                    # держит «линию», и линия должна повернуться вместе с ходом).
-                    if (self._pos_sp is not None
-                            and (fr is None or fr.any_stick())
-                            and abs(math.atan2(math.sin(s.att_yaw - self._pos_sp[1]),
-                                               math.cos(s.att_yaw - self._pos_sp[1])))
-                            > self._POS_YAW_TOL):
-                        self._pos_sp = None
-                    if self._pos_sp is None:
-                        if self._pos_wait_t is None:
-                            self._pos_wait_t = s.now_sim
-                        if (abs(self._signal(s)) < self._POS_PIN_V / self._soft
-                                or s.now_sim - self._pos_wait_t > self._POS_PIN_T):
-                            self._pos_sp = (pos, s.att_yaw)
-                            self._pos_wait_t = None
-                            self._i_hold = False      # гвоздь взят — трим снова учится
-                            if fr is not None:
-                                fr.set_pin()          # ОДИН 2D-гвоздь на обе оси
-                    if self._pos_sp is not None:
-                        err_pos = (fr.body_err(self._axis) if fr is not None
-                                   else self._pos_sp[0] - pos)
-                        if err_pos is None:           # рама без гвоздя (сброшен) — взять
-                            fr.set_pin()
-                            err_pos = 0.0
-                        self._target = self._station_target(err_pos, self._signal(s))
-                    else:
-                        self._target = 0.0    # ещё тормозим — гвоздь позже
-                        self._pos_brake = False
+                if pos is not None and cmd == 0.0:
+                    # СТАНЦИЯ: «СНАЧАЛА ТОРМОЗИ, ПОТОМ ГВОЗДЬ» (механика LOITER,
+                    # полёт 2026-08-18: точка в момент отпускания = «рулю против
+                    # резинки»). Фазы, гвоздь и гейт высоты — StationKeeper.hold;
+                    # закон цели — через хук _station_target (стенды подменяют).
+                    self._target = self.station.hold(s, pos, self._signal(s), fr,
+                                                     self._axis, self._soft,
+                                                     self._station_target)
                 else:
-                    self._pos_sp = None       # стик живой → точка отпущена
-                    self._pos_wait_t = None
-                    self._pos_brake = False
-                    self._target = cmd * self.cmd_gain
+                    # стик живой (или станции нет): точка отпущена, цель = команда;
                     # трим ветра ЗАЩЁЛКНУТ на время толчка и выбега (_TRIM_LATCH)
-                    self._i_hold = bool(self._TRIM_LATCH and pos is not None)
+                    self.station.release(bool(self._TRIM_LATCH and pos is not None))
+                    self._target = cmd * self.cmd_gain
                 sig = self._signal(s)
                 err = sig - self._target                                # velocity-assist
             # первый брейк после enter() (трим ещё не выучен) — интегрируем со
@@ -522,3 +457,43 @@ class _FlowDamper1D(StabilizationStrategy):
         if self._cmd_mode == "pos":
             return None
         return (self._target, self._prev_err, self._out)
+
+    # --- Станция: делегаты в StationKeeper --------------------------------------
+    # Состояние станции живёт в self.station; исторические имена оставлены как
+    # свойства — их читают/пишут стенды (test_station_brake §4b-5, test_ipm_gates),
+    # телеметрия и сабклассы законов (PosBrake). Новому коду — station.* напрямую.
+    @property
+    def _pos_sp(self): return self.station.pin
+    @_pos_sp.setter
+    def _pos_sp(self, v): self.station.pin = v
+    @property
+    def _pos_wait_t(self): return self.station.wait_t
+    @_pos_wait_t.setter
+    def _pos_wait_t(self, v): self.station.wait_t = v
+    @property
+    def _pos_brake(self): return self.station.braking
+    @_pos_brake.setter
+    def _pos_brake(self, v): self.station.braking = v
+    @property
+    def _trim_armed(self): return self.station.trim_armed
+    @_trim_armed.setter
+    def _trim_armed(self, v): self.station.trim_armed = v
+    @property
+    def _i_hold(self): return self.station.i_hold
+    @_i_hold.setter
+    def _i_hold(self, v): self.station.i_hold = v
+    @property
+    def _pos_alt(self): return self.station.alt_gate
+    # конфиг станции (ручки pos_* задаются в __init__; здесь — только чтение)
+    @property
+    def pos_kp(self): return self.station.kp
+    @property
+    def pos_vmax(self): return self.station.vmax
+    @property
+    def pos_brake(self): return self.station.brake
+    @property
+    def pos_brake_vmax(self): return self.station.brake_vmax
+    @property
+    def pos_acc(self): return self.station.acc
+    @property
+    def pos_brake_v(self): return self.station.brake_v

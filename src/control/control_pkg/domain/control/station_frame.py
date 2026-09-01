@@ -61,13 +61,20 @@ class StationFrame:
             self.x += df * c - dl * si
             self.y += df * si + dl * c
         self._prev = cur
-        # телеметрия рамы — в снапшот (→ /mission/status: sf/sx/sy/spx/spy)
-        s.st_frame = 1
-        s.st_x, s.st_y = self.x, self.y
-        if self.pin is not None:
-            s.st_px, s.st_py = self.pin
-        else:
-            s.st_px = s.st_py = float('nan')
+
+    def dbg(self):
+        """(x, y, гвоздь|None) для телеметрии — или None, пока рама не видела ни
+        одного кадра («чего нет в источниках, того нет и в строке»).
+
+        ПУЛЛ-модель, как hold_dbg/rate_dbg демпфера: раму читает НОДА и сама кладёт
+        поля st_* в снапшот перед hud_status (→ /mission/status: sf/sx/sy/spx/spy).
+        До 2026-09-01 advance() писал st_* прямо в DroneState — единственное место,
+        где домен использовал входной снапшот как выходную шину; заодно после ухода
+        рамы из стека (свап на VinsHold) sf=1 залипал в персистентном снапшоте со
+        stale-координатами."""
+        if self._seq < 0:
+            return None
+        return (self.x, self.y, self.pin)
 
     def set_pin(self) -> None:
         self.pin = (self.x, self.y)

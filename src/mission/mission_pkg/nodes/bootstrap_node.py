@@ -458,6 +458,17 @@ class BootstrapArch2Node(Node):
         # мягкая посадка (SoftLand.land_state): баннер LANDING в HUD
         land = (step.land_state()
                 if step is not None and hasattr(step, 'land_state') else None)
+        # рама станции: ПУЛЛ из StationFrame.dbg() → поля st_* снапшота (домен в
+        # DroneState не пишет); рамы нет в текущем стеке / кадров не было — sf=0
+        fdbg = next((d for d in (getattr(st_, 'frame', None) and st_.frame.dbg()
+                                 for st_ in getattr(getattr(step, 'stack', None),
+                                                    'stabs', ()))
+                     if d is not None), None)
+        s.st_frame = int(fdbg is not None)
+        if fdbg is not None:
+            s.st_x, s.st_y = fdbg[0], fdbg[1]
+            s.st_px, s.st_py = (fdbg[2] if fdbg[2] is not None
+                                else (float('nan'), float('nan')))
         line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt,
                           ladder=ladder, vins_min=self._vins_min,
                           ripe_sec=self._ripe_sec, ripe_min=self._ripe_min,

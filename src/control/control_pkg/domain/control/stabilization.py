@@ -7,7 +7,8 @@
 - `gz_hold.py` — **Gz\\***: держит ПОЗИЦИЮ по ground-truth Gazebo (sim-оракул для
   тюнинга). GzHold база + алиасы GzPosHold/GzRollHold/GzPitchHold/GzYawHold.
 - `flow_damper.py` — **_FlowDamper1D**: общая база Dp* (покадровая интеграция,
-  conf-blend, hold+fade, станция-кипинг BRAKE/RETURN, трим ветра, мягкость).
+  conf-blend, hold+fade, мягкость); станция-кипинг — `station_keeper.py`
+  (**StationKeeper**: фазы RELEASED/SETTLING/HOLD/BRAKE, гвоздь, трим ветра).
 - `flow_axes.py` — **Dp\\*** оси по полнокадровому потоку: DpRollHold/DpPitchHold/
   DpYawHold + зонд DpPitchBack + композит DpHold (все три оси).
 - `ipm_axes.py` — оси по МЕТРИЧЕСКОМУ каналу вида сверху: _IpmGated (гейт
@@ -30,4 +31,5 @@ from .gz_hold import GzHold, GzPitchHold, GzPosHold, GzRollHold, GzYawHold  # no
 from .ipm_axes import DpPitchRate, DpRollRate, _IpmGated                    # noqa: F401
 from .passthrough import PilotPassthrough                                   # noqa: F401
 from .station_frame import StationFrame                                     # noqa: F401
+from .station_keeper import StationKeeper                                   # noqa: F401
 from .vins_hold import VinsHold                                             # noqa: F401
