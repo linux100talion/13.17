@@ -276,7 +276,11 @@ src/control/                       # ament_python пакет control_pkg
   package.xml setup.py setup.cfg resource/control_pkg  architecture.md
   control_pkg/
     domain/          rc.py state.py setpoint.py ports.py
-      control/       base.py stabilization.py trajectory.py excitation.py
+      control/       base.py trajectory.py excitation.py
+                     stabilization.py     # фасад-реэкспорт (имена стабильны), код в:
+                     gz_hold.py vins_hold.py passthrough.py      # Gz*/VINS/легаси
+                     flow_damper.py flow_axes.py ipm_axes.py     # база Dp* + оси поток/IPM
+                     alt_settled.py station_frame.py             # гейт высоты, рама станции
     application/     control_stack.py arbiter.py
     infrastructure/  ros_clock.py ros_telemetry.py mavros_actuator.py ros_io.py
                      ros_pilot.py ros_perception.py

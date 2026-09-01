@@ -171,7 +171,7 @@ class BootstrapConfig:
     roll_rate_ki: float = 0.0
     roll_rate_ki_trim: float = 0.0   # ki в упоре ПЕРВОГО брейка станции (набор трима
                                      # ветра), 0 = ki. Ручка — BS_ROLL_RATE_KI_TRIM /
-                                     # --roll-rate-ki-trim; смысл — stabilization.py,
+                                     # --roll-rate-ki-trim; смысл — flow_damper.py,
                                      # _FlowDamper1D.__init__ (ki_trim)
     roll_rate_kd: float = 0.0
     roll_rate_cmd_gain: float = 0.0   # м/с при полном стике (0 = чистое удержание:
@@ -278,7 +278,7 @@ class BootstrapConfig:
     # Без упора поведение не меняется вовсе (отлётанные серии без станции — бит-в-бит).
     # 1 = вкл (лётный дефолт), 0 = выкл. BS_RATE_AWU / --rate-anti-windup
     rate_anti_windup: float = 1.0
-    # СТАНЦИЯ В ОСЯХ КУРСА (StationFrame, stabilization.py): 'yaw' — гвоздь, мировая
+    # СТАНЦИЯ В ОСЯХ КУРСА (StationFrame, station_frame.py): 'yaw' — гвоздь, мировая
     # позиция и вектор трима ветра общие для крена/тангажа и повёрнуты курсом (после
     # разворота точка и трим на месте); 'body' — как было, каждая ось в осях борта
     # (разворот 200° в 5 м/с: трим смотрит назад, борт разгоняется до 1.4 м/с без
@@ -659,13 +659,13 @@ class BootstrapConfig:
                                      # показал — выключен заодно с остальными. 0 = выкл.
     # МЯГКОСТЬ ПО ВЫСОТЕ (_IpmGated.soft_alt): выше этой высоты, м, kp и pos_kp оси
     # ×(soft_alt/h), пороги гвоздя/брейка ÷; ki не трогается. 0 = выкл. Зачем —
-    # stabilization.py (шум канала вперёд ∝ h: на 8 м брейк будился шумом, тангаж
+    # ipm_axes.py (шум канала вперёд ∝ h: на 8 м брейк будился шумом, тангаж
     # качало ±11°). BS_PITCH_SOFT_ALT / BS_ROLL_SOFT_ALT, --pitch-soft-alt/--roll-soft-alt.
     pitch_soft_alt: float = 0.0
     roll_soft_alt: float = 0.0       # боковой шум с высотой плоский (0.15–0.18) — выкл
     # МЯГКОСТЬ ПО ИЗМЕРЕННОМУ ШУМУ канала (м/кадр, ipm_noise_*; у земли ~0.015–0.02):
     # выше — kp/pos_kp ×√(ref/σ̂), ki ×(ref/σ̂), пороги ÷. 0 = выкл. С soft_alt — минимум.
-    # BS_PITCH_SOFT_NOISE / BS_ROLL_SOFT_NOISE. Логика — stabilization.py, _IpmGated.
+    # BS_PITCH_SOFT_NOISE / BS_ROLL_SOFT_NOISE. Логика — ipm_axes.py, _IpmGated.
     pitch_soft_noise: float = 0.0
     roll_soft_noise: float = 0.0
     ipm_alt_band_fwd: float = 0.0    # ПРОДОЛЬНАЯ ось: полоса «высота установилась», М.

@@ -89,7 +89,7 @@ for b in sys.argv[1:]:
                             # пишется из снапшота и живёт даже без демпфера крена.
                             ('боковая', np.array(d9) if d9 else (np.array(d7) if d7 else None),
                              # ⚠️ ошибка в стабилизаторе считается как СИГНАЛ − цель
-                             # (stabilization.py: `err = self._signal(s) - self._target`),
+                             # (flow_damper.py: `err = self._signal(s) - self._target`),
                              # значит измерение = цель + ошибка. Обратный порядок даёт
                              # зеркальный сигнал и corr ≈ −0.8 с истиной — проверка на месте.
                              (lambda a: a[:, 1]) if d9 else (lambda a: a[:, 1] + a[:, 2]))):
