@@ -285,7 +285,9 @@ src/control/                       # ament_python пакет control_pkg
     application/     control_stack.py arbiter.py
     infrastructure/  ros_clock.py ros_telemetry.py mavros_actuator.py ros_io.py
                      ros_pilot.py ros_perception.py
-    perception/      flow_estimator.py           # КАНОНИЧНАЯ копия (борт self-contained; вариант A)
+    perception/      flow_estimator.py    # фасад FlowEstimator (канал скорости/yaw + process)
+                     ipm.py keyframe.py   # миксины: канал вида сверху / опорный канал
+                     attitude_buffer.py   # КАНОНИЧНАЯ копия (борт self-contained; вариант A)
   test/              test_profile_motion.py test_pilot_strategies.py test_families.py
                      test_flow_strategies.py test_multiaxis_stack.py test_handover.py
                      test_ports.py        # порты ↔ адаптеры: AST-сверка сигнатур без ROS

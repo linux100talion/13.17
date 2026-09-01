@@ -104,7 +104,7 @@ from nav_msgs.msg import Odometry                                        # noqa:
 from rclpy.serialization import deserialize_message                      # noqa: E402
 from sensor_msgs.msg import Image                                        # noqa: E402
 
-import control_pkg.perception.flow_estimator as fe_mod                   # noqa: E402
+import control_pkg.perception.ipm as ipm_mod                             # noqa: E402
 from control_pkg.perception.flow_estimator import FlowEstimator          # noqa: E402
 from mission_pkg.config import BootstrapConfig                           # noqa: E402
 
@@ -188,7 +188,8 @@ def flight_cfg():
 
 
 class CV2Proxy:
-    """Модуль cv2 для flow_estimator с перехватом LK: счётчик точек наружу не отдаётся."""
+    """Модуль cv2 для канала IPM (perception/ipm.py — LK живёт там) с перехватом:
+    счётчик точек наружу не отдаётся."""
 
     def __init__(self):
         self.n_in = self.n_ok = 0
@@ -294,7 +295,7 @@ def main():
     base_name = next((n for n, v in variants if v == BASE), variants[0][0])
 
     proxy = CV2Proxy()
-    fe_mod.cv2 = proxy
+    ipm_mod.cv2 = proxy
     ests, rows, corners = {}, {}, {}
     n = 0
     W = H = None

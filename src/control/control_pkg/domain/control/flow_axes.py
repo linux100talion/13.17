@@ -100,7 +100,7 @@ class DpPitchHold(_FlowDamper1D):
 
     def _signal_ok(self, s):
         # опора действительна только на постоянной высоте: на наборе и снижении
-        # оценщик помечает кадр kf_valid=False (см. flow_estimator.kf_alt_max)
+        # оценщик помечает кадр kf_valid=False (kf_alt_max в perception/keyframe.py)
         return bool(s.kf_valid)
 
 

@@ -32,17 +32,18 @@ import cv2
 # ЕЁ. `src/lab/flow_estimator.py` — старый скелет (129 строк против 471), разошедшийся
 # с лётным кодом; тест на нём пинил бы знак у кода, который никуда не летает.
 # Путь ищем от файла (репо) и по типовым точкам монтирования контейнеров.
-for _p in (os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        '..', 'control', 'control_pkg', 'perception'),
-           '/root/sim_ws/src/control/control_pkg/perception',
-           '/control/control_pkg/perception'):
-    if os.path.isfile(os.path.join(_p, 'flow_estimator.py')):
+# с 2026-09-01 оценщик — пакет (flow_estimator + миксины ipm/keyframe, relative
+# import): standalone-импорт мёртв, в sys.path кладём КОРЕНЬ с control_pkg
+for _p in (os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'control'),
+           '/root/sim_ws/src/control',
+           '/control'):
+    if os.path.isfile(os.path.join(_p, 'control_pkg', 'perception', 'flow_estimator.py')):
         sys.path.insert(0, _p)
         break
 else:                                    # noqa: PLW0120 — не нашли боевую: это ОШИБКА
     sys.exit('боевой flow_estimator.py не найден — проверять нечего')
-import flow_estimator as _fe             # noqa: E402
-from flow_estimator import FlowEstimator  # noqa: E402
+import control_pkg.perception.flow_estimator as _fe              # noqa: E402
+from control_pkg.perception.flow_estimator import FlowEstimator  # noqa: E402
 print(f'проверяем оценщик: {_fe.__file__}')
 
 # --- константы: зеркало alt_hold_bootstrap.py:59-61 (sim.yaml интринсики + экстринсики)
