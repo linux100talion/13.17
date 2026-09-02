@@ -139,9 +139,11 @@ class BootstrapArch2Node(Node):
         if cfg.handover_vins and (cfg.control_mode == 'flow_assist' or
                                   (use_mission and 'Dp' in stab_spec)):
             vins = VinsHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
-                            cfg.gz_max, cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain)
+                            cfg.gz_max, cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain,
+                            kd_err=cfg.vins_kd_err > 0)
             handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec)
-            self.logger.info(f"handover Flow→Vins ВКЛ: ready при ≥{cfg.vins_min} odom")
+            kd_note = ", kd на ошибке скорости" if cfg.vins_kd_err > 0 else ""
+            self.logger.info(f"handover Flow→Vins ВКЛ: ready при ≥{cfg.vins_min} odom{kd_note}")
 
         # домен/приложение: план по выбранному пути. live_pilot: газ живого пульта
         # проходит в Control-фазе через ThrottleLatch (scripted — нет: эталонные
@@ -946,6 +948,9 @@ def _parse() -> tuple:
     # ярус LOITER, путь 2: потолок крена виража, ° (YawBankLimit; 0 = выкл)
     p.add_argument('--loiter-bank-max', dest='loiter_bank_max', type=float,
                    default=_D.loiter_bank_max)
+    # VinsHold: kd на ошибке скорости, не на абсолютной v (см. config.vins_kd_err)
+    p.add_argument('--vins-kd-err', dest='vins_kd_err', type=float,
+                   default=_D.vins_kd_err)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,

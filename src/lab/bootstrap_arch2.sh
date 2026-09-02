@@ -272,6 +272,9 @@ ARGS=()
 # ярус LOITER, путь 2: потолок крена виража, ° (YawBankLimit — темп yaw по
 # скорости |ω| ≤ g·tan(φ)/v; альтернатива TrackHold, см. config.loiter_bank_max)
 [ -n "${BS_LOITER_BANK_MAX:-}" ] && ARGS+=(--loiter-bank-max "$BS_LOITER_BANK_MAX")
+# VinsHold: kd на ошибке скорости (лечит звон/долг уставки при полёте по
+# прямой, серия eagle 2026-09-02; см. config.vins_kd_err)
+[ -n "${BS_VINS_KD_ERR:-}" ]     && ARGS+=(--vins-kd-err "$BS_VINS_KD_ERR")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")

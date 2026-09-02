@@ -18,11 +18,20 @@ class VinsHold(StabilizationStrategy):
     axes = frozenset({"roll", "pitch"})
 
     def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
-                 psign=1.0, rsign=1.0, cmd_gain=0.8):
+                 psign=1.0, rsign=1.0, cmd_gain=0.8, kd_err=False):
         self.kp, self.kd, self.ki = kp, kd, ki
         self.imax, self.max = imax, max_pwm
         self.psign, self.rsign = psign, rsign
         self.cmd_gain = cmd_gain
+        # kd_err: D-член на ОШИБКЕ скорости (v − v_уставки), не на абсолютной v.
+        # Со старым законом в движении kd·v — константный «тормоз» (4 м/с × 120 =
+        # 480 PWM при потолке 150): его компенсируют позиционный долг ~9–12 м и
+        # И-член в капе, борт летит «на растянутой пружине» и звенит ~1 Гц
+        # (серия eagle 2026-09-02, разбор в docker/sim/doc/tmp/eagle/eagle.txt).
+        # С kd_err D демпфирует вокруг ДВИЖУЩЕГОСЯ равновесия (как каскад
+        # LOITER); на висении и при отпущенном стике v_уставки=0 → закон
+        # бит-в-бит прежний (доказанное удержание 0.07 м не трогаем).
+        self.kd_err = kd_err
         self._spx = self._spy = 0.0        # интеграл стик-команды → уставка (vins-опора)
         self._ix = self._iy = 0.0
         self._it = None
@@ -37,8 +46,10 @@ class VinsHold(StabilizationStrategy):
         # «вперёд» = куда сейчас смотрит нос, а не куда смотрел на входе в фазу
         c0 = math.cos(s.vins_yaw)
         s0 = math.sin(s.vins_yaw)
-        self._spx += (sp.c_fwd * c0 + sp.c_right * s0) * self.cmd_gain * dt
-        self._spy += (sp.c_fwd * s0 - sp.c_right * c0) * self.cmd_gain * dt
+        vspx = (sp.c_fwd * c0 + sp.c_right * s0) * self.cmd_gain
+        vspy = (sp.c_fwd * s0 - sp.c_right * c0) * self.cmd_gain
+        self._spx += vspx * dt
+        self._spy += vspy * dt
         ex = s.vins_x - self._spx
         ey = s.vins_y - self._spy
         now = s.now_sim
@@ -54,8 +65,12 @@ class VinsHold(StabilizationStrategy):
         sn = math.sin(s.vins_yaw)
         e_fwd = ex * c + ey * sn
         e_rgt = -ex * sn + ey * c
-        v_fwd = s.vins_vx * c + s.vins_vy * sn
-        v_rgt = -s.vins_vx * sn + s.vins_vy * c
+        vx, vy = s.vins_vx, s.vins_vy
+        if self.kd_err:
+            vx -= vspx
+            vy -= vspy
+        v_fwd = vx * c + vy * sn
+        v_rgt = -vx * sn + vy * c
         i_fwd = self._ix * c + self._iy * sn
         i_rgt = -self._ix * sn + self._iy * c
         po = self.psign * (self.kp * e_fwd + self.kd * v_fwd + self.ki * i_fwd)
