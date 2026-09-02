@@ -281,6 +281,46 @@ step_legacy = Freefly("ff", FakeStack([DAMPER]), pilot_stabs=[DAMPER],
 check("ladder_state: без sf_master → None (голый гейт LOITER в HUD)",
       step_legacy.ladder_state(snap(0.0)) is None)
 
+# --- 12. loiter_track (TrackHold): ярус LOITER = [track, yaw-стаб] — стики в
+# осях мира; распад яруса возвращает пилотский стек БЕЗ track (он только там) ---
+TRACK = FakeStab('track', ('roll', 'pitch'))
+clock, mode = FakeClock(), FakeMode()
+vins = FakeVins()
+stack = FakeStack([DAMPER, YAWD])
+step = Freefly("freefly", stack, pilot_stabs=[DAMPER, YAWD],
+               handover=VinsHandover(vins, min_count=40, fresh_sec=2.0),
+               loiter_center=True, vins_fresh=2.0, sf_master=True,
+               loiter_track=TRACK)
+r = PlanRunner([step], clock, mode, FakeLog())
+tick_until(r, clock, 2.0, lvl=2, odom=700, vins_age=0.1, extnav=True,
+           mode="LOITER")
+check("loiter_track: ярус LOITER = [track, yaw-стаб]",
+      names(stack) == ['track', 'yawd'])
+tick_until(r, clock, 1.0, lvl=0, odom=700, vins_age=0.1, extnav=True)
+check("loiter_track: потолок 2→0 — track ушёл вместе с ярусом",
+      names(stack) == ['damper', 'yawd'])
+
+# --- 13. loiter_bank_max (путь 2): yaw-стаб яруса LOITER обёрнут в YawBankLimit
+# (декоратор прозрачен — имя видно через inner), вне яруса — голый стаб ---
+from control_pkg.domain.control.bank_limit import YawBankLimit          # noqa: E402
+clock, mode = FakeClock(), FakeMode()
+vins = FakeVins()
+stack = FakeStack([DAMPER, YAWD])
+step = Freefly("freefly", stack, pilot_stabs=[DAMPER, YAWD],
+               handover=VinsHandover(vins, min_count=40, fresh_sec=2.0),
+               loiter_center=True, vins_fresh=2.0, sf_master=True,
+               loiter_bank_max=8.0)
+r = PlanRunner([step], clock, mode, FakeLog())
+tick_until(r, clock, 2.0, lvl=2, odom=700, vins_age=0.1, extnav=True,
+           mode="LOITER")
+check("loiter_bank_max: ярус LOITER = yaw-стаб под YawBankLimit",
+      names(stack) == ['yawd'] and isinstance(stack.stabs[0], YawBankLimit)
+      and stack.stabs[0].inner is YAWD)
+tick_until(r, clock, 1.0, lvl=0, odom=700, vins_age=0.1, extnav=True)
+check("loiter_bank_max: вне яруса — голый стаб (без обёртки)",
+      names(stack) == ['damper', 'yawd']
+      and not isinstance(stack.stabs[1], YawBankLimit))
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FREEFLY LADDER OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

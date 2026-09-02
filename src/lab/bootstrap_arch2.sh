@@ -266,6 +266,12 @@ ARGS=()
 # штатный LOITER-на-VINS: freefly-центр CH6 (BS_FF_LOITER=1) и бюджет гейта loiter<t>
 [ -n "${BS_FF_LOITER:-}" ]       && ARGS+=(--ff-loiter "$BS_FF_LOITER")
 [ -n "${BS_LOITER_ALT:-}" ]      && ARGS+=(--loiter-alt "$BS_LOITER_ALT")
+# ярус LOITER: стики = скорость в осях МИРА (TrackHold — yaw вращает нос, не
+# траекторию; агро-галсы без крена виража, см. config.loiter_track)
+[ -n "${BS_LOITER_TRACK:-}" ]    && ARGS+=(--loiter-track "$BS_LOITER_TRACK")
+# ярус LOITER, путь 2: потолок крена виража, ° (YawBankLimit — темп yaw по
+# скорости |ω| ≤ g·tan(φ)/v; альтернатива TrackHold, см. config.loiter_bank_max)
+[ -n "${BS_LOITER_BANK_MAX:-}" ] && ARGS+=(--loiter-bank-max "$BS_LOITER_BANK_MAX")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")

@@ -940,6 +940,12 @@ def _parse() -> tuple:
     # гейт «в воздухе» LOITER-на-VINS, м (одна правда: Freefly+LoiterHold+HUD)
     p.add_argument('--loiter-alt', dest='loiter_alt', type=float,
                    default=_D.loiter_alt)
+    # ярус LOITER: стики = скорость в осях МИРА (TrackHold, см. config.loiter_track)
+    p.add_argument('--loiter-track', dest='loiter_track', type=float,
+                   default=_D.loiter_track)
+    # ярус LOITER, путь 2: потолок крена виража, ° (YawBankLimit; 0 = выкл)
+    p.add_argument('--loiter-bank-max', dest='loiter_bank_max', type=float,
+                   default=_D.loiter_bank_max)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,

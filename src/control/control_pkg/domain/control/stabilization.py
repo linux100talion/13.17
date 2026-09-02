@@ -15,6 +15,8 @@
   доверия) + DpPitchRate/DpRollRate.
 - `alt_settled.py` — _AltSettled («высота успокоилась» без дифференциатора).
 - `station_frame.py` — StationFrame (станция в осях курса, общая рама).
+- `track_hold.py` — TrackHold (стики LOITER в осях мира: yaw вращает нос, не траекторию).
+- `bank_limit.py` — YawBankLimit (потолок крена виража: |ω| ≤ g·tan(φ_max)/v).
 - `vins_hold.py` — VinsHold (position-hold по VINS после init, своя опора).
 - `passthrough.py` — PilotPassthrough (легаси).
 
@@ -24,6 +26,7 @@ from ..rc import RC_CENTER, RcCommand, clamp                                # no
 from ..setpoint import Setpoint                                             # noqa: F401
 from ..state import DroneState                                              # noqa: F401
 from .alt_settled import _AltSettled                                        # noqa: F401
+from .bank_limit import YawBankLimit                                        # noqa: F401
 from .base import StabilizationStrategy                                     # noqa: F401
 from .flow_axes import DpHold, DpPitchBack, DpPitchHold, DpRollHold, DpYawHold  # noqa: F401
 from .flow_damper import _blend, _FlowDamper1D                              # noqa: F401
@@ -32,4 +35,5 @@ from .ipm_axes import DpPitchRate, DpRollRate, _IpmGated                    # no
 from .passthrough import PilotPassthrough                                   # noqa: F401
 from .station_frame import StationFrame                                     # noqa: F401
 from .station_keeper import StationKeeper                                   # noqa: F401
+from .track_hold import TrackHold                                           # noqa: F401
 from .vins_hold import VinsHold                                             # noqa: F401

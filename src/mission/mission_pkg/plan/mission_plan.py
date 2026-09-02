@@ -57,6 +57,7 @@ import re
 from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.altitude import AltHold
 from control_pkg.domain.control.excitation import NoExcitation
+from control_pkg.domain.control.track_hold import TrackHold
 from control_pkg.domain.control.trajectory import (ConstProfile, RcTransmitter,
                                                    StationKeep, StaticSetpoint, YawTurn)
 from control_pkg.domain.rc import RC_MIN_THR
@@ -160,7 +161,10 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                         sf_master=cfg.sf_master > 0,
                         loiter_alt=cfg.loiter_alt,
                         land_gate=((cfg.land_alt_max, cfg.land_v_max)
-                                   if soft_land else None))]
+                                   if soft_land else None),
+                        loiter_track=(TrackHold() if cfg.loiter_track > 0
+                                      else None),
+                        loiter_bank_max=cfg.loiter_bank_max)]
         if soft_land:
             # кнопка SA → Freefly отдаёт NEXT (FREEFLY_LAND) → сюда; дизарм
             # руками по-прежнему завершает миссию из самого Freefly (FINISH)

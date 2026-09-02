@@ -11,6 +11,7 @@ ctx.elapsed()/try_cmd()/keep_mode() — ни строчки rclpy.
 import math
 
 from control_pkg.application.hud import LadderState
+from control_pkg.domain.control.bank_limit import YawBankLimit
 from control_pkg.domain.control.throttle_latch import ThrottleLatch
 from control_pkg.domain.rc import RC_CENTER, RC_MIN_THR, RcCommand
 
@@ -55,7 +56,10 @@ def _overlay_stack(step, ctx, s, rc) -> None:
 def _yaw_stabs(stabs):
     """Состав яруса LOITER лесенки: от пилотского стека остаются ТОЛЬКО yaw-стабы
     (композит DpHold отдаёт свой yaw-суб через `yaw_sub`), roll/pitch — сырой
-    passthrough (в LOITER это уставки скорости для контроллера FCU).
+    passthrough (в LOITER это уставки скорости для контроллера FCU); при
+    config.loiter_track к ним ярус добавляет TrackHold (стик-вектор в осях мира —
+    yaw вращает нос, не траекторию; крен виража atan(v·ω/g) исчезает по
+    построению — разбор eagle/4 2026-09-01).
 
     ПОЧЕМУ НЕ ПУСТОЙ СТЕК (разбор lv2_joy_20260831_074358): с пустым стеком yaw-стик
     уходил в FCU сырым (±400 PWM = 202.5 °/с полного стика, PILOT_Y_RATE) — втрое
@@ -492,12 +496,21 @@ class Freefly(Step):
 
     def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
                  handover=None, loiter_center=False, vins_fresh=2.0,
-                 sf_master=False, loiter_alt=1.5, land_gate=None):
+                 sf_master=False, loiter_alt=1.5, land_gate=None,
+                 loiter_track=None, loiter_bank_max=0.0):
         self.name = name
         self.stack = stack
         self.keep = keep
         self._pilot_stabs = pilot_stabs
         self.loiter_alt = loiter_alt   # гейт «в воздухе» (см. config.loiter_alt)
+        # TrackHold яруса LOITER (config.loiter_track): стики roll/pitch — уставки
+        # скорости В ОСЯХ МИРА (yaw вращает нос, не траекторию — агро-галсы без
+        # крена виража). None = легаси (сырой passthrough в осях борта).
+        self.loiter_track = loiter_track
+        # Потолок крена виража яруса LOITER (config.loiter_bank_max, °): yaw-стабы
+        # яруса оборачиваются в YawBankLimit — «нос ведёт траекторию», но темп
+        # разворота режется по скорости (|ω| ≤ g·tan(φ_max)/v). 0 = выкл.
+        self.loiter_bank_max = float(loiter_bank_max)
         # Кнопка посадки (SA): (alt_max, v_max) — фронт «нажали» при rel_alt ≤
         # alt_max и |v| ≤ v_max завершает freefly → следующий шаг плана
         # (SoftLand). None — кнопки нет (ff_land=0), сажает пилот руками.
@@ -705,16 +718,29 @@ class Freefly(Step):
         self._tier = tier
         stabs = (self._pilot_stabs if tier == 0
                  else self.handover.vins_stabs(self._pilot_stabs, s) if tier == 1
-                 # LOITER: позицию держит FCU, roll/pitch = уставки скорости
-                 # (passthrough); yaw — тот же DpYawHold, что в ярусах 0/1
-                 # (сырой стик ронял борт в нырок — см. _yaw_stabs)
-                 else _yaw_stabs(self._pilot_stabs))
+                 else self._tier2_stabs())
         self.stack.switch_stabilization(stabs)
         self.stack.enter(s)              # пересев опор: держим ОТ ТЕКУЩЕЙ точки
+        tier2 = ("LOITER — стики = скорость В ОСЯХ МИРА (TrackHold), yaw у демпфера"
+                 if self.loiter_track is not None
+                 else "LOITER — стики = уставки скорости, yaw у демпфера")
+        if self.loiter_bank_max > 0:
+            tier2 += f", крен виража ≤ {self.loiter_bank_max:g}°"
         ctx.log.info("    ЛЕСЕНКА: ярус {} (потолок SC={})".format(
-            {0: "ДЕМПФЕР", 1: "VINSHOLD",
-             2: "LOITER — стики = уставки скорости, yaw у демпфера"}[tier],
-            self._level))
+            {0: "ДЕМПФЕР", 1: "VINSHOLD", 2: tier2}[tier], self._level))
+
+    def _tier2_stabs(self):
+        """Стек яруса LOITER: позицию держит FCU, roll/pitch = уставки скорости
+        (passthrough; с TrackHold — контр-вращённые в оси мира: yaw вращает нос,
+        не траекторию); yaw — тот же DpYawHold, что в ярусах 0/1 (сырой стик
+        ронял борт в нырок — см. _yaw_stabs), при loiter_bank_max — под потолком
+        крена виража (YawBankLimit: |ω| ≤ g·tan(φ_max)/v, темп по скорости).
+        Обёртки свежие на каждый вход в ярус — состояние живёт в общем inner."""
+        yaw = _yaw_stabs(self._pilot_stabs)
+        if self.loiter_bank_max > 0:
+            yaw = [YawBankLimit(st, self.loiter_bank_max) for st in yaw]
+        track = [self.loiter_track] if self.loiter_track is not None else []
+        return track + yaw
 
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=s.pilot_throttle)
