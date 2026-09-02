@@ -275,6 +275,12 @@ ARGS=()
 # VinsHold: kd на ошибке скорости (лечит звон/долг уставки при полёте по
 # прямой, серия eagle 2026-09-02; см. config.vins_kd_err)
 [ -n "${BS_VINS_KD_ERR:-}" ]     && ARGS+=(--vins-kd-err "$BS_VINS_KD_ERR")
+# VinsHold: защёлка трима — И-член заморожен от живого стика до «гвоздя»
+# (аналог _TRIM_LATCH станции; см. config.vins_i_latch)
+[ -n "${BS_VINS_I_LATCH:-}" ]    && ARGS+=(--vins-i-latch "$BS_VINS_I_LATCH")
+# VinsHold: гвоздь по остановке — на отпускании стика уставка перевязывается
+# на точку, где борт встал (как штатный LOITER; см. config.vins_pin_stop)
+[ -n "${BS_VINS_PIN_STOP:-}" ]   && ARGS+=(--vins-pin-stop "$BS_VINS_PIN_STOP")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")

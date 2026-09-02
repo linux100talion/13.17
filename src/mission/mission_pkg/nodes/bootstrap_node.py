@@ -140,10 +140,13 @@ class BootstrapArch2Node(Node):
                                   (use_mission and 'Dp' in stab_spec)):
             vins = VinsHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
                             cfg.gz_max, cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain,
-                            kd_err=cfg.vins_kd_err > 0)
+                            kd_err=cfg.vins_kd_err > 0, i_latch=cfg.vins_i_latch > 0,
+                            pin_stop=cfg.vins_pin_stop > 0)
             handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec)
             kd_note = ", kd на ошибке скорости" if cfg.vins_kd_err > 0 else ""
-            self.logger.info(f"handover Flow→Vins ВКЛ: ready при ≥{cfg.vins_min} odom{kd_note}")
+            il_note = ", защёлка трима" if cfg.vins_i_latch > 0 else ""
+            ps_note = ", гвоздь по остановке" if cfg.vins_pin_stop > 0 else ""
+            self.logger.info(f"handover Flow→Vins ВКЛ: ready при ≥{cfg.vins_min} odom{kd_note}{il_note}{ps_note}")
 
         # домен/приложение: план по выбранному пути. live_pilot: газ живого пульта
         # проходит в Control-фазе через ThrottleLatch (scripted — нет: эталонные
@@ -951,6 +954,12 @@ def _parse() -> tuple:
     # VinsHold: kd на ошибке скорости, не на абсолютной v (см. config.vins_kd_err)
     p.add_argument('--vins-kd-err', dest='vins_kd_err', type=float,
                    default=_D.vins_kd_err)
+    # VinsHold: защёлка трима — И-член заморожен стик→гвоздь (config.vins_i_latch)
+    p.add_argument('--vins-i-latch', dest='vins_i_latch', type=float,
+                   default=_D.vins_i_latch)
+    # VinsHold: гвоздь по остановке — уставка на точку стопа (config.vins_pin_stop)
+    p.add_argument('--vins-pin-stop', dest='vins_pin_stop', type=float,
+                   default=_D.vins_pin_stop)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,
