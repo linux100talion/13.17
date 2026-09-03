@@ -287,6 +287,17 @@ ARGS=()
 # VinsHold: сглаживание vins-скорости для D-члена (ФНЧ τ с) — лечит пилу
 # команды от kd·(сырая конечная разность позы) (config.vins_vsmooth)
 [ -n "${BS_VINS_VSMOOTH:-}" ]    && ARGS+=(--vins-vsmooth "$BS_VINS_VSMOOTH")
+# Ярус 1: выбор стабилизатора VINS (vinshold | dpvins) + гейны DpVins
+# (velocity-каскад, плавная замена VinsHold; см. config.dpvins_* / vins_axes.py)
+[ -n "${BS_VINS_STAB:-}" ]       && ARGS+=(--vins-stab "$BS_VINS_STAB")
+[ -n "${BS_DPVINS_KP_FWD:-}" ]   && ARGS+=(--dpvins-kp-fwd "$BS_DPVINS_KP_FWD")
+[ -n "${BS_DPVINS_KP_LAT:-}" ]   && ARGS+=(--dpvins-kp-lat "$BS_DPVINS_KP_LAT")
+[ -n "${BS_DPVINS_KI:-}" ]       && ARGS+=(--dpvins-ki "$BS_DPVINS_KI")
+[ -n "${BS_DPVINS_CMD_GAIN:-}" ] && ARGS+=(--dpvins-cmd-gain "$BS_DPVINS_CMD_GAIN")
+[ -n "${BS_DPVINS_POS_KP:-}" ]   && ARGS+=(--dpvins-pos-kp "$BS_DPVINS_POS_KP")
+[ -n "${BS_DPVINS_POS_VMAX:-}" ] && ARGS+=(--dpvins-pos-vmax "$BS_DPVINS_POS_VMAX")
+[ -n "${BS_DPVINS_POS_ACC:-}" ]  && ARGS+=(--dpvins-pos-acc "$BS_DPVINS_POS_ACC")
+[ -n "${BS_DPVINS_VSMOOTH:-}" ]  && ARGS+=(--dpvins-vsmooth "$BS_DPVINS_VSMOOTH")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")

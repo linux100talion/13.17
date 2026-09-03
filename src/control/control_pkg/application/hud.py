@@ -59,7 +59,7 @@ class LadderState:
 
 # Имена ярусов лесенки — общие для лога ноды, HUD (ASCII: Hershey-шрифт OpenCV
 # кириллицу не рисует) и ленты joy_timeline.
-TIER_NAMES = {0: "DAMPER", 1: "VINSHOLD", 2: "LOITER"}
+TIER_NAMES = {0: "DAMPER", 1: "VINS", 2: "LOITER"}
 
 # Свежесть позиции EKF — зеркало fresh_sec у WaitEkfPos (step.py) и гейта
 # GPS-kill в bootstrap_node: одна правда «EKF держит позицию».

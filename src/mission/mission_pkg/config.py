@@ -109,6 +109,27 @@ class BootstrapConfig:
     # подъесть демпфирование (высотный звон, BS_GZ_KD). КАНДИДАТ, полётом не
     # доказан: дефолт 0, включается BS_VINS_VSMOOTH=0.3 в .env бокса.
     vins_vsmooth: float = 0.0
+    # ЯРУС 1 — какой стабилизатор на опоре VINS: 'vinshold' (2D position-PID,
+    # дефолт, доказан сериями eagle) | 'dpvins' (velocity-каскад DpVins —
+    # плавная замена, см. vins_axes.py). Переключатель BS_VINS_STAB для A/B.
+    vins_stab: str = 'vinshold'
+    # DpVins (velocity-каскад): внутренний контур скорости, гейны в PWM на м/с
+    # ошибки скорости; ki — ветровой трим (латч на живом стике); внешний позиц.
+    # контур (стик отпущен) — pos_kp/vmax/acc √-кап, как станция демпфера;
+    # cmd_gain — м/с при полном стике; vsmooth — ФНЧ скорости ВНУТРЕННЕГО контура
+    # (аналог окна МНК демпфера; здесь безопасно — главная петля 1-го порядка).
+    # ГЕЙНЫ ДОКАЗАНЫ полётом lv2_joy_055400 (2026-09-03): kp 80/60 + ki 6 +
+    # vsmooth 0.2 → σθ 0.5–0.9° (уровень VinsHold, на устоявшихся прямых —
+    # демпфера 0.5°); стартовые 200/120/20/0.1 звенели втрое (v1 ab_dpvins σθ
+    # 3.5°) — от rate-осей IPM-демпфера, не перенеслись (у VINS другой шум).
+    dpvins_kp_fwd: float = 80.0
+    dpvins_kp_lat: float = 60.0
+    dpvins_ki: float = 6.0
+    dpvins_cmd_gain: float = 4.0
+    dpvins_pos_kp: float = 0.3
+    dpvins_pos_vmax: float = 0.3
+    dpvins_pos_acc: float = 0.15
+    dpvins_vsmooth: float = 0.2
     # shuttle (челнок) как стик-профиль: ±level по плечам leg сек
     gz_shuttle_level: float = 0.3    # уровень стика [-1..1] на плече
     gz_shuttle_leg: float = 3.0      # длительность плеча, sim-сек

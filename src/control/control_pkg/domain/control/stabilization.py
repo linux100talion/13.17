@@ -18,6 +18,8 @@
 - `track_hold.py` — TrackHold (стики LOITER в осях мира: yaw вращает нос, не траекторию).
 - `bank_limit.py` — YawBankLimit (потолок крена виража: |ω| ≤ g·tan(φ_max)/v).
 - `vins_hold.py` — VinsHold (position-hold по VINS после init, своя опора).
+- `vins_axes.py` — DpVins (velocity-каскад на опоре VINS — плавная замена
+  VinsHold: внутренний контур скорости + внешний √-кап позиции, как демпфер).
 - `passthrough.py` — PilotPassthrough (легаси).
 
 Незанятые оси раздаёт пилоту сам ControlStack (per-axis база = сырые стики).
@@ -36,4 +38,5 @@ from .passthrough import PilotPassthrough                                   # no
 from .station_frame import StationFrame                                     # noqa: F401
 from .station_keeper import StationKeeper                                   # noqa: F401
 from .track_hold import TrackHold                                           # noqa: F401
+from .vins_axes import DpVins                                               # noqa: F401
 from .vins_hold import VinsHold                                             # noqa: F401

@@ -676,9 +676,9 @@ class Freefly(Step):
         if lvl is not None and lvl != self._level:
             self._level = lvl
             ctx.log.info("    SC-потолок: {}".format(
-                {0: "ДЕМПФЕР (без свапа на VinsHold)",
-                 1: "демпфер → VINSHOLD по готовности",
-                 2: "демпфер → VinsHold → LOITER по зрелости"}[lvl]))
+                {0: "ДЕМПФЕР (без свапа на VINS)",
+                 1: "демпфер → VINS по готовности",
+                 2: "демпфер → VINS → LOITER по зрелости"}[lvl]))
 
     def _ladder_tier(self, s) -> int:
         """Активный ярус = min(потолок SC, лучший ГОТОВЫЙ). Вниз с VinsHold —
@@ -727,7 +727,7 @@ class Freefly(Step):
         if self.loiter_bank_max > 0:
             tier2 += f", крен виража ≤ {self.loiter_bank_max:g}°"
         ctx.log.info("    ЛЕСЕНКА: ярус {} (потолок SC={})".format(
-            {0: "ДЕМПФЕР", 1: "VINSHOLD", 2: tier2}[tier], self._level))
+            {0: "ДЕМПФЕР", 1: "VINS", 2: tier2}[tier], self._level))
 
     def _tier2_stabs(self):
         """Стек яруса LOITER: позицию держит FCU, roll/pitch = уставки скорости
@@ -967,7 +967,7 @@ class SoftLand(Step):
         ctx.reset_keyframe()
         self.stack.enter(s)
         ctx.log.info("    {}: {} — снижение в ALT_HOLD под {} (газ {}), стик = наклон"
-                     .format(self.name, why, "VINSHOLD" if self._tier == 1 else "ДЕМПФЕРОМ",
+                     .format(self.name, why, "VINS" if self._tier == 1 else "ДЕМПФЕРОМ",
                              self.descent))
 
     def _decide(self, ctx, s) -> None:

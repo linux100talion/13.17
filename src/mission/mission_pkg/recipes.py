@@ -24,7 +24,7 @@ from control_pkg.application.control_stack import ControlStack
 from control_pkg.domain.control.excitation import NoExcitation
 from control_pkg.domain.control.stabilization import (
     DpHold, DpPitchBack, DpPitchHold, DpPitchRate, DpRollHold, DpRollRate, DpYawHold, GzHold, GzPitchHold,
-    GzPosHold, GzRollHold, GzYawHold, StationFrame, VinsHold)
+    DpVins, GzPosHold, GzRollHold, GzYawHold, StationFrame, VinsHold)
 from control_pkg.domain.control.trajectory import RcTransmitter, Shuttle
 
 CONTROL_MODES = ("shuttle", "assisted", "manual", "flow_assist")
@@ -99,12 +99,29 @@ def _dp_yaw(cfg):
                      pilot_gain=cfg.yaw_pilot_gain, v_gate=cfg.yaw_v_gate)
 
 
-def _vins(cfg):
+def _dpvins(cfg):
+    """DpVins — velocity-каскад на опоре VINS (плавная замена VinsHold)."""
+    return DpVins(kp_fwd=cfg.dpvins_kp_fwd, kp_lat=cfg.dpvins_kp_lat,
+                  ki=cfg.dpvins_ki, imax=cfg.gz_imax, max_pwm=cfg.gz_max,
+                  cmd_gain=cfg.dpvins_cmd_gain, pos_kp=cfg.dpvins_pos_kp,
+                  pos_vmax=cfg.dpvins_pos_vmax, pos_acc=cfg.dpvins_pos_acc,
+                  psign=cfg.gz_psign, rsign=cfg.gz_rsign,
+                  vsmooth=cfg.dpvins_vsmooth, i_latch=cfg.vins_i_latch > 0)
+
+
+def build_vins_stab(cfg):
+    """Стабилизатор яруса 1 по cfg.vins_stab: 'dpvins' → DpVins, иначе VinsHold."""
+    if str(cfg.vins_stab).lower() == 'dpvins':
+        return _dpvins(cfg)
     return VinsHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax, cfg.gz_max,
                     cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain,
                     kd_err=cfg.vins_kd_err > 0, i_latch=cfg.vins_i_latch > 0,
                     pin_stop=cfg.vins_pin_stop > 0, predict=cfg.vins_predict > 0,
                     vsmooth=cfg.vins_vsmooth)
+
+
+def _vins(cfg):
+    return build_vins_stab(cfg)
 
 
 # имя → билдер(cfg)→стратегия (None = «ничего», для manual/none)
