@@ -255,6 +255,11 @@ ARGS=()
 # рантайм switch Flow→Vins по «VINS ready» (только flow_assist)
 [ "${BS_HANDOVER_VINS:-0}" = "1" ] && ARGS+=(--handover-vins)
 [ -n "${BS_VINS_MIN:-}" ]        && ARGS+=(--vins-min "$BS_VINS_MIN")
+# гейт здоровья VINS: авто-демоут яруса 1 при разносе (потолок + IPM-кросс-чек;
+# см. config.vins_v_max/vins_ipm_tol)
+[ -n "${BS_VINS_V_MAX:-}" ]      && ARGS+=(--vins-v-max "$BS_VINS_V_MAX")
+[ -n "${BS_VINS_IPM_TOL:-}" ]    && ARGS+=(--vins-ipm-tol "$BS_VINS_IPM_TOL")
+[ -n "${BS_VINS_SANE_N:-}" ]     && ARGS+=(--vins-sane-n "$BS_VINS_SANE_N")
 # зрелость VINS для EKF-свапа: sim-СЕКУНД от первой одометрии (гейт по времени
 # потока, не по счётчику; пол по счётчику — BS_VINS_MIN)
 [ -n "${BS_RIPE_SEC:-}" ]        && ARGS+=(--ripe-sec "$BS_RIPE_SEC")

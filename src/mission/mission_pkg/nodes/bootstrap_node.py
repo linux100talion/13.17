@@ -140,7 +140,9 @@ class BootstrapArch2Node(Node):
         if cfg.handover_vins and (cfg.control_mode == 'flow_assist' or
                                   (use_mission and 'Dp' in stab_spec)):
             vins = build_vins_stab(cfg)
-            handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec)
+            handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec,
+                                    v_max=cfg.vins_v_max, ipm_tol=cfg.vins_ipm_tol,
+                                    sane_n=cfg.vins_sane_n)
             if str(cfg.vins_stab).lower() == 'dpvins':
                 note = (f", DpVins (velocity-каскад) kp {cfg.dpvins_kp_fwd:g}/"
                         f"{cfg.dpvins_kp_lat:g} ki {cfg.dpvins_ki:g} "
@@ -940,6 +942,12 @@ def _parse() -> tuple:
     p.add_argument('--handover-vins', dest='handover_vins', action='store_true')
     p.add_argument('--vins-min', dest='vins_min', type=int, default=40)
     p.add_argument('--vins-fresh-sec', dest='vins_fresh_sec', type=float, default=2.0)
+    # гейт здоровья VINS (авто-демоут яруса 1 при разносе; см. config.vins_v_max)
+    p.add_argument('--vins-v-max', dest='vins_v_max', type=float, default=_D.vins_v_max)
+    p.add_argument('--vins-ipm-tol', dest='vins_ipm_tol', type=float,
+                   default=_D.vins_ipm_tol)
+    p.add_argument('--vins-sane-n', dest='vins_sane_n', type=int,
+                   default=_D.vins_sane_n)
     # зрелость VINS для EKF-свапа: sim-секунды от первой одометрии (см. config)
     p.add_argument('--ripe-sec', dest='ripe_sec', type=float, default=_D.ripe_sec)
     # 2-я ступень гейта — детектор residual+ratio (0 = только время)

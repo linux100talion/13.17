@@ -23,15 +23,48 @@ VINSHANDOVER: hover_1 держал 0.9 м, hover_4/7 болтало 4-7 м де�
 
 
 class VinsHandover:
-    def __init__(self, vins_hold, min_count: int = 40, fresh_sec: float = 2.0):
+    def __init__(self, vins_hold, min_count: int = 40, fresh_sec: float = 2.0,
+                 v_max: float = 0.0, ipm_tol: float = 0.0, sane_n: int = 3):
         self._vins = vins_hold
         self.min_count = min_count
         self.fresh_sec = fresh_sec
+        # ГЕЙТ ЗДОРОВЬЯ (санити): защита от разноса VINS (см. config.vins_v_max).
+        # 0 = выкл. sane_n — сколько кадров подряд расхождения с IPM до вердикта
+        # «болен» (защита от одиночного шумного кадра IPM; физ. потолок — сразу).
+        self.v_max = v_max
+        self.ipm_tol = ipm_tol
+        self.sane_n = sane_n
+        self._ipm_bad = 0             # кадров подряд |vins_v−ipm_v| > tol
+        self._last_sane_t = None      # счётчик двигаем раз на новый sim-тик
         self._done = False
+
+    def vins_sane(self, s) -> bool:
+        """VINS вменяем: скорость физически возможна И (если IPM жив) согласна с
+        независимым оптическим каналом. Разнос (|v|→20 на неподвижном борте)
+        проваливает оба. Модуль скорости инвариантен к системе координат, так
+        что vins (мир) и ipm (тело) сравнимы напрямую."""
+        import math
+        vh = math.hypot(s.vins_vx, s.vins_vy)
+        if self.v_max > 0.0 and vh > self.v_max:
+            return False                      # физически невозможно = мусор (грубо)
+        # IPM-кросс-чек с защитой от одиночного шумного кадра (sane_n подряд).
+        # Счётчик двигаем раз на новый sim-тик — метод зовут оба пути лесенки.
+        new_tick = self._last_sane_t is None or s.now_sim > self._last_sane_t
+        if self.ipm_tol > 0.0 and s.ipm_ok:
+            iv = math.hypot(s.ipm_vfwd, s.ipm_vlat)
+            bad = abs(vh - iv) > self.ipm_tol
+            if new_tick:
+                self._ipm_bad = self._ipm_bad + 1 if bad else 0
+        elif new_tick:
+            self._ipm_bad = 0                 # IPM слеп — чек не судит, не копим
+        if new_tick:
+            self._last_sane_t = s.now_sim
+        return self._ipm_bad < self.sane_n
 
     def vins_ready(self, s) -> bool:
         return (s.vins_odom_count >= self.min_count and
-                (s.now_sim - s.vins_last_sim) < self.fresh_sec)
+                (s.now_sim - s.vins_last_sim) < self.fresh_sec and
+                self.vins_sane(s))
 
     def vins_stabs(self, base, s):
         """Состав яруса VinsHold: yaw-стабы из base + VinsHold ПОСЛЕДНИМ (порядок —

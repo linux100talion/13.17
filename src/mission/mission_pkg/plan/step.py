@@ -689,7 +689,11 @@ class Freefly(Step):
         if lvl < 1 or ho is None:
             tier = 0
         elif self._tier >= 1:
-            tier = 1 if (s.now_sim - s.vins_last_sim) <= 3.0 * ho.fresh_sec else 0
+            # уже на ярусе ≥1: держим по свежести (гистерезис 3×fresh), НО падаем
+            # немедленно при потере ЗДОРОВЬЯ VINS (разнос — свеж, но мусор; без
+            # этого залипал на мусоре → унос, память vins-hover-init-divergence)
+            fresh = (s.now_sim - s.vins_last_sim) <= 3.0 * ho.fresh_sec
+            tier = 1 if (fresh and ho.vins_sane(s)) else 0
         else:
             tier = 1 if ho.vins_ready(s) else 0
         if lvl >= 2 and self._in_loiter and s.mode == "LOITER":

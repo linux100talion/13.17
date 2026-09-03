@@ -93,6 +93,56 @@ rc3 = stack3.update(s(odom=6, last_sim=11.1, now=11.1, vins_x=1.5))
 check("композит: на форвард-дрейфе vins команда тангажа — от VinsHold (≠1500)",
       rc3.pitch != 1500)
 
+# ============ ГЕЙТ ЗДОРОВЬЯ VINS (авто-демоут яруса 1 при разносе) ============
+def sh(now, vx=0.0, vy=0.0, ipm_ok=False, ipm_vfwd=0.0, ipm_vlat=0.0):
+    return DroneState(vins_valid=True, vins_odom_count=100,
+                      vins_last_sim=now, now_sim=now, vins_vx=vx, vins_vy=vy,
+                      ipm_ok=ipm_ok, ipm_vfwd=ipm_vfwd, ipm_vlat=ipm_vlat)
+
+
+hg = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
+                  v_max=12.0, ipm_tol=4.0, sane_n=3)
+
+# 1. норма: скорость мала, IPM согласен → sane, ready
+check("норма (v=1, ipm=1): sane и ready", hg.vins_sane(sh(50.0, vx=1.0,
+      ipm_ok=True, ipm_vfwd=1.0)) and hg.vins_ready(sh(50.05, vx=1.0,
+      ipm_ok=True, ipm_vfwd=1.0)))
+
+# 2. физ. потолок: |v|=20 > 12 → мусор СРАЗУ (без счётчика)
+check("разнос |v|=20 > потолок 12: НЕ sane (сразу)",
+      not hg.vins_sane(sh(51.0, vx=20.0, vy=0.0)))
+check("разнос: vins_ready = False → авто-демоут",
+      not hg.vins_ready(sh(51.05, vx=20.0)))
+
+# 3. IPM-расхождение: |vins_v−ipm_v| = 8 > tol 4, но нужно sane_n=3 подряд
+hg2 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
+                   v_max=12.0, ipm_tol=4.0, sane_n=3)
+r1 = hg2.vins_sane(sh(60.0, vx=8.0, ipm_ok=True, ipm_vfwd=0.0))   # bad 1
+r2 = hg2.vins_sane(sh(60.1, vx=8.0, ipm_ok=True, ipm_vfwd=0.0))   # bad 2
+check("IPM-расхождение 1-2 кадра: ещё sane (защита от шума)", r1 and r2)
+r3 = hg2.vins_sane(sh(60.2, vx=8.0, ipm_ok=True, ipm_vfwd=0.0))   # bad 3
+check("IPM-расхождение 3 кадра подряд: НЕ sane (демоут)", not r3)
+
+# 4. IPM ослеп в разносе (ipm_ok=False, но v<потолка): физ.потолок не судит,
+#    IPM тоже — счётчик не копится (не ложный демоут при слепом канале)
+hg3 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
+                   v_max=12.0, ipm_tol=4.0, sane_n=3)
+for i in range(5):
+    ok_slep = hg3.vins_sane(sh(70.0 + i * 0.1, vx=5.0, ipm_ok=False))
+check("IPM слеп, v под потолком: остаётся sane (чек не судит)", ok_slep)
+
+# 5. счётчик двигается раз на тик (метод зовут оба пути лесенки за один тик)
+hg4 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
+                   v_max=12.0, ipm_tol=4.0, sane_n=3)
+st_bad = sh(80.0, vx=8.0, ipm_ok=True, ipm_vfwd=0.0)
+hg4.vins_sane(st_bad); hg4.vins_sane(st_bad); hg4.vins_sane(st_bad)  # тот же тик ×3
+check("тот же тик ×3: счётчик = 1 (не 3) → ещё sane", hg4._ipm_bad == 1)
+
+# 6. выкл (v_max=0, ipm_tol=0): всегда sane (старое поведение)
+hg5 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0)
+check("гейт выкл: разнос |v|=20 всё равно sane (обратная совместимость)",
+      hg5.vins_sane(sh(90.0, vx=20.0)))
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HANDOVER Flow→Vins OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
