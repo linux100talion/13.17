@@ -20,10 +20,12 @@ class VinsHold(StabilizationStrategy):
     # защёлка трима (i_latch): пороги — мёртвая зона стика и «гвоздь» по скорости
     _I_DZ = 0.02       # |c_*| выше — стик живой, И-член замораживается
     _I_PIN_V = 0.3     # м/с: после отпускания И-член спит, пока борт не встал
+    _PRED_MAX = 0.3    # с: потолок мёртвого счисления предиктора (protухший
+                       # отсчёт дальше не экстраполируем — честнее сырое)
 
     def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
                  psign=1.0, rsign=1.0, cmd_gain=0.8, kd_err=False,
-                 i_latch=False, pin_stop=False):
+                 i_latch=False, pin_stop=False, predict=False):
         self.kp, self.kd, self.ki = kp, kd, ki
         self.imax, self.max = imax, max_pwm
         self.psign, self.rsign = psign, rsign
@@ -52,6 +54,15 @@ class VinsHold(StabilizationStrategy):
         # возврат 3.6–5.3 м после каждого стопа). «Тормозим и держим где
         # встали», а не «возвращаемся туда, где была команда».
         self.pin_stop = pin_stop
+        # predict — ПРЕДИКТОР ПОЗЫ между отсчётами VINS (мёртвое счисление):
+        # контроллер тикает 20 Гц и уставка бежит непрерывно, а поза VINS шагает
+        # 10 Гц — ошибка kp·e ПИЛИТ (замер eagle/1 vs /2 2026-09-03: средний шаг
+        # команды 11 PWM/тик и 6-7 реверсов/с против 0.8-1.0 и 0.1-0.4 у
+        # демпфера — «не плавный» при вылеченном звоне). Лечение: позу между
+        # отсчётами продвигаем на v_vins·возраст (скорость VINS IMU-пропагирована,
+        # честная — тот же приём, что AttitudeBuffer для углов IPM). Экстраполяция
+        # капится _PRED_MAX; predict=False — закон бит-в-бит прежний.
+        self.predict = predict
         self._spx = self._spy = 0.0        # интеграл стик-команды → уставка (vins-опора)
         self._ix = self._iy = 0.0
         self._it = None
@@ -74,6 +85,15 @@ class VinsHold(StabilizationStrategy):
         vspy = (sp.c_fwd * s0 - sp.c_right * c0) * self.cmd_gain
         self._spx += vspx * dt
         self._spy += vspy * dt
+        # предиктор позы: между 10 Гц отсчётами продвигаем позицию мёртвым
+        # счислением на v_vins·возраст — иначе kp·e пилит против бегущей уставки
+        px, py = s.vins_x, s.vins_y
+        if self.predict:
+            age = s.now_sim - s.vins_last_sim
+            if 0.0 < age:
+                age = min(age, self._PRED_MAX)
+                px += s.vins_vx * age
+                py += s.vins_vy * age
         # общий «гвоздь»: стик отпущен И борт встал (|v| < _I_PIN_V) — здесь
         # снимается защёлка трима (i_latch) и перевязывается уставка (pin_stop)
         stick = abs(sp.c_fwd) > self._I_DZ or abs(sp.c_right) > self._I_DZ
@@ -85,10 +105,10 @@ class VinsHold(StabilizationStrategy):
         elif math.hypot(s.vins_vx, s.vins_vy) < self._I_PIN_V:
             self._i_frozen = False         # гвоздь: встали — трим снова учится
             if self._pin_pending:
-                self._spx, self._spy = s.vins_x, s.vins_y
+                self._spx, self._spy = px, py
                 self._pin_pending = False  # один раз на отпускание — дальше держим
-        ex = s.vins_x - self._spx
-        ey = s.vins_y - self._spy
+        ex = px - self._spx
+        ey = py - self._spy
         now = s.now_sim
         if (self.ki > 0 and self._it is not None and now > self._it
                 and not self._i_frozen):

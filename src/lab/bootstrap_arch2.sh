@@ -281,6 +281,9 @@ ARGS=()
 # VinsHold: гвоздь по остановке — на отпускании стика уставка перевязывается
 # на точку, где борт встал (как штатный LOITER; см. config.vins_pin_stop)
 [ -n "${BS_VINS_PIN_STOP:-}" ]   && ARGS+=(--vins-pin-stop "$BS_VINS_PIN_STOP")
+# VinsHold: предиктор позы между 10 Гц отсчётами VINS — мёртвое счисление
+# v_vins·возраст, лечит пилу kp·e против бегущей уставки (config.vins_predict)
+[ -n "${BS_VINS_PREDICT:-}" ]    && ARGS+=(--vins-predict "$BS_VINS_PREDICT")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")
