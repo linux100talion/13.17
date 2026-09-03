@@ -105,6 +105,25 @@ for i in range(20):
 check("живой стик, v=цель: И-член заморожен (выход центр)",
       r1.pitch == RC_CENTER)
 
+# --- 7a. трим: ПЕРВОЕ торможение учит ветер, после гвоздя морозится ---
+# дилемма lv2_joy_065026/ab_dpv_pinfix: всегда мотать → унос назад; всегда
+# морозить → дедлок (без ветра не остановиться). _trim_armed: первый брейк
+# интегрирует, дальше морозит на торможении.
+vh = make(ki=20.0, kp_fwd=40.0)
+vh.update(st(vx=1.0, t=100.05), Setpoint(c_fwd=1.0), DT)   # живой стик → pin_pending
+r0 = None
+for i in range(30):                          # отпустили, ПЕРВОЕ торможение (не armed)
+    r0 = vh.update(st(vx=1.0, t=100.1 + i * DT), Setpoint(), DT)
+check("первое торможение (не armed): трим ИНТЕГРИРУЕТ (выход > чистый kp·v 40)",
+      r0.pitch > RC_CENTER + 40)
+vh.update(st(vx=0.0, x=1.0, t=102.0), Setpoint(), DT)      # встал → гвоздь, armed
+vh.update(st(vx=1.0, t=102.05), Setpoint(c_fwd=1.0), DT)   # стик оживил → гвоздь снят
+i0 = vh._if
+for i in range(20):                          # торможение armed: трим ЗАМОРОЖЕН
+    vh.update(st(vx=1.0, t=102.1 + i * DT), Setpoint(), DT)
+check("торможение после первого гвоздя (armed): трим ЗАМОРОЖЕН (не растёт)",
+      abs(vh._if - i0) < 1e-6)
+
 # --- 7b. знак крена: правый стик → вправо (+ro), как VinsHold ---
 rc = make(ki=0.0).update(st(vx=0.0, vy=0.0, yaw=0.0), Setpoint(c_right=1.0), DT)
 check("правый стик, v=0: разгон вправо (+150, как VinsHold)",

@@ -102,7 +102,7 @@ def _dp_yaw(cfg):
 def _dpvins(cfg):
     """DpVins — velocity-каскад на опоре VINS (плавная замена VinsHold)."""
     return DpVins(kp_fwd=cfg.dpvins_kp_fwd, kp_lat=cfg.dpvins_kp_lat,
-                  ki=cfg.dpvins_ki, imax=cfg.gz_imax, max_pwm=cfg.gz_max,
+                  ki=cfg.dpvins_ki, imax=cfg.dpvins_imax, max_pwm=cfg.gz_max,
                   cmd_gain=cfg.dpvins_cmd_gain, pos_kp=cfg.dpvins_pos_kp,
                   pos_vmax=cfg.dpvins_pos_vmax, pos_acc=cfg.dpvins_pos_acc,
                   psign=cfg.gz_psign, rsign=cfg.gz_rsign,

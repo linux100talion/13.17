@@ -298,6 +298,7 @@ ARGS=()
 [ -n "${BS_DPVINS_POS_VMAX:-}" ] && ARGS+=(--dpvins-pos-vmax "$BS_DPVINS_POS_VMAX")
 [ -n "${BS_DPVINS_POS_ACC:-}" ]  && ARGS+=(--dpvins-pos-acc "$BS_DPVINS_POS_ACC")
 [ -n "${BS_DPVINS_VSMOOTH:-}" ]  && ARGS+=(--dpvins-vsmooth "$BS_DPVINS_VSMOOTH")
+[ -n "${BS_DPVINS_IMAX:-}" ]     && ARGS+=(--dpvins-imax "$BS_DPVINS_IMAX")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")

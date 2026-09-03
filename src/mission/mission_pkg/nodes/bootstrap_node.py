@@ -994,6 +994,8 @@ def _parse() -> tuple:
                    default=_D.dpvins_pos_acc)
     p.add_argument('--dpvins-vsmooth', dest='dpvins_vsmooth', type=float,
                    default=_D.dpvins_vsmooth)
+    p.add_argument('--dpvins-imax', dest='dpvins_imax', type=float,
+                   default=_D.dpvins_imax)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,

@@ -58,6 +58,7 @@ class DpVins(StabilizationStrategy):
         self._pinx = self._piny = None     # гвоздь (мир); None = стик жив / не встал
         self._pin_pending = False          # гвоздь заказан (стик жил, ждём стопа)
         self._if = self._il = 0.0          # И-член (трим) вдоль fwd/lat тела
+        self._trim_armed = False           # ветровой трим выучен (первый стоп прошёл)
         self._vff = self._vfl = 0.0        # ФНЧ скорости внутреннего контура
         self._vf_init = False
         self._it = None
@@ -66,6 +67,7 @@ class DpVins(StabilizationStrategy):
         self._pinx = self._piny = None
         self._pin_pending = False
         self._if = self._il = 0.0
+        self._trim_armed = False
         self._vff = self._vfl = 0.0
         self._vf_init = False
         self._it = s.now_sim
@@ -112,6 +114,7 @@ class DpVins(StabilizationStrategy):
             if self._pin_pending and speed < self._PIN_V:
                 self._pinx, self._piny = s.vins_x, s.vins_y   # ГВОЗДЬ по остановке
                 self._pin_pending = False
+                self._trim_armed = True      # первый стоп прошёл — ветер выучен
             if self._pinx is not None:
                 ex = self._pinx - s.vins_x
                 ey = self._piny - s.vins_y
@@ -129,9 +132,20 @@ class DpVins(StabilizationStrategy):
         err_fwd = v_fwd - tv_fwd
         err_rgt = v_rgt - tv_rgt
 
-        # И-член (ветровой трим): интеграл ошибки скорости, латч на живом стике
+        # И-член (ветровой трим). Дилемма (прогоны lv2_joy_065026 / ab_dpv_pinfix):
+        # ТОРМОЖЕНИЕ (стик отпущен, гвоздя нет, цель 0) даёт ошибку = v вперёд.
+        # Если ki мотает её ВСЕГДА — трим набирает «назад» на весь тормозной путь
+        # → после стопа уносит борт назад (1.4–3.4 м). Если морозить до гвоздя —
+        # без трима kp·v уравновешивает ветер на ~1 м/с, |v| не падает < pin_v,
+        # гвоздь не вяжется, дрейф вечен (унос). Решение как _trim_armed/_BRAKE_TRIM
+        # демпфера: на ПЕРВОМ торможении (ветер ещё не выучен) трим ИНТЕГРИРУЕТ —
+        # это ловит ветер и даёт остановиться (цена — небольшой возврат на первом
+        # стопе, обычно на висении зрелости при малой v); после первого гвоздя
+        # (_trim_armed) трим на торможении ЗАМОРОЖЕН, учится только на удержании
+        # → чистые стопы без возврата. На живом стике заморожен всегда.
         now = s.now_sim
-        frozen = self.i_latch and stick
+        frozen = self.i_latch and (stick
+                                   or (self._trim_armed and self._pinx is None))
         if self.ki > 0.0 and self._it is not None and now > self._it and not frozen:
             di = now - self._it
             cap = self.imax / self.ki
