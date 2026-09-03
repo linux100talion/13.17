@@ -118,11 +118,26 @@ check("первое торможение (не armed): трим ИНТЕГРИР
       r0.pitch > RC_CENTER + 40)
 vh.update(st(vx=0.0, x=1.0, t=102.0), Setpoint(), DT)      # встал → гвоздь, armed
 vh.update(st(vx=1.0, t=102.05), Setpoint(c_fwd=1.0), DT)   # стик оживил → гвоздь снят
-i0 = vh._if
+i0 = vh._itx
 for i in range(20):                          # торможение armed: трим ЗАМОРОЖЕН
     vh.update(st(vx=1.0, t=102.1 + i * DT), Setpoint(), DT)
 check("торможение после первого гвоздя (armed): трим ЗАМОРОЖЕН (не растёт)",
-      abs(vh._if - i0) < 1e-6)
+      abs(vh._itx - i0) < 1e-6)
+
+# --- 7c. ТРИМ В ОСЯХ МИРА: набран на курсе 0, после разворота 90° гасит ту же
+# мировую ось (не устаревает по телу) — фикс сноса при развороте (lv2_joy_075118)
+vh = make(ki=20.0, kp_fwd=40.0, pos_kp=0.0)   # pos_kp=0: без внешнего контура
+vh.update(st(vx=0.5, t=100.05), Setpoint(c_fwd=1.0), DT)   # стик → pin_pending
+for i in range(30):                            # первый брейк: копим трим (мир +x)
+    vh.update(st(vx=0.5, x=0.5, t=100.1 + i * DT), Setpoint(), DT)
+vh.update(st(vx=0.0, x=0.5, t=102.0), Setpoint(), DT)      # гвоздь → armed
+tx = vh._itx
+check("трим набран в мировом +x (itx > 0)", tx > 0.5)
+# теперь борт на КУРСЕ 90° держит ту же точку: мировой +x трим = боковой у тела
+# → должен пойти в КРЕН (roll), тангаж почти чист
+rc = vh.update(st(vx=0.0, x=0.5, yaw=math.pi / 2, t=102.05), Setpoint(), DT)
+check("на курсе 90°: мировой трим +x → в КРЕН (roll ≠ центр)",
+      abs(rc.roll - RC_CENTER) > 5)
 
 # --- 7b. знак крена: правый стик → вправо (+ro), как VinsHold ---
 rc = make(ki=0.0).update(st(vx=0.0, vy=0.0, yaw=0.0), Setpoint(c_right=1.0), DT)

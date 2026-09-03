@@ -57,7 +57,7 @@ class DpVins(StabilizationStrategy):
         # состояние
         self._pinx = self._piny = None     # гвоздь (мир); None = стик жив / не встал
         self._pin_pending = False          # гвоздь заказан (стик жил, ждём стопа)
-        self._if = self._il = 0.0          # И-член (трим) вдоль fwd/lat тела
+        self._itx = self._ity = 0.0        # И-член (трим) в осях МИРА (x, y)
         self._trim_armed = False           # ветровой трим выучен (первый стоп прошёл)
         self._vff = self._vfl = 0.0        # ФНЧ скорости внутреннего контура
         self._vf_init = False
@@ -66,7 +66,7 @@ class DpVins(StabilizationStrategy):
     def enter(self, s: DroneState) -> None:
         self._pinx = self._piny = None
         self._pin_pending = False
-        self._if = self._il = 0.0
+        self._itx = self._ity = 0.0
         self._trim_armed = False
         self._vff = self._vfl = 0.0
         self._vf_init = False
@@ -149,12 +149,22 @@ class DpVins(StabilizationStrategy):
         if self.ki > 0.0 and self._it is not None and now > self._it and not frozen:
             di = now - self._it
             cap = self.imax / self.ki
-            self._if = clamp(self._if + err_fwd * di, -cap, cap)
-            self._il = clamp(self._il + err_rgt * di, -cap, cap)
+            # ⚠️ ТРИМ В ОСЯХ МИРА (как StationFrame DpHold): ветер — мировой,
+            # трим тела устаревал после разворота (prog lv2_joy_075118: держит
+            # при фикс. курсе, сносит 1.5 м/с при развороте «за/против ветра»).
+            # Интегрируем ошибку скорости, повёрнутую в мир, храним (itx, ity),
+            # ниже проецируем на ТЕКУЩИЙ курс — трим следует за курсом, гасит
+            # тот же мировой ветер под любым разворотом.
+            ex_w = err_fwd * c - err_rgt * sn
+            ey_w = err_fwd * sn + err_rgt * c
+            self._itx = clamp(self._itx + ex_w * di, -cap, cap)
+            self._ity = clamp(self._ity + ey_w * di, -cap, cap)
         self._it = now
 
-        po = self.psign * (self.kp_fwd * err_fwd + self.ki * self._if)
-        ro = self.rsign * (self.kp_lat * err_rgt + self.ki * self._il)
+        i_fwd = self._itx * c + self._ity * sn        # мировой трим → тело (курс)
+        i_rgt = -self._itx * sn + self._ity * c
+        po = self.psign * (self.kp_fwd * err_fwd + self.ki * i_fwd)
+        ro = self.rsign * (self.kp_lat * err_rgt + self.ki * i_rgt)
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
         return RcCommand(roll=RC_CENTER + int(ro), pitch=RC_CENTER + int(po),
