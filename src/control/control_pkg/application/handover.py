@@ -28,8 +28,12 @@ class VinsHandover:
 
     def __init__(self, vins_hold, min_count: int = 40, fresh_sec: float = 2.0,
                  v_max: float = 0.0, ipm_tol: float = 0.0, sane_n: int = 3,
-                 hover_v: float = 0.0, hover_sec: float = 2.0):
+                 hover_v: float = 0.0, hover_sec: float = 2.0,
+                 trim_seed: bool = True):
         self._vins = vins_hold
+        # посев трима от демпфера на входе в ярус 1 (DpHold.trim_pwm →
+        # DpVins.seed_trim): ветер, который демпфер уже держит, не учить заново
+        self.trim_seed = trim_seed
         self.min_count = min_count
         self.fresh_sec = fresh_sec
         # ГЕЙТ ЗДОРОВЬЯ (санити): защита от разноса VINS (см. config.vins_v_max).
@@ -121,6 +125,20 @@ class VinsHandover:
             if reset is not None:
                 reset()
             self._trim_dirty = False
+        if self.trim_seed:
+            # ПОСЕВ трима от демпфера: его установившийся И-член держал этот
+            # ветер секунду назад — DpVins не учит заново (унос ~2 м → ~0).
+            # После сброса выше посев штатно сеет и свежую раму. seed_trim сам
+            # отказывает, если трим НЕ девственный (начатое обучение/выученный
+            # ветер свежее демпферного). Валюта — PWM каналов (trim_pwm).
+            seed = getattr(self._vins, "seed_trim", None)
+            if seed is not None:
+                for st_ in base:
+                    tp = getattr(st_, "trim_pwm", None)
+                    v = tp() if tp is not None else None
+                    if v is not None:
+                        seed(v[0], v[1], s)
+                        break
         self._vins.enter(s)
         return keep + [self._vins]
 

@@ -181,6 +181,54 @@ hg6.vins_sane(sh(100.2, vx=20.0))                    # всё ещё insane (н�
 check("insane продолжается (не фронт): рестарт НЕ повторяется",
       not hg6.pop_restart_request())
 
+# ============ ПОСЕВ ТРИМА от демпфера на входе в ярус 1 (vins_stabs) ============
+# Установившийся И-член станции (валюта PWM каналов, DpHold.trim_pwm) сеется в
+# DpVins.seed_trim — ветер, который демпфер уже держит, не учится заново.
+from control_pkg.domain.control.vins_axes import DpVins                    # noqa: E402
+
+comp8 = DpHold()
+for x in comp8._subs:                      # рукотворный установившийся трим осей
+    if getattr(x, "_axis", None) == "pitch":
+        x._i = -40.0
+    elif getattr(x, "_axis", None) == "roll":
+        x._i = 10.0
+check("DpHold.trim_pwm: каналы (osign·И-член) = (−40, 10)",
+      comp8.trim_pwm() == (-40.0, 10.0))
+
+dpv = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
+ho8 = VinsHandover(dpv, min_count=5, fresh_sec=2.0)      # trim_seed дефолт ВКЛ
+ho8.vins_stabs([comp8], s(5, 11.0, 11.0))
+check("vins_stabs: трим DpVins посеян из демпфера (мир, yaw=0)",
+      abs(dpv._itx + 40.0) < 1e-9 and abs(dpv._ity - 10.0) < 1e-9)
+check("посев не взводит «ветер выучен» (ki_trim остаётся страховкой)",
+      not dpv._trim_armed)
+
+# начатое обучение не перетирается (дребезг гейта: трим уже нажит, trim_keep)
+dpv2 = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
+dpv2._itx = 5.0
+VinsHandover(dpv2, min_count=5, fresh_sec=2.0).vins_stabs([comp8], s(5, 11.0, 11.0))
+check("трим не девственный → посев отказал (своё свежее)", dpv2._itx == 5.0)
+
+# ручка: trim_seed=False — посева нет (учить с нуля, старое поведение)
+dpv3 = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
+VinsHandover(dpv3, min_count=5, fresh_sec=2.0,
+             trim_seed=False).vins_stabs([comp8], s(5, 11.0, 11.0))
+check("trim_seed=False: трим остался нулевым", dpv3._itx == 0.0 and dpv3._ity == 0.0)
+
+# /restart: сброс старой рамы, затем посев СВЕЖЕЙ — в одном входе в ярус
+dpv4 = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
+dpv4._itx, dpv4._trim_armed = 50.0, True
+ho11 = VinsHandover(dpv4, min_count=5, fresh_sec=2.0)
+ho11.note_vins_restart()
+ho11.vins_stabs([comp8], s(5, 11.0, 11.0))
+check("после /restart: сброс старого трима, посев в свежую раму",
+      abs(dpv4._itx + 40.0) < 1e-9 and not dpv4._trim_armed)
+
+# VinsHold посева не имеет — vins_stabs не падает
+VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0).vins_stabs(
+    [comp8], s(5, 11.0, 11.0))
+check("VinsHold (без seed_trim): vins_stabs не падает", True)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HANDOVER Flow→Vins OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

@@ -337,6 +337,30 @@ class DpHold(StabilizationStrategy):
         for x in self._subs:
             x.enter(s)
 
+    def trim_pwm(self):
+        """Ветровой трим станции В ВАЛЮТЕ КАНАЛОВ: (pitch_off, roll_off) — вклад
+        И-члена каждой оси в RcCommand (после osign), или None, если осей с
+        тримом нет. Для посева DpVins при передаче яруса 0→1 (handover.
+        vins_stabs): установившийся И-член — то, что ФАКТИЧЕСКИ держало ветер
+        секунду назад. Валюта каналов выбрана сознательно: PWM ручки имеет
+        однозначный физический смысл, а внутренние пространства стабилизаторов
+        (до osign/psign) — свои конвенции у каждого (три зеркальных знака в
+        истории проекта). blend/fade игнорируем: на установившемся удержании
+        blend≈1, а посев — оценка, ki доучит."""
+        po = ro = None
+        for x in self._subs:
+            i = getattr(x, "_i", None)
+            osign = getattr(x, "osign", None)
+            if i is None or osign is None:
+                continue
+            if getattr(x, "_axis", None) == "pitch":
+                po = osign * i
+            elif getattr(x, "_axis", None) == "roll":
+                ro = osign * i
+        if po is None and ro is None:
+            return None
+        return (po or 0.0, ro or 0.0)
+
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
         rc = RcCommand(throttle=RC_CENTER)
         for x in self._subs:

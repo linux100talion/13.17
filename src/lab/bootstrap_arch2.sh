@@ -314,6 +314,7 @@ ARGS=()
 # config.dpvins_ki_trim / dpvins_trim_keep, разбор doc/tmp/eagle/dpvins.txt
 [ -n "${BS_DPVINS_KI_TRIM:-}" ]  && ARGS+=(--dpvins-ki-trim "$BS_DPVINS_KI_TRIM")
 [ -n "${BS_DPVINS_TRIM_KEEP:-}" ] && ARGS+=(--dpvins-trim-keep "$BS_DPVINS_TRIM_KEEP")
+[ -n "${BS_DPVINS_TRIM_SEED:-}" ] && ARGS+=(--dpvins-trim-seed "$BS_DPVINS_TRIM_SEED")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")

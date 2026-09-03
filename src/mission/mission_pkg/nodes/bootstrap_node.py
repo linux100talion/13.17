@@ -144,7 +144,8 @@ class BootstrapArch2Node(Node):
                                     v_max=cfg.vins_v_max, ipm_tol=cfg.vins_ipm_tol,
                                     sane_n=cfg.vins_sane_n,
                                     hover_v=cfg.vins_hover_v,
-                                    hover_sec=cfg.vins_hover_sec)
+                                    hover_sec=cfg.vins_hover_sec,
+                                    trim_seed=cfg.dpvins_trim_seed > 0)
             if str(cfg.vins_stab).lower() == 'dpvins':
                 note = (f", DpVins (velocity-каскад) kp {cfg.dpvins_kp_fwd:g}/"
                         f"{cfg.dpvins_kp_lat:g} ki {cfg.dpvins_ki:g} "
@@ -1037,6 +1038,8 @@ def _parse() -> tuple:
                    default=_D.dpvins_ki_trim)
     p.add_argument('--dpvins-trim-keep', dest='dpvins_trim_keep', type=float,
                    default=_D.dpvins_trim_keep)
+    p.add_argument('--dpvins-trim-seed', dest='dpvins_trim_seed', type=float,
+                   default=_D.dpvins_trim_seed)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,

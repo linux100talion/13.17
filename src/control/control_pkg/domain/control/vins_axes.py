@@ -101,6 +101,28 @@ class DpVins(StabilizationStrategy):
         self._trim_armed = False
         self._moved = False
 
+    def seed_trim(self, pitch_off: float, roll_off: float, s: DroneState) -> bool:
+        """ПОСЕВ трима от демпфера при передаче яруса 0→1 (п.5.3 dpvins.txt):
+        установившийся И-член станции = тот же ветровой трим, снятый В ВАЛЮТЕ
+        КАНАЛОВ (DpHold.trim_pwm, после osign). Обратно в пространство DpVins —
+        обращением СОБСТВЕННОГО уравнения выхода: po = psign·(kp·err + i_fwd)
+        → i_fwd = psign·pitch_off (psign² = 1), никаких рассуждений о
+        конвенциях; тело → мир по vins_yaw — та же проекция, которой трим
+        учится в update(). Сеем только ДЕВСТВЕННЫЙ трим (< 1 PWM и не armed):
+        начатое обучение (дребезг гейта, trim_keep) и выученный ветер не
+        перетираем — свой свежее. НЕ armed: посев — оценка (blend, протухание
+        станции), ki_trim остаётся страховкой и быстро доучит остаток; при
+        хорошем посеве ошибка мала и фаза — no-op до первого стопа."""
+        if self._trim_armed or math.hypot(self._itx, self._ity) >= 1.0:
+            return False
+        i_fwd = self.psign * float(pitch_off)
+        i_rgt = self.rsign * float(roll_off)
+        c = math.cos(s.vins_yaw)
+        sn = math.sin(s.vins_yaw)
+        self._itx = clamp(i_fwd * c - i_rgt * sn, -self.imax, self.imax)
+        self._ity = clamp(i_fwd * sn + i_rgt * c, -self.imax, self.imax)
+        return True
+
     def _return_target(self, e):
         """Цель скорости внешнего контура к гвоздю: линейный pos_kp + √-кап acc
         (тормозной путь без перелёта, как sqrt_controller ArduPilot / RETURN

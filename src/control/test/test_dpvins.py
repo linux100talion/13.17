@@ -297,6 +297,59 @@ v_tail = hover_lag()
 check(f"хвост висения (40-80 с) спокоен: max|v| < 0.3 (получено {v_tail:.2f})",
       v_tail < 0.3)
 
+
+# --- 16. ПОСЕВ трима от демпфера (seed_trim): канал → psign → мир ---
+# Валюта — PWM каналов (после osign демпфера / до psign DpVins): обращение
+# собственного уравнения выхода po = psign·(kp·err + i_fwd), никаких
+# рассуждений о конвенциях (три зеркальных знака в истории проекта).
+vh16 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
+check("посев принят (девственный трим)",
+      vh16.seed_trim(-40.0, 10.0, st(t=100.0)))
+rc = vh16.update(st(vx=0.0, t=100.05), Setpoint(), DT)
+check("v=0: выход = ровно посеянные каналы (тангаж −40, крен +10)",
+      rc.pitch == RC_CENTER - 40 and rc.roll == RC_CENTER + 10)
+check("трим уже нажит (≥1 PWM) → повторный посев отказан",
+      not vh16.seed_trim(99.0, 0.0, st()))
+vh16a = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
+vh16a._trim_armed = True
+check("ветер выучен (armed) → посев отказан (своё свежее)",
+      not vh16a.seed_trim(99.0, 0.0, st()) and vh16a._itx == 0.0)
+
+# трим МИРОВОЙ: посеян на курсе 0, после разворота на 90° проецируется
+# в другие оси тела (ветер не вращается вместе с бортом)
+vh17 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
+vh17.seed_trim(-40.0, 10.0, st(t=100.0))
+rc = vh17.update(st(vx=0.0, yaw=math.pi / 2, t=100.05), Setpoint(), DT)
+# допуск ±1 PWM: cos(π/2)=6e-17 даёт 9.999…, int() срезает вниз
+check("разворот 90° после посева: трим следует за курсом (каналы ≈ +10, +40)",
+      abs(rc.pitch - (RC_CENTER + 10)) <= 1
+      and abs(rc.roll - (RC_CENTER + 40)) <= 1)
+
+
+# --- 17. замкнутый контур с посевом: унос ≈ 0 (п.5.3 dpvins.txt) ---
+def carry_seed(seed, **kw):
+    vh = DpVins(**dict(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0,
+                       imax=120.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
+                       pos_vmax=0.3, pos_acc=0.15, vsmooth=0.0, i_latch=True,
+                       **kw))
+    vh.enter(DroneState(now_sim=100.0))
+    vh.seed_trim(seed, 0.0, st(t=100.0))
+    x = v = 0.0
+    t = 100.05
+    for _ in range(4000):
+        rc = vh.update(st(vx=v, x=x, t=t), Setpoint(), DT)
+        v += (1.0 - (rc.pitch - RC_CENTER) / 100.0) * DT
+        x += v * DT
+        t += DT
+    return x
+
+c_seed = carry_seed(100.0)
+check(f"посев = нужный трим (100): унос ≈ 0 (получено {c_seed:.2f} м)",
+      abs(c_seed) < 0.5)
+c_part = carry_seed(70.0)
+check(f"посев неточный (70 из 100): ki_trim доучил, унос мал ({c_part:.2f} м)",
+      abs(c_part) < 1.0)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
