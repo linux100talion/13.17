@@ -144,27 +144,38 @@ class DpVins(StabilizationStrategy):
         # (_trim_armed) трим на торможении ЗАМОРОЖЕН, учится только на удержании
         # → чистые стопы без возврата. На живом стике заморожен всегда.
         now = s.now_sim
+        i_fwd = self._itx * c + self._ity * sn        # мировой трим → тело (курс)
+        i_rgt = -self._itx * sn + self._ity * c
+        po = self.psign * (self.kp_fwd * err_fwd + self.ki * i_fwd)
+        ro = self.rsign * (self.kp_lat * err_rgt + self.ki * i_rgt)
+        # АНТИ-ВИНДАП: выход в упоре и ошибка толкает ГЛУБЖЕ — трим не мотать.
+        # Так imax можно держать высоким (ветру нужен трим до ~ветра: при ветре
+        # 10 ~100 PWM, кап 50 не держал — снос 1-1.3 м/с, унос 9-18 м,
+        # lv2_joy_082437), а в насыщении торможения momentum не наматывается
+        # (иначе перелёт первого стопа ∝ imax). Как anti_windup демпфера.
+        sat = ((abs(po) >= self.max and po * err_fwd > 0.0)
+               or (abs(ro) >= self.max and ro * err_rgt > 0.0))
         frozen = self.i_latch and (stick
                                    or (self._trim_armed and self._pinx is None))
-        if self.ki > 0.0 and self._it is not None and now > self._it and not frozen:
+        if (self.ki > 0.0 and self._it is not None and now > self._it
+                and not frozen and not sat):
             di = now - self._it
             cap = self.imax / self.ki
             # ⚠️ ТРИМ В ОСЯХ МИРА (как StationFrame DpHold): ветер — мировой,
             # трим тела устаревал после разворота (prog lv2_joy_075118: держит
             # при фикс. курсе, сносит 1.5 м/с при развороте «за/против ветра»).
             # Интегрируем ошибку скорости, повёрнутую в мир, храним (itx, ity),
-            # ниже проецируем на ТЕКУЩИЙ курс — трим следует за курсом, гасит
-            # тот же мировой ветер под любым разворотом.
+            # проецируем на ТЕКУЩИЙ курс — трим следует за курсом под разворотом.
             ex_w = err_fwd * c - err_rgt * sn
             ey_w = err_fwd * sn + err_rgt * c
             self._itx = clamp(self._itx + ex_w * di, -cap, cap)
             self._ity = clamp(self._ity + ey_w * di, -cap, cap)
+            # пересчёт выхода со свежим тримом (для среза; в упоре кламп ниже)
+            i_fwd = self._itx * c + self._ity * sn
+            i_rgt = -self._itx * sn + self._ity * c
+            po = self.psign * (self.kp_fwd * err_fwd + self.ki * i_fwd)
+            ro = self.rsign * (self.kp_lat * err_rgt + self.ki * i_rgt)
         self._it = now
-
-        i_fwd = self._itx * c + self._ity * sn        # мировой трим → тело (курс)
-        i_rgt = -self._itx * sn + self._ity * c
-        po = self.psign * (self.kp_fwd * err_fwd + self.ki * i_fwd)
-        ro = self.rsign * (self.kp_lat * err_rgt + self.ki * i_rgt)
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
         return RcCommand(roll=RC_CENTER + int(ro), pitch=RC_CENTER + int(po),
