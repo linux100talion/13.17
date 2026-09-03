@@ -143,6 +143,17 @@ hg5 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0)
 check("гейт выкл: разнос |v|=20 всё равно sane (обратная совместимость)",
       hg5.vins_sane(sh(90.0, vx=20.0)))
 
+# 7. ЗАПРОС /restart на фронте sane→insane (восстановление после разноса)
+hg6 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0, v_max=12.0)
+hg6.vins_sane(sh(100.0, vx=1.0))                     # sane
+check("пока sane: рестарт не заказан", not hg6.pop_restart_request())
+hg6.vins_sane(sh(100.1, vx=20.0))                    # sane→insane фронт
+check("фронт sane→insane: /restart заказан", hg6.pop_restart_request())
+check("pop одноразовый: второй раз пусто", not hg6.pop_restart_request())
+hg6.vins_sane(sh(100.2, vx=20.0))                    # всё ещё insane (не фронт)
+check("insane продолжается (не фронт): рестарт НЕ повторяется",
+      not hg6.pop_restart_request())
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HANDOVER Flow→Vins OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

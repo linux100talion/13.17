@@ -36,17 +36,18 @@ class VinsHandover:
         self.sane_n = sane_n
         self._ipm_bad = 0             # кадров подряд |vins_v−ipm_v| > tol
         self._last_sane_t = None      # счётчик двигаем раз на новый sim-тик
+        self._was_sane = True         # прошлый вердикт (для фронта sane→insane)
+        self._restart_req = False     # одноразовый запрос /restart (нода опросит)
         self._done = False
 
     def vins_sane(self, s) -> bool:
         """VINS вменяем: скорость физически возможна И (если IPM жив) согласна с
         независимым оптическим каналом. Разнос (|v|→20 на неподвижном борте)
         проваливает оба. Модуль скорости инвариантен к системе координат, так
-        что vins (мир) и ipm (тело) сравнимы напрямую."""
+        что vins (мир) и ipm (тело) сравнимы напрямую. На ФРОНТЕ sane→insane
+        заказывает /restart VINS (нода опрашивает pop_restart_request)."""
         import math
         vh = math.hypot(s.vins_vx, s.vins_vy)
-        if self.v_max > 0.0 and vh > self.v_max:
-            return False                      # физически невозможно = мусор (грубо)
         # IPM-кросс-чек с защитой от одиночного шумного кадра (sane_n подряд).
         # Счётчик двигаем раз на новый sim-тик — метод зовут оба пути лесенки.
         new_tick = self._last_sane_t is None or s.now_sim > self._last_sane_t
@@ -57,9 +58,21 @@ class VinsHandover:
                 self._ipm_bad = self._ipm_bad + 1 if bad else 0
         elif new_tick:
             self._ipm_bad = 0                 # IPM слеп — чек не судит, не копим
+        cap_bad = self.v_max > 0.0 and vh > self.v_max   # физ. потолок (грубо, сразу)
+        sane = (not cap_bad) and (self._ipm_bad < self.sane_n)
         if new_tick:
+            if self._was_sane and not sane:   # фронт: заказать сброс VINS
+                self._restart_req = True
+            self._was_sane = sane
             self._last_sane_t = s.now_sim
-        return self._ipm_bad < self.sane_n
+        return sane
+
+    def pop_restart_request(self) -> bool:
+        """One-shot: True если был фронт sane→insane с прошлого опроса (нода
+        шлёт /restart, чтобы VINS переинициализировался после разноса)."""
+        r = self._restart_req
+        self._restart_req = False
+        return r
 
     def vins_ready(self, s) -> bool:
         return (s.vins_odom_count >= self.min_count and

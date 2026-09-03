@@ -389,8 +389,13 @@ class BootstrapArch2Node(Node):
         # (3N+4)² LDLT — при 3 мин стояния ~109 с на попытку, /odometry не появляется
         # за весь полёт (odom_gets_borken, 2026-08-28). Подробно: config.vins_restart_arm.
         self._vins_restart_pub = None
-        if cfg.vins_restart_arm > 0:
+        if cfg.vins_restart_arm > 0 or cfg.vins_restart_diverge > 0:
             self._vins_restart_pub = self.create_publisher(Bool, '/restart', 1)
+        # восстановление VINS после демоута-по-разносу (см. config.vins_restart_diverge)
+        self._handover = handover
+        self._restart_diverge = cfg.vins_restart_diverge > 0
+        self._restart_cd = cfg.vins_restart_cd
+        self._last_restart_t = -1e9
         self.timer = self.create_timer(0.05, self._tick)
         self.logger.info(
             f"alt_hold_bootstrap ARCH2: mode={cfg.control_mode} alt={cfg.alt}м "
@@ -447,6 +452,16 @@ class BootstrapArch2Node(Node):
 
         self._send_origin()              # безжпсный бут: origin до подтверждения
         rc = self.runner.tick(s)
+        # восстановление после разноса: гейт здоровья демотнул ярус → /restart VINS
+        # (переинициализация), с кулдауном (сброс окна VINS сам занимает время)
+        if (self._restart_diverge and self._vins_restart_pub is not None
+                and self._handover is not None
+                and self._handover.pop_restart_request()
+                and s.now_sim - self._last_restart_t >= self._restart_cd):
+            self._last_restart_t = s.now_sim
+            self._vins_restart_pub.publish(Bool(data=True))
+            self.logger.warn("гейт здоровья: VINS разнёсся → демоут на демпфер + "
+                             "/restart (переинициализация)")
         rc = self.arbiter.resolve(s, rc)          # safety-seize: MANUAL → сырые стики
         if self.arbiter.last_manual != self._arb_seized:
             self._arb_seized = self.arbiter.last_manual
@@ -948,6 +963,11 @@ def _parse() -> tuple:
                    default=_D.vins_ipm_tol)
     p.add_argument('--vins-sane-n', dest='vins_sane_n', type=int,
                    default=_D.vins_sane_n)
+    # рестарт VINS после демоута-по-разносу (см. config.vins_restart_diverge)
+    p.add_argument('--vins-restart-diverge', dest='vins_restart_diverge',
+                   type=float, default=_D.vins_restart_diverge)
+    p.add_argument('--vins-restart-cd', dest='vins_restart_cd', type=float,
+                   default=_D.vins_restart_cd)
     # зрелость VINS для EKF-свапа: sim-секунды от первой одометрии (см. config)
     p.add_argument('--ripe-sec', dest='ripe_sec', type=float, default=_D.ripe_sec)
     # 2-я ступень гейта — детектор residual+ratio (0 = только время)
