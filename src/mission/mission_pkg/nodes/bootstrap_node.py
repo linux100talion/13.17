@@ -428,6 +428,8 @@ class BootstrapArch2Node(Node):
             self._vins_restart_pub.publish(Bool(data=True))
             self.logger.info("арм: /restart → VINS (сброс окна инициализации, "
                              "накопленного на земле)")
+            if self._handover is not None:
+                self._handover.note_vins_restart()   # рама переродится → трим сбросить
         if self.perception is not None:
             # ФРОНТ ARMED → ноль высоты перцепции здесь и сейчас (perc_alt_zero):
             # EKF local z смещён вниз на 0.2-0.3 м, и на низком полёте это больше
@@ -462,6 +464,7 @@ class BootstrapArch2Node(Node):
                 and s.now_sim - self._last_restart_t >= self._restart_cd):
             self._last_restart_t = s.now_sim
             self._vins_restart_pub.publish(Bool(data=True))
+            self._handover.note_vins_restart()   # рама переродится → трим сбросить
             self.logger.warn("гейт здоровья: VINS разнёсся → демоут на демпфер + "
                              "/restart (переинициализация)")
         rc = self.arbiter.resolve(s, rc)          # safety-seize: MANUAL → сырые стики
@@ -1030,6 +1033,10 @@ def _parse() -> tuple:
                    default=_D.dpvins_vsmooth)
     p.add_argument('--dpvins-imax', dest='dpvins_imax', type=float,
                    default=_D.dpvins_imax)
+    p.add_argument('--dpvins-ki-trim', dest='dpvins_ki_trim', type=float,
+                   default=_D.dpvins_ki_trim)
+    p.add_argument('--dpvins-trim-keep', dest='dpvins_trim_keep', type=float,
+                   default=_D.dpvins_trim_keep)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,

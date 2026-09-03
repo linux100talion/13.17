@@ -23,9 +23,17 @@ DpVins повторяет архитектуру демпфера/LOITER — vel
   сглаживание съедало демпфирование (тупик BS_VINS_VSMOOTH в VinsHold).
 
 Оси в раме курса: скорость/позиция VINS (мир) проецируются по vins_yaw. Трим —
-пока в осях тела (разворот-во-время-удержания не разведён — как ранний демпфер
-до StationFrame; для прямых галсов и стоп-удержания достаточно, TODO — мировой
-трим). НЕ реализован полный автомат станции (BRAKE/фазы) — он был нужен ШУМНОМУ
+В ОСЯХ МИРА (как StationFrame демпфера), хранится в PWM: ветер мировой, трим
+следует за курсом под разворотом (фикс lv2_joy_075118). Обучение трима
+ДВУХСКОРОСТНОЕ: до первого гвоздя — ki_trim (быстрый захват ветра: унос на
+входе в ярус = нужный трим / ki обучения, при ветре 10 (~100 PWM) и ki 6 было
+16–17.5 м на КАЖДОМ фронте яруса, от kp не зависит — замер wind_* 2026-09-03,
+разбор doc/tmp/eagle/dpvins.txt), после — рабочий ki на удержании. Трим
+ПЕРЕЖИВАЕТ повторные enter() (trim_keep: ветер на переключении яруса не
+исчезает, а дребезг гейта обнулял трим повторно — 24 м вместо 17); сброс —
+только reset_trim(), его зовёт VinsHandover на фактическом /restart VINS
+(мировая рама перерождается — вектор в старой раме недействителен).
+НЕ реализован полный автомат станции (BRAKE/фазы) — он был нужен ШУМНОМУ
 дрейфующему каналу потока; у VINS позиция чистая, хватает √-капа RETURN.
 """
 import math
@@ -42,12 +50,14 @@ class DpVins(StabilizationStrategy):
     _I_DZ = 0.02       # |c_*| выше — стик живой (трим замораживается, гвоздь снят)
     _PIN_V = 0.3       # м/с: гвоздь по остановке / порог «встал»
 
-    def __init__(self, kp_fwd=200.0, kp_lat=120.0, ki=20.0, imax=100.0,
-                 max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3,
-                 pos_acc=0.15, psign=1.0, rsign=1.0, vsmooth=0.1,
-                 i_latch=True):
+    def __init__(self, kp_fwd=200.0, kp_lat=120.0, ki=20.0, ki_trim=0.0,
+                 imax=100.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
+                 pos_vmax=0.3, pos_acc=0.15, psign=1.0, rsign=1.0, vsmooth=0.1,
+                 i_latch=True, trim_keep=True):
         self.kp_fwd, self.kp_lat = kp_fwd, kp_lat
         self.ki, self.imax, self.max = ki, imax, max_pwm
+        self.ki_trim = ki_trim             # скорость обучения ДО первого гвоздя (0 = ki)
+        self.trim_keep = trim_keep         # трим переживает enter() (входы в ярус)
         self.cmd_gain = cmd_gain
         # внешний позиционный контур (цель скорости при отпущенном стике)
         self.pos_kp, self.pos_vmax, self.pos_acc = pos_kp, pos_vmax, pos_acc
@@ -57,7 +67,7 @@ class DpVins(StabilizationStrategy):
         # состояние
         self._pinx = self._piny = None     # гвоздь (мир); None = стик жив / не встал
         self._pin_pending = False          # гвоздь заказан (стик жил, ждём стопа)
-        self._itx = self._ity = 0.0        # И-член (трим) в осях МИРА (x, y)
+        self._itx = self._ity = 0.0        # трим (PWM) в осях МИРА (x, y)
         self._trim_armed = False           # ветровой трим выучен (первый стоп прошёл)
         self._vff = self._vfl = 0.0        # ФНЧ скорости внутреннего контура
         self._vf_init = False
@@ -66,11 +76,22 @@ class DpVins(StabilizationStrategy):
     def enter(self, s: DroneState) -> None:
         self._pinx = self._piny = None
         self._pin_pending = False
-        self._itx = self._ity = 0.0
-        self._trim_armed = False
+        # ТРИМ НЕ ТРОГАЕМ (trim_keep): ветер на переключении яруса не исчезает,
+        # а обнуление на каждом входе = обучение заново = унос ≈ трим/ki по
+        # ветру на каждом фронте яруса (wind_* 2026-09-03: 17 м; дребезг гейта
+        # wind_back — 24). Сброс — только reset_trim() (handover, на /restart).
+        if not self.trim_keep:
+            self.reset_trim()
         self._vff = self._vfl = 0.0
         self._vf_init = False
         self._it = s.now_sim
+
+    def reset_trim(self) -> None:
+        """Обнулить ветровой трим и «ветер выучен». Зовёт VinsHandover на
+        фактическом /restart VINS: мировая рама перерождается, хранимый мировой
+        вектор в новой раме недействителен (при trim_keep=False — enter())."""
+        self._itx = self._ity = 0.0
+        self._trim_armed = False
 
     def _return_target(self, e):
         """Цель скорости внешнего контура к гвоздю: линейный pos_kp + √-кап acc
@@ -144,10 +165,10 @@ class DpVins(StabilizationStrategy):
         # (_trim_armed) трим на торможении ЗАМОРОЖЕН, учится только на удержании
         # → чистые стопы без возврата. На живом стике заморожен всегда.
         now = s.now_sim
-        i_fwd = self._itx * c + self._ity * sn        # мировой трим → тело (курс)
+        i_fwd = self._itx * c + self._ity * sn        # мировой трим (PWM) → тело (курс)
         i_rgt = -self._itx * sn + self._ity * c
-        po = self.psign * (self.kp_fwd * err_fwd + self.ki * i_fwd)
-        ro = self.rsign * (self.kp_lat * err_rgt + self.ki * i_rgt)
+        po = self.psign * (self.kp_fwd * err_fwd + i_fwd)
+        ro = self.rsign * (self.kp_lat * err_rgt + i_rgt)
         # АНТИ-ВИНДАП: выход в упоре и ошибка толкает ГЛУБЖЕ — трим не мотать.
         # Так imax можно держать высоким (ветру нужен трим до ~ветра: при ветре
         # 10 ~100 PWM, кап 50 не держал — снос 1-1.3 м/с, унос 9-18 м,
@@ -157,10 +178,17 @@ class DpVins(StabilizationStrategy):
                or (abs(ro) >= self.max and ro * err_rgt > 0.0))
         frozen = self.i_latch and (stick
                                    or (self._trim_armed and self._pinx is None))
-        if (self.ki > 0.0 and self._it is not None and now > self._it
+        # СКОРОСТЬ ОБУЧЕНИЯ двухфазная: до первого гвоздя (ветер не выучен) —
+        # ki_trim, быстрый захват (зеркало _POS_BRAKE_TRIM/ki_trim демпфера):
+        # унос на входе в ярус = нужный трим / ki обучения, от kp не зависит
+        # (при ветре 10 ≈ 100 PWM: ki 6 → 17 м, ki_trim 60 → ~2; замер wind_*
+        # 2026-09-03). После гвоздя — рабочий ki на удержании. Трим хранится
+        # в PWM, чтобы смена скорости не дёргала выход.
+        ki = (self.ki_trim if self.ki_trim > 0.0 and not self._trim_armed
+              else self.ki)
+        if (ki > 0.0 and self._it is not None and now > self._it
                 and not frozen and not sat):
-            di = now - self._it
-            cap = self.imax / self.ki
+            di = (now - self._it) * ki
             # ⚠️ ТРИМ В ОСЯХ МИРА (как StationFrame DpHold): ветер — мировой,
             # трим тела устаревал после разворота (prog lv2_joy_075118: держит
             # при фикс. курсе, сносит 1.5 м/с при развороте «за/против ветра»).
@@ -168,13 +196,13 @@ class DpVins(StabilizationStrategy):
             # проецируем на ТЕКУЩИЙ курс — трим следует за курсом под разворотом.
             ex_w = err_fwd * c - err_rgt * sn
             ey_w = err_fwd * sn + err_rgt * c
-            self._itx = clamp(self._itx + ex_w * di, -cap, cap)
-            self._ity = clamp(self._ity + ey_w * di, -cap, cap)
+            self._itx = clamp(self._itx + ex_w * di, -self.imax, self.imax)
+            self._ity = clamp(self._ity + ey_w * di, -self.imax, self.imax)
             # пересчёт выхода со свежим тримом (для среза; в упоре кламп ниже)
             i_fwd = self._itx * c + self._ity * sn
             i_rgt = -self._itx * sn + self._ity * c
-            po = self.psign * (self.kp_fwd * err_fwd + self.ki * i_fwd)
-            ro = self.rsign * (self.kp_lat * err_rgt + self.ki * i_rgt)
+            po = self.psign * (self.kp_fwd * err_fwd + i_fwd)
+            ro = self.rsign * (self.kp_lat * err_rgt + i_rgt)
         self._it = now
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)

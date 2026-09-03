@@ -11,7 +11,11 @@
 - √-кап: далеко от гвоздя цель ограничена vmax, близко — √(2·acc·e);
 - латч трима: И-член заморожен на живом стике;
 - геометрия: курс 90° — «вперёд» = мировая Y;
-- vsmooth сглаживает ВНУТРЕННИЙ сигнал (главная петля), выход ровнее при шуме.
+- vsmooth сглаживает ВНУТРЕННИЙ сигнал (главная петля), выход ровнее при шуме;
+- ki_trim: до первого гвоздя ветер учится быстро, после — рабочим ki;
+- trim_keep: трим переживает enter() (вход в ярус), сброс — только reset_trim();
+- замкнутый контур: унос обучения = нужный трим / ki обучения (≈17 м при
+  ki 6 и «ветре 10» — как в полётах wind_* 2026-09-03; ki_trim 60 — в разы короче).
 
 Запуск:  python3 src/control/test/test_dpvins.py
 """
@@ -185,6 +189,68 @@ check("vsmooth сглаживает внутренний контур (макс 
 
 # --- 10. vsmooth=0 воспроизводимо ---
 check("vsmooth=0 воспроизводимо бит-в-бит", noisy(0.0) == raw)
+
+
+# --- 11. ki_trim: быстрый захват ветра ДО первого гвоздя, после — рабочий ki ---
+def learn(**kw):
+    vh = DpVins(**dict(kp_fwd=40.0, kp_lat=32.0, ki=6.0, imax=120.0,
+                       max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3,
+                       pos_acc=0.15, vsmooth=0.0, i_latch=True, **kw))
+    vh.enter(DroneState(now_sim=100.0))
+    vh.update(st(vx=0.5, t=100.05), Setpoint(c_fwd=1.0), DT)  # стик → pin_pending
+    for i in range(10):                       # первый брейк: учим ветер
+        vh.update(st(vx=0.5, t=100.1 + i * DT), Setpoint(), DT)
+    return vh
+
+fast, slow = learn(ki_trim=60.0), learn()
+check("ki_trim 60 против ki 6: захват ветра на первом брейке ×10",
+      abs(fast._itx - 10.0 * slow._itx) < 1e-6 and slow._itx > 0.0)
+fast.update(st(vx=0.0, x=1.0, t=101.0), Setpoint(), DT)   # встал → гвоздь, armed
+i0 = fast._itx
+fast.update(st(vx=0.5, x=1.0, t=101.05), Setpoint(), DT)  # удержание: рабочий ki
+check("после первого гвоздя обучение падает до рабочего ki (6)",
+      abs((fast._itx - i0) - 0.5 * DT * 6.0) < 1e-6)
+
+# --- 12. trim_keep: трим переживает enter() (повторный вход в ярус) ---
+vh = learn(ki_trim=60.0)
+vh.update(st(vx=0.0, x=1.0, t=101.0), Setpoint(), DT)     # гвоздь → armed
+t0 = vh._itx
+vh.enter(st(t=200.0))                                     # повторный вход в ярус
+check("enter(): трим и «ветер выучен» живы (ветер не исчез на переключении)",
+      vh._itx == t0 and vh._trim_armed)
+vh.reset_trim()                                           # фактический /restart VINS
+check("reset_trim(): трим обнулён и разоружён (рама мира переродилась)",
+      vh._itx == 0.0 and not vh._trim_armed)
+vh2 = learn(ki_trim=60.0, trim_keep=False)
+vh2.enter(st(t=200.0))
+check("trim_keep=False: старое поведение — сброс на enter()", vh2._itx == 0.0)
+
+
+# --- 13. ЗАМКНУТЫЙ КОНТУР: унос обучения = нужный трим / ki обучения ---
+# план: «ветер» разгоняет 1 м/с², 100 PWM выхода = 1 м/с² противодействия →
+# равновесный трим 100 PWM (как ветер 10 м/с в полётах wind_* 2026-09-03:
+# унос 16-17.5 м при ki 6, формула 100/6 = 16.7). Меряем путь по ветру.
+def carry(**kw):
+    vh = DpVins(**dict(kp_fwd=40.0, kp_lat=32.0, ki=6.0, imax=120.0,
+                       max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3,
+                       pos_acc=0.15, vsmooth=0.0, i_latch=True, **kw))
+    vh.enter(DroneState(now_sim=100.0))
+    # стик НЕ трогаем — как в полётах: после входа в ярус гвоздь не заказан
+    # (pin_pending=False), борт свободно тормозится к нулю, трим учит ветер
+    x = v = 0.0
+    t = 100.05
+    for _ in range(4000):                     # 200 сим-секунд
+        rc = vh.update(st(vx=v, x=x, t=t), Setpoint(), DT)
+        v += (1.0 - (rc.pitch - RC_CENTER) / 100.0) * DT      # ветер − управление
+        x += v * DT
+        t += DT
+    return x
+
+c_slow, c_fast = carry(), carry(ki_trim=60.0)
+check(f"унос при ki=6 ≈ 100/6 м (полёты 16-17.5; получено {c_slow:.1f})",
+      14.0 < c_slow < 20.0)
+check(f"ki_trim=60: унос в ≥4 раза короче ({c_fast:.1f} м)",
+      c_fast < c_slow / 4.0)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")

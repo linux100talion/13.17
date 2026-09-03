@@ -44,6 +44,7 @@ class VinsHandover:
         self.hover_v = hover_v
         self.hover_sec = hover_sec
         self._center_since = None     # sim-время начала непрерывного висения (стик центр)
+        self._trim_dirty = False      # был /restart VINS: мировой трим стаба недействителен
         self._bad = 0                # кадров подряд «болен» (IPM|hover)
         self._last_sane_t = None      # счётчик двигаем раз на новый sim-тик
         self._was_sane = True         # прошлый вердикт (для фронта sane→insane)
@@ -92,6 +93,15 @@ class VinsHandover:
         self._restart_req = False
         return r
 
+    def note_vins_restart(self) -> None:
+        """Нода ФАКТИЧЕСКИ послала /restart VINS: мировая рама одометрии
+        перерождается (мир монокуляра рождается с курсом первого кадра) —
+        ветровой трим стабилизатора, хранимый мировым вектором, в новой раме
+        недействителен. Помечаем; сброс — на ближайшем входе в ярус
+        (vins_stabs). Запрос-фронт гейта (pop_restart_request) сам по себе
+        трим НЕ сбрасывает: рестарт может не состояться (кулдаун, выкл)."""
+        self._trim_dirty = True
+
     def vins_ready(self, s) -> bool:
         return (s.vins_odom_count >= self.min_count and
                 (s.now_sim - s.vins_last_sim) < self.fresh_sec and
@@ -104,6 +114,13 @@ class VinsHandover:
         опора = текущая точка. Используется и одноразовым свапом (maybe_switch),
         и лесенкой SF-мастера (Freefly._ladder_apply — там переходы двусторонние)."""
         keep = [st for st in base if "yaw" in getattr(st, "axes", frozenset())]
+        if self._trim_dirty:
+            # рама VINS переродилась (/restart) — мировой трим недействителен;
+            # у стабов без трима (VinsHold) метода нет — им сбрасывать нечего
+            reset = getattr(self._vins, "reset_trim", None)
+            if reset is not None:
+                reset()
+            self._trim_dirty = False
         self._vins.enter(s)
         return keep + [self._vins]
 

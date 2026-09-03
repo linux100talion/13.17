@@ -309,6 +309,11 @@ ARGS=()
 [ -n "${BS_DPVINS_POS_ACC:-}" ]  && ARGS+=(--dpvins-pos-acc "$BS_DPVINS_POS_ACC")
 [ -n "${BS_DPVINS_VSMOOTH:-}" ]  && ARGS+=(--dpvins-vsmooth "$BS_DPVINS_VSMOOTH")
 [ -n "${BS_DPVINS_IMAX:-}" ]     && ARGS+=(--dpvins-imax "$BS_DPVINS_IMAX")
+# унос на входе в ярус 1: быстрый захват ветра до первого гвоздя (ki_trim) +
+# трим переживает входы в ярус (сброс лишь на /restart VINS) — см.
+# config.dpvins_ki_trim / dpvins_trim_keep, разбор doc/tmp/eagle/dpvins.txt
+[ -n "${BS_DPVINS_KI_TRIM:-}" ]  && ARGS+=(--dpvins-ki-trim "$BS_DPVINS_KI_TRIM")
+[ -n "${BS_DPVINS_TRIM_KEEP:-}" ] && ARGS+=(--dpvins-trim-keep "$BS_DPVINS_TRIM_KEEP")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")
