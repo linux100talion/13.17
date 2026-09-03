@@ -142,7 +142,9 @@ class BootstrapArch2Node(Node):
             vins = build_vins_stab(cfg)
             handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec,
                                     v_max=cfg.vins_v_max, ipm_tol=cfg.vins_ipm_tol,
-                                    sane_n=cfg.vins_sane_n)
+                                    sane_n=cfg.vins_sane_n,
+                                    hover_v=cfg.vins_hover_v,
+                                    hover_sec=cfg.vins_hover_sec)
             if str(cfg.vins_stab).lower() == 'dpvins':
                 note = (f", DpVins (velocity-каскад) kp {cfg.dpvins_kp_fwd:g}/"
                         f"{cfg.dpvins_kp_lat:g} ki {cfg.dpvins_ki:g} "
@@ -963,6 +965,10 @@ def _parse() -> tuple:
                    default=_D.vins_ipm_tol)
     p.add_argument('--vins-sane-n', dest='vins_sane_n', type=int,
                    default=_D.vins_sane_n)
+    p.add_argument('--vins-hover-v', dest='vins_hover_v', type=float,
+                   default=_D.vins_hover_v)
+    p.add_argument('--vins-hover-sec', dest='vins_hover_sec', type=float,
+                   default=_D.vins_hover_sec)
     # рестарт VINS после демоута-по-разносу (см. config.vins_restart_diverge)
     p.add_argument('--vins-restart-diverge', dest='vins_restart_diverge',
                    type=float, default=_D.vins_restart_diverge)

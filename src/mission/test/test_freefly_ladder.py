@@ -118,20 +118,22 @@ def make(loiter_center=True):
     vins = FakeVins()
     stack = FakeStack([DAMPER, YAWD])
     step = Freefly("freefly", stack, pilot_stabs=[DAMPER, YAWD],
-                   handover=VinsHandover(vins, min_count=40, fresh_sec=2.0),
+                   handover=VinsHandover(vins, min_count=40, fresh_sec=2.0,
+                                         v_max=12.0, ipm_tol=4.0, sane_n=3),
                    loiter_center=loiter_center, vins_fresh=2.0, sf_master=True)
     runner = PlanRunner([step], clock, mode, FakeLog())
     return runner, clock, mode, stack, vins
 
 
 def snap(t, lvl=0, sw=-1, alt=3.0, odom=0, vins_age=None, extnav=False,
-         mode="ALT_HOLD"):
-    """vins_age: возраст последней одометрии, с (None = одометрии не было)."""
+         mode="ALT_HOLD", vins_vx=0.0):
+    """vins_age: возраст последней одометрии, с (None = одометрии не было).
+    vins_vx: скорость VINS (для санити-гейта — >v_max = разнос)."""
     return DroneState(mode=mode, armed=True, rel_alt=alt, now_sim=t,
                       pilot_switch=sw, pilot_level=lvl,
                       pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER,
                       pilot_throttle=RC_CENTER, pilot_yaw=RC_CENTER,
-                      vins_odom_count=odom,
+                      vins_odom_count=odom, vins_vx=vins_vx,
                       vins_last_sim=(t - vins_age) if vins_age is not None else -1e9,
                       extnav_ready=extnav)
 
@@ -191,6 +193,23 @@ tick_until(r, clock, 3.0, lvl=2, odom=700, vins_age=8.0, extnav=True,
 check("протух в LOITER: ALT_HOLD ре-ассертится", "ALT_HOLD" in mode.modes)
 check("протух в LOITER: стек — демпфер (не голый ALT_HOLD)",
       names(stack) == ['damper', 'yawd'])
+
+# --- 5б. VINS РАЗНЁССЯ в LOITER (свеж, но |v|>потолка) → гейт здоровья
+# выводит из LOITER на демпфер (без этого EKF ехал за разносом → снос) ---
+r, clock, mode, stack, vins = make()
+tick_until(r, clock, 2.0, lvl=2, odom=700, vins_age=0.1, extnav=True)
+tick_until(r, clock, 1.0, lvl=2, odom=700, vins_age=0.1, extnav=True,
+           mode="LOITER")
+check("подготовка: залатчен в LOITER (стек yaw-стаб)", names(stack) == ['yawd'])
+mode.modes.clear()
+# свеж (vins_age 0.1) и extnav готов, НО |vins_v|=20 > потолок 12 = разнос
+tick_until(r, clock, 0.5, lvl=2, odom=700, vins_age=0.1, extnav=True,
+           mode="LOITER", vins_vx=20.0)
+check("разнос в LOITER: ALT_HOLD ре-ассертится (выход из LOITER)",
+      "ALT_HOLD" in mode.modes)
+check("разнос в LOITER: стек упал на демпфер", names(stack) == ['damper', 'yawd'])
+check("разнос в LOITER: /restart заказан (фронт sane→insane)",
+      r.steps[0].handover.pop_restart_request())
 
 # --- 6. MANUAL (SF не-вверх) и возврат: пересев опор от текущей точки ---
 r, clock, mode, stack, vins = make()

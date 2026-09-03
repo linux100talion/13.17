@@ -616,10 +616,19 @@ class Freefly(Step):
             return "LAND"
         self._land_warned = False
         fresh_age = s.now_sim - s.vins_last_sim
+        # ГЕЙТ ЗДОРОВЬЯ и на ярусе 2 (LOITER-на-VINS): FCU держит позицию на
+        # EKF-от-VINS, и разнос VINS (медленный горизонтальный) EKF в GPS-denied
+        # может «поехать» за ним → LOITER держит уползающую точку → снос. Санити
+        # (потолок+IPM, тот же ho.vins_sane) ловит и здесь: не sane → выход из
+        # LOITER (_in_loiter=False) → _ladder_tier не форсит ярус 2 → падение на
+        # демпфер (санити яруса 1 добивает), /restart — от фронта vins_sane.
+        insane = self.handover is not None and not self.handover.vins_sane(s)
         if self._in_loiter:
-            if not s.extnav_ready or fresh_age > 3.0 * self.vins_fresh:
+            if (not s.extnav_ready or fresh_age > 3.0 * self.vins_fresh or insane):
                 self._in_loiter = False
-                ctx.log.warn("    LOITER: VINS/extnav протух — откат {}".format(
+                ctx.log.warn("    LOITER: {} — откат {}".format(
+                    "VINS РАЗНЁССЯ (гейт здоровья)" if insane
+                    else "VINS/extnav протух",
                     "на ярус ниже (лесенка)" if self.sf_master
                     else "в ALT_HOLD (стики = наклоны)"))
             elif (s.mode != "LOITER" and not self._latch_warned
@@ -637,7 +646,7 @@ class Freefly(Step):
                                  "ФАКТИЧЕСКИ чистый ALT_HOLD, стики = наклоны; "
                                  "тумблер вверх вернёт наш стек"))
         elif (s.extnav_ready and fresh_age < self.vins_fresh
-                and (s.rel_alt or 0.0) > self.loiter_alt):
+                and (s.rel_alt or 0.0) > self.loiter_alt and not insane):
             self._in_loiter = True
             self._loiter_warned = False
             self._loiter_since = s.now_sim

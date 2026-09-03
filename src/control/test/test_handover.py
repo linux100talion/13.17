@@ -18,6 +18,7 @@ from control_pkg.domain.control.excitation import NoExcitation       # noqa: E40
 from control_pkg.domain.control.stabilization import (               # noqa: E402
     DpRollHold, VinsHold, DpYawHold)
 from control_pkg.domain.control.trajectory import StaticSetpoint     # noqa: E402
+from control_pkg.domain.rc import RC_CENTER                          # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
 
 results = []
@@ -94,10 +95,12 @@ check("композит: на форвард-дрейфе vins команда т
       rc3.pitch != 1500)
 
 # ============ ГЕЙТ ЗДОРОВЬЯ VINS (авто-демоут яруса 1 при разносе) ============
-def sh(now, vx=0.0, vy=0.0, ipm_ok=False, ipm_vfwd=0.0, ipm_vlat=0.0):
+def sh(now, vx=0.0, vy=0.0, ipm_ok=False, ipm_vfwd=0.0, ipm_vlat=0.0,
+       roll=RC_CENTER, pitch=RC_CENTER):
     return DroneState(vins_valid=True, vins_odom_count=100,
                       vins_last_sim=now, now_sim=now, vins_vx=vx, vins_vy=vy,
-                      ipm_ok=ipm_ok, ipm_vfwd=ipm_vfwd, ipm_vlat=ipm_vlat)
+                      ipm_ok=ipm_ok, ipm_vfwd=ipm_vfwd, ipm_vlat=ipm_vlat,
+                      pilot_roll=roll, pilot_pitch=pitch)
 
 
 hg = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
@@ -136,12 +139,36 @@ hg4 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
                    v_max=12.0, ipm_tol=4.0, sane_n=3)
 st_bad = sh(80.0, vx=8.0, ipm_ok=True, ipm_vfwd=0.0)
 hg4.vins_sane(st_bad); hg4.vins_sane(st_bad); hg4.vins_sane(st_bad)  # тот же тик ×3
-check("тот же тик ×3: счётчик = 1 (не 3) → ещё sane", hg4._ipm_bad == 1)
+check("тот же тик ×3: счётчик = 1 (не 3) → ещё sane", hg4._bad == 1)
 
 # 6. выкл (v_max=0, ipm_tol=0): всегда sane (старое поведение)
 hg5 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0)
 check("гейт выкл: разнос |v|=20 всё равно sane (обратная совместимость)",
       hg5.vins_sane(sh(90.0, vx=20.0)))
+
+# 6б. ФИЗИКА ВИСЕНИЯ: центральные стики дольше hover_sec + |vins_v|>hover_v = разнос
+# (ловит МЕДЛЕННЫЙ разнос до потолка 12). off=выкл; DZ стика = 40 PWM.
+hgh = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
+                   hover_v=3.0, hover_sec=2.0, sane_n=3)
+# висим (стики центр), |vins_v|=5 > hover_v 3, но ещё < hover_sec → sane
+check("висение <hover_sec, v=5: ещё sane (транзиент стопа)",
+      hgh.vins_sane(sh(200.0, vx=5.0)))
+hgh.vins_sane(sh(202.5, vx=5.0))                     # >2с центра → чек активен, bad 1
+hgh.vins_sane(sh(202.6, vx=5.0))                     # bad 2
+check("висение >hover_sec, v=5, 3 кадра: НЕ sane (медленный разнос)",
+      not hgh.vins_sane(sh(202.7, vx=5.0)))
+# ВАЖНО: на быстрой прямой (стик отклонён) чек ВЫКЛ — v=5 при активном стике sane
+hgh2 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
+                    hover_v=3.0, hover_sec=2.0, sane_n=3)
+for i in range(60):                                  # 3с полного стика вперёд, v=5
+    ok_fly = hgh2.vins_sane(sh(300.0 + i * 0.05, vx=5.0, pitch=RC_CENTER - 400))
+check("стик активен (прямая), v=5: sane (чек висения выключен)", ok_fly)
+# ветровой снос на висении < hover_v: sane
+hgh3 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
+                    hover_v=3.0, hover_sec=2.0, sane_n=3)
+for i in range(60):                                  # 3с висения, снос 1.2 м/с (ветер)
+    ok_wind = hgh3.vins_sane(sh(400.0 + i * 0.05, vx=1.2))
+check("висение, ветровой снос 1.2 < hover_v 3: sane", ok_wind)
 
 # 7. ЗАПРОС /restart на фронте sane→insane (восстановление после разноса)
 hg6 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0, v_max=12.0)

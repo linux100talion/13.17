@@ -20,21 +20,31 @@ VINSHANDOVER: hover_1 держал 0.9 м, hover_4/7 болтало 4-7 м де�
 Живёт в application (не в домене): это policy оркестрации стратегий, а не закон.
 Тестируется оффлайн — синтетический рост vins_odom_count → switch срабатывает 1 раз.
 """
+from ..domain.rc import RC_CENTER
 
 
 class VinsHandover:
+    _STICK_DZ = 40                # PWM: |стик − центр| ниже = стик в центре (висение)
+
     def __init__(self, vins_hold, min_count: int = 40, fresh_sec: float = 2.0,
-                 v_max: float = 0.0, ipm_tol: float = 0.0, sane_n: int = 3):
+                 v_max: float = 0.0, ipm_tol: float = 0.0, sane_n: int = 3,
+                 hover_v: float = 0.0, hover_sec: float = 2.0):
         self._vins = vins_hold
         self.min_count = min_count
         self.fresh_sec = fresh_sec
         # ГЕЙТ ЗДОРОВЬЯ (санити): защита от разноса VINS (см. config.vins_v_max).
-        # 0 = выкл. sane_n — сколько кадров подряд расхождения с IPM до вердикта
-        # «болен» (защита от одиночного шумного кадра IPM; физ. потолок — сразу).
+        # 0 = выкл. sane_n — сколько кадров подряд «болен» до вердикта.
         self.v_max = v_max
         self.ipm_tol = ipm_tol
         self.sane_n = sane_n
-        self._ipm_bad = 0             # кадров подряд |vins_v−ipm_v| > tol
+        # ФИЗИКА ВИСЕНИЯ (ловит МЕДЛЕННЫЙ разнос, потолок — только грубый): при
+        # ЦЕНТРАЛЬНЫХ стиках дольше hover_sec истинная скорость ограничена ветром
+        # (~1 м/с даже в 10 м/с — контур держит); |vins_v| выше hover_v = разнос.
+        # VINS-независимо (стик+|vins_v|), надёжно (в отличие от IPM). 0 = выкл.
+        self.hover_v = hover_v
+        self.hover_sec = hover_sec
+        self._center_since = None     # sim-время начала непрерывного висения (стик центр)
+        self._bad = 0                # кадров подряд «болен» (IPM|hover)
         self._last_sane_t = None      # счётчик двигаем раз на новый sim-тик
         self._was_sane = True         # прошлый вердикт (для фронта sane→insane)
         self._restart_req = False     # одноразовый запрос /restart (нода опросит)
@@ -48,18 +58,26 @@ class VinsHandover:
         заказывает /restart VINS (нода опрашивает pop_restart_request)."""
         import math
         vh = math.hypot(s.vins_vx, s.vins_vy)
-        # IPM-кросс-чек с защитой от одиночного шумного кадра (sane_n подряд).
         # Счётчик двигаем раз на новый sim-тик — метод зовут оба пути лесенки.
         new_tick = self._last_sane_t is None or s.now_sim > self._last_sane_t
+        bad = False
+        # IPM-кросс-чек (по умолчанию выкл — IPM ненадёжен, см. config.vins_ipm_tol)
         if self.ipm_tol > 0.0 and s.ipm_ok:
             iv = math.hypot(s.ipm_vfwd, s.ipm_vlat)
-            bad = abs(vh - iv) > self.ipm_tol
-            if new_tick:
-                self._ipm_bad = self._ipm_bad + 1 if bad else 0
-        elif new_tick:
-            self._ipm_bad = 0                 # IPM слеп — чек не судит, не копим
+            bad = bad or abs(vh - iv) > self.ipm_tol
+        # ФИЗИКА ВИСЕНИЯ: стик в центре дольше hover_sec + |vins_v| > hover_v
+        centered = (abs(s.pilot_roll - RC_CENTER) < self._STICK_DZ
+                    and abs(s.pilot_pitch - RC_CENTER) < self._STICK_DZ)
+        if new_tick:
+            self._center_since = (self._center_since or s.now_sim) if centered else None
+        hovering = (self.hover_v > 0.0 and self._center_since is not None
+                    and s.now_sim - self._center_since > self.hover_sec)
+        if hovering and vh > self.hover_v:
+            bad = True                        # висим, а VINS «летит» = разнос
+        if new_tick:
+            self._bad = self._bad + 1 if bad else 0
         cap_bad = self.v_max > 0.0 and vh > self.v_max   # физ. потолок (грубо, сразу)
-        sane = (not cap_bad) and (self._ipm_bad < self.sane_n)
+        sane = (not cap_bad) and (self._bad < self.sane_n)
         if new_tick:
             if self._was_sane and not sane:   # фронт: заказать сброс VINS
                 self._restart_req = True
