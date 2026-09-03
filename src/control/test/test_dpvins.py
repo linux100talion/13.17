@@ -252,6 +252,51 @@ check(f"унос при ki=6 ≈ 100/6 м (полёты 16-17.5; получен�
 check(f"ki_trim=60: унос в ≥4 раза короче ({c_fast:.1f} м)",
       c_fast < c_slow / 4.0)
 
+
+# --- 14. голый вход в ярус (стика нет ВООБЩЕ): первый стоп после движения
+#         вяжет гвоздь и заканчивает быстрое обучение. Полёт lv2_joy_220204:
+#         выход из фазы ki_trim был привязан к гвоздю, гвоздь — к стику; пилот
+#         стик не трогал → ki_trim=60 молотил все 41 с яруса (см. тест 15).
+vh14 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
+vh14.update(st(vx=0.1, t=100.05), Setpoint(), DT)        # вход на висении
+check("вход без стика на висении: гвоздь НЕ вяжется (движения ещё не было)",
+      vh14._pinx is None and not vh14._trim_armed)
+vh14.update(st(vx=0.6, t=100.10), Setpoint(), DT)        # ветер понёс (>_PIN_V)
+vh14.update(st(vx=0.2, x=1.4, t=100.15), Setpoint(), DT)  # первый стоп
+check("первый стоп после движения: гвоздь в точке стопа + ветер выучен",
+      vh14._pinx == 1.4 and vh14._trim_armed)
+
+
+# --- 15. ЗАМКНУТЫЙ КОНТУР С ЛАГОМ НАКЛОНА: голое висение на ветру ---
+# Полёт lv2_joy_20260903_220204 (ветер 5, стики центр весь ярус): контур трима
+# = скрытый позиционный член (∫v = путь), ωn=√(ki/100), ζ=(kp/100)/(2·ωn);
+# при ki_trim 60 ζ≈0.26 (T≈8.1 c) — и лаги канала (наклон FCU, vsmooth 0.3,
+# латентность VINS) съедают остаток запаса: рост, период 7.1 с, ±2 м и
+# 2.2 м/с к 40-й секунде яруса. Модель: наклон — апериодика τ=0.5 с.
+def hover_lag(**kw):
+    vh = DpVins(**dict(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0,
+                       imax=120.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
+                       pos_vmax=0.3, pos_acc=0.15, vsmooth=0.3, i_latch=True,
+                       **kw))
+    vh.enter(DroneState(now_sim=100.0))
+    x = v = a = 0.0
+    t = 100.05
+    tail = []
+    for _ in range(int(80.0 / DT)):            # 80 сим-секунд висения
+        rc = vh.update(st(vx=v, x=x, t=t), Setpoint(), DT)
+        cmd = -(rc.pitch - RC_CENTER) / 100.0  # PWM → м/с² (100 PWM = 1 м/с²)
+        a += (DT / 0.5) * (cmd - a)            # лаг наклона τ = 0.5 с
+        v += (0.5 + a) * DT                    # «ветер 5» ≈ 0.5 м/с²
+        x += v * DT
+        t += DT
+        if t - 100.0 > 40.0:
+            tail.append(abs(v))
+    return max(tail)
+
+v_tail = hover_lag()
+check(f"хвост висения (40-80 с) спокоен: max|v| < 0.3 (получено {v_tail:.2f})",
+      v_tail < 0.3)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
