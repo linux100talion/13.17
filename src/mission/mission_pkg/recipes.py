@@ -103,7 +103,8 @@ def _vins(cfg):
     return VinsHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax, cfg.gz_max,
                     cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain,
                     kd_err=cfg.vins_kd_err > 0, i_latch=cfg.vins_i_latch > 0,
-                    pin_stop=cfg.vins_pin_stop > 0, predict=cfg.vins_predict > 0)
+                    pin_stop=cfg.vins_pin_stop > 0, predict=cfg.vins_predict > 0,
+                    vsmooth=cfg.vins_vsmooth)
 
 
 # имя → билдер(cfg)→стратегия (None = «ничего», для manual/none)

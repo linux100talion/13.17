@@ -284,6 +284,9 @@ ARGS=()
 # VinsHold: предиктор позы между 10 Гц отсчётами VINS — мёртвое счисление
 # v_vins·возраст, лечит пилу kp·e против бегущей уставки (config.vins_predict)
 [ -n "${BS_VINS_PREDICT:-}" ]    && ARGS+=(--vins-predict "$BS_VINS_PREDICT")
+# VinsHold: сглаживание vins-скорости для D-члена (ФНЧ τ с) — лечит пилу
+# команды от kd·(сырая конечная разность позы) (config.vins_vsmooth)
+[ -n "${BS_VINS_VSMOOTH:-}" ]    && ARGS+=(--vins-vsmooth "$BS_VINS_VSMOOTH")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")

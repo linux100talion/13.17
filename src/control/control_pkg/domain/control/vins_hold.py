@@ -25,7 +25,7 @@ class VinsHold(StabilizationStrategy):
 
     def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
                  psign=1.0, rsign=1.0, cmd_gain=0.8, kd_err=False,
-                 i_latch=False, pin_stop=False, predict=False):
+                 i_latch=False, pin_stop=False, predict=False, vsmooth=0.0):
         self.kp, self.kd, self.ki = kp, kd, ki
         self.imax, self.max = imax, max_pwm
         self.psign, self.rsign = psign, rsign
@@ -63,6 +63,18 @@ class VinsHold(StabilizationStrategy):
         # честная — тот же приём, что AttitudeBuffer для углов IPM). Экстраполяция
         # капится _PRED_MAX; predict=False — закон бит-в-бит прежний.
         self.predict = predict
+        # vsmooth — доп. сглаживание vins-скорости для D-члена (ФНЧ 1-го порядка,
+        # τ секунд; 0 = выкл). VINS-скорость в адаптере — сырая конечная разность
+        # 10 Гц позы (EMA a=0.4, лёгкая): её шаг ~0.07 м/с × kd=80 ≈ 6 PWM — ~70%
+        # ПИЛЫ команды тангажа (шаг 8-9 PWM/тик, 4-5 реверсов/с; демпфер плавный,
+        # т.к. кормит kd скоростью в окне МНК 0.3 с). Точный реплей ab_pred
+        # (yaw_freeze_ab сессии): доглаживание vins-v до EMA a≈0.15 роняет пилу
+        # 8.6 → 2.7 PWM/тик (уровень kd=0), сохраняя kd. ⚠️ лаг D-члена растёт с
+        # τ — риск подъесть демпфирование, вернувшее высотный звон (BS_GZ_KD 80);
+        # проверяется полётом. kd_err вычитает уставку из УЖЕ сглаженной скорости.
+        self.vsmooth = vsmooth
+        self._vfx = self._vfy = 0.0        # сглаженная vins-скорость (ФНЧ)
+        self._vf_init = False
         self._spx = self._spy = 0.0        # интеграл стик-команды → уставка (vins-опора)
         self._ix = self._iy = 0.0
         self._it = None
@@ -75,6 +87,8 @@ class VinsHold(StabilizationStrategy):
         self._it = s.now_sim
         self._i_frozen = False
         self._pin_pending = False
+        self._vfx = self._vfy = 0.0
+        self._vf_init = False
 
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
         # проекция стик-команды по ТЕКУЩЕМУ vins-курсу (тело) — как в GzHold:
@@ -124,6 +138,15 @@ class VinsHold(StabilizationStrategy):
         e_fwd = ex * c + ey * sn
         e_rgt = -ex * sn + ey * c
         vx, vy = s.vins_vx, s.vins_vy
+        if self.vsmooth > 0.0:
+            if not self._vf_init:
+                self._vfx, self._vfy = vx, vy
+                self._vf_init = True
+            else:
+                a = dt / (self.vsmooth + dt) if dt > 0.0 else 1.0
+                self._vfx += a * (vx - self._vfx)
+                self._vfy += a * (vy - self._vfy)
+            vx, vy = self._vfx, self._vfy
         if self.kd_err:
             vx -= vspx
             vy -= vspy
