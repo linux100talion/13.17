@@ -228,6 +228,11 @@ check("источник ipm: wnp/wnr в PWM каналов (целые), wns=ipm
 sw.wind_src = 'vins'
 check("источник vins: wns=vins",
       kv(hud_status(sw, FRESH))['wns'] == 'vins')
+check("без vel_mag (дефолт -1) — поля spd нет",
+      'spd' not in kv(hud_status(sw, FRESH)))
+sw.vel_mag = 0.34
+check("vel_mag задан: spd= в м/с рядом с ветром",
+      kv(hud_status(sw, FRESH))['spd'] == '0.34')
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")

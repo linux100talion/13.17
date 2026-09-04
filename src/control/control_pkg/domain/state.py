@@ -121,6 +121,8 @@ class DroneState:
     wind_p: float = 0.0              # трим тангажа, PWM канала
     wind_r: float = 0.0              # трим крена, PWM канала
     wind_src: str = ""               # 'ipm' (демпфер) | 'vins' (DpVins); '' = нет
+    vel_mag: float = -1.0            # |скорость| м/с ТОГО ЖЕ датчика, что wind_src
+                                     # (IPM: ipm_vfwd/vlat; VINS: vins_vx/vy); -1 = нет
     ipm_vfwd: float = 0.0            # продольная скорость, М/С
     ipm_vlat: float = 0.0            # боковая скорость, М/С
     ipm_noise_fwd: float = 0.0       # шум пути канала за кадр (EMA |Δ − v̂·dt|), М/КАДР

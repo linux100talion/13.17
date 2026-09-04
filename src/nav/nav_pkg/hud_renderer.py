@@ -334,6 +334,15 @@ class HudRenderer:
         tw, _th, base, _t = self._metrics(k, text, 0.7)
         self._box(frame, k, frame.shape[1] - tw - round(10 * k),
                   cy - rad - base - round(8 * k), text, HUD_WHITE, 0.7, None)
+        # |скорость| того же датчика — СЛЕВА от компаса (как быстро реально
+        # несёт по тому же сенсору, чей ветер показан). spd= в статусе, м/с;
+        # поля нет (нет активного датчика) — числа не рисуем.
+        vm = self._num("spd")
+        if vm is not None:
+            vt = f"V {vm:.1f}"
+            vtw, _vth, vbase, _vt = self._metrics(k, vt, 0.7)
+            self._box(frame, k, cx - rad - round(8 * k) - vtw,
+                      cy + vbase // 2, vt, HUD_WHITE, 0.7, None)
 
     def draw(self, frame, now: float) -> None:
         k = frame.shape[1] / 1280.0

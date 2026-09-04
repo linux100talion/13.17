@@ -196,11 +196,17 @@ def _wind_fields(s) -> str:
     выбирает по АКТИВНОМУ стеку яруса; на ярусе 2 LOITER — выученный трим
     DpVins по текущему vins_yaw: стек пуст, но ветер при передаче FCU не
     исчез). Направление и силу из PWM считает рендерер (общая формула для FPV
-    и scene_hud.mp4). Только при живом источнике — «чего нет в источниках,
-    того нет и в строке»."""
+    и scene_hud.mp4). spd= — |скорость| ТОГО ЖЕ датчика (нода: ipm_vfwd/vlat
+    или vins_vx/vy), рисуется слева от компаса. Только при живом источнике —
+    «чего нет в источниках, того нет и в строке»."""
     if not getattr(s, 'wind_src', ''):
         return ""
-    return f" wnp={s.wind_p:.0f} wnr={s.wind_r:.0f} wns={s.wind_src}"
+    out = f" wnp={s.wind_p:.0f} wnr={s.wind_r:.0f} wns={s.wind_src}"
+    # |скорость| того же датчика (spd=, м/с) — рядом с компасом слева; -1 = нет
+    vm = getattr(s, 'vel_mag', -1.0)
+    if vm >= 0.0:
+        out += f" spd={vm:.2f}"
+    return out
 
 
 def _frame_fields(s) -> str:

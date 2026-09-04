@@ -533,6 +533,14 @@ class BootstrapArch2Node(Node):
                 p_, r_ = tp(s.vins_yaw)
                 if math.hypot(p_, r_) >= 1.0:
                     s.wind_p, s.wind_r, s.wind_src = p_, r_, 'vins'
+        # |скорость| ТОГО ЖЕ датчика, что стрелка ветра (рядом с компасом):
+        # ipm → канал вида сверху (тело), vins → одометрия VINS (мир). Как
+        # быстро борт реально несёт по тому датчику, чей трим показан ветром.
+        s.vel_mag = -1.0
+        if s.wind_src == 'vins':
+            s.vel_mag = math.hypot(s.vins_vx, s.vins_vy)
+        elif s.wind_src == 'ipm':
+            s.vel_mag = math.hypot(s.ipm_vfwd, s.ipm_vlat)
         line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt,
                           ladder=ladder, vins_min=self._vins_min,
                           ripe_sec=self._ripe_sec, ripe_min=self._ripe_min,
