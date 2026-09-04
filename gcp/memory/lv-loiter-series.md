@@ -9,8 +9,8 @@ metadata:
 ---
 
 Серия LV (штатный ArduPilot Loiter на EKF-от-VINS) закрыта 2026-08-19, ветка
-`nn2_c3_laptop_vins`, коммиты e36c53b…8b94f66. Ранбук — `docker/sim/doc/tmp/
-laptop_move.md` §3 (доки переехали в doc/old 2026-08-21, с 2026-09-04 — doc/tmp); актуальное описание
+`nn2_c3_laptop_vins`, коммиты e36c53b…8b94f66. Ранбук — `docker/sim/doc/old/
+laptop_move.md` §3 (доки переехали в doc/old 2026-08-21); актуальное описание
 перехода в LOITER — `docker/sim/loiter.md`.
 
 **Пилотный freefly-LV ДОКАЗАН 2026-08-20** (6-й прогон, W10, GPS заглушен):
