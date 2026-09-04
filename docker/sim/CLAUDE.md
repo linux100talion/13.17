@@ -26,14 +26,14 @@ env.default                 — ЭТАЛОН .env (коммитится): .env �
                               его копией автоматически (make ensure-env / freefly_lv)
 env.md                      — шпаргалка: .env — локальный профиль бокса (кто читает,
                               лесенка приоритетов, текущие ключи LV/BS_SF_MASTER/WORLD)
-Q.txt, CMD.txt              — актуальные заметки (вопросы-ответы по freefly,
-                              холодный старт)
+CMD.txt                     — актуальные заметки (холодный старт; Q.txt —
+                              вопросы-ответы по freefly — переехал в doc/tmp/)
 LV1_loiter.md               — путь до LOITER-на-VINS в профиле LV=1 (GPS жив на
                               буте, глушится в полёте; легаси-селектор CH6)
 LV2_loiter.md               — то же для LV=2 «GPS отсутствует с бута» (боевой
                               дефолт: мост нулевой позы, origin руками,
                               лесенка SF-мастера)
-doc/old/                    — архив (FAQ*, todo*, README, laptop_move.md,
+doc/tmp/                    — архив (FAQ*, todo*, README, laptop_move.md,
                               concept.txt, спеки flow/yaw, tune_results)
 ```
 
@@ -52,12 +52,12 @@ make fresh-start    # полный сброс (down→up, ephemeral state тер
 Лётные команды (после `wait`): `make arm takeoff hover land disarm`,
 `make fly` (облёт квадрата для инициализации VINS), `make vins-watch`.
 
-## Переезд на GPU-ноутбук — `doc/old/laptop_move.md`
+## Переезд на GPU-ноутбук — `doc/tmp/laptop_move.md`
 
 Стенд жил на GPU-less боксе (`CPU=1`, llvmpipe, RTF ≈ 0.07). Чек-лист подъёма на
 машине с NVIDIA, что ломается при переходе к реальному времени (разрешение камеры,
 окна в КАДРАХ, wall-таймауты) и план проброса живого пульта —
-`docker/sim/doc/old/laptop_move.md` (архив; итоги серии LV — там же, §3).
+`docker/sim/doc/tmp/laptop_move.md` (архив; итоги серии LV — там же, §3).
 
 ## CPU-режим (ветка nn2_c3_cpu)
 
@@ -211,7 +211,7 @@ ARM_SIM_BUDGET=100 ARM_WALL_CAP=2400 \
 Открытый контур для калибровки планта флоу-демпфера (`flow_calib.py`, слой C):
 под gz-hold-pitch на roll подаётся ЗАДАННЫЙ `roll_off` (демпфер ВЫКЛ) → `roll_off`
 экзогенный → чистая идентификация `k/s/τ/d`. Полный контекст и три бэга кампании —
-`docker/sim/doc/old/HowToFlow_PID_synth.md`. `/flow_dbg` в bag обязателен (фактический
+`docker/sim/doc/tmp/HowToFlow_PID_synth.md`. `/flow_dbg` в bag обязателен (фактический
 `roll_off`).
 
 **Эталонная команда (balanced — позиция ВОЗВРАЩАЕТСЯ, дрон на сцене):**

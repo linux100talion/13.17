@@ -311,7 +311,7 @@ ARGS=()
 [ -n "${BS_DPVINS_IMAX:-}" ]     && ARGS+=(--dpvins-imax "$BS_DPVINS_IMAX")
 # унос на входе в ярус 1: быстрый захват ветра до первого гвоздя (ki_trim) +
 # трим переживает входы в ярус (сброс лишь на /restart VINS) — см.
-# config.dpvins_ki_trim / dpvins_trim_keep, разбор doc/tmp/eagle/dpvins.txt
+# config.dpvins_ki_trim / dpvins_trim_keep, разбор doc/eagle/dpvins.txt
 [ -n "${BS_DPVINS_KI_TRIM:-}" ]  && ARGS+=(--dpvins-ki-trim "$BS_DPVINS_KI_TRIM")
 [ -n "${BS_DPVINS_TRIM_KEEP:-}" ] && ARGS+=(--dpvins-trim-keep "$BS_DPVINS_TRIM_KEEP")
 [ -n "${BS_DPVINS_TRIM_SEED:-}" ] && ARGS+=(--dpvins-trim-seed "$BS_DPVINS_TRIM_SEED")

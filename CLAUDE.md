@@ -274,7 +274,7 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 ## Ключевые решения по симуляции
 
 1. **Gazebo Harmonic** (не Fortress) — по concept.txt
-   (`docker/sim/doc/old/concept.txt`; плагины `gz-sim-*`).
+   (`docker/sim/doc/tmp/concept.txt`; плагины `gz-sim-*`).
    Нештатная пара для Humble, ставится вручную из репозитория osrfoundation.
 2. **GPU = NVIDIA CUDA** (везде).
 3. **Вариант А — OpenCV+CUDA из исходников в образе `nav`.** Камера-нода работает
