@@ -13,7 +13,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from control_pkg.application.hud import (hud_status, LadderState,    # noqa: E402
-                                         LAND_NAMES, loiter_gate, vinshold_gate)
+                                         LAND_NAMES, loiter_gate, vinshold_gate,
+                                         wind_from_ekf)
 from control_pkg.domain.state import DroneState                      # noqa: E402
 
 FRESH = 2.0
@@ -233,6 +234,23 @@ check("без vel_mag (дефолт -1) — поля spd нет",
 sw.vel_mag = 0.34
 check("vel_mag задан: spd= в м/с рядом с ветром",
       kv(hud_status(sw, FRESH))['spd'] == '0.34')
+
+# --- ветер EKF3 (первичный источник, wind_from_ekf) ---
+import math as _m
+check("wind_from_ekf: штиль (0,0) → None",
+      wind_from_ekf(0.0, 0.0, 0.0) is None)
+# ветер дует на восток (wx>0), нос на восток (yaw=0) → дует в нос (вперёд);
+# скорость 5 → эквив. pwm 100·(5/10)²=25; рендерер вернёт 10·√(25/100)=5
+wnp, wnr = wind_from_ekf(5.0, 0.0, 0.0)
+check(f"ekf: ветер на E, нос на E → wnp≈+25 wnr≈0, скорость 5 ({wnp:.1f},{wnr:.1f})",
+      abs(wnp - 25.0) < 0.5 and abs(wnr) < 0.5)
+check("ekf: обратный якорь скорости (pwm→10·√ = м/с)",
+      abs(10.0 * _m.sqrt(_m.hypot(*wind_from_ekf(10.0, 0.0, 0.0)) / 100.0) - 10.0) < 1e-6)
+# тот же ветер на восток, нос на СЕВЕР (yaw=90°): восток СПРАВА → компас вправо
+wnp2, wnr2 = wind_from_ekf(5.0, 0.0, _m.pi / 2)
+a = _m.degrees(_m.atan2(-wnr2, wnp2))
+check(f"ekf: ветер на E, нос на N → компас ВПРАВО ({a:.0f}° ≈ +90)",
+      abs(a - 90.0) < 1.0)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")

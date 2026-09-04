@@ -174,7 +174,8 @@ wait_sitl() {
     return 1
 }
 wait_sitl || echo "freefly_lv: 5762 так и не открылся — пробую eeprom-шаг как есть"
-EEPROM_CMD="PYTHONPATH=/root/ardupilot/modules/mavlink python3 /scripts/sitl_lv_profile.py $LV"
+# BS_EKF_DRAG (drag-фьюжн ветра EKF3, стрелка ветра HUD) — в eeprom-шаг LV2.
+EEPROM_CMD="PYTHONPATH=/root/ardupilot/modules/mavlink BS_EKF_DRAG='${BS_EKF_DRAG:-32}' python3 /scripts/sitl_lv_profile.py $LV"
 if ! docker exec "$SIM" bash -lc "$EEPROM_CMD"; then
     # SITL часто мёртв после аварийно размотанного прогона (краш физики/зависший
     # арм) при живых контейнерах — лечится полным рестартом стека, делаем сами.

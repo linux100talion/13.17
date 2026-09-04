@@ -120,9 +120,16 @@ class DroneState:
     # курс −92° и 0°, расчётное «дует к» 97°/90° при истине 98°). ---
     wind_p: float = 0.0              # трим тангажа, PWM канала
     wind_r: float = 0.0              # трим крена, PWM канала
-    wind_src: str = ""               # 'ipm' (демпфер) | 'vins' (DpVins); '' = нет
-    vel_mag: float = -1.0            # |скорость| м/с ТОГО ЖЕ датчика, что wind_src
-                                     # (IPM: ipm_vfwd/vlat; VINS: vins_vx/vy); -1 = нет
+    wind_src: str = ""               # 'ekf' | 'ipm' (демпфер) | 'vins' (DpVins); '' = нет
+    vel_mag: float = -1.0            # |скорость| борта м/с активного датчика вида
+                                     # (ярус 0: ipm_vfwd/vlat; ярусы 1/2: vins_vx/vy); -1 = нет
+    # Оценка ветра EKF3 (drag-фьюжн) — фильтрованная, физика, во ВСЕХ режимах.
+    # /mavros/wind_estimation (WIND msg от FCU), скорость воздушной массы в
+    # мире ENU. ПЕРВИЧНЫЙ источник стрелки ветра HUD (windspeed.md). Требует
+    # EK3_DRAG_BCOEF>0 (BS_EKF_DRAG) + WIND в стриме (nav_up).
+    wind_ekf_wx: float = 0.0         # ENU-восток, м/с (куда дует)
+    wind_ekf_wy: float = 0.0         # ENU-север, м/с
+    wind_ekf_sim: float = -1e9       # sim-время последнего WIND (свежесть)
     ipm_vfwd: float = 0.0            # продольная скорость, М/С
     ipm_vlat: float = 0.0            # боковая скорость, М/С
     ipm_noise_fwd: float = 0.0       # шум пути канала за кадр (EMA |Δ − v̂·dt|), М/КАДР

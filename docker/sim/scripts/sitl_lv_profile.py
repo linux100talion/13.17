@@ -28,6 +28,7 @@
 #         Очередь ноды эти же значения лишь самовосстанавливает и датирует
 #         extnav_ready зрелостью VINS — источники тут ставим МЫ, до бута.
 # ============================================================================
+import os
 import sys
 import time
 
@@ -78,6 +79,21 @@ def main():
     if want is None:
         print(f"ОШИБКА: LV={lv} (ожидаю 0, 1 или 2)")
         return 2
+    want = dict(want)     # копия: не мутируем PROFILE между вызовами
+    # BS_EKF_DRAG — drag-фьюжн ветра EKF3 (BCOEF, кг/м²; 0 = выкл). Наблюдаемость
+    # на VINS-external-nav доказана Ф0 (ветер сошёлся к истине 10 м/с). Даёт
+    # стрелку ветра HUD во ВСЕХ режимах (windspeed.md). ⚠️ МЕНЯЕТ EKF (добавляет
+    # drag-измерение) — только для ветра HUD, но проверять качество удержания
+    # A/B прежде чем доверять для управления. Значение 32 — замер сим-драга на
+    # 5-10 м/с. Стрелку рисует только при непустом WIND-стриме (nav_up).
+    bcoef = float(os.environ.get('BS_EKF_DRAG', '32') or '0')
+    if bcoef > 0 and lv == '2':
+        want['EK3_DRAG_BCOEF_X'] = bcoef
+        want['EK3_DRAG_BCOEF_Y'] = bcoef
+        want['EK3_DRAG_MCOEF'] = 0.0
+    elif lv == '2':
+        want['EK3_DRAG_BCOEF_X'] = 0.0   # выкл явно (мог остаться в eeprom)
+        want['EK3_DRAG_BCOEF_Y'] = 0.0
     print(f"  eeprom-профиль LV={lv}: подключаюсь к SITL ({CONN})...", flush=True)
     try:
         m = mavutil.mavlink_connection(CONN, source_system=253)

@@ -175,6 +175,17 @@ if ! pgrep -f "mavros_node" >/dev/null; then
                 '{stream_id: 10, message_rate: 50, on_off: true}' >> "$LOG/mavros.log" 2>&1
             ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
                 '{stream_id: 2, message_rate: 2, on_off: true}' >> "$LOG/mavros.log" 2>&1
+            #   11 EXTRA2 + msg 168 (WIND) → /mavros/wind_estimation: оценка
+            #      ветра EKF3 (drag-фьюжн) для стрелки ветра HUD (windspeed.md).
+            #      Как ATTITUDE, WIND не в стриме роутер-канала по умолчанию
+            #      (проба Ф0: топик молчал, пока не запросили). SET_MESSAGE_
+            #      INTERVAL для 168 в этом SITL ОТРАБАТЫВАЕТ (в отличие от
+            #      ATTITUDE) — шлём и его, и stream_id 11, что сработает.
+            #      Данные идут только при EK3_DRAG_BCOEF>0 (BS_EKF_DRAG).
+            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
+                '{stream_id: 11, message_rate: 5, on_off: true}' >> "$LOG/mavros.log" 2>&1
+            ros2 service call /mavros/set_message_interval mavros_msgs/srv/MessageInterval \
+                '{message_id: 168, message_rate: 5.0}' >> "$LOG/mavros.log" 2>&1
             # Подтверждаем по SIM-частоте data_raw (на низком RTF wall-rate мизер).
             hz=$(python3 /scripts/imu_rate.py 40 15 2>/dev/null | tail -1)
             echo "  stream_rate: /mavros/imu/data_raw ≈ ${hz:-?} sim-Гц (EXTRA1 запрошен)" >> "$LOG/mavros.log"

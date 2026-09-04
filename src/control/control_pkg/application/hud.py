@@ -41,7 +41,28 @@ WaitEkfPos (step.py) пускает арм: свежий /mavros/local_position 
 оффлайн как handover (test_hud_status.py).
 """
 
+import math
 from dataclasses import dataclass
+
+
+def wind_from_ekf(wx, wy, yaw):
+    """Ветер EKF3 (drag-фьюжн) → (wnp, wnr) в валюте каналов, для той же стрелки
+    HUD, что трим. Источник ветра на ярусе LOITER (наш стек пуст, трим замерзает
+    — а EKF3 фильтрует и следит). (wx, wy) — скорость воздушной массы в мире ENU
+    (КУДА дует), yaw — ENU-курс. Скорость нативно в м/с; кодируем в
+    «эквивалентный PWM» тем же якорем, что читает рендерер
+    (v = 10·√(pwm/100) → pwm = 100·(v/10)²), направление проецируем мир→тело по
+    yaw (рендерер ждёт дует_вправо = −wnr). None — ветра нет (штиль/не готово).
+    Наблюдаемость на VINS-external-nav доказана Ф0 (сошёлся к 10.0 м/с @98° =
+    истина в висении); см. windspeed.md."""
+    speed = math.hypot(wx, wy)
+    if speed < 1e-3:
+        return None
+    pwm = 100.0 * (speed / 10.0) ** 2
+    c, sn = math.cos(yaw), math.sin(yaw)
+    df = wx * c + wy * sn          # ветер дует ВПЕРЁД (тело)
+    dr = wx * sn - wy * c          # ветер дует ВПРАВО (тело)
+    return (df / speed * pwm, -dr / speed * pwm)
 
 
 @dataclass(frozen=True)
@@ -190,15 +211,16 @@ def _ladder_fields(s, ladder, fresh_sec, vins_min) -> str:
 
 
 def _wind_fields(s) -> str:
-    """Оценка ветра тримом активного стабилизатора (стрелка ветра HUD): wnp/wnr
-    — трим тангажа/крена в PWM КАНАЛОВ (валюта seed_trim: наклон трима смотрит
-    ПРОТИВ ветра), wns — датчик источника ('ipm' демпфер / 'vins' DpVins; нода
-    выбирает по АКТИВНОМУ стеку яруса; на ярусе 2 LOITER — выученный трим
-    DpVins по текущему vins_yaw: стек пуст, но ветер при передаче FCU не
-    исчез). Направление и силу из PWM считает рендерер (общая формула для FPV
-    и scene_hud.mp4). spd= — |скорость| ТОГО ЖЕ датчика (нода: ipm_vfwd/vlat
-    или vins_vx/vy), рисуется слева от компаса. Только при живом источнике —
-    «чего нет в источниках, того нет и в строке»."""
+    """Оценка ветра (стрелка ветра HUD): wnp/wnr — ветер в PWM КАНАЛОВ, wns —
+    источник ПО ЯРУСУ. Ярусы 0/1 — НАШ трим стабилизатора: 'ipm' (демпфер) /
+    'vins' (DpVins), контур держит вживую → трим гладко следит. Ярус 2 LOITER
+    — 'ekf' (EKF3 drag-фьюжн, /mavros/wind_estimation, wind_from_ekf): стек
+    пуст, трим замёрз бы, а EKF следит (требует BS_EKF_DRAG + WIND-стрим,
+    иначе стрелки в LOITER нет). Направление и силу из PWM считает рендерер
+    (общая формула для FPV и scene_hud.mp4). spd= — |скорость| борта активного
+    датчика вида (ipm_vfwd/vlat ярус 0, vins_vx/vy ярусы 1/2), слева от
+    компаса. Только при живом источнике — «чего нет в источниках, того нет и в
+    строке» (windspeed.md)."""
     if not getattr(s, 'wind_src', ''):
         return ""
     out = f" wnp={s.wind_p:.0f} wnr={s.wind_r:.0f} wns={s.wind_src}"

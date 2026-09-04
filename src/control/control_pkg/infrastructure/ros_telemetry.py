@@ -8,7 +8,7 @@ RELIABLE-подписка их НЕ получает. Ground-truth скорос�
 """
 import math
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TwistWithCovarianceStamped
 from mavros_msgs.msg import RCIn, State
 from nav_msgs.msg import Odometry
 from rclpy.qos import qos_profile_sensor_data
@@ -46,6 +46,13 @@ class RosTelemetry:
         # (гейт WaitEkfPos перед армом, урок LV4). QoS sensor: совместим с любым.
         node.create_subscription(PoseStamped, '/mavros/local_position/pose',
                                  self._on_lpos, qos_profile_sensor_data)
+        # Оценка ветра EKF3 (drag-фьюжн, WIND msg): скорость воздушной массы в
+        # мире ENU → стрелка ветра HUD (первичный источник). Топик есть всегда
+        # (плагин wind_estimation), данные — только при EK3_DRAG_BCOEF>0 и WIND
+        # в стриме (nav_up). QoS sensor: mavros шлёт BEST_EFFORT.
+        node.create_subscription(TwistWithCovarianceStamped,
+                                 '/mavros/wind_estimation', self._on_wind,
+                                 qos_profile_sensor_data)
         # Детектор посадки FCU (EXTENDED_SYS_STATE.landed_state) — для детекта
         # касания SoftLand в дополнение к баро/gt. Нужен стрим EXTENDED_STATUS
         # (nav_up.sh, stream_id 2); без него топик молчит → fcu_landed=-1, детект
@@ -114,6 +121,13 @@ class RosTelemetry:
     def _on_lpos(self, m):
         self._s.ekf_pos_last_sim = self._clock.now_sim()
         self._s.ekf_z = float(m.pose.position.z)   # высота глазами EKF3 → HUD
+
+    def _on_wind(self, m):
+        # ветер EKF3 в мире ENU (скорость воздушной массы, куда дует); свежесть
+        # по sim-часам (на земле FCU шлёт последний в-воздухе замер, гейтим по age)
+        self._s.wind_ekf_wx = float(m.twist.twist.linear.x)
+        self._s.wind_ekf_wy = float(m.twist.twist.linear.y)
+        self._s.wind_ekf_sim = self._clock.now_sim()
 
     def _on_gt(self, m):
         x = m.pose.pose.position.x

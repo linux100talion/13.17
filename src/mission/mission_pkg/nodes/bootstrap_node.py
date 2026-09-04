@@ -27,7 +27,7 @@ from std_msgs.msg import Bool, Empty
 
 from control_pkg.application.arbiter import Arbiter
 from control_pkg.application.handover import VinsHandover
-from control_pkg.application.hud import hud_status
+from control_pkg.application.hud import hud_status, wind_from_ekf
 from control_pkg.domain.control.stabilization import VinsHold
 from control_pkg.domain.rc import RC_CENTER, RcCommand
 from control_pkg.infrastructure.mavros_actuator import MavrosActuator
@@ -504,42 +504,42 @@ class BootstrapArch2Node(Node):
             s.st_x, s.st_y = fdbg[0], fdbg[1]
             s.st_px, s.st_py = (fdbg[2] if fdbg[2] is not None
                                 else (float('nan'), float('nan')))
-        # оценка ветра тримом АКТИВНОГО стека (стрелка ветра HUD): пулл
-        # trim_pwm() как у рамы, но берём ПОСЛЕДНИЙ стаб с тримом — правило
-        # самого стека «поздний перезаписывает свои оси у раннего»: на ярусе 1
-        # композит DpHold остаётся ради yaw ([DpHold, DpVins]), а крен/тангаж
-        # держит DpVins — его трим и есть ветер. Валюта — PWM каналов (как у
-        # посева); датчик источника выдаёт seed_trim (есть только у DpVins).
-        # LOITER (ярус 2) пулл-осей не имеет — поля ветра честно пропадают.
+        # ── ОЦЕНКА ВЕТРА для стрелки HUD — источник ПО ЯРУСУ ─────────────────
+        # Ярусы 0/1 (DpHold/DpVins) — НАШ расчётный ветер (трим активного
+        # стабилизатора): контур держит вживую, трим гладко следит за ветром.
+        # Ярус 2 (LOITER) — наш стек пуст, трим замерзает → ветер из EKF3
+        # drag-фьюжна (/mavros/wind_estimation): фильтрован, физика, следит за
+        # порывом. Наблюдаемость на VINS-external-nav доказана Ф0 (сошёлся к
+        # истине 10 м/с в висении; на резком движении/разносе VINS дёргается —
+        # точен как readout висенного ветра). Требует EK3_DRAG_BCOEF>0
+        # (BS_EKF_DRAG) + WIND в стриме (nav_up); иначе в LOITER стрелки нет.
         s.wind_src = ''
-        for st_ in getattr(getattr(step, 'stack', None), 'stabs', ()):
-            tp = getattr(st_, 'trim_pwm', None)
-            v = tp() if tp is not None else None
-            if v is not None:
-                s.wind_p, s.wind_r = v
-                s.wind_src = ('vins' if getattr(st_, 'seed_trim', None)
-                              is not None else 'ipm')
-        # ярус 2 (LOITER): наш стек пуст (позицию держит FCU), но выученный
-        # трим DpVins жив (trim_keep — ветер при передаче не исчез). Мировой
-        # вектор проецируем ТЕКУЩИМ vins_yaw (кэш DpVins заморожен на выходе
-        # из яруса 1, а борт в LOITER крутится). Только выученный трим
-        # (≥1 PWM) при свежем VINS — девственный/протухший арроу бы врал.
-        if (not s.wind_src and ladder is not None and ladder.tier >= 2
-                and self._handover is not None
-                and (s.now_sim - s.vins_last_sim) < self.cfg.vins_fresh_sec):
-            tp = getattr(getattr(self._handover, '_vins', None),
-                         'trim_pwm', None)
-            if tp is not None:
-                p_, r_ = tp(s.vins_yaw)
-                if math.hypot(p_, r_) >= 1.0:
-                    s.wind_p, s.wind_r, s.wind_src = p_, r_, 'vins'
-        # |скорость| ТОГО ЖЕ датчика, что стрелка ветра (рядом с компасом):
-        # ipm → канал вида сверху (тело), vins → одометрия VINS (мир). Как
-        # быстро борт реально несёт по тому датчику, чей трим показан ветром.
+        tier = ladder.tier if ladder is not None else 0
+        if tier >= 2:
+            wage = s.now_sim - s.wind_ekf_sim
+            if wage < 1.5 and math.hypot(s.wind_ekf_wx, s.wind_ekf_wy) >= 0.5:
+                wr = wind_from_ekf(s.wind_ekf_wx, s.wind_ekf_wy, s.att_yaw)
+                if wr is not None:
+                    s.wind_p, s.wind_r, s.wind_src = wr[0], wr[1], 'ekf'
+        else:
+            # ПОСЛЕДНИЙ стаб с тримом (правило стека «поздний перезаписывает
+            # оси»: ярус 1 — DpVins, не DpHold-композит). seed_trim есть только
+            # у DpVins → он и различает vins/ipm.
+            for st_ in getattr(getattr(step, 'stack', None), 'stabs', ()):
+                tp = getattr(st_, 'trim_pwm', None)
+                v = tp() if tp is not None else None
+                if v is not None:
+                    s.wind_p, s.wind_r = v
+                    s.wind_src = ('vins' if getattr(st_, 'seed_trim', None)
+                                  is not None else 'ipm')
+        # |скорость| борта АКТИВНОГО датчика вида (рядом с компасом): ярус 0 —
+        # канал IPM (тело), ярусы 1/2 — одометрия VINS (мир). Не привязано к
+        # источнику ветра: показывает, как быстро реально несёт по тому сенсору,
+        # на котором борт летит.
         s.vel_mag = -1.0
-        if s.wind_src == 'vins':
+        if tier >= 1 and (s.now_sim - s.vins_last_sim) < self.cfg.vins_fresh_sec:
             s.vel_mag = math.hypot(s.vins_vx, s.vins_vy)
-        elif s.wind_src == 'ipm':
+        elif s.ipm_ok:
             s.vel_mag = math.hypot(s.ipm_vfwd, s.ipm_vlat)
         line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt,
                           ladder=ladder, vins_min=self._vins_min,
