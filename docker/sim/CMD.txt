@@ -9,6 +9,15 @@ $  python3 src/lab/joystick/js_probe.py
 
 
 
+WIND_SPD=10 \
+WIND_GUST="spd=15 at=90 rise=2 hold=5 fall=4 every=30" \
+bash src/lab/freefly_lv.sh
+
+
+
+---------------------------------------------
+---------------------------------------------
+
 
 Resume this session with:
 claude --resume a87a9b9e-b3a0-4662-9df6-e3a524aca43c
