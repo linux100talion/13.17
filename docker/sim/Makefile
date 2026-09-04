@@ -131,8 +131,13 @@ status:          ## что запустилось, что упало (проце
 wait:            ## ждать пока nav_up.sh напишет «nav: готово» (до 5 мин)
 	@echo "Жду завершения nav_up.sh..."
 	@timeout 300 bash -c '\
-	  until docker logs p1317_nav 2>&1 | grep -q "nav: готово"; do sleep 3; done' \
+	  S=$$(docker inspect -f "{{.State.StartedAt}}" p1317_nav); \
+	  until docker logs --since "$$S" p1317_nav 2>&1 | grep -q "nav: готово"; do sleep 3; done' \
 	  && echo "nav: готово" || echo "TIMEOUT (5 мин)"
+# ⚠️ --since StartedAt обязателен: docker logs переживают stop/start (чистятся
+# только на пересоздание), и после restart-all грело ложное «nav: готово» от
+# ПРОШЛОЙ жизни контейнера — секвенсор стартовал на полуподнятом стеке
+# (E2E 2026-09-04: hover схватил мусорный t0, публикатор ветра не нашёл топик).
 
 logs:            ## хвост логов всех нод (output/*.log)
 	tail -n 40 -f output/*.log
