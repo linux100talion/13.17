@@ -69,8 +69,10 @@
 
 - **Ключи compose** (см. `${...}` в `docker-compose*.yml`): `SPAWN_POSE`
   (постоянная точка старта — шесть чисел или имя пресета `spawn_save.py`, см.
-  `spawn.md`), `WIND_SPD` / `WIND_DIR_DEG` / `WIND_FACTOR`, `CAMERA_W`/`CAMERA_H`,
-  `VISION_POSE_SOURCE`. Применяются на fresh-start.
+  `spawn.md`), `WIND_SPD` / `WIND_DIR_DEG` / `WIND_FACTOR` / `WIND_GUST`
+  (порывы поверх постоянного ветра, детерминированный профиль в sim-времени —
+  спека в шапке `src/lab/wind_gust.py`, публикатор запускает `capture_scene.sh`),
+  `CAMERA_W`/`CAMERA_H`, `VISION_POSE_SOURCE`. Применяются на fresh-start.
 - **Ключи freefly_lv** — всё, что скрипт принимает через env: `BS_*`
   (пробрасываются в контейнер автоматически, см. `capture_scene.sh`), `WIND_SPD`,
   `RES`, `GDRIVE_UP`, `MP4`, `KEEP_BAG`, `HUD_MP4`, `TOPICS_EXTRA`...

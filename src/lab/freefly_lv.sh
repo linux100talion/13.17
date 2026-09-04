@@ -190,6 +190,12 @@ fi
 # ── 2) env-профиль полёта (эталон из Q.txt; всё переопределяется снаружи) ────
 # WIND_SPD: дефолт снижен 10 → 5 (2026-08-23, просьба Андрея) — 10 был из
 # LV-серии (стресс ветром), для регулярных прогонов серии joystick хватает 5.
+# WIND_GUST: ПОРЫВЫ поверх постоянного ветра (дефолт пусто = без порывов) —
+# детерминированный профиль в абсолютном sim-времени, публикатор
+# src/lab/wind_gust.py (запускает capture_scene, лог едет в архив прогона):
+#   WIND_GUST="spd=12 at=60 rise=2 hold=5 fall=4 every=30" bash src/lab/freefly_lv.sh
+# spd = ПИК м/с (не добавка), at = sim-сек первого порыва (часы Gazebo, t=0 =
+# старт мира; прогрев EKF ~44 с), every=0 = один порыв. Спека — шапка wind_gust.py.
 export WIND_SPD="${WIND_SPD:-5}"
 export BS_PILOT="${BS_PILOT:-joy}"
 export BS_STAB="${BS_STAB:-DpHoldM}"
@@ -696,6 +702,14 @@ if [ "$KEEP_BAG" = "1" ]; then
 fi
 if [ -f "$SIMDIR/output/joy.log" ]; then
     cp "$SIMDIR/output/joy.log" "$RUN_DIR/" || true
+fi
+# лог порывов ветра (sim_t фаз каждого порыва — джойнится с bag'ом по sim-времени)
+if [ -n "${WIND_GUST:-}" ]; then
+    if [ -f "$SIMDIR/output/wind_gust.log" ]; then
+        cp "$SIMDIR/output/wind_gust.log" "$RUN_DIR/" || true
+    else
+        echo "⚠️ WIND_GUST задан, а output/wind_gust.log нет — публикатор не жил?" >&2
+    fi
 fi
 if [ "${BS_PILOT}" = "replay" ] && [ -f "$SIMDIR/output/joy_replay.log" ]; then
     cp "$SIMDIR/output/joy_replay.log" "$RUN_DIR/" || true

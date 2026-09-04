@@ -48,6 +48,10 @@ services:
       - WIND_SPD=${WIND_SPD:-0}
       - WIND_DIR_DEG=${WIND_DIR_DEG:-98}
       - WIND_FACTOR=${WIND_FACTOR:-0.4}
+      # ПОРЫВЫ ветра: спека для src/lab/wind_gust.py (его запускает capture_scene
+      # на прогоне); сюда доезжает ради sim_up.sh — при WIND_SPD=0 с непустым
+      # WIND_GUST плагин WindEffects всё равно грузится (порывы на штиле).
+      - WIND_GUST=${WIND_GUST:-}
       # ТОЧКА СПАВНА дрона: "x y z roll pitch yaw" в осях МИРА Gazebo (пусто =
       # штатный центр площадки). Задаётся из окружения прогона (freefly_lv:
       # SPAWN_FROM=<каталог прогона> → src/lab/spawn_pose.py) или постоянно —

@@ -63,8 +63,12 @@ fi
 # Отсюда 0.4 (расчётно 0.74 Н, крен ≈2.4°). При 0.8 выходило 9.4° — это уже ~7 м/с.
 # ⚠️ Закон квадратичный, поэтому factor нельзя пересчитывать пропорцией: меняешь —
 # перемеряй тем же прогоном с оракулом.
+# ПОРЫВЫ (WIND_GUST, src/lab/wind_gust.py): публикатор шлёт вектор ветра в
+# runtime-топик /world/<мир>/wind — плагин принимает его на лету, мир не
+# трогается. Но сам ПЛАГИН должен быть загружен: при WIND_SPD=0 c непустым
+# WIND_GUST грузим весь ветровой блок с нулевой базой (порывы на штиле).
 WIND_SPD="${WIND_SPD:-0}"
-if [ "$WIND_SPD" != "0" ]; then
+if [ "$WIND_SPD" != "0" ] || [ -n "${WIND_GUST:-}" ]; then
     WIND_DIR_DEG="${WIND_DIR_DEG:-98}"; WIND_FACTOR="${WIND_FACTOR:-0.4}"
     mkdir -p "$PATCH"
     read -r WX WY <<<"$(awk -v s="$WIND_SPD" -v d="$WIND_DIR_DEG" \
@@ -91,7 +95,7 @@ PYEOF
         "$PATCH/iris_with_standoffs/model.sdf"
     export GZ_SIM_RESOURCE_PATH="$PATCH:${GZ_SIM_RESOURCE_PATH}"
     WORLD="$PATCH/world_wind.sdf"
-    echo "  ВЕТЕР: ${WIND_SPD} м/с, куда дует ${WIND_DIR_DEG}° (мир: ${WX} ${WY} 0), factor ${WIND_FACTOR}"
+    echo "  ВЕТЕР: ${WIND_SPD} м/с, куда дует ${WIND_DIR_DEG}° (мир: ${WX} ${WY} 0), factor ${WIND_FACTOR}${WIND_GUST:+, порывы: $WIND_GUST}"
 else
     echo "  ветер: выкл (WIND_SPD=0)"
 fi

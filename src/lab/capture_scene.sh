@@ -44,6 +44,7 @@ TOPICS_EXTRA="${TOPICS_EXTRA:-}" # доп. топики в bag (через пр�
 SKIP_CAM="${SKIP_CAM:-0}"       # 1 = НЕ писать/не обрабатывать /image_color: лёгкий bag
                                 #     (мегабайты) для анализа только по IMU/позе, напр. FFT
 NAV="${NAV:-p1317_nav}"         # имя nav-контейнера
+SIM="${SIM:-p1317_simulator}"   # имя simulator-контейнера (порывы ветра)
 CPU="${CPU:-}"                  # CPU=1 → GPU-less режим (docker-compose.cpu.yml)
 GDRIVE_UP="${GDRIVE_UP:-1}"            # 1 = заливать на Google Drive (ТОЛЬКО scene.mp4); 0 = нет
 GDRIVE_REMOTE="${GDRIVE_REMOTE:-gdrive}"      # имя rclone-remote (из rclone.conf)
@@ -131,7 +132,17 @@ HOST_UG="$(id -u):$(id -g)"
 chown_output() {
     docker exec "$NAV" chown -R "$HOST_UG" /root/sim_ws/output >/dev/null 2>&1 || true
 }
-trap chown_output EXIT
+# Публикатор порывов (WIND_GUST) гасим в том же trap: он живёт в контейнере
+# simulator и переживает ЛЮБОЙ выход секвенсора (успех/ошибка/ранний exit) —
+# без этого бесконечный профиль (every>0) качал бы ветер и после прогона.
+# SIGTERM для него вежливый: восстанавливает базовый ветер и выходит.
+cleanup() {
+    if [ -n "${WIND_GUST:-}" ]; then
+        docker exec "$SIM" pkill -f wind_gust >/dev/null 2>&1 || true
+    fi
+    chown_output
+}
+trap cleanup EXIT
 
 # ── 0. подготовка хоста + очистка артефактов прошлого прогона ─────────────────
 # fresh-start/restart монтируют /dev/rawbayer (v4l2loopback) в nav. Модуль ядра
@@ -196,6 +207,25 @@ else
     if [ -n "$CAMERA_W" ] || [ -n "$CAMERA_H" ]; then
         echo "  ⚠️ разрешение задано, но при RESTART=0 НЕ применится (нужен fresh-start)"
     fi
+fi
+
+# ── 1b. порывы ветра (WIND_GUST) — детерминированный профиль поверх WIND_SPD ──
+# Публикатор src/lab/wind_gust.py живёт в контейнере simulator (там биндинги
+# gz.transport13) и шлёт вектор ветра в runtime-топик плагина WindEffects.
+# Расписание в АБСОЛЮТНОМ sim-времени (t=0 = старт Gazebo) → на fresh-start
+# порывы двух прогонов приходят в одни и те же sim-секунды (честный A/B).
+# Спека и дефолты — в шапке wind_gust.py; лог фаз — output/wind_gust.log.
+# Гасится в trap cleanup на любом выходе. Оба рестарта (restart-all и
+# fresh-start) перезапускают Gazebo → sim-часы с нуля, `at` честный.
+# ⚠️ Только при RESTART=0 часы старые — абсолютное `at` уже уехало.
+if [ -n "${WIND_GUST:-}" ]; then
+    log "порывы ветра: WIND_GUST='$WIND_GUST' (лог output/wind_gust.log)"
+    docker exec "$SIM" pkill -f wind_gust >/dev/null 2>&1 || true
+    rm -f "$OUTPUT_DIR/wind_gust.log" 2>/dev/null || true
+    python3 "$SCRIPT_DIR/wind_gust.py" "$WIND_GUST" || {
+        echo "ОШИБКА: wind_gust.py не запустился (спека WIND_GUST кривая?)" >&2
+        exit 3
+    }
 fi
 
 # ── 2. старт записи rosbag (вокруг всей последовательности команд) ─────────────
