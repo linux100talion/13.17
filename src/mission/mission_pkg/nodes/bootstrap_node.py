@@ -504,6 +504,35 @@ class BootstrapArch2Node(Node):
             s.st_x, s.st_y = fdbg[0], fdbg[1]
             s.st_px, s.st_py = (fdbg[2] if fdbg[2] is not None
                                 else (float('nan'), float('nan')))
+        # оценка ветра тримом АКТИВНОГО стека (стрелка ветра HUD): пулл
+        # trim_pwm() как у рамы, но берём ПОСЛЕДНИЙ стаб с тримом — правило
+        # самого стека «поздний перезаписывает свои оси у раннего»: на ярусе 1
+        # композит DpHold остаётся ради yaw ([DpHold, DpVins]), а крен/тангаж
+        # держит DpVins — его трим и есть ветер. Валюта — PWM каналов (как у
+        # посева); датчик источника выдаёт seed_trim (есть только у DpVins).
+        # LOITER (ярус 2) пулл-осей не имеет — поля ветра честно пропадают.
+        s.wind_src = ''
+        for st_ in getattr(getattr(step, 'stack', None), 'stabs', ()):
+            tp = getattr(st_, 'trim_pwm', None)
+            v = tp() if tp is not None else None
+            if v is not None:
+                s.wind_p, s.wind_r = v
+                s.wind_src = ('vins' if getattr(st_, 'seed_trim', None)
+                              is not None else 'ipm')
+        # ярус 2 (LOITER): наш стек пуст (позицию держит FCU), но выученный
+        # трим DpVins жив (trim_keep — ветер при передаче не исчез). Мировой
+        # вектор проецируем ТЕКУЩИМ vins_yaw (кэш DpVins заморожен на выходе
+        # из яруса 1, а борт в LOITER крутится). Только выученный трим
+        # (≥1 PWM) при свежем VINS — девственный/протухший арроу бы врал.
+        if (not s.wind_src and ladder is not None and ladder.tier >= 2
+                and self._handover is not None
+                and (s.now_sim - s.vins_last_sim) < self.cfg.vins_fresh_sec):
+            tp = getattr(getattr(self._handover, '_vins', None),
+                         'trim_pwm', None)
+            if tp is not None:
+                p_, r_ = tp(s.vins_yaw)
+                if math.hypot(p_, r_) >= 1.0:
+                    s.wind_p, s.wind_r, s.wind_src = p_, r_, 'vins'
         line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt,
                           ladder=ladder, vins_min=self._vins_min,
                           ripe_sec=self._ripe_sec, ripe_min=self._ripe_min,

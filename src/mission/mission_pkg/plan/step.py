@@ -729,6 +729,14 @@ class Freefly(Step):
         if tier == self._tier:
             return
         self._tier = tier
+        if tier == 2 and self.handover is not None:
+            # LOITER: DpVins в стеке НЕТ (позицию держит FCU), но ветровой трим
+            # ему сеем — на нём стоит стрелка ветра HUD в LOITER. Нужно явно:
+            # лесенка умеет прыгнуть 0→2 минуя vins_stabs (там был единственный
+            # посев) — тогда трим DpVins девствен и стрелка пуста (симптом
+            # «пропадает в loiter, возвращается перещёлком тумблера»).
+            # Идемпотентно: seed_trim откажет, если ярус 1 уже посеял.
+            self.handover.seed_vins(self._pilot_stabs, s)
         stabs = (self._pilot_stabs if tier == 0
                  else self.handover.vins_stabs(self._pilot_stabs, s) if tier == 1
                  else self._tier2_stabs())

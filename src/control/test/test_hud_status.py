@@ -217,6 +217,18 @@ check("land= стоит ДО полей гейта (lalt) — парсер k=v �
       .index(' land=pos') < hud_status(DroneState(now_sim=5.0), FRESH, land='pos')
       .index(' lalt='))
 
+# --- поля ветра (стрелка HUD): только при активном источнике ---
+check("без источника ветра — полей wnp/wnr/wns нет",
+      'wnp' not in kv(hud_status(DroneState(now_sim=5.0), FRESH)))
+sw = DroneState(now_sim=5.0)
+sw.wind_p, sw.wind_r, sw.wind_src = -125.4, -20.7, 'ipm'
+d = kv(hud_status(sw, FRESH))
+check("источник ipm: wnp/wnr в PWM каналов (целые), wns=ipm",
+      d['wnp'] == '-125' and d['wnr'] == '-21' and d['wns'] == 'ipm')
+sw.wind_src = 'vins'
+check("источник vins: wns=vins",
+      kv(hud_status(sw, FRESH))['wns'] == 'vins')
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HUD_STATUS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

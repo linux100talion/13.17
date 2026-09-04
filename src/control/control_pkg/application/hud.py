@@ -163,7 +163,8 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
             + (f" land={land}" if land else "")
             + _gate_fields(s, loiter_alt, ripe_sec, ripe_min)
             + _ladder_fields(s, ladder, fresh_sec, vins_min)
-            + _frame_fields(s))
+            + _frame_fields(s)
+            + _wind_fields(s))
 
 
 def _gate_fields(s, loiter_alt, ripe_sec, ripe_min) -> str:
@@ -186,6 +187,20 @@ def _ladder_fields(s, ladder, fresh_sec, vins_min) -> str:
     t1, w1 = vinshold_gate(s, fresh_sec, vins_min)
     return (f" lvl={ladder.level} tier={ladder.tier} lat={ladder.latch_age:.1f}"
             f" t1={t1} w1={w1} vmin={vins_min}")
+
+
+def _wind_fields(s) -> str:
+    """Оценка ветра тримом активного стабилизатора (стрелка ветра HUD): wnp/wnr
+    — трим тангажа/крена в PWM КАНАЛОВ (валюта seed_trim: наклон трима смотрит
+    ПРОТИВ ветра), wns — датчик источника ('ipm' демпфер / 'vins' DpVins; нода
+    выбирает по АКТИВНОМУ стеку яруса; на ярусе 2 LOITER — выученный трим
+    DpVins по текущему vins_yaw: стек пуст, но ветер при передаче FCU не
+    исчез). Направление и силу из PWM считает рендерер (общая формула для FPV
+    и scene_hud.mp4). Только при живом источнике — «чего нет в источниках,
+    того нет и в строке»."""
+    if not getattr(s, 'wind_src', ''):
+        return ""
+    return f" wnp={s.wind_p:.0f} wnr={s.wind_r:.0f} wns={s.wind_src}"
 
 
 def _frame_fields(s) -> str:

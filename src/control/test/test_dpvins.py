@@ -350,6 +350,27 @@ c_part = carry_seed(70.0)
 check(f"посев неточный (70 из 100): ki_trim доучил, унос мал ({c_part:.2f} м)",
       abs(c_part) < 1.0)
 
+# --- 18. trim_pwm(): обратная к seed_trim (стрелка ветра HUD) ---
+# круговой проход: посев каналов → trim_pwm отдаёт их же; после разворота
+# на 90° — те же числа, что выход теста 17 (мировой трим глазами нового тела)
+vh18 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
+vh18.seed_trim(-40.0, 10.0, st(t=100.0))
+vh18.update(st(vx=0.0, t=100.05), Setpoint(), DT)
+p18, r18 = vh18.trim_pwm()
+check(f"trim_pwm = ровно посеянные каналы ({p18:.1f}, {r18:.1f})",
+      abs(p18 - (-40.0)) < 1e-6 and abs(r18 - 10.0) < 1e-6)
+vh18.update(st(vx=0.0, yaw=math.pi / 2, t=100.10), Setpoint(), DT)
+p18b, r18b = vh18.trim_pwm()
+check(f"trim_pwm после разворота 90°: мировой трим в новом теле "
+      f"({p18b:.1f}, {r18b:.1f} ≈ +10, +40)",
+      abs(p18b - 10.0) < 1e-9 + 1e-6 and abs(r18b - 40.0) < 1e-6)
+# ветка LOITER: DpVins не тикает (кэш yaw заморожен), нода даёт ТЕКУЩИЙ курс
+# явным аргументом — проекция по нему, кэш игнорируется
+p18c, r18c = vh18.trim_pwm(0.0)
+check(f"trim_pwm(yaw=0) при замороженном кэше 90°: проекция по данному курсу "
+      f"({p18c:.1f}, {r18c:.1f} ≈ −40, +10)",
+      abs(p18c - (-40.0)) < 1e-6 and abs(r18c - 10.0) < 1e-6)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

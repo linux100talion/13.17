@@ -118,6 +118,24 @@ class VinsHandover:
         опора = текущая точка. Используется и одноразовым свапом (maybe_switch),
         и лесенкой SF-мастера (Freefly._ladder_apply — там переходы двусторонние)."""
         keep = [st for st in base if "yaw" in getattr(st, "axes", frozenset())]
+        self.seed_vins(base, s)
+        self._vins.enter(s)
+        return keep + [self._vins]
+
+    def seed_vins(self, base, s) -> None:
+        """ПОСЕВ ветрового трима DpVins от демпферной базы (И-член демпфера =
+        тот же ветер, снятый секунду назад — DpVins не учит заново, унос
+        ~2 м → ~0). Вынесен из vins_stabs, потому что нужен НЕ только на входе
+        в ярус 1: лесенка умеет прыгать 0→2 (LOITER латчится в тот же миг, что
+        зреет VINS) МИНУЯ vins_stabs — тогда без явного посева здесь трим
+        DpVins остаётся девственным, и стрелка ветра HUD в LOITER пуста
+        (симптом: «пропадает при переключении в loiter, возвращается
+        перещёлкиванием тумблера» — перещёлк проводит через ярус 1). Зовётся
+        и из _ladder_apply на входе в ярус 2. Идемпотентен: seed_trim сам
+        отказывает на НЕдевственном триме (начатое обучение / выученный ветер
+        свежее демпферного), так что проход 0→1→2 не сеет дважды.
+        /restart (_trim_dirty) сбрасывает трим здесь же — тогда сеем свежую
+        раму. Валюта — PWM каналов (trim_pwm), знаки — забота seed_trim."""
         if self._trim_dirty:
             # рама VINS переродилась (/restart) — мировой трим недействителен;
             # у стабов без трима (VinsHold) метода нет — им сбрасывать нечего
@@ -125,22 +143,17 @@ class VinsHandover:
             if reset is not None:
                 reset()
             self._trim_dirty = False
-        if self.trim_seed:
-            # ПОСЕВ трима от демпфера: его установившийся И-член держал этот
-            # ветер секунду назад — DpVins не учит заново (унос ~2 м → ~0).
-            # После сброса выше посев штатно сеет и свежую раму. seed_trim сам
-            # отказывает, если трим НЕ девственный (начатое обучение/выученный
-            # ветер свежее демпферного). Валюта — PWM каналов (trim_pwm).
-            seed = getattr(self._vins, "seed_trim", None)
-            if seed is not None:
-                for st_ in base:
-                    tp = getattr(st_, "trim_pwm", None)
-                    v = tp() if tp is not None else None
-                    if v is not None:
-                        seed(v[0], v[1], s)
-                        break
-        self._vins.enter(s)
-        return keep + [self._vins]
+        if not self.trim_seed:
+            return
+        seed = getattr(self._vins, "seed_trim", None)
+        if seed is None:
+            return
+        for st_ in base:
+            tp = getattr(st_, "trim_pwm", None)
+            v = tp() if tp is not None else None
+            if v is not None:
+                seed(v[0], v[1], s)
+                break
 
     def maybe_switch(self, stack, s) -> bool:
         """Если VINS сошёлся, а ЭТОТ стек ещё на демпфере — заменить roll/pitch-

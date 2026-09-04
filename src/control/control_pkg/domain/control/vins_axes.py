@@ -75,6 +75,7 @@ class DpVins(StabilizationStrategy):
         self._moved = False                # ярус видел движение (|v| > _PIN_V)
         self._itx = self._ity = 0.0        # трим (PWM) в осях МИРА (x, y)
         self._trim_armed = False           # ветровой трим выучен (первый стоп прошёл)
+        self._last_yaw = 0.0               # vins_yaw последнего rc() — для trim_pwm()
         self._vff = self._vfl = 0.0        # ФНЧ скорости внутреннего контура
         self._vf_init = False
         self._it = None
@@ -123,6 +124,22 @@ class DpVins(StabilizationStrategy):
         self._ity = clamp(i_fwd * sn + i_rgt * c, -self.imax, self.imax)
         return True
 
+    def trim_pwm(self, yaw=None):
+        """Трим в валюте PWM КАНАЛОВ (pitch_off, roll_off) — ОБРАТНАЯ к
+        seed_trim операция и зеркало DpHold.trim_pwm (общий интерфейс пулла:
+        стрелка ветра HUD, посев). Мировой вектор проецируется в тело по yaw:
+        без аргумента — vins_yaw ПОСЛЕДНЕГО update() (кэш _last_yaw; на
+        активном ярусе свеж), с аргументом — заданный курс (LOITER: DpVins не
+        тикает, кэш заморожен на выходе из яруса, а борт крутится — нода даёт
+        текущий s.vins_yaw). Девственный трим честно отдаёт (0, 0)."""
+        if yaw is None:
+            yaw = self._last_yaw
+        c = math.cos(yaw)
+        sn = math.sin(yaw)
+        i_fwd = self._itx * c + self._ity * sn
+        i_rgt = -self._itx * sn + self._ity * c
+        return (self.psign * i_fwd, self.rsign * i_rgt)
+
     def _return_target(self, e):
         """Цель скорости внешнего контура к гвоздю: линейный pos_kp + √-кап acc
         (тормозной путь без перелёта, как sqrt_controller ArduPilot / RETURN
@@ -135,6 +152,7 @@ class DpVins(StabilizationStrategy):
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
         c = math.cos(s.vins_yaw)
         sn = math.sin(s.vins_yaw)
+        self._last_yaw = s.vins_yaw        # кэш для trim_pwm() (пулл без снапшота)
         # скорость VINS (мир) → тело (fwd+, right+)
         v_fwd = s.vins_vx * c + s.vins_vy * sn
         v_rgt = -s.vins_vx * sn + s.vins_vy * c

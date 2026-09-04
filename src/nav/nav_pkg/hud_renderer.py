@@ -19,6 +19,7 @@
 # на любом разрешении HUD занимает ту же долю кадра, что в FPV-даунлинке.
 # ============================================================================
 import collections
+import math
 
 import cv2
 
@@ -295,6 +296,45 @@ class HudRenderer:
             y = self._line(frame, k, y, text, col, scale=0.7, fill=fill)
         return y
 
+    def _draw_wind(self, frame, k):
+        """СТРЕЛКА ВЕТРА из трима активного стабилизатора (wnp/wnr/wns статуса,
+        правый нижний угол). Компас ОТНОСИТЕЛЬНО НОСА (метка сверху = нос,
+        видео и так «глазами носа»): стрелка показывает, КУДА ДУЕТ (куда несло
+        бы борт), подпись — сила и датчик (IPM = трим демпфера / VINS = трим
+        DpVins; выбирает лётная нода по активному ярусу).
+        Семантика PWM (знаковый якорь — полёт joystick/1 2026-09-04, ветер-10 к
+        98°, курсы −92° и 0°): наклон трима смотрит ПРОТИВ ветра; pitch+ =
+        лечь назад, roll+ = вправо → «дует к» в теле = (wnp, −wnr) по
+        (вперёд, вправо). Сила: якорь 100 PWM ↔ 10 м/с и F ∝ v² → v =
+        10·√(PWM/100). Оценка честна на удержании (трим выучен) и врёт первые
+        секунды обучения — как всякий трим."""
+        if "wns" not in self.status:
+            return
+        p, r = self._num("wnp"), self._num("wnr")
+        if p is None or r is None:
+            return
+        pwm = math.hypot(p, r)
+        spd = 10.0 * math.sqrt(pwm / 100.0)
+        a = math.atan2(-r, p)              # куда дует, по часовой от носа
+        rad = round(34 * k)
+        cx = frame.shape[1] - round(10 * k) - rad
+        cy = frame.shape[0] - round(14 * k) - rad
+        thick = max(1, round(2 * k * FONT_K))
+        cv2.circle(frame, (cx, cy), rad, (0, 0, 0), -1)
+        cv2.circle(frame, (cx, cy), rad, HUD_WHITE, thick)
+        cv2.line(frame, (cx, cy - rad), (cx, cy - rad + round(8 * k)),
+                 HUD_WHITE, thick)         # метка носа
+        dx, dy = math.sin(a), -math.cos(a)
+        e = 0.72 * rad
+        cv2.arrowedLine(frame, (round(cx - e * dx), round(cy - e * dy)),
+                        (round(cx + e * dx), round(cy + e * dy)),
+                        HUD_WHITE, thick + 1, tipLength=0.35)
+        src = self.status.get("wns", "").upper()
+        text = f"WIND {spd:.1f} {src}"
+        tw, _th, base, _t = self._metrics(k, text, 0.7)
+        self._box(frame, k, frame.shape[1] - tw - round(10 * k),
+                  cy - rad - base - round(8 * k), text, HUD_WHITE, 0.7, None)
+
     def draw(self, frame, now: float) -> None:
         k = frame.shape[1] / 1280.0
         # 0) фичи VINS-трекера — то, за что реально цепляется одометрия.
@@ -445,3 +485,8 @@ class HudRenderer:
             self._line_right(frame, k, yr,
                              f"CMD R{self.cmd_roll:+04.0f} "
                              f"P{self.cmd_pitch:+04.0f}", HUD_WHITE)
+        # 10) стрелка ветра из трима активного стабилизатора (правый нижний
+        # угол); поля wnp/wnr/wns есть только при активном источнике (ярусы
+        # 0/1), протухший статус гасит виджет вместе с остальными
+        if st_ok:
+            self._draw_wind(frame, k)

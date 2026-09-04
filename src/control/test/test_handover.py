@@ -229,6 +229,18 @@ VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0).vins_stabs(
     [comp8], s(5, 11.0, 11.0))
 check("VinsHold (без seed_trim): vins_stabs не падает", True)
 
+# seed_vins напрямую (вход в ярус 2 LOITER МИНУЯ vins_stabs): трим DpVins
+# сеется, DpVins в стек НЕ идёт — на нём стоит стрелка ветра HUD в LOITER.
+# Это и есть «прыжок 0→2»: без явного посева трим был бы девственным.
+dpv12 = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
+ho12 = VinsHandover(dpv12, min_count=5, fresh_sec=2.0)
+ho12.seed_vins([comp8], s(5, 11.0, 11.0))
+check("seed_vins (вход 0→2 в LOITER): трим DpVins посеян как в vins_stabs",
+      abs(dpv12._itx + 40.0) < 1e-9 and abs(dpv12._ity - 10.0) < 1e-9)
+check("seed_vins идемпотентен: повторный вызов не перетирает (уже нажит)",
+      ho12.seed_vins([comp8], s(5, 11.0, 11.0)) is None
+      and abs(dpv12._itx + 40.0) < 1e-9)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HANDOVER Flow→Vins OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
