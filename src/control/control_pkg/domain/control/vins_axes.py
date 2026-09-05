@@ -38,8 +38,15 @@ DpVins повторяет архитектуру демпфера/LOITER — vel
 исчезает, а дребезг гейта обнулял трим повторно — 24 м вместо 17); сброс —
 только reset_trim(), его зовёт VinsHandover на фактическом /restart VINS
 (мировая рама перерождается — вектор в старой раме недействителен).
-НЕ реализован полный автомат станции (BRAKE/фазы) — он был нужен ШУМНОМУ
-дрейфующему каналу потока; у VINS позиция чистая, хватает √-капа RETURN.
+ФАЗА BRAKE (2026-09-05, серия dphold_vs_dpvins + cmd/1–2): закон цели внешнего контура
+взят у станции демпфера ЦЕЛИКОМ — два StationKeeper (оси вперёд/вбок), их target():
+BRAKE — пока уходим от гвоздя быстрее brake_v, цель −brake·v (ошибка скорости
+×(1+brake): при brake 3 kp 40/32 → 160/128 PWM на м/с — жёсткость демпфера, у
+которого 360 ложатся на IPM с гейном 0.45–0.9); RETURN — прежний pos_kp/vmax/√-кап.
+Без него DpVins пропускал порыв 8 м/с на 6–9 м против 2.5 у DpHold при том же
+лаге: датчик лучше, закон мягче (разбор — память dphold-vs-dpvins-gusts). Трим на
+торможении после первого гвоздя ЗАМОРОЖЕН (как _BRAKE_TRIM демпфера). brake 0 =
+выкл: target() станции с brake 0 — та же формула, что прежний _return_target.
 """
 import math
 
@@ -47,6 +54,7 @@ from ..rc import RC_CENTER, RcCommand, clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
 from .base import StabilizationStrategy
+from .station_keeper import StationKeeper
 
 
 class DpVins(StabilizationStrategy):
@@ -58,7 +66,8 @@ class DpVins(StabilizationStrategy):
     def __init__(self, kp_fwd=200.0, kp_lat=120.0, ki=20.0, ki_trim=0.0,
                  imax=100.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
                  pos_vmax=0.3, pos_acc=0.15, psign=1.0, rsign=1.0, vsmooth=0.1,
-                 i_latch=True, trim_keep=True):
+                 i_latch=True, trim_keep=True, brake=0.0, brake_v=0.25,
+                 brake_vmax=1.0):
         self.kp_fwd, self.kp_lat = kp_fwd, kp_lat
         self.ki, self.imax, self.max = ki, imax, max_pwm
         self.ki_trim = ki_trim             # скорость обучения ДО первого гвоздя (0 = ki)
@@ -66,6 +75,16 @@ class DpVins(StabilizationStrategy):
         self.cmd_gain = cmd_gain
         # внешний позиционный контур (цель скорости при отпущенном стике)
         self.pos_kp, self.pos_vmax, self.pos_acc = pos_kp, pos_vmax, pos_acc
+        # ЗАКОН ЦЕЛИ внешнего контура — станция демпфера как есть (BRAKE/RETURN,
+        # выход из тормоза, перевзвод): по экземпляру на ось тела. Гвоздь/трим —
+        # свои (DpVins), у станции берём только target() и фазу braking.
+        self.brake, self.brake_v, self.brake_vmax = brake, brake_v, brake_vmax
+        self._st_fwd = StationKeeper(kp=pos_kp, vmax=pos_vmax, brake=brake,
+                                     brake_vmax=brake_vmax, acc=pos_acc,
+                                     brake_v=brake_v, pin_v=self._PIN_V)
+        self._st_rgt = StationKeeper(kp=pos_kp, vmax=pos_vmax, brake=brake,
+                                     brake_vmax=brake_vmax, acc=pos_acc,
+                                     brake_v=brake_v, pin_v=self._PIN_V)
         self.psign, self.rsign = psign, rsign
         self.vsmooth = vsmooth
         self.i_latch = i_latch
@@ -84,6 +103,8 @@ class DpVins(StabilizationStrategy):
         self._pinx = self._piny = None
         self._pin_pending = False
         self._moved = False
+        self._st_fwd.reset()
+        self._st_rgt.reset()
         # ТРИМ НЕ ТРОГАЕМ (trim_keep): ветер на переключении яруса не исчезает,
         # а обнуление на каждом входе = обучение заново = унос ≈ трим/ki по
         # ветру на каждом фронте яруса (wind_* 2026-09-03: 17 м; дребезг гейта
@@ -140,10 +161,16 @@ class DpVins(StabilizationStrategy):
         i_rgt = -self._itx * sn + self._ity * c
         return (self.psign * i_fwd, self.rsign * i_rgt)
 
+    @property
+    def braking(self) -> bool:
+        """Фаза BRAKE хотя бы на одной оси (станция)."""
+        return self._st_fwd.braking or self._st_rgt.braking
+
     def _return_target(self, e):
         """Цель скорости внешнего контура к гвоздю: линейный pos_kp + √-кап acc
         (тормозной путь без перелёта, как sqrt_controller ArduPilot / RETURN
-        станции). Знак — к гвоздю."""
+        станции). Знак — к гвоздю. С 2026-09-05 контур зовёт StationKeeper.target();
+        при brake 0 он даёт ровно эту формулу — метод оставлен эталоном для теста."""
         mag = min(self.pos_kp * abs(e), self.pos_vmax)
         if self.pos_acc > 0.0:
             mag = min(mag, math.sqrt(2.0 * self.pos_acc * abs(e)))
@@ -173,6 +200,8 @@ class DpVins(StabilizationStrategy):
         if stick:
             self._pinx = self._piny = None     # точка отпущена
             self._pin_pending = True           # гвоздь заказан на ближайший стоп
+            self._st_fwd.release(False)        # брейк погашен (гвоздя нет)
+            self._st_rgt.release(False)
             # цель скорости тела: у VinsHold команда setpoint'а в осях тела
             # выходит (c_fwd·g, −c_right·g) — проекция мировой vsp(cmd) назад по
             # курсу; повторяем, иначе правый стик уводит борт влево
@@ -201,8 +230,9 @@ class DpVins(StabilizationStrategy):
                 ey = self._piny - s.vins_y
                 e_fwd = ex * c + ey * sn
                 e_rgt = -ex * sn + ey * c
-                tv_fwd = self._return_target(e_fwd)
-                tv_rgt = self._return_target(e_rgt)
+                # закон станции: BRAKE (−brake·v, пока уходим) / RETURN (√-кап)
+                tv_fwd = self._st_fwd.target(e_fwd, v_fwd)
+                tv_rgt = self._st_rgt.target(e_rgt, v_rgt)
             else:
                 tv_fwd = tv_rgt = 0.0          # тормозим к нулю до гвоздя
 
@@ -241,7 +271,8 @@ class DpVins(StabilizationStrategy):
         # гвоздя нет, но и торможения нет — там трим ДОЛЖЕН учиться (рабочим
         # ki), иначе смена ветра между входами в ярус не доучивается никогда.
         frozen = self.i_latch and (stick
-                                   or (self._trim_armed and self._pin_pending))
+                                   or (self._trim_armed
+                                       and (self._pin_pending or self.braking)))
         # СКОРОСТЬ ОБУЧЕНИЯ двухфазная: до первого гвоздя (ветер не выучен) —
         # ki_trim, быстрый захват (зеркало _POS_BRAKE_TRIM/ki_trim демпфера):
         # унос на входе в ярус = нужный трим / ki обучения, от kp не зависит

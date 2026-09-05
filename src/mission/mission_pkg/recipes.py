@@ -108,7 +108,9 @@ def _dpvins(cfg):
                   pos_vmax=cfg.dpvins_pos_vmax, pos_acc=cfg.dpvins_pos_acc,
                   psign=cfg.gz_psign, rsign=cfg.gz_rsign,
                   vsmooth=cfg.dpvins_vsmooth, i_latch=cfg.vins_i_latch > 0,
-                  trim_keep=cfg.dpvins_trim_keep > 0)
+                  trim_keep=cfg.dpvins_trim_keep > 0,
+                  brake=cfg.dpvins_pos_brake, brake_v=cfg.dpvins_pos_brake_v,
+                  brake_vmax=cfg.dpvins_pos_brake_vmax)
 
 
 def build_vins_stab(cfg):

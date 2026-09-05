@@ -371,6 +371,87 @@ check(f"trim_pwm(yaw=0) при замороженном кэше 90°: прое�
       f"({p18c:.1f}, {r18c:.1f} ≈ −40, +10)",
       abs(p18c - (-40.0)) < 1e-6 and abs(r18c - 10.0) < 1e-6)
 
+# ============ ФАЗА BRAKE внешнего контура (закон станции демпфера, 2026-09-05) ============
+# Серия dphold_vs_dpvins + cmd/1–2: без брейка DpVins пропускал порыв на 6–9 м против
+# 2.5 у DpHold — при уходе от гвоздя станция ставит цель −brake·v (ошибка ×(1+brake)).
+# 16. brake=0 — цель станции РОВНО прежний _return_target (регресс бит-в-бит)
+vh16 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0)
+ok16 = all(abs(vh16._st_fwd.target(e, v) - vh16._return_target(e)) < 1e-12
+           for e in (-3.0, -1.0, -0.2, 0.0, 0.05, 0.4, 2.0) for v in (-1.0, 0.0, 0.7))
+check("brake=0: target() станции == _return_target (RETURN, √-кап) при любых e/v", ok16)
+
+
+def hover_then_push(brake, v_push=0.6, n_push=20, **kw):
+    """Гвоздь в нуле (стоп после движения), затем борт УНОСИТ от гвоздя вперёд со
+    скоростью v_push (VINS x растёт). Возвращает (стаб, список |po|)."""
+    vh = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, brake=brake, **kw)
+    t = 100.05
+    for i in range(5):                                # движение → _moved
+        vh.update(st(vx=0.6, x=0.1 * i, t=t), Setpoint(), DT); t += DT
+    for i in range(5):                                # стоп → гвоздь
+        vh.update(st(vx=0.0, x=0.5, t=t), Setpoint(), DT); t += DT
+    outs = []
+    x = 0.5
+    for i in range(n_push):                           # унос от гвоздя (порыв)
+        x += v_push * DT
+        rc = vh.update(st(vx=v_push, x=x, t=t), Setpoint(), DT); t += DT
+        outs.append(rc.pitch - RC_CENTER)
+    return vh, outs, x, t
+
+
+vh_a, out_a, xa, ta = hover_then_push(0.0)
+vh_b, out_b, xb, tb = hover_then_push(3.0)
+check("гвоздь по стопу связан (оба)", vh_a._pinx is not None and vh_b._pinx is not None)
+check("brake=3: при уносе 0.6 м/с фаза BRAKE активна", vh_b.braking and not vh_a.braking)
+# цель без брейка: RETURN к гвоздю ≈ −min(0.3·e, 0.3, √(2·0.15·e)) ≈ −0.3 (к точке);
+# с брейком: −3·0.6 = −1.8 → кап −1.0. Ошибка v−цель: 0.9 против 1.6 → выход ×1.8
+ratio = abs(out_b[-1]) / max(abs(out_a[-1]), 1e-9)
+check(f"brake=3: выход торможения в {ratio:.2f} раза больше (ожидание ~1.6–1.8)",
+      1.5 < ratio < 2.0)
+check("brake=3: знак выхода — против уноса (торможение вперёд-хода = +po)",
+      out_b[-1] > 0 and out_a[-1] > 0)
+# 17. выход из BRAKE: скорость развернулась к гвоздю → RETURN (цель к точке, мягкая)
+vh_c, _, xc, tc = hover_then_push(3.0)
+for i in range(10):
+    xc -= 0.4 * DT
+    rc = vh_c.update(st(vx=-0.4, x=xc, t=tc), Setpoint(), DT); tc += DT
+check("разворот к гвоздю: BRAKE погашен (RETURN)", not vh_c.braking)
+# 18. трим на торможении после первого гвоздя ЗАМОРОЖЕН (как _BRAKE_TRIM демпфера)
+vh_d = make(kp_fwd=40.0, kp_lat=32.0, ki=30.0, brake=3.0)
+t = 100.05
+for i in range(5):
+    vh_d.update(st(vx=0.6, x=0.1 * i, t=t), Setpoint(), DT); t += DT
+for i in range(5):
+    vh_d.update(st(vx=0.0, x=0.5, t=t), Setpoint(), DT); t += DT
+check("подготовка: ветер «выучен» (первый гвоздь прошёл)", vh_d._trim_armed)
+itx0 = vh_d._itx
+x = 0.5
+for i in range(20):
+    x += 0.6 * DT
+    vh_d.update(st(vx=0.6, x=x, t=t), Setpoint(), DT); t += DT
+check("BRAKE после первого гвоздя: трим не мотается (заморожен)",
+      vh_d.braking and abs(vh_d._itx - itx0) < 1e-9)
+# без брейка тот же унос интегрировал бы трим
+vh_e = make(kp_fwd=40.0, kp_lat=32.0, ki=30.0, brake=0.0)
+t = 100.05
+for i in range(5):
+    vh_e.update(st(vx=0.6, x=0.1 * i, t=t), Setpoint(), DT); t += DT
+for i in range(5):
+    vh_e.update(st(vx=0.0, x=0.5, t=t), Setpoint(), DT); t += DT
+ite0 = vh_e._itx; x = 0.5
+for i in range(20):
+    x += 0.6 * DT
+    vh_e.update(st(vx=0.6, x=x, t=t), Setpoint(), DT); t += DT
+check("без брейка тот же унос учит трим (контроль)", abs(vh_e._itx - ite0) > 1.0)
+# 19. живой стик гасит BRAKE и снимает гвоздь
+vh_f, _, xf, tf = hover_then_push(3.0)
+vh_f.update(st(vx=0.6, x=xf, t=tf), Setpoint(c_fwd=1.0), DT)
+check("стик: BRAKE погашен, гвоздь снят", not vh_f.braking and vh_f._pinx is None)
+# 20. enter() сбрасывает фазу станции
+vh_g, _, _, _ = hover_then_push(3.0)
+vh_g.enter(DroneState(now_sim=200.0))
+check("enter(): фаза BRAKE сброшена", not vh_g.braking)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

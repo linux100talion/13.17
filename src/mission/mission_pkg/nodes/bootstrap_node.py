@@ -1120,6 +1120,13 @@ def _parse() -> tuple:
                    default=_D.dpvins_trim_keep)
     p.add_argument('--dpvins-trim-seed', dest='dpvins_trim_seed', type=float,
                    default=_D.dpvins_trim_seed)
+    # фаза BRAKE внешнего контура DpVins (config.dpvins_pos_brake*)
+    p.add_argument('--dpvins-pos-brake', dest='dpvins_pos_brake', type=float,
+                   default=_D.dpvins_pos_brake)
+    p.add_argument('--dpvins-pos-brake-v', dest='dpvins_pos_brake_v', type=float,
+                   default=_D.dpvins_pos_brake_v)
+    p.add_argument('--dpvins-pos-brake-vmax', dest='dpvins_pos_brake_vmax', type=float,
+                   default=_D.dpvins_pos_brake_vmax)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,

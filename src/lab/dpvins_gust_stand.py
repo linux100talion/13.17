@@ -6,25 +6,38 @@
 
 Плант — как в test_dpvins §13: v̇ = α·(ветер − наклон), α = 0.01 м/с² на PWM (100 PWM =
 1 м/с²; ветер 10 м/с ≈ 100 PWM-экв., 5 ≈ 44), наклон исполняется апериодикой τ 0.26 с
-(идентифицированный лаг FCU, модель BS_GZ_KD), скорость измеряется с лагом 0.15 с (EMA
-VinsTrack a=0.4 @10 Гц). Порыв — огибающая wind_gust.py (1−cos фронт 2 с, плато 5, спад 4,
+(идентифицированный лаг FCU, модель BS_GZ_KD), скорость — с лагом 0.35 с (ИЗМЕРЕНО по bag lv2_joy_20260905_184557: spd= статуса
+отстаёт от истины на 0.35 с — VinsTrack EMA a=0.4 на 10 Гц + приход; до полёта стенд брал
+0.15 и льстил: обещал запас до ki 45, а ki 30 раскачался в полёте). Порыв — огибающая wind_gust.py (1−cos фронт 2 с, плато 5, спад 4,
 период 20) с силой GUST PWM-экв.; калибровка: при ki 6 пик за цикл должен выйти 6–9 м и
 vmax 1.4–1.9, как в полётах → GUST 75 (порыв 8 м/с). До порывов борт получает толчок,
 чтобы связался первый гвоздь (в полёте — посев трима от демпфера + первый стоп).
 
 Метрики по циклам без первого (установившийся режим): пик смещения от точки на фронте,
 остаток в конце цикла, vmax; плюс первый цикл отдельно (обучение трима под порывом).
-Итог 2026-09-05 (kp 40/32, vsmooth 0.3, imax 120, GUST 75):
-  ki   6: пик 9.26 м, остаток 0.20   — эталон, совпал с полётами
-  ki  15: пик 4.93, остаток 0.02
-  ki  20: пик 4.09, остаток 0.13
-  ki  30: пик 3.64, остаток 0.22, vmax 1.80   — кандидат dpvins/ki30.txt
-  ki  45: пик 7.23, остаток 1.60, vmax 2.69   — раскачка трима (перелёт)
-  ki  60: пик 6.19, остаток 1.44, vmax 3.01
-  для масштаба: kp 90 + ki 30 (демпфер) — пик 1.62; kp 60/48 + ki 30 — 2.69.
+Итог 2026-09-05 с τ_meas 0.35 (kp 40/32, vsmooth 0.3, imax 120, GUST 75):
+  ki   6: пик 9.61 м, остаток 0.22, vmax 1.84   — эталон, совпал с полётами (6.3–9.5)
+  ki  10: пик 8.60, остаток 0.07
+  ki  15: пик 4.26, остаток 0.05, vmax 1.77     — устойчив и при τ 0.5 (4.43 / 0.11)
+  ki  20: пик 4.81, остаток 0.16                — на грани (при τ 0.5: 5.63 / 0.21)
+  ki  30: пик 5.52, остаток 1.87, vmax 2.33     — РАСКАЧКА; полёт 184557 (cmd/1): пик 5.15,
+                                                  остаток 2.65, vmax 2.5, T 8–10 с — совпало
+  (при старом τ 0.15: ki 30 → 3.64 / 0.22, раскачка только с ki 45 — стенд льстил.)
+ФАЗА BRAKE (DpVins.brake, закон станции демпфера; τ 0.35, ki 15, kp 40/32):
+  brake_vmax 1.0 (кап демпфера): brake 3/5/8 → пик 5.4–5.5, остаток 1.5–1.6 — кап режет
+      вклад тормоза до kp·1.0 = 40 PWM, равновесие сноса 75 PWM-экв. остаётся ~0.9 м/с;
+  brake_vmax 2.0: brake 3 → 3.76 / 0.55;  brake 5 → 3.43 / 0.13;  brake 8 → 3.21 / 0.04
+      (при τ 0.11: 3.62 / 3.20 / 2.99) — vmax сноса ~1.0, устойчиво;
+  brake_vmax 3.0: brake 5/8 → vmax 1.4–1.8, остаток 0.9–1.2 — раскачка, кап 3.0 лишний.
+  Арифметика: демпфер держит снос на 0.21 м/с, потому что kp 90 × (1+3) = 360 PWM/(м/с);
+  у DpVins kp 40 → нужен brake 5–8 (240–360) и кап ≥ 2.0, чтобы тормоз не обрезался.
+  Для масштаба закон демпфера как есть (kp 90 ki 30 brake 3, τ 0.35): 2.24 / 0.06.
+  ⚠️ Стенд не видит предельный цикл σθ с контуром ориентации FCU — гейн ×6–9 на
+  торможении может его возбудить; это только полётом (cmd/3).
 Стенд не знает шума VINS и предельного цикла kp против контура ориентации FCU (Tθ 1.6 с) —
 σθ он не предскажет, это только полёт. Запуск с хоста (ROS не нужен):
-  python3 src/lab/dpvins_gust_stand.py [--gust 75] [--ki 6,15,20,30,45,60] [--kp 40,32]
+  python3 src/lab/dpvins_gust_stand.py [--gust 75] [--ki 6,15,30] [--kp 40,32] \
+      [--brake 0,1.5,3] [--tau-meas 0.35]   # brake — фаза BRAKE станции (DpVins.brake)
 """
 import argparse
 import math
@@ -40,7 +53,8 @@ from control_pkg.domain.state import DroneState              # noqa: E402
 DT = 0.05
 ALPHA = 0.01          # м/с² на PWM (100 PWM = 1 м/с², test_dpvins §13)
 TAU_ACT = 0.26        # лаг исполнения наклона FCU, с
-TAU_MEAS = 0.15       # лаг измерения скорости (EMA VinsTrack), с
+TAU_MEAS = 0.35       # лаг скорости VINS в ноде к истине, ИЗМЕРЕН по bag 184557 (кросс-
+                      # корреляция spd= статуса vs истина Gazebo); было 0.15 — стенд льстил
 BASE_PWM = 8.0        # база 1 м/с ≈ 8 PWM-экв.
 GUST = dict(at=30.0, rise=2.0, hold=5.0, fall=4.0, every=20.0)
 
@@ -60,10 +74,11 @@ def gust_env(t):
     return 0.0
 
 
-def run(ki, gust_pwm, kp_fwd=40.0, kp_lat=32.0, vsmooth=0.3, imax=120.0, cycles=6):
+def run(ki, gust_pwm, kp_fwd=40.0, kp_lat=32.0, vsmooth=0.3, imax=120.0, cycles=6,
+        brake=0.0, brake_v=0.25, brake_vmax=1.0):
     vh = DpVins(kp_fwd=kp_fwd, kp_lat=kp_lat, ki=ki, ki_trim=60.0, imax=imax, max_pwm=150.0,
                 cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3, pos_acc=0.15, vsmooth=vsmooth,
-                i_latch=True)
+                i_latch=True, brake=brake, brake_v=brake_v, brake_vmax=brake_vmax)
     t = 0.0
     vh.enter(DroneState(now_sim=t))
     x = v = v_meas = f_act = 0.0
@@ -104,17 +119,28 @@ def main():
     ap.add_argument('--kp', default='40,32', help='kp_fwd,kp_lat')
     ap.add_argument('--vsmooth', type=float, default=0.3)
     ap.add_argument('--imax', type=float, default=120.0)
+    ap.add_argument('--brake', default='0', help='фаза BRAKE станции: список, напр. 0,1.5,3')
+    ap.add_argument('--brake-v', type=float, default=0.25)
+    ap.add_argument('--brake-vmax', type=float, default=1.0)
+    ap.add_argument('--tau-meas', type=float, default=None, help='лаг измерения, с (дефолт TAU_MEAS)')
     a = ap.parse_args()
+    global TAU_MEAS
+    if a.tau_meas is not None:
+        TAU_MEAS = a.tau_meas
     kp_fwd, kp_lat = (float(x) for x in a.kp.split(','))
     print(f"плант: α {ALPHA} м/с²/PWM, τ_act {TAU_ACT} с, τ_meas {TAU_MEAS} с; порыв {a.gust:g} PWM-экв. "
           f"({GUST['rise']:g}/{GUST['hold']:g}/{GUST['fall']:g} с каждые {GUST['every']:g}); "
-          f"kp {kp_fwd:g}/{kp_lat:g} vsmooth {a.vsmooth:g} imax {a.imax:g}")
-    print(f"{'ki':>5} {'пик,м':>6} {'остаток,м':>9} {'vmax':>5} | {'1-й цикл пик':>12}")
-    for ki in (float(x) for x in a.ki.split(',')):
-        p = run(ki, a.gust, kp_fwd, kp_lat, a.vsmooth, a.imax)
-        ss = p[1:]
-        print(f"{ki:5g} {sum(q[0] for q in ss) / len(ss):6.2f} {sum(q[1] for q in ss) / len(ss):9.2f} "
-              f"{max(q[2] for q in ss):5.2f} | {p[0][0]:12.2f}")
+          f"kp {kp_fwd:g}/{kp_lat:g} vsmooth {a.vsmooth:g} imax {a.imax:g} τ_meas {TAU_MEAS:g}; "
+          f"brake_v {a.brake_v:g} brake_vmax {a.brake_vmax:g}")
+    print(f"{'brake':>5} {'ki':>5} {'пик,м':>6} {'остаток,м':>9} {'vmax':>5} | {'1-й цикл пик':>12}")
+    for br in (float(x) for x in a.brake.split(',')):
+        for ki in (float(x) for x in a.ki.split(',')):
+            p = run(ki, a.gust, kp_fwd, kp_lat, a.vsmooth, a.imax,
+                    brake=br, brake_v=a.brake_v, brake_vmax=a.brake_vmax)
+            ss = p[1:]
+            print(f"{br:5g} {ki:5g} {sum(q[0] for q in ss) / len(ss):6.2f} "
+                  f"{sum(q[1] for q in ss) / len(ss):9.2f} {max(q[2] for q in ss):5.2f} | "
+                  f"{p[0][0]:12.2f}")
 
 
 if __name__ == '__main__':
