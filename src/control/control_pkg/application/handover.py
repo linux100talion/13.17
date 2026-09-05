@@ -29,7 +29,9 @@ class VinsHandover:
     def __init__(self, vins_hold, min_count: int = 40, fresh_sec: float = 2.0,
                  v_max: float = 0.0, ipm_tol: float = 0.0, sane_n: int = 3,
                  hover_v: float = 0.0, hover_sec: float = 2.0,
-                 trim_seed: bool = True):
+                 trim_seed: bool = True, scale_ratio: float = 0.0,
+                 scale_ipm_min: float = 2.0, scale_sec: float = 3.0,
+                 scale_alt_max: float = 4.0, scale_hold: float = 30.0):
         self._vins = vins_hold
         # посев трима от демпфера на входе в ярус 1 (DpHold.trim_pwm →
         # DpVins.seed_trim): ветер, который демпфер уже держит, не учить заново
@@ -48,6 +50,24 @@ class VinsHandover:
         self.hover_v = hover_v
         self.hover_sec = hover_sec
         self._center_since = None     # sim-время начала непрерывного висения (стик центр)
+        # ЧЕК ЗАНИЖЕНИЯ |vins_v| (коллапс масштаба реборн-VINS, lv2_joy_20260905_
+        # 114248: VINS «0.4–0.9» при истинных 3–5.5, IPM годен 100 % и видел 5.0):
+        # потолок и физика висения ловят только ЗАВЫШЕНИЕ. Опорник — IPM-канал,
+        # но ТОЛЬКО там, где он надёжен: висение (стики центр), низко
+        # (≤ scale_alt_max), ipm_ok непрерывно ≥ scale_sec; на высоте/быстрой
+        # прямой IPM сам мусорил (ab_tier2gate 7→155 м/с) — там чек молчит.
+        # |ipm_v| > scale_ipm_min и |vins_v| < ratio·|ipm_v| дольше scale_sec →
+        # не sane, латч на scale_hold (масштаб сам не починится; демпфер держит
+        # по IPM). Латч снимает перерождение VINS (новая рама = новый масштаб).
+        self.scale_ratio = scale_ratio
+        self.scale_ipm_min = scale_ipm_min
+        self.scale_sec = scale_sec
+        self.scale_alt_max = scale_alt_max
+        self.scale_hold = scale_hold
+        self._ipm_ok_since = None     # sim-старт непрерывной годности IPM
+        self._scale_bad_since = None  # sim-старт непрерывного «VINS занижает»
+        self._scale_until = -1e9      # латч чека занижения до (sim-с)
+        self.scale_trips = 0          # срабатываний чека занижения (лог/статус)
         self._trim_dirty = False      # был /restart VINS: мировой трим стаба недействителен
         self._bad = 0                # кадров подряд «болен» (IPM|hover)
         self._last_sane_t = None      # счётчик двигаем раз на новый sim-тик
@@ -60,7 +80,8 @@ class VinsHandover:
         независимым оптическим каналом. Разнос (|v|→20 на неподвижном борте)
         проваливает оба. Модуль скорости инвариантен к системе координат, так
         что vins (мир) и ipm (тело) сравнимы напрямую. На ФРОНТЕ sane→insane
-        заказывает /restart VINS (нода опрашивает pop_restart_request)."""
+        заказывает /restart VINS (нода опрашивает pop_restart_request).
+        Третий чек — ЗАНИЖЕНИЕ против IPM (коллапс масштаба), см. __init__."""
         import math
         vh = math.hypot(s.vins_vx, s.vins_vy)
         # Счётчик двигаем раз на новый sim-тик — метод зовут оба пути лесенки.
@@ -75,14 +96,37 @@ class VinsHandover:
                     and abs(s.pilot_pitch - RC_CENTER) < self._STICK_DZ)
         if new_tick:
             self._center_since = (self._center_since or s.now_sim) if centered else None
-        hovering = (self.hover_v > 0.0 and self._center_since is not None
-                    and s.now_sim - self._center_since > self.hover_sec)
+        centered_long = (self._center_since is not None
+                         and s.now_sim - self._center_since > self.hover_sec)
+        hovering = self.hover_v > 0.0 and centered_long
         if hovering and vh > self.hover_v:
             bad = True                        # висим, а VINS «летит» = разнос
         if new_tick:
             self._bad = self._bad + 1 if bad else 0
+        # ЧЕК ЗАНИЖЕНИЯ (см. __init__): VINS видит много меньше, чем стойко годный
+        # IPM на висении низко → масштаб VINS схлопнулся, контур слеп.
+        if new_tick:
+            self._ipm_ok_since = ((self._ipm_ok_since or s.now_sim)
+                                  if s.ipm_ok else None)
+        if self.scale_ratio > 0.0:
+            alt = s.perc_alt if s.perc_alt is not None else s.rel_alt
+            low = alt is not None and alt <= self.scale_alt_max
+            ipm_stable = (self._ipm_ok_since is not None
+                          and s.now_sim - self._ipm_ok_since >= self.scale_sec)
+            iv = math.hypot(s.ipm_vfwd, s.ipm_vlat)
+            under = (centered_long and low and ipm_stable
+                     and iv > self.scale_ipm_min and vh < self.scale_ratio * iv)
+            if new_tick:
+                self._scale_bad_since = ((self._scale_bad_since or s.now_sim)
+                                         if under else None)
+                if (self._scale_bad_since is not None
+                        and s.now_sim - self._scale_bad_since >= self.scale_sec):
+                    if s.now_sim >= self._scale_until:
+                        self.scale_trips += 1           # новый латч (не продление)
+                    self._scale_until = s.now_sim + self.scale_hold
+        scale_bad = s.now_sim < self._scale_until
         cap_bad = self.v_max > 0.0 and vh > self.v_max   # физ. потолок (грубо, сразу)
-        sane = (not cap_bad) and (self._bad < self.sane_n)
+        sane = (not cap_bad) and (self._bad < self.sane_n) and not scale_bad
         if new_tick:
             if self._was_sane and not sane:   # фронт: заказать сброс VINS
                 self._restart_req = True
@@ -103,8 +147,11 @@ class VinsHandover:
         ветровой трим стабилизатора, хранимый мировым вектором, в новой раме
         недействителен. Помечаем; сброс — на ближайшем входе в ярус
         (vins_stabs). Запрос-фронт гейта (pop_restart_request) сам по себе
-        трим НЕ сбрасывает: рестарт может не состояться (кулдаун, выкл)."""
+        трим НЕ сбрасывает: рестарт может не состояться (кулдаун, выкл).
+        Латч чека занижения снимается: новая рама = новый масштаб."""
         self._trim_dirty = True
+        self._scale_until = -1e9
+        self._scale_bad_since = None
 
     def vins_ready(self, s) -> bool:
         return (s.vins_odom_count >= self.min_count and

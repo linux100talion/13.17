@@ -262,6 +262,13 @@ ARGS=()
 [ -n "${BS_VINS_SANE_N:-}" ]     && ARGS+=(--vins-sane-n "$BS_VINS_SANE_N")
 [ -n "${BS_VINS_HOVER_V:-}" ]    && ARGS+=(--vins-hover-v "$BS_VINS_HOVER_V")
 [ -n "${BS_VINS_HOVER_SEC:-}" ]  && ARGS+=(--vins-hover-sec "$BS_VINS_HOVER_SEC")
+# чек ЗАНИЖЕНИЯ |vins_v| против IPM на висении низко (коллапс масштаба реборн-VINS;
+# config.vins_scale_*): ratio 0 = выкл
+[ -n "${BS_VINS_SCALE_RATIO:-}" ]   && ARGS+=(--vins-scale-ratio "$BS_VINS_SCALE_RATIO")
+[ -n "${BS_VINS_SCALE_IPM_MIN:-}" ] && ARGS+=(--vins-scale-ipm-min "$BS_VINS_SCALE_IPM_MIN")
+[ -n "${BS_VINS_SCALE_SEC:-}" ]     && ARGS+=(--vins-scale-sec "$BS_VINS_SCALE_SEC")
+[ -n "${BS_VINS_SCALE_ALT_MAX:-}" ] && ARGS+=(--vins-scale-alt-max "$BS_VINS_SCALE_ALT_MAX")
+[ -n "${BS_VINS_SCALE_HOLD:-}" ]    && ARGS+=(--vins-scale-hold "$BS_VINS_SCALE_HOLD")
 # рестарт VINS после демоута-по-разносу (переинициализация; config.vins_restart_diverge)
 [ -n "${BS_VINS_RESTART_DIVERGE:-}" ] && ARGS+=(--vins-restart-diverge "$BS_VINS_RESTART_DIVERGE")
 [ -n "${BS_VINS_RESTART_CD:-}" ]  && ARGS+=(--vins-restart-cd "$BS_VINS_RESTART_CD")

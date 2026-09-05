@@ -181,6 +181,88 @@ hg6.vins_sane(sh(100.2, vx=20.0))                    # всё ещё insane (н�
 check("insane продолжается (не фронт): рестарт НЕ повторяется",
       not hg6.pop_restart_request())
 
+# ============ ЧЕК ЗАНИЖЕНИЯ |vins_v| против IPM (коллапс масштаба) ============
+# lv2_joy_20260905_114248: реборн-VINS с масштабом 0.14 видел 0.4–0.9 при истинных
+# 3–5.5, IPM годен и видел 5.0 — потолок и физика висения такое не ловят.
+def ssc(now, vx=0.0, ipm_v=0.0, ipm_ok=True, alt=1.5, roll=RC_CENTER, pitch=RC_CENTER):
+    return DroneState(vins_valid=True, vins_odom_count=300, vins_last_sim=now,
+                      now_sim=now, vins_vx=vx, vins_vy=0.0, ipm_ok=ipm_ok,
+                      ipm_vfwd=0.0, ipm_vlat=ipm_v, perc_alt=alt, rel_alt=alt,
+                      pilot_roll=roll, pilot_pitch=pitch)
+
+
+def mk_scale(**kw):
+    args = dict(min_count=5, fresh_sec=2.0, hover_v=3.0, hover_sec=2.0, sane_n=10,
+                scale_ratio=0.5, scale_ipm_min=2.0, scale_sec=3.0, scale_alt_max=4.0,
+                scale_hold=30.0)
+    args.update(kw)
+    return VinsHandover(VinsHold(), **args)
+
+
+def run(h, t0, dur, dt=0.05, **kw):
+    """Кормит гейт dur секунд снапшотами ssc(**kw); возвращает (последний sane, t)."""
+    t, ok = t0, True
+    for _ in range(int(round(dur / dt))):
+        t += dt
+        ok = h.vins_sane(ssc(t, **kw))
+    return ok, t
+
+
+# 1. картина 114248: висение низко, IPM 5 м/с стойко, VINS 0.7 → не sane, латч.
+# Таймеры с первого тика: висение 2 с, стойкость IPM 3 с (опорник должен быть годен
+# непрерывно), затем условие занижения 3 с подряд → фронт на ~6 с.
+hs = mk_scale()
+ok, t = run(hs, 500.0, 2.5, vx=0.7, ipm_v=5.0)          # висение взведено, IPM ещё не стоек
+check("занижение: IPM годен <3 с — ещё sane (опорник не стоек)", ok)
+ok, t = run(hs, t, 3.3, vx=0.7, ipm_v=5.0)               # IPM стоек с 3 с, условие 2.8 с
+check("занижение: условие <3 с — ещё sane", ok and hs.scale_trips == 0)
+ok, t = run(hs, t, 0.4, vx=0.7, ipm_v=5.0)               # условие >3 с
+check("занижение 3 с подряд: НЕ sane (VINS 0.7 при IPM 5)", not ok and hs.scale_trips == 1)
+ok, t = run(hs, t, 5.0, vx=0.0, ipm_v=0.0)               # демпфер остановил борт
+check("латч: борт встал, IPM 0 — всё ещё НЕ sane (масштаб сам не починится)", not ok)
+ok, t = run(hs, t, 26.0, vx=0.0, ipm_v=0.0)              # > scale_hold 30 с
+check("латч истёк (30 с): снова sane, срабатывание одно", ok and hs.scale_trips == 1)
+
+# 2. на высоте IPM не опорник: те же скорости на 15 м → sane
+hs2 = mk_scale()
+ok, _ = run(hs2, 600.0, 6.0, vx=0.7, ipm_v=5.0, alt=15.0)
+check("высота 15 м (> alt_max 4): чек молчит", ok and hs2.scale_trips == 0)
+
+# 3. живой стик: чек выключен (быстрая прямая — IPM сам мусорит)
+hs3 = mk_scale()
+ok, _ = run(hs3, 700.0, 6.0, vx=0.7, ipm_v=5.0, pitch=RC_CENTER - 300)
+check("стик активен: чек молчит", ok and hs3.scale_trips == 0)
+
+# 4. IPM мигает (ok<3 с подряд): не опорник
+hs4 = mk_scale()
+t = 800.0
+ok = True
+for i in range(120):                                      # 6 с, каждые 2 с брак кадра
+    t += 0.05
+    ok = hs4.vins_sane(ssc(t, vx=0.7, ipm_v=5.0, ipm_ok=(i % 40 != 0)))
+check("IPM годен не дольше 2 с подряд: чек молчит", ok and hs4.scale_trips == 0)
+
+# 5. согласие датчиков (IPM 1.5, VINS 1.2 — ветровой снос): sane
+hs5 = mk_scale()
+ok, _ = run(hs5, 900.0, 6.0, vx=1.2, ipm_v=1.5)
+check("IPM 1.5 (< ipm_min 2): чек молчит", ok and hs5.scale_trips == 0)
+hs5b = mk_scale(hover_v=0.0)
+ok, _ = run(hs5b, 950.0, 6.0, vx=4.5, ipm_v=5.0)
+check("IPM 5, VINS 4.5 (согласны): чек занижения молчит", ok and hs5b.scale_trips == 0)
+
+# 6. перерождение VINS снимает латч (новая рама = новый масштаб)
+hs6 = mk_scale()
+ok, t = run(hs6, 1000.0, 6.5, vx=0.7, ipm_v=5.0)
+check("подготовка: латч взведён", not ok and hs6.scale_trips == 1)
+hs6.note_vins_restart()
+ok, _ = run(hs6, t, 0.5, vx=0.0, ipm_v=0.0)
+check("note_vins_restart: латч снят, sane", ok)
+
+# 7. выкл (ratio 0): картина 114248 остаётся sane (старое поведение)
+hs7 = mk_scale(scale_ratio=0.0)
+ok, _ = run(hs7, 1100.0, 6.0, vx=0.7, ipm_v=5.0)
+check("scale_ratio=0: чек выключен", ok and hs7.scale_trips == 0)
+
 # ============ ПОСЕВ ТРИМА от демпфера на входе в ярус 1 (vins_stabs) ============
 # Установившийся И-член станции (валюта PWM каналов, DpHold.trim_pwm) сеется в
 # DpVins.seed_trim — ветер, который демпфер уже держит, не учится заново.

@@ -145,7 +145,12 @@ class BootstrapArch2Node(Node):
                                     sane_n=cfg.vins_sane_n,
                                     hover_v=cfg.vins_hover_v,
                                     hover_sec=cfg.vins_hover_sec,
-                                    trim_seed=cfg.dpvins_trim_seed > 0)
+                                    trim_seed=cfg.dpvins_trim_seed > 0,
+                                    scale_ratio=cfg.vins_scale_ratio,
+                                    scale_ipm_min=cfg.vins_scale_ipm_min,
+                                    scale_sec=cfg.vins_scale_sec,
+                                    scale_alt_max=cfg.vins_scale_alt_max,
+                                    scale_hold=cfg.vins_scale_hold)
             if str(cfg.vins_stab).lower() == 'dpvins':
                 note = (f", DpVins (velocity-каскад) kp {cfg.dpvins_kp_fwd:g}/"
                         f"{cfg.dpvins_kp_lat:g} ki {cfg.dpvins_ki:g} "
@@ -400,6 +405,7 @@ class BootstrapArch2Node(Node):
         self._restart_cd = cfg.vins_restart_cd
         self._last_restart_t = -1e9
         self._rebirths_prev = 0    # детект перерождения VINS (VinsTrack) → трим/лог
+        self._scale_trips_prev = 0 # срабатываний чека занижения (лог)
         self.timer = self.create_timer(0.05, self._tick)
         self.logger.info(
             f"alt_hold_bootstrap ARCH2: mode={cfg.control_mode} alt={cfg.alt}м "
@@ -443,6 +449,14 @@ class BootstrapArch2Node(Node):
                 self._handover.note_vins_restart()
             self.logger.warn(f"VINS переродился (#{s.vins_rebirths}): рама/масштаб "
                              f"новые → ярус 1 ждёт зрелость заново")
+        # ЧЕК ЗАНИЖЕНИЯ сработал (Handover.vins_sane, третий канал): VINS видит
+        # много меньше стойко годного IPM на висении низко — масштаб схлопнулся
+        if (self._handover is not None
+                and self._handover.scale_trips != self._scale_trips_prev):
+            self._scale_trips_prev = self._handover.scale_trips
+            self.logger.warn(f"гейт здоровья: VINS ЗАНИЖАЕТ скорость против IPM "
+                             f"(#{self._handover.scale_trips}) → демпфер на "
+                             f"{self.cfg.vins_scale_hold:g} с")
         if self.perception is not None:
             # ФРОНТ ARMED → ноль высоты перцепции здесь и сейчас (perc_alt_zero):
             # EKF local z смещён вниз на 0.2-0.3 м, и на низком полёте это больше
@@ -558,6 +572,11 @@ class BootstrapArch2Node(Node):
                           ladder=ladder, vins_min=self._vins_min,
                           ripe_sec=self._ripe_sec, ripe_min=self._ripe_min,
                           land=land)
+        # scl — срабатываний чека ЗАНИЖЕНИЯ |vins_v| против IPM (Handover.vins_sane):
+        # состояние гейта, не датчика — поэтому здесь, а не в hud_status. В ленте
+        # joy_timeline объясняет демоут яруса 1 при свежем и «медленном» VINS.
+        if self._handover is not None:
+            line += f" scl={self._handover.scale_trips}"
         # переход гейта LOITER, яруса ИЛИ посадки — в лог (виден и в sim_nav.log)
         st = ' '.join(w for w in line.split()
                       if w.startswith(('st=', 'tier=', 'land=')))
@@ -1023,6 +1042,17 @@ def _parse() -> tuple:
                    default=_D.vins_hover_v)
     p.add_argument('--vins-hover-sec', dest='vins_hover_sec', type=float,
                    default=_D.vins_hover_sec)
+    # чек занижения |vins_v| против IPM (коллапс масштаба; config.vins_scale_*)
+    p.add_argument('--vins-scale-ratio', dest='vins_scale_ratio', type=float,
+                   default=_D.vins_scale_ratio)
+    p.add_argument('--vins-scale-ipm-min', dest='vins_scale_ipm_min', type=float,
+                   default=_D.vins_scale_ipm_min)
+    p.add_argument('--vins-scale-sec', dest='vins_scale_sec', type=float,
+                   default=_D.vins_scale_sec)
+    p.add_argument('--vins-scale-alt-max', dest='vins_scale_alt_max', type=float,
+                   default=_D.vins_scale_alt_max)
+    p.add_argument('--vins-scale-hold', dest='vins_scale_hold', type=float,
+                   default=_D.vins_scale_hold)
     # рестарт VINS после демоута-по-разносу (см. config.vins_restart_diverge)
     p.add_argument('--vins-restart-diverge', dest='vins_restart_diverge',
                    type=float, default=_D.vins_restart_diverge)
