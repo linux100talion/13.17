@@ -399,6 +399,7 @@ class BootstrapArch2Node(Node):
         self._restart_diverge = cfg.vins_restart_diverge > 0
         self._restart_cd = cfg.vins_restart_cd
         self._last_restart_t = -1e9
+        self._rebirths_prev = 0    # детект перерождения VINS (VinsTrack) → трим/лог
         self.timer = self.create_timer(0.05, self._tick)
         self.logger.info(
             f"alt_hold_bootstrap ARCH2: mode={cfg.control_mode} alt={cfg.alt}м "
@@ -431,6 +432,17 @@ class BootstrapArch2Node(Node):
                              "накопленного на земле)")
             if self._handover is not None:
                 self._handover.note_vins_restart()   # рама переродится → трим сбросить
+            self.telemetry.reset_vins_stream()       # зрелость потока — заново
+        # ПЕРЕРОЖДЕНИЕ потока VINS, замеченное телеметрией (дыра штампов/скачок:
+        # переинициализация сама или наш /restart): рама и масштаб новые —
+        # ветровой трим яруса 1 недействителен (как на /restart), зрелость уже
+        # обнулена телеметрией → лесенка роняет ярус и ждёт vins_min заново.
+        if s.vins_rebirths != self._rebirths_prev:
+            self._rebirths_prev = s.vins_rebirths
+            if self._handover is not None:
+                self._handover.note_vins_restart()
+            self.logger.warn(f"VINS переродился (#{s.vins_rebirths}): рама/масштаб "
+                             f"новые → ярус 1 ждёт зрелость заново")
         if self.perception is not None:
             # ФРОНТ ARMED → ноль высоты перцепции здесь и сейчас (perc_alt_zero):
             # EKF local z смещён вниз на 0.2-0.3 м, и на низком полёте это больше
@@ -466,6 +478,7 @@ class BootstrapArch2Node(Node):
             self._last_restart_t = s.now_sim
             self._vins_restart_pub.publish(Bool(data=True))
             self._handover.note_vins_restart()   # рама переродится → трим сбросить
+            self.telemetry.reset_vins_stream()   # зрелость потока — заново, ярус вниз сразу
             self.logger.warn("гейт здоровья: VINS разнёсся → демоут на демпфер + "
                              "/restart (переинициализация)")
         rc = self.arbiter.resolve(s, rc)          # safety-seize: MANUAL → сырые стики

@@ -170,11 +170,15 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
     # «плывёт» −2…−5 с по полёту) — толчок пилота приходилось угадывать по целям
     # осей. Здесь стик лежит в той же строке и с тем же sim-штампом, что и всё
     # остальное. HUD эти поля не рисует (парсер k=v лишнее игнорирует).
+    # reb — перерождений потока VINS (рестарт нодой / переинициализация сама,
+    # VinsTrack): каждое обнуляет odom= — в ленте joy_timeline объясняет, почему
+    # t1 вдруг WAIT/odom при живом VINS (прогон 20260905_114248: 4 рестарта).
     # t — sim-время снапшота. /mission/status — String без header: в bag он лежит по
     # СТЕНОЧНОМУ времени приёма, а RTF плывёт, и стики/раму из него было не выровнять
     # с истиной Gazebo (ab_frame: сдвиг −2…−5 с) — та же болезнь, что у /joy.
     return (f"t={s.now_sim:.2f} st={st} why={why} ekf={ekf} extnav={int(s.extnav_ready)} "
             f"odom={s.vins_odom_count} age={min(age, 999.0):.1f} "
+            f"reb={getattr(s, 'vins_rebirths', 0)} "
             f"alt={(s.rel_alt or 0.0):.1f} zekf={zekf} palt={palt} "
             f"ipm={int(s.ipm_ok)} ipmf={s.ipm_fail} "
             f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f} "

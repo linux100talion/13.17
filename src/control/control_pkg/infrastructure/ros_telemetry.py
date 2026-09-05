@@ -4,7 +4,9 @@
 Наполняет единый снапшот из колбэков; snapshot() отдаёт его домену со свежим now_sim.
 QoS для rel_alt и rc/in — SensorData (BEST_EFFORT): MAVROS публикует их так, дефолтная
 RELIABLE-подписка их НЕ получает. Ground-truth скорость — конечная разность по sim-времени
-с EMA (twist-фрейм одометрии неоднозначен, считаем сами). Всё как в монолите.
+с EMA (twist-фрейм одометрии неоднозначен, считаем сами). Скорость VINS — тоже
+конечная разность, но по HEADER-ШТАМПАМ (VinsTrack): джиттер доставки в неё не
+попадает. Всё остальное как в монолите.
 """
 import math
 
@@ -15,6 +17,7 @@ from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Float64
 
 from ..application.ripeness import VinsRipeness
+from ..application.vins_track import VinsTrack
 from ..domain.state import DroneState
 
 
@@ -25,8 +28,10 @@ class RosTelemetry:
         self._ripe = VinsRipeness()   # детектор зрелости VINS (2-я ступень гейта)
         self._gt_px = self._gt_py = None
         self._gt_pt = None
-        self._vins_px = self._vins_py = None
-        self._vins_pt = None
+        # скорость VINS по ШТАМПАМ + детект перерождения потока (vins_track.py):
+        # dt по времени прихода раздувал скорость на догоняющей пачке после
+        # стопора эстиматора → ложный «разнос» (lv2_joy_20260905_114248)
+        self._track = VinsTrack()
         node.create_subscription(State, '/mavros/state', self._on_state, 10)
         # Источник rel_alt: 'global' — GLOBAL_POSITION_INT (замерзает без GPS);
         # 'baro' — сырой барометр (GPS-denied / боевой борт). См. baro_alt.py.
@@ -80,18 +85,27 @@ class RosTelemetry:
         self._s.rel_alt = float(alt)
 
     def _on_odom(self, m):
-        self._s.vins_odom_count += 1
         t = self._clock.now_sim()
+        # Время измерения — HEADER-ШТАМП (sim-время кадра), не now_sim прихода:
+        # джиттер доставки раздувает конечную разность Δp/Δt (детектор зрелости —
+        # прогон 052917: res=0.24 при офлайн-поле 0.05-0.10; скорость для гейта
+        # здоровья — прогон 20260905_114248: стопор эстиматора 1.5 с + пачка →
+        # 3.44 м/с при twist ≤1.47 → ложный демоут + /restart в полёте).
+        th = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        x = m.pose.pose.position.x
+        y = m.pose.pose.position.y
+        if self._track.on_odom(th, x, y):
+            # ПЕРЕРОЖДЕНИЕ потока (рестарт/переинициализация VINS сама по себе):
+            # новая рама и новый масштаб — зрелость считается заново, счётчик и
+            # время первой одометрии обнуляются (ярус 1 ждёт vins_min/ripe_sec)
+            self._s.vins_rebirths += 1
+            self._s.vins_odom_count = 0
+        self._s.vins_odom_count += 1
         if self._s.vins_odom_count == 1:
             self._s.vins_first_sim = t    # старт потока — для гейта зрелости
-        self._s.vins_last_sim = t
+        self._s.vins_last_sim = t         # свежесть — по ПРИХОДУ (молчащий VINS)
         # детектор зрелости (2-я ступень гейта): residual поза/скорость +
         # вертикальный ratio к rel_alt (баро при alt_src=baro, global на GPS).
-        # Время — HEADER-ШТАМП одометрии, не now_sim прихода: джиттер доставки
-        # раздувает конечную разность Δp/Δt и residual врёт вверх (прогон
-        # 052917: res=0.24 при офлайн-поле 0.05-0.10 — детектор молчал,
-        # зрелость открыл таймер).
-        th = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
         p, v = m.pose.pose.position, m.twist.twist.linear
         self._ripe.on_odom(th, (p.x, p.y, p.z), (v.x, v.y, v.z),
                            self._s.rel_alt)
@@ -99,20 +113,26 @@ class RosTelemetry:
         self._s.vins_ratio = (self._ripe.ratio
                               if self._ripe.ratio is not None else -1.0)
         self._s.vins_ripe_det = self._ripe.ready
-        # Поза VINS + скорость конечной разностью (twist-фрейм неоднозначен — как gt).
-        x = m.pose.pose.position.x
-        y = m.pose.pose.position.y
+        # Поза VINS + скорость конечной разностью по штампам (twist-фрейм
+        # неоднозначен — как gt; EMA a=0.4 внутри VinsTrack).
         q = m.pose.pose.orientation
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-        if self._vins_pt is not None and t > self._vins_pt:
-            dt = t - self._vins_pt
-            a = 0.4
-            self._s.vins_vx = (1.0 - a) * self._s.vins_vx + a * (x - self._vins_px) / dt
-            self._s.vins_vy = (1.0 - a) * self._s.vins_vy + a * (y - self._vins_py) / dt
-        self._vins_px, self._vins_py, self._vins_pt = x, y, t
+        self._s.vins_vx, self._s.vins_vy = self._track.vx, self._track.vy
         self._s.vins_x, self._s.vins_y, self._s.vins_yaw = x, y, yaw
         self._s.vins_valid = True
+
+    def reset_vins_stream(self) -> None:
+        """Нода послала /restart VINS: поток объявлен оборванным ЗДЕСЬ И СЕЙЧАС,
+        не дожидаясь протухания (2 с) — счётчик и первое время обнуляются, ярус 1
+        падает на демпфер сразу и ждёт зрелость новой рамы. Скорость с нуля.
+        Перерождение засчитывается, если поток был (на арме одометрии ещё нет)."""
+        if self._s.vins_odom_count > 0:
+            self._s.vins_rebirths += 1
+        self._s.vins_odom_count = 0
+        self._s.vins_first_sim = -1e9
+        self._s.vins_vx = self._s.vins_vy = 0.0
+        self._track.reset()
 
     def _on_rcin(self, m):
         if len(m.channels) >= 3:

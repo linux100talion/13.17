@@ -494,6 +494,12 @@ class Freefly(Step):
     _yaw_stabs. Легаси-центр НЕ трогаем: старые реплеи с BS_SF_MASTER=0
     сохраняют пустой стек как было."""
 
+    # Удержание яруса 0 после демоута ярусов ≥1 по здоровью/свежести/зрелости,
+    # sim-с: без него лесенка дребезжала 1→0→1 за один тик (счётчик «болен»
+    # обнуляется первым же хорошим тиком), каждый вход пересеивал DpVins —
+    # разбор lv2_joy_20260905_114248. Потолок SC пилота не удерживается.
+    TIER_HOLD_SEC = 5.0
+
     def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
                  handover=None, loiter_center=False, vins_fresh=2.0,
                  sf_master=False, loiter_alt=1.5, land_gate=None,
@@ -534,6 +540,7 @@ class Freefly(Step):
         self._land_warned = False
         self._level = None             # применённый потолок SC (0/1/2, sf_master)
         self._tier = 0                 # активный ярус лесенки (0/1/2)
+        self._tier0_until = -1e9       # ярус 0 удержан до (sim-с) после демоута
         self._was_manual = False       # для пересева опор на выходе из MANUAL
         self._disarm_since = None      # sim-старт удержания жеста дизарма на земле
         self._gesture_last = 0.0       # sim-время последнего тика с жестом
@@ -550,6 +557,7 @@ class Freefly(Step):
         self._land_warned = False
         self._level = None
         self._tier = 0
+        self._tier0_until = -1e9
         self._was_manual = False
         self._disarm_since = None
         self._gesture_last = 0.0
@@ -692,7 +700,11 @@ class Freefly(Step):
     def _ladder_tier(self, s) -> int:
         """Активный ярус = min(потолок SC, лучший ГОТОВЫЙ). Вниз с VinsHold —
         с гистерезисом 3×fresh (как выход из LOITER): мигание свежести у порога
-        не должно дёргать стек под пилотом. Протух дольше — честный демпфер."""
+        не должно дёргать стек под пилотом. Протух дольше — честный демпфер.
+        Немедленно вниз — при потере ЗДОРОВЬЯ (разнос) и при ПЕРЕРОЖДЕНИИ потока
+        (рестарт/переинициализация обнуляют vins_odom_count — новая рама и новый
+        масштаб, зрелость заново). После любого такого демоута ярус 0 держится
+        ≥ TIER_HOLD_SEC: без удержания лесенка дребезжала 1→0→1 за тик."""
         lvl = self._level if self._level is not None else 0
         ho = self.handover
         if lvl < 1 or ho is None:
@@ -701,10 +713,16 @@ class Freefly(Step):
             # уже на ярусе ≥1: держим по свежести (гистерезис 3×fresh), НО падаем
             # немедленно при потере ЗДОРОВЬЯ VINS (разнос — свеж, но мусор; без
             # этого залипал на мусоре → унос, память vins-hover-init-divergence)
+            # и при незрелом потоке (перерождение: count < min — 20260905_114248:
+            # ярус 1 возвращался первым сообщением реборн-VINS с масштабом 0.14)
             fresh = (s.now_sim - s.vins_last_sim) <= 3.0 * ho.fresh_sec
-            tier = 1 if (fresh and ho.vins_sane(s)) else 0
+            mature = s.vins_odom_count >= ho.min_count
+            tier = 1 if (fresh and mature and ho.vins_sane(s)) else 0
+            if tier == 0:
+                self._tier0_until = s.now_sim + self.TIER_HOLD_SEC
         else:
-            tier = 1 if ho.vins_ready(s) else 0
+            held = s.now_sim < self._tier0_until
+            tier = 1 if (not held and ho.vins_ready(s)) else 0
         if lvl >= 2 and self._in_loiter and s.mode == "LOITER":
             tier = 2
         return tier

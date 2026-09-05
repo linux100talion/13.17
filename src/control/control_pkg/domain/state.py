@@ -33,6 +33,10 @@ class DroneState:
     vins_ripe_det: bool = False           # детектор зрелости: residual тих
                                           # quiet_sec И ratio в полосе (2-я
                                           # ступень гейта, см. ripeness.py)
+    vins_rebirths: int = 0                # перерождений потока VINS (рестарт нодой /
+                                          # переинициализация сама): VinsTrack — дыра в
+                                          # штампах >1 с или скачок позы; каждое обнуляет
+                                          # vins_odom_count/first_sim (зрелость заново)
     # Поза VINS (свой фрейд, НЕ выровнен к миру) — для VinsHold после init. Хватает
     # для УДЕРЖАНИЯ (держим текущую позу константной), выравнивание не нужно.
     vins_valid: bool = False

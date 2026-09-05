@@ -340,6 +340,37 @@ check("loiter_bank_max: вне яруса — голый стаб (без обё
       names(stack) == ['damper', 'yawd']
       and not isinstance(stack.stabs[1], YawBankLimit))
 
+# --- 11. УДЕРЖАНИЕ ЯРУСА 0 после демоута по здоровью (TIER_HOLD_SEC): без него
+# лесенка дребезжала 1→0→1 за один тик — счётчик «болен» обнуляется первым же
+# хорошим тиком, каждый вход пересеивал DpVins (lv2_joy_20260905_114248) ---
+r, clock, mode, stack, vins = make()
+tick_until(r, clock, 1.0, lvl=1, odom=100, vins_age=0.1)
+check("hold: подготовка — ярус 1", names(stack) == ['yawd', 'vins'])
+tick_until(r, clock, 0.5, lvl=1, odom=100, vins_age=0.1, vins_vx=20.0)   # разнос
+check("hold: разнос → демпфер", names(stack) == ['damper', 'yawd'])
+enters0 = vins.enters
+tick_until(r, clock, 2.0, lvl=1, odom=100, vins_age=0.1)                 # снова sane
+check("hold: VINS снова sane через 2 с — ярус 0 ещё удержан",
+      names(stack) == ['damper', 'yawd'] and vins.enters == enters0)
+tick_until(r, clock, 3.5, lvl=1, odom=100, vins_age=0.1)                 # > 5 с
+check("hold: после TIER_HOLD_SEC — возврат на ярус 1 (один вход)",
+      names(stack) == ['yawd', 'vins'] and vins.enters == enters0 + 1)
+
+# --- 12. ПЕРЕРОЖДЕНИЕ потока: телеметрия обнуляет vins_odom_count (рестарт /
+# переинициализация) — ярус 1 падает НЕМЕДЛЕННО при свежем потоке и ждёт
+# зрелость заново (раньше на спуске проверялись только свежесть и здоровье:
+# реборн-VINS с масштабом 0.14 держал ярус 1 → унос ±50 м) ---
+r, clock, mode, stack, vins = make()
+tick_until(r, clock, 1.0, lvl=1, odom=100, vins_age=0.1)
+check("rebirth: подготовка — ярус 1", names(stack) == ['yawd', 'vins'])
+tick_until(r, clock, 0.2, lvl=1, odom=1, vins_age=0.1)                  # реборн: count=1
+check("rebirth: count 1 (<min 40) при свежем потоке → демпфер сразу",
+      names(stack) == ['damper', 'yawd'])
+tick_until(r, clock, 6.0, lvl=1, odom=20, vins_age=0.1)                 # зреет, ещё мало
+check("rebirth: count 20 (<40) — ярус 0 держится", names(stack) == ['damper', 'yawd'])
+tick_until(r, clock, 1.0, lvl=1, odom=45, vins_age=0.1)                 # зрелость
+check("rebirth: count 45 (≥40) — ярус 1 вернулся", names(stack) == ['yawd', 'vins'])
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FREEFLY LADDER OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
