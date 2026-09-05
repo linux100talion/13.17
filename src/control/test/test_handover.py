@@ -282,8 +282,9 @@ ho8 = VinsHandover(dpv, min_count=5, fresh_sec=2.0)      # trim_seed дефол�
 ho8.vins_stabs([comp8], s(5, 11.0, 11.0))
 check("vins_stabs: трим DpVins посеян из демпфера (мир, yaw=0)",
       abs(dpv._itx + 40.0) < 1e-9 and abs(dpv._ity - 10.0) < 1e-9)
-check("посев не взводит «ветер выучен» (ki_trim остаётся страховкой)",
-      not dpv._trim_armed)
+check("посев ВЗВОДИТ «ветер выучен» → дальше рабочий ki, не ki_trim (вход на ходу: "
+      "ki_trim 60 за секунду переписывал посев скоростью возврата, cmd_3/wind_right)",
+      dpv._trim_armed)
 
 # начатое обучение не перетирается (дребезг гейта: трим уже нажит, trim_keep)
 dpv2 = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
@@ -303,8 +304,8 @@ dpv4._itx, dpv4._trim_armed = 50.0, True
 ho11 = VinsHandover(dpv4, min_count=5, fresh_sec=2.0)
 ho11.note_vins_restart()
 ho11.vins_stabs([comp8], s(5, 11.0, 11.0))
-check("после /restart: сброс старого трима, посев в свежую раму",
-      abs(dpv4._itx + 40.0) < 1e-9 and not dpv4._trim_armed)
+check("после /restart: сброс старого трима, посев в свежую раму (armed от посева)",
+      abs(dpv4._itx + 40.0) < 1e-9 and dpv4._trim_armed)
 
 # VinsHold посева не имеет — vins_stabs не падает
 VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0).vins_stabs(

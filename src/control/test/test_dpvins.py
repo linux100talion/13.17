@@ -347,8 +347,12 @@ c_seed = carry_seed(100.0)
 check(f"посев = нужный трим (100): унос ≈ 0 (получено {c_seed:.2f} м)",
       abs(c_seed) < 0.5)
 c_part = carry_seed(70.0)
-check(f"посев неточный (70 из 100): ki_trim доучил, унос мал ({c_part:.2f} м)",
-      abs(c_part) < 1.0)
+# Посев ВЗВОДИТ armed (2026-09-05): остаток 30 PWM доучивается РАБОЧИМ ki, не ki_trim —
+# унос ≈ 30/ki: при ki 6 стенда ~4 м (было <1 с ki_trim), в лётных профилях ki 15 → ~1.6 м.
+# Плата осознанная: ki_trim после посева за секунду переписывал трим скоростью возврата
+# демпфера (вход в ярус на ходу 0.85 м/с → −56 при +57, cmd_3/wind_right, унос 46 м).
+check(f"посев неточный (70 из 100): остаток учит рабочий ki — унос ≈ 30/ki ({c_part:.2f} м, ki 6)",
+      2.5 < abs(c_part) < 6.0)
 
 # --- 18. trim_pwm(): обратная к seed_trim (стрелка ветра HUD) ---
 # круговой проход: посев каналов → trim_pwm отдаёт их же; после разворота
@@ -451,6 +455,41 @@ check("стик: BRAKE погашен, гвоздь снят", not vh_f.braking 
 vh_g, _, _, _ = hover_then_push(3.0)
 vh_g.enter(DroneState(now_sim=200.0))
 check("enter(): фаза BRAKE сброшена", not vh_g.braking)
+
+# 21. ЗАПИРАНИЕ BRAKE и страховка brake_t (cmd_3/wind_right/1): ошибочный трим ПО ветру
+# + боковая ось kp 32: тормоз развернуть снос не может, фаза не выходит, трим заморожен —
+# унос вечен. brake_t: после N с непрерывного BRAKE трим снова учится.
+def locked(brake_t):
+    vh = make(kp_fwd=32.0, kp_lat=32.0, ki=15.0, brake=5.0, brake_vmax=2.0, brake_t=brake_t)
+    t = 100.05
+    for i in range(5):
+        vh.update(st(vx=0.6, x=0.1 * i, t=t), Setpoint(), DT); t += DT
+    for i in range(5):
+        vh.update(st(vx=0.0, x=0.5, t=t), Setpoint(), DT); t += DT       # гвоздь
+    vh._itx = -56.0                                                    # ошибочный трим
+    x, it0 = 0.5, vh._itx
+    seen_brake = False
+    for i in range(int(12.0 / DT)):                                    # 12 с уноса 0.5 м/с
+        x += 0.5 * DT
+        vh.update(st(vx=0.5, x=x, t=t), Setpoint(), DT); t += DT
+        seen_brake |= vh.braking
+    return vh, seen_brake, it0
+vh21a, br_a, it_a = locked(0.0)
+check("brake_t=0: BRAKE активен весь унос, трим заморожен (запирание как в полёте)",
+      br_a and vh21a.braking and abs(vh21a._itx - it_a) < 1e-9)
+vh21b, br_b, it_b = locked(8.0)
+check("brake_t=8: через 8 с непрерывного BRAKE трим снова учится (страховка)",
+      br_b and abs(vh21b._itx - it_b) > 5.0)
+# 22. посев взводит armed → обучение рабочим ki, не ki_trim
+vh22 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
+vh22.seed_trim(-40.0, 10.0, st(t=100.05))
+check("seed_trim: armed (ветер известен)", vh22._trim_armed)
+it0 = vh22._itx; t = 100.05
+for i in range(20):                                # 1 с движения 0.85 м/с (возврат демпфера)
+    vh22.update(st(vx=0.85, x=0.85 * DT * i, t=t), Setpoint(), DT); t += DT
+d22 = abs(vh22._itx - it0)
+check(f"после посева 1 с хода 0.85 м/с меняет трим на {d22:.1f} PWM (ki 6, не ki_trim 60 ≈ 51)",
+      d22 < 10.0)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")

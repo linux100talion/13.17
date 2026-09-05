@@ -137,7 +137,16 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         if not live_pilot:
             raise ValueError("freefly требует живого пилота (--pilot joy/ros): "
                              "арм/взлёт/посадка/дизарм — руками с пульта")
-        stack = ControlStack(build_stabilizers(cfg, stab_spec),
+        # ОДИН набор стабов яруса 0 — и в стеке с первого тика, и в лесенке/SoftLand
+        # (_pilot_stabs). Раньше стек строился ВТОРЫМ вызовом build_stabilizers:
+        # до первой смены яруса живой демпфер был экземпляром стека, а посев трима
+        # DpVins (handover.seed_vins) читал trim_pwm() ИДЛЕ-копии из pilot_stabs —
+        # нули; DpVins стартовал с тримом 0 и за секунду ki_trim выучивал скорость
+        # возврата борта как «ветер» (cmd_3/wind_right: −56 PWM при +57 у демпфера,
+        # BRAKE заморозил — унос 46 м). Со второго входа (после 1→0 лесенка клала в
+        # стек pilot_stabs) посев работал — так и жил незамеченным.
+        pilot_stabs = build_stabilizers(cfg, stab_spec)
+        stack = ControlStack(pilot_stabs,
                              RcTransmitter(cfg.pilot_deadzone, cfg.pilot_full,
                                            cfg.pilot_pitch_sign, cfg.pilot_roll_sign),
                              NoExcitation(), slew=cfg.slew)
@@ -148,9 +157,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         # ждёт позицию EKF, газ прижат — руддер-арм физически невозможен.
         warmup = ([WaitEkfPos("ekf_warmup", RC_MIN_THR, cfg.ekf_pos_budget)]
                   if cfg.ff_loiter > 0 else [])
-        # ОДИН набор стабов яруса 0 на Freefly и SoftLand: лесенка кладёт в стек
-        # именно эти объекты, посадка продолжает их состояние (трим ветра)
-        pilot_stabs = build_stabilizers(cfg, stab_spec)
+        # pilot_stabs — те же объекты, что в стеке (см. выше); SoftLand продолжает
+        # их состояние (трим ветра)
         soft_land = cfg.ff_land > 0
         plan = [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget)] + warmup + [
                 Freefly("freefly", stack, keep=keep,

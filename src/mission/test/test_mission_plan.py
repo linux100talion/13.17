@@ -244,6 +244,12 @@ def main():
                    ffs.land_gate == (cfg.land_alt_max, cfg.land_v_max)))
     checks.append(("freefly: SoftLand делит стек и стабы яруса 0 с Freefly",
                    ff[-1].stack is ffs.stack and ff[-1]._pilot_stabs is ffs._pilot_stabs))
+    # стек с ПЕРВОГО тика собран из тех же объектов, что pilot_stabs: иначе до первой
+    # смены яруса живой демпфер — экземпляр стека, а посев трима DpVins читает
+    # идле-копию (нули) — cmd_3/wind_right: трим −56 при +57 у демпфера, унос 46 м
+    checks.append(("freefly: стек и pilot_stabs — ОДНИ объекты (посев трима читает живой демпфер)",
+                   len(ffs.stack.stabs) == len(ffs._pilot_stabs)
+                   and all(a is b for a, b in zip(ffs.stack.stabs, ffs._pilot_stabs))))
     checks.append(("freefly: газ снижения SoftLand = центр − dz − 0.15/3.16·span = 1381",
                    ff[-1].descent == 1381))
     checks.append(("freefly: дефолт гейта SA = 5 м / 1 м/с, снижение 0.15 м/с",

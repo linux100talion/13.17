@@ -1127,6 +1127,8 @@ def _parse() -> tuple:
                    default=_D.dpvins_pos_brake_v)
     p.add_argument('--dpvins-pos-brake-vmax', dest='dpvins_pos_brake_vmax', type=float,
                    default=_D.dpvins_pos_brake_vmax)
+    p.add_argument('--dpvins-pos-brake-t', dest='dpvins_pos_brake_t', type=float,
+                   default=_D.dpvins_pos_brake_t)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,

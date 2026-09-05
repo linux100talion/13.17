@@ -34,10 +34,18 @@ vmax 1.4–1.9, как в полётах → GUST 75 (порыв 8 м/с). До 
   Для масштаба закон демпфера как есть (kp 90 ki 30 brake 3, τ 0.35): 2.24 / 0.06.
   ⚠️ Стенд не видит предельный цикл σθ с контуром ориентации FCU — гейн ×6–9 на
   торможении может его возбудить; это только полётом (cmd/3).
+ЗАПИРАНИЕ BRAKE (cmd_3/wind_right/1, --trim0 −56 = ошибочный трим ПО ветру после гвоздя;
+  боковая ось --kp 32,32, brake 5 кап 2, ki 15, τ 0.35): тормоз 32·(1.7+2) = 118 PWM не
+  перекрывает ветер 75 + трим 56 → снос не разворачивается, фаза не выходит, трим заморожен:
+  brake_t 0 → 21 м без возврата (полёт: 16.7 м/цикл, 46 м); brake_t 4 → 6.0/3.5; 6 → 4.6/1.2;
+  8 → 4.0/0.11. Штатно на kp 32: brake_t 0 → 4.28/0.97, 8 → 4.34/0.55, 4–6 хуже (трим учит
+  порыв на середине → перелёт). Дефолт dpvins_pos_brake_t 8. На kp 40 запирания нет
+  (240 > 131) — авторитет решает, поэтому боковая ось 32 уязвимее продольной 40.
 Стенд не знает шума VINS и предельного цикла kp против контура ориентации FCU (Tθ 1.6 с) —
 σθ он не предскажет, это только полёт. Запуск с хоста (ROS не нужен):
   python3 src/lab/dpvins_gust_stand.py [--gust 75] [--ki 6,15,30] [--kp 40,32] \
-      [--brake 0,1.5,3] [--tau-meas 0.35]   # brake — фаза BRAKE станции (DpVins.brake)
+      [--brake 0,1.5,3] [--brake-vmax 2] [--brake-t 8] [--trim0 -56] [--tau-meas 0.35]
+  # brake — фаза BRAKE станции; trim0 — ошибочный трим после гвоздя (тест запирания)
 """
 import argparse
 import math
@@ -75,10 +83,11 @@ def gust_env(t):
 
 
 def run(ki, gust_pwm, kp_fwd=40.0, kp_lat=32.0, vsmooth=0.3, imax=120.0, cycles=6,
-        brake=0.0, brake_v=0.25, brake_vmax=1.0):
+        brake=0.0, brake_v=0.25, brake_vmax=1.0, brake_t=0.0, trim0=None):
     vh = DpVins(kp_fwd=kp_fwd, kp_lat=kp_lat, ki=ki, ki_trim=60.0, imax=imax, max_pwm=150.0,
                 cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3, pos_acc=0.15, vsmooth=vsmooth,
-                i_latch=True, brake=brake, brake_v=brake_v, brake_vmax=brake_vmax)
+                i_latch=True, brake=brake, brake_v=brake_v, brake_vmax=brake_vmax,
+                brake_t=brake_t)
     t = 0.0
     vh.enter(DroneState(now_sim=t))
     x = v = v_meas = f_act = 0.0
@@ -99,6 +108,8 @@ def run(ki, gust_pwm, kp_fwd=40.0, kp_lat=32.0, vsmooth=0.3, imax=120.0, cycles=
         if not kicked and t > 15.0:          # толчок → первый гвоздь до порывов
             v += 0.5
             kicked = True
+        if trim0 is not None and 24.9 < t <= 24.95 and vh._pinx is not None:
+            vh._itx = trim0               # ОШИБОЧНЫЙ трим после гвоздя (запирание BRAKE)
         if t >= GUST['at']:
             k = int((t - GUST['at']) // GUST['every'])
             if k != cyc:
@@ -123,6 +134,8 @@ def main():
     ap.add_argument('--brake-v', type=float, default=0.25)
     ap.add_argument('--brake-vmax', type=float, default=1.0)
     ap.add_argument('--tau-meas', type=float, default=None, help='лаг измерения, с (дефолт TAU_MEAS)')
+    ap.add_argument('--brake-t', type=float, default=0.0, help='заморозка трима первые N с брейка (0 = всю фазу)')
+    ap.add_argument('--trim0', type=float, default=None, help='ошибочный трим PWM, вписанный после гвоздя (тест запирания)')
     a = ap.parse_args()
     global TAU_MEAS
     if a.tau_meas is not None:
@@ -131,12 +144,13 @@ def main():
     print(f"плант: α {ALPHA} м/с²/PWM, τ_act {TAU_ACT} с, τ_meas {TAU_MEAS} с; порыв {a.gust:g} PWM-экв. "
           f"({GUST['rise']:g}/{GUST['hold']:g}/{GUST['fall']:g} с каждые {GUST['every']:g}); "
           f"kp {kp_fwd:g}/{kp_lat:g} vsmooth {a.vsmooth:g} imax {a.imax:g} τ_meas {TAU_MEAS:g}; "
-          f"brake_v {a.brake_v:g} brake_vmax {a.brake_vmax:g}")
+          f"brake_v {a.brake_v:g} brake_vmax {a.brake_vmax:g} brake_t {a.brake_t:g} trim0 {a.trim0}")
     print(f"{'brake':>5} {'ki':>5} {'пик,м':>6} {'остаток,м':>9} {'vmax':>5} | {'1-й цикл пик':>12}")
     for br in (float(x) for x in a.brake.split(',')):
         for ki in (float(x) for x in a.ki.split(',')):
             p = run(ki, a.gust, kp_fwd, kp_lat, a.vsmooth, a.imax,
-                    brake=br, brake_v=a.brake_v, brake_vmax=a.brake_vmax)
+                    brake=br, brake_v=a.brake_v, brake_vmax=a.brake_vmax,
+                    brake_t=a.brake_t, trim0=a.trim0)
             ss = p[1:]
             print(f"{br:5g} {ki:5g} {sum(q[0] for q in ss) / len(ss):6.2f} "
                   f"{sum(q[1] for q in ss) / len(ss):9.2f} {max(q[2] for q in ss):5.2f} | "

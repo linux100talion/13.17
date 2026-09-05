@@ -67,7 +67,7 @@ class DpVins(StabilizationStrategy):
                  imax=100.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
                  pos_vmax=0.3, pos_acc=0.15, psign=1.0, rsign=1.0, vsmooth=0.1,
                  i_latch=True, trim_keep=True, brake=0.0, brake_v=0.25,
-                 brake_vmax=1.0):
+                 brake_vmax=1.0, brake_t=0.0):
         self.kp_fwd, self.kp_lat = kp_fwd, kp_lat
         self.ki, self.imax, self.max = ki, imax, max_pwm
         self.ki_trim = ki_trim             # скорость обучения ДО первого гвоздя (0 = ki)
@@ -79,6 +79,15 @@ class DpVins(StabilizationStrategy):
         # выход из тормоза, перевзвод): по экземпляру на ось тела. Гвоздь/трим —
         # свои (DpVins), у станции берём только target() и фазу braking.
         self.brake, self.brake_v, self.brake_vmax = brake, brake_v, brake_vmax
+        # СТРАХОВКА ОТ ЗАПИРАНИЯ BRAKE: трим на торможении заморожен (как у демпфера)
+        # только первые brake_t секунд фазы; если тормоз за это время борт не
+        # остановил (уходим дальше — авторитета не хватает против ветра или
+        # ошибочного трима), трим снова учится. Без этого петля запиралась:
+        # ошибочный трим → снос → BRAKE → трим заморожен → снос вечен
+        # (cmd_3/wind_right/1: 46 м без возврата при триме −56 вместо +57).
+        # 0 = морозить всю фазу (закон демпфера как есть).
+        self.brake_t = brake_t
+        self._brake_since = None           # sim-старт текущей фазы BRAKE
         self._st_fwd = StationKeeper(kp=pos_kp, vmax=pos_vmax, brake=brake,
                                      brake_vmax=brake_vmax, acc=pos_acc,
                                      brake_v=brake_v, pin_v=self._PIN_V)
@@ -105,6 +114,7 @@ class DpVins(StabilizationStrategy):
         self._moved = False
         self._st_fwd.reset()
         self._st_rgt.reset()
+        self._brake_since = None
         # ТРИМ НЕ ТРОГАЕМ (trim_keep): ветер на переключении яруса не исчезает,
         # а обнуление на каждом входе = обучение заново = унос ≈ трим/ki по
         # ветру на каждом фронте яруса (wind_* 2026-09-03: 17 м; дребезг гейта
@@ -132,9 +142,8 @@ class DpVins(StabilizationStrategy):
         конвенциях; тело → мир по vins_yaw — та же проекция, которой трим
         учится в update(). Сеем только ДЕВСТВЕННЫЙ трим (< 1 PWM и не armed):
         начатое обучение (дребезг гейта, trim_keep) и выученный ветер не
-        перетираем — свой свежее. НЕ armed: посев — оценка (blend, протухание
-        станции), ki_trim остаётся страховкой и быстро доучит остаток; при
-        хорошем посеве ошибка мала и фаза — no-op до первого стопа."""
+        перетираем — свой свежее. Посев ВЗВОДИТ «ветер выучен» (armed): дальше
+        рабочий ki, не ki_trim — см. комментарий в теле (вход на ходу)."""
         if self._trim_armed or math.hypot(self._itx, self._ity) >= 1.0:
             return False
         i_fwd = self.psign * float(pitch_off)
@@ -143,6 +152,12 @@ class DpVins(StabilizationStrategy):
         sn = math.sin(s.vins_yaw)
         self._itx = clamp(i_fwd * c - i_rgt * sn, -self.imax, self.imax)
         self._ity = clamp(i_fwd * sn + i_rgt * c, -self.imax, self.imax)
+        # Посев = ветер ИЗВЕСТЕН → сразу рабочий ki (armed). Раньше ki_trim 60
+        # оставался «страховкой доучить остаток», но вход в ярус случается на
+        # ходу (демпфер возвращает борт в точку, 0.85 м/с): за секунду ki_trim
+        # переписывал посеянный трим скоростью ВОЗВРАТА как «ветром» — знак
+        # обратный (cmd_3/wind_right: −56 при +57). Гвоздь по стопу — как прежде.
+        self._trim_armed = True
         return True
 
     def trim_pwm(self, yaw=None):
@@ -242,6 +257,7 @@ class DpVins(StabilizationStrategy):
         # ПОЛОЖИТЕЛЬНУЮ ОС в удержании — унос (прогон ab_dpvins 2026-09-03).
         err_fwd = v_fwd - tv_fwd
         err_rgt = v_rgt - tv_rgt
+        now = s.now_sim
 
         # И-член (ветровой трим). Дилемма (прогоны lv2_joy_065026 / ab_dpv_pinfix):
         # ТОРМОЖЕНИЕ (стик отпущен, гвоздя нет, цель 0) даёт ошибку = v вперёд.
@@ -254,7 +270,6 @@ class DpVins(StabilizationStrategy):
         # стопе, обычно на висении зрелости при малой v); после первого гвоздя
         # (_trim_armed) трим на торможении ЗАМОРОЖЕН, учится только на удержании
         # → чистые стопы без возврата. На живом стике заморожен всегда.
-        now = s.now_sim
         i_fwd = self._itx * c + self._ity * sn        # мировой трим (PWM) → тело (курс)
         i_rgt = -self._itx * sn + self._ity * c
         po = self.psign * (self.kp_fwd * err_fwd + i_fwd)
@@ -270,9 +285,18 @@ class DpVins(StabilizationStrategy):
         # выученном ветре. Именно pin_pending, не «нет гвоздя»: после enter()
         # гвоздя нет, но и торможения нет — там трим ДОЛЖЕН учиться (рабочим
         # ki), иначе смена ветра между входами в ярус не доучивается никогда.
+        braking = self.braking
+        if braking:
+            if self._brake_since is None:
+                self._brake_since = now
+        else:
+            self._brake_since = None
+        # заморозка на торможении — всю фазу (brake_t 0) или первые brake_t с
+        brake_frozen = braking and (self.brake_t <= 0.0
+                                    or now - self._brake_since < self.brake_t)
         frozen = self.i_latch and (stick
                                    or (self._trim_armed
-                                       and (self._pin_pending or self.braking)))
+                                       and (self._pin_pending or brake_frozen)))
         # СКОРОСТЬ ОБУЧЕНИЯ двухфазная: до первого гвоздя (ветер не выучен) —
         # ki_trim, быстрый захват (зеркало _POS_BRAKE_TRIM/ki_trim демпфера):
         # унос на входе в ярус = нужный трим / ki обучения, от kp не зависит
