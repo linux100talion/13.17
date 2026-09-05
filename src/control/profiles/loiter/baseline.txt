@@ -1,0 +1,47 @@
+# ЯРУС 2 — штатный LOITER на EKF-от-VINS: эталон 2026-09-05 (коммит 3a5205c).
+# Мы не контур, а редактор команды: позицию держит прошивка (PSC), наш стек — только
+# yaw (DpYawHold из dphold/baseline) под YawBankLimit; стики roll/pitch — уставки
+# скорости. Гейт входа — extnav_ready + свежий VINS + в воздухе; выход из LOITER по
+# протуханию (3×fresh) или по гейту здоровья VINS (vinshold/baseline). Формат — README.md.
+
+# слой: env — LOITER по центру CH6 (freefly), бюджет латча режима 80 с; путь 2 —
+# «нос ведёт траекторию», крен виража ≤ 8° (YawBankLimit, ab_bank8); путь 1 (TrackHold,
+# стики в осях мира) выкл
+BS_FF_LOITER=1
+BS_MODE_BUDGET=80
+BS_LOITER_BANK_MAX=8
+BS_LOITER_TRACK=0
+# слой: нода — гейт «в воздухе» 0.5 м (low-rider п.4), бюджет ожидания гейта 60 с
+BS_LOITER_ALT=0.5
+BS_LOITER_GATE_BUDGET=60
+
+# слой: env — GPS-DENIED (LV=2): GPS нет с бута, origin ставит нода (Киев), высота
+# миссии — баро
+BS_GPS_DENIED=1
+BS_GPS_DISABLE=0
+BS_SET_ORIGIN=1
+BS_ALT_SRC=baro
+# слой: нода — точка origin (sim-geo-anchor-kyiv: мир/дом SITL/origin обязаны совпадать),
+# бюджет ожидания позиции EKF перед армом
+BS_ORIGIN_LAT=50.450100
+BS_ORIGIN_LON=30.523400
+BS_ORIGIN_ALT=180.0
+BS_EKF_POS_BUDGET=120
+
+# слой: env (sim_up/sitl_lv_profile) — ветер EKF3 drag-фьюжн: BCOEF 32 кг/м² (стрелка ветра
+# HUD в LOITER; ekf3-drag-wind); 0 = выкл
+BS_EKF_DRAG=32
+
+# слой: SITL — справочно, применяется НЕ через env (docker/sim/config/sitl-extra.parm,
+# docker/sim/scripts/sitl_lv_profile.py для LV=2):
+#SITL LOIT_SPEED_MS 5          # скорость уставки LOITER при полном стике, м/с (4.8: LOIT_SPEED→_MS)
+#SITL PSC_ANGLE_MAX 20         # потолок наклона позиционного контура, °
+#SITL LOIT_OPTIONS 0
+#SITL LAND_SPD_MS 0.15         # скорость касания штатного LAND (SoftLand)
+#SITL VISO_TYPE 1              # внешняя одометрия (VISION_*) до EK3
+#SITL EK3_SRC1_POSXY 6         # позиция — ExternalNav (мост VINS)
+#SITL EK3_SRC1_VELXY 0         # скорость IPM не фьюзим (урок полёта №5)
+#SITL SIM_GPS1_ENABLE 0        # GPS отсутствует с бута (LV=2)
+#SITL EK3_DRAG_BCOEF_X/Y 32    # = BS_EKF_DRAG; EK3_DRAG_MCOEF 0
+#SITL EK3_GBIAS_P_NSE 0.00001
+#SITL ATC_RAT_RLL_P 0.045      # ATC_RAT_RLL_D 0.0012

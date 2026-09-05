@@ -1,0 +1,102 @@
+# ЯРУС 0 — ДЕМПФЕР DpHoldM: эталон 2026-09-05 (коммит 3a5205c; серия dphold_vs_dpvins).
+# Композит DpHold(DpRollRate, DpPitchRate) + DpYawHold; сенсор — IPM-канал (вид сверху),
+# относительное зрение без глобальной рамы (см. src/control/control.md, low-rider.md).
+# Итог эталона под порывом 8 м/с: пик за порыв 2.4–2.8 м на любой высоте, остаток за
+# цикл 0.8–1.5 м копится по ветру (в лоб на 10 м — 10 м за 2 мин). Формат — README.md.
+BS_STAB=DpHoldM
+
+# слой: env (freefly_lv.sh) — СКОРОСТНОЙ КОНТУР rate-осей, PWM на м/с ошибки скорости IPM.
+# kp 90: kp 30→90 убрал звон 10.7 с; ki 30 + ki_trim 60 до первого гвоздя (быстрый захват
+# ветра); cmd_gain 5 — м/с при полном стике.
+BS_ROLL_RATE_KP=90
+BS_PITCH_RATE_KP=90
+BS_ROLL_RATE_KI=30
+BS_PITCH_RATE_KI=30
+BS_ROLL_RATE_KI_TRIM=60
+BS_PITCH_RATE_KI_TRIM=60
+BS_ROLL_RATE_CMD_GAIN=5
+BS_PITCH_RATE_CMD_GAIN=5
+BS_ROLL_IMAX=150
+BS_ROLL_OSIGN=1
+BS_PITCH_OSIGN=1
+BS_SLEW=300
+# слой: нода — D rate-осей выкл, потолок И-члена тангажа, анти-виндап И-члена
+BS_ROLL_RATE_KD=0
+BS_PITCH_RATE_KD=0
+BS_PITCH_IMAX=120
+BS_RATE_AWU=1
+
+# слой: env — СТАНЦИЯ (StationKeeper над псевдопозицией-интегралом пути): возврат
+# pos_kp 0.3 с капом 0.3 м/с и √-разгоном 0.15; тормоз BRAKE 3 (−brake·v) до 1.0 м/с при
+# |v| ≥ 0.25 (ab_brake*, ab_pitch — дефолт с 2026-08-28/29).
+BS_ROLL_POS_KP=0.3
+BS_PITCH_POS_KP=0.3
+BS_ROLL_POS_VMAX=0.3
+BS_PITCH_POS_VMAX=0.3
+BS_ROLL_POS_ACC=0.15
+BS_PITCH_POS_ACC=0.15
+BS_ROLL_POS_BRAKE=3
+BS_PITCH_POS_BRAKE=3
+BS_ROLL_POS_BRAKE_V=0.25
+BS_PITCH_POS_BRAKE_V=0.25
+BS_ROLL_POS_BRAKE_VMAX=1.0
+BS_PITCH_POS_BRAKE_VMAX=1.0
+# станция в осях курса (трим/гвоздь следуют за разворотом, ab_frame/ab_gate)
+BS_STATION_FRAME=yaw
+# слой: нода — курс станции от FCU; гвоздь тангажа только на установившейся высоте (0.2 м)
+BS_STATION_HEADING=fcu
+BS_PITCH_POS_ALT_BAND=0.2
+BS_ROLL_POS_ALT_BAND=0
+
+# слой: env — МЯГКОСТЬ ПО ИЗМЕРЕННОМУ ШУМУ канала (kp/pos_kp ×√(ref/σ̂), ki ×(ref/σ̂),
+# пороги ÷): тангаж 0.02 м/кадр (ab_noise). Это она, а не soft_alt, смягчает тангаж с
+# высотой — цена: в лоб на 5–20 м DpHold уплывает по ветру (dphold_vs_dpvins).
+BS_PITCH_SOFT_NOISE=0.02
+# слой: нода — по высоте не смягчаем (soft_alt 0), крен по шуму не смягчаем (плоский)
+BS_PITCH_SOFT_ALT=0
+BS_ROLL_SOFT_ALT=0
+BS_ROLL_SOFT_NOISE=0
+
+# слой: env — ПЕРЦЕПЦИЯ IPM: окно МНК 0.3 с, деротация ω, ФВЧ-гейт нуля ω_z 0.1 (τ 2 с);
+# углы — буфер интерполяции с латентностью 0.02 с (ab_interp)
+BS_IPM_WIN=0.3
+BS_IPM_DEROT=1.0
+BS_IPM_WZ_GATE=0.1
+BS_IPM_WZ_TAU=2.0
+BS_ATT_INTERP=1
+BS_ATT_LATENCY=0.02
+# слой: нода — фильтр скорости 0.4 с, ускорение по наклону τ 5 с, пол высоты 0.5,
+# масштабно-инвариантная полоса h_ref 3.0, адаптивное окно 1.05, точная модель
+BS_IPM_VEL_TAU=0.4
+BS_IPM_ACC_TAU=5.0
+BS_IPM_ALT_FLOOR=0.5
+BS_IPM_SCALE_REF=3.0
+BS_IPM_ADAPT=1.05
+BS_IPM_MODEL=exact
+BS_IPM_ALT_STILL=0.5
+BS_IPM_MAX_SPEED=0
+BS_IPM_ARM_FRAMES=0
+BS_IPM_ALT_FWD=0
+BS_IPM_ALT_LAT=0
+BS_ATT_EXTRAP=0
+BS_ATT_WAIT_MAX=0.15
+# слой: env — высота перцепции: EKF local z + латч нуля по арму (damper-low-alt)
+BS_PERC_ALT_SRC=local
+BS_PERC_ALT_ZERO=1
+
+# слой: env — КУРС DpYawHold (единственная ось на всех трёх ярусах): kp 0 (пружина
+# курса лечилась прямой передачей стика pilot_gain 130 + kd 6 + утечка 8), гейт
+# лобового yaw на ходу 0.5 (ab_gate)
+BS_YAW_KP=0
+BS_YAW_KI=0
+BS_YAW_KD=6
+BS_YAW_LEAK=8
+BS_YAW_PILOT_GAIN=130
+BS_YAW_RATE_FULL=60
+BS_YAW_MAX_RATE=100
+BS_YAW_SMOOTH=5
+BS_YAW_ARM_FRAMES=5
+BS_YAW_V_GATE=0.5
+# слой: нода
+BS_YAW_OSIGN=1
+BS_YAW_TRANS_FIX=1
