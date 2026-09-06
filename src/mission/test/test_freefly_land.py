@@ -114,14 +114,14 @@ YAWD = FakeStab('yawd', ('yaw',))
 VINS = FakeStab('vins', ('roll', 'pitch'))
 
 
-def make(budget=45.0):
+def make(budget=45.0, land_in_loiter=True):
     clock, mode, log = FakeClock(), FakeMode(), FakeLog()
     stack = FakeStack([DAMPER, YAWD])
     pilot_stabs = [DAMPER, YAWD]
     ho = VinsHandover(VINS, min_count=40, fresh_sec=2.0)
     ff = Freefly("freefly", stack, pilot_stabs=pilot_stabs, handover=ho,
                  loiter_center=True, vins_fresh=2.0, sf_master=True,
-                 land_gate=(1.0, 0.3))
+                 land_gate=(1.0, 0.3), land_in_loiter=land_in_loiter)
     land = SoftLand("land", stack, 0.3, budget, pilot_stabs=pilot_stabs,
                     handover=ho, rate=0.3, fresh_sec=2.0)
     runner = PlanRunner([ff, land], clock, mode, log)
@@ -357,6 +357,103 @@ tick_until(r0, clock, 1.0)
 tick_until(r0, clock, 0.5, alt=0.5, ipm=(0.0, 0.0), sa=True)
 check("ff_land=0: кнопка не делает ничего", cur(r0) == "freefly"
       and log.count("SA:") == 0)
+
+# --- 10. ОТМЕНА повторным нажатием, ветка alt: назад в freefly, стек демпфер ---
+r, clock, mode, log, stack, ff, land = make()
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 0.2, alt=0.8, ipm=(0.05, 0.0), sa=True)           # нажали, зажали
+tick_until(r, clock, 0.5, alt=0.8, ipm=(0.05, 0.0), sa=True)           # ещё держим — не отмена
+check("отмена: зажатая с входа кнопка — не отмена (шаг land)", cur(r) == "land")
+tick_until(r, clock, 0.3, alt=0.8, ipm=(0.05, 0.0), sa=False)          # отпустили
+tick_until(r, clock, 0.2, alt=0.8, ipm=(0.05, 0.0), sa=True)           # второй фронт
+check("отмена (ветка alt): второй фронт → шаг freefly, результат LAND_CANCEL",
+      cur(r) == "freefly" and r.result == "LAND_CANCEL")
+rc, _ = tick_until(r, clock, 0.5, alt=0.8, ipm=(0.05, 0.0), sa=True)
+check("после отмены: стек демпфер, газ = стик пилота (не 1362), «возврат» в логе",
+      names(stack) == ['damper', 'yawd'] and rc.throttle == RC_CENTER
+      and any("возврат в свободный полёт" in ln for ln in log.lines))
+tick_until(r, clock, 0.3, alt=0.8, ipm=(0.05, 0.0), sa=False)
+tick_until(r, clock, 0.2, alt=0.8, ipm=(0.05, 0.0), sa=True)           # третий фронт — снова посадка
+check("третье нажатие — снова посадка (шаг land)", cur(r) == "land")
+
+# --- 11. ОТМЕНА в ветке pos (LOITER → LAND): keep послан сразу, стек перепринят ---
+r, clock, mode, log, stack, ff, land = make()
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 3.0, alt=3.0, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LOITER")
+tick_until(r, clock, 0.2, alt=0.9, ipm=(0.0, 0.0), odom=700, vins_age=0.1, extnav=True,
+           lvl=2, mode="LOITER", sa=True)
+tick_until(r, clock, 1.0, alt=0.9, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LAND", sa=False)
+check("подготовка: ветка pos, LAND залатчен, стек пуст", land.land_state() == "pos" and names(stack) == [])
+n_modes = len(mode.modes)
+tick_until(r, clock, 0.2, alt=0.9, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LAND", sa=True)
+check("отмена (ветка pos): ALT_HOLD послан сразу, шаг freefly, LAND_CANCEL",
+      "ALT_HOLD" in mode.modes[n_modes:] and cur(r) == "freefly" and r.result == "LAND_CANCEL")
+tick_until(r, clock, 0.5, alt=0.9, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="ALT_HOLD", sa=False)
+check("после отмены из LAND: стек перепринят лесенкой (не пуст)", names(stack) != [])
+
+# --- 12. после касания отмены нет; cancel=False — отмена выключена ---
+r, clock, mode, log, stack, ff, land = make()
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 0.2, alt=0.8, ipm=(0.05, 0.0), sa=True)
+tick_until(r, clock, 0.3, alt=0.2, ipm=(0.05, 0.0), sa=False)          # касание по баро
+check("касание: land_state=touch", land.land_state() == "touch")
+tick_until(r, clock, 0.2, alt=0.2, sa=True)
+check("SA после касания: остаёмся в land, предупреждение",
+      cur(r) == "land" and any("ПОСЛЕ касания" in ln for ln in log.lines))
+r, clock, mode, log, stack, ff, land = make()
+land.cancel = False
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 0.2, alt=0.8, ipm=(0.05, 0.0), sa=True)
+tick_until(r, clock, 0.3, alt=0.8, ipm=(0.05, 0.0), sa=False)
+tick_until(r, clock, 0.2, alt=0.8, ipm=(0.05, 0.0), sa=True)
+check("cancel=False: второе нажатие не отменяет (шаг land), предупреждение",
+      cur(r) == "land" and any("отмена выключена" in ln for ln in log.lines))
+
+# --- 13. отмена из LAND, FCU медлит: keep ре-ассертится, стек молчит, потом всё штатно ---
+r, clock, mode, log, stack, ff, land = make()
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 3.0, alt=3.0, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LOITER")
+tick_until(r, clock, 0.2, alt=0.9, ipm=(0.0, 0.0), odom=700, vins_age=0.1, extnav=True,
+           lvl=2, mode="LOITER", sa=True)
+tick_until(r, clock, 1.0, alt=0.9, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LAND", sa=False)
+n0 = len(mode.modes)
+tick_until(r, clock, 0.2, alt=0.9, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LAND", sa=True)
+rc, _ = tick_until(r, clock, 2.5, alt=0.9, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LAND", sa=False)
+asserts = [m for m in mode.modes[n0:] if m == "ALT_HOLD"]
+check(f"FCU медлит в LAND 2.5 с: ALT_HOLD ре-ассертится ({len(asserts)} раз ≥ 2), шаг freefly",
+      len(asserts) >= 2 and cur(r) == "freefly")
+check("пока FCU в LAND: стики в центре (стек молчит — в position-LAND стик = скорость)",
+      (rc.roll, rc.pitch) == (RC_CENTER, RC_CENTER))
+rc, _ = tick_until(r, clock, 0.5, alt=0.9, ipm=(0.05, 0.0), odom=700, vins_age=0.1, extnav=True,
+                   lvl=2, mode="ALT_HOLD", sa=False)
+check("FCU вышел в ALT_HOLD: стек снова рулит", rc.roll != RC_CENTER or rc.pitch != RC_CENTER)
+r, clock, mode, log, stack, ff, land = make()
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 3.0, alt=3.0, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LOITER")
+tick_until(r, clock, 0.2, alt=0.9, ipm=(0.0, 0.0), odom=700, vins_age=0.1, extnav=True,
+           lvl=2, mode="LOITER", sa=True)
+tick_until(r, clock, 1.0, alt=0.9, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LAND", sa=False)
+tick_until(r, clock, 0.2, alt=0.9, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LAND", sa=True)
+tick_until(r, clock, 6.0, alt=0.9, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LAND", sa=False)
+check("FCU не вышел из LAND за 5 с: один error в логе, дальше LAND уважаем",
+      sum(1 for ln in log.lines if "не вышел из LAND" in ln) == 1 and cur(r) == "freefly")
+
+# --- 14. land_in_loiter=0 (дефолт ноды): на ярусе LOITER кнопка отвергается ---
+r, clock, mode, log, stack, ff, land = make(land_in_loiter=False)
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 3.0, alt=3.0, odom=700, vins_age=0.1, extnav=True, lvl=2, mode="LOITER")
+check("подготовка: ярус 2", ff._tier == 2)
+tick_until(r, clock, 0.2, alt=0.9, ipm=(0.0, 0.0), odom=700, vins_age=0.1, extnav=True,
+           lvl=2, mode="LOITER", sa=True)
+check("SA на ярусе LOITER: отказ с подсказкой, шаг freefly, LAND не послан",
+      cur(r) == "freefly" and any("ярус LOITER — посадка кнопкой ОТКЛЮЧЕНА" in ln for ln in log.lines)
+      and "LAND" not in mode.modes)
+tick_until(r, clock, 0.3, alt=0.9, ipm=(0.0, 0.0), odom=700, vins_age=0.1, extnav=True,
+           lvl=1, mode="ALT_HOLD", sa=False)                       # CH6 вниз → ярус 1
+tick_until(r, clock, 0.2, alt=0.9, ipm=(0.0, 0.0), odom=700, vins_age=0.1, extnav=True,
+           lvl=1, mode="ALT_HOLD", sa=True)
+check("CH6 вниз → ярус 1 → SA: посадка (ветка alt под VinsHold)",
+      cur(r) == "land" and land.land_state() in ("vinshold", "damper"))
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FREEFLY SOFT-LAND OK" if ok_all else "❌ СБОЙ")

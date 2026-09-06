@@ -1152,6 +1152,16 @@ class BootstrapConfig:
     ff_land: float = 1.0             # 1 = кнопка SA сажает (шаг SoftLand в плане
                                      # freefly); 0 = как раньше (сажает пилот).
                                      # BS_FF_LAND / --ff-land
+    land_in_loiter: float = 0.0      # 1 = кнопка SA сажает и на ярусе LOITER (ветка
+                                     # pos: LAND полётника); 0 = на ярусе 2 SA
+                                     # отвергается с подсказкой — отмена посадки из
+                                     # LAND не работает (2026-09-06: FCU не выходил
+                                     # из LAND по нашим set_mode), сажать руками или
+                                     # CH6 вниз → ярус 0/1 → SA. BS_LAND_IN_LOITER
+    ff_land_cancel: float = 1.0      # 1 = второе нажатие SA до касания ОТМЕНЯЕТ
+                                     # посадку (любая ветка/ярус: из LAND — keep
+                                     # сразу, goto freefly, стек/опора заново);
+                                     # 0 = как раньше. BS_FF_LAND_CANCEL
     land_alt_max: float = 5.0        # гейт кнопки: rel_alt ≤ этого, м (выше —
                                      # игнор с предупреждением; LAND сам сядет с
                                      # любой высоты, но кнопка задумана «у земли»).
@@ -1166,7 +1176,9 @@ class BootstrapConfig:
     land_rate: float = 0.15          # скорость снижения ветки ALT_HOLD, м/с (PWM
                                      # газа считается по alt_dz/alt_span/
                                      # alt_rate_full — той же формулой, что AltHold).
-                                     # Ветка LAND — LAND_SPEED в sitl-extra.parm (15).
+                                     # Ветка LAND — LAND_SPD_MS в sitl-extra.parm
+                                     # (0.15 = как здесь; ×2 пробовали 2026-09-06,
+                                     # пилот вернул).
                                      # BS_LAND_RATE / --land-rate
     land_joy: str = 'b0'             # где кнопка в /joy: 'b<i>' — buttons[i],
                                      # 'a<i>' — axes[i] > 0.5; '' — нет (только

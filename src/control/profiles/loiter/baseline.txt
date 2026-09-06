@@ -38,6 +38,7 @@ BS_EKF_DRAG=32
 # docker/sim/scripts/sitl_lv_profile.py для LV=2):
 #SITL LOIT_SPEED_MS 5          # скорость уставки LOITER при полном стике, м/с (4.8: LOIT_SPEED→_MS)
 #SITL PSC_ANGLE_MAX 20         # потолок наклона позиционного контура, °
+#SITL LAND_SPD_MS 0.15         # скорость снижения LAND (ветка pos SoftLand), м/с = land_rate ветки alt
 #SITL LOIT_OPTIONS 0
 #SITL LAND_SPD_MS 0.15         # скорость касания штатного LAND (SoftLand)
 #SITL VISO_TYPE 1              # внешняя одометрия (VISION_*) до EK3

@@ -499,14 +499,24 @@ class Freefly(Step):
     # обнуляется первым же хорошим тиком), каждый вход пересеивал DpVins —
     # разбор lv2_joy_20260905_114248. Потолок SC пилота не удерживается.
     TIER_HOLD_SEC = 5.0
+    LAND_EXIT_SEC = 5.0      # после отмены посадки из LAND: столько ре-ассертим keep
+                             # и держим стики в центре, пока FCU не вышел из LAND
 
     def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
                  handover=None, loiter_center=False, vins_fresh=2.0,
                  sf_master=False, loiter_alt=1.5, land_gate=None,
-                 loiter_track=None, loiter_bank_max=0.0, loiter_guard=False):
+                 loiter_track=None, loiter_bank_max=0.0, loiter_guard=False,
+                 land_in_loiter=False):
         self.name = name
         self.stack = stack
         self.keep = keep
+        # КНОПКА ПОСАДКИ НА ЯРУСЕ LOITER (land_in_loiter, config.land_in_loiter):
+        # False = на ярусе 2 SA отвергается с подсказкой (ветка pos SoftLand —
+        # LAND полётника — из LOITER не отменяется кнопкой, 2026-09-06: FCU из
+        # LAND в ALT_HOLD по нашим set_mode не выходил и после ре-ассерта;
+        # пилот сажает из LOITER руками либо CH6 вниз → ярус 0/1 → SA).
+        # True = как раньше.
+        self.land_in_loiter = land_in_loiter
         # ГЕЙТЫ ЯРУСА 2 КАК У ЯРУСА 1 (loiter_guard, cmd/9, 2026-09-06): (1) ЗРЕЛОСТЬ —
         # вход и удержание LOITER требуют vins_odom_count ≥ vins_min (после
         # перерождения VINS мост латчит молодую раму с масштабом-лотереей, а
@@ -561,6 +571,7 @@ class Freefly(Step):
     def enter(self, ctx, s) -> None:
         self._greeted = False
         self._was_armed = False
+        self._stack_applied = False    # первый _ladder_apply обязан применить стек
         self._stab_pos = None
         self._in_loiter = False
         self._loiter_warned = False
@@ -576,6 +587,30 @@ class Freefly(Step):
         self._disarm_warned = False
         # зажатая на входе кнопка — не фронт (getattr: дамми-снапшоты тестов без поля)
         self._land_prev = bool(getattr(s, 'pilot_land', False))
+        # ВОЗВРАТ В ВОЗДУХЕ (отмена посадки: SoftLand → goto freefly): борт уже
+        # заармлен — стек и опора с этой точки сразу, без «пилот заармил»; стек
+        # яруса перепримет первый _ladder_apply (SoftLand мог оставить его пустым
+        # в ветке pos), режим — _mode_target (LAND ещё не сменился → keep_mode
+        # молчит, SoftLand сам шлёт keep при отмене)
+        self._land_exit_until = -1e9
+        self._land_exit_warned = False
+        if s is not None and getattr(s, 'armed', False) and ctx is not None:
+            self._was_armed = True
+            self._greeted = True
+            ctx.reset_keyframe()
+            self.stack.enter(s)
+            ctx.log.info("    freefly: возврат в свободный полёт (борт заармлен, "
+                         f"rel_alt={s.rel_alt})")
+            if s.mode == "LAND":
+                # ОТМЕНА ПОСАДКИ ИЗ LAND (ветка pos SoftLand): один async set_mode
+                # мог не дойти/быть отвергнут, а _mode_target LAND «уважает» (EKF-
+                # failsafe) — борт продолжил бы садиться, и наш стек в position-LAND
+                # командовал бы СКОРОСТЬ (полёт 2026-09-06: отмена в LOITER не
+                # работала). Окно LAND_EXIT_SEC: keep ре-ассертится, стики в центре.
+                self._land_exit_until = s.now_sim + self.LAND_EXIT_SEC
+                ctx.mode.set_mode(self.keep)
+                ctx.log.warn(f"    freefly: FCU ещё в LAND — выход в {self.keep} "
+                             f"(ре-ассерт {self.LAND_EXIT_SEC:g} с, стики в центре)")
 
     def _land_press(self, ctx, s) -> bool:
         """Фронт кнопки посадки через гейт «низко и почти стоим». Ловим ФРОНТ
@@ -594,6 +629,10 @@ class Freefly(Step):
         if s.pilot_switch == 1:
             ctx.log.warn("    SA: MANUAL (SF не вверх) — посадка кнопкой только "
                          "под стеком, верни SF вверх")
+            return False
+        if not self.land_in_loiter and self._tier == 2:
+            ctx.log.warn("    SA: ярус LOITER — посадка кнопкой ОТКЛЮЧЕНА (LAND полётника "
+                         "не отменяется; сажай руками или CH6 вниз → ярус 0/1 → SA)")
             return False
         alt = s.rel_alt
         if alt is None or alt > alt_max:
@@ -623,6 +662,8 @@ class Freefly(Step):
             self._loiter_warned = False
             self._latch_warned = False
             return self.keep
+        if s.mode == "LAND" and s.now_sim < self._land_exit_until:
+            return self.keep               # отмена посадки: выводим из LAND (см. enter)
         if s.mode == "LAND":
             # FCU сам ушёл в LAND (EKF-failsafe, FS_EKF_ACTION) — с failsafe
             # не воюем (полёт 2026-08-20 №5: ре-ассерт LOITER бился с LAND
@@ -768,8 +809,9 @@ class Freefly(Step):
     def _ladder_apply(self, ctx, s) -> None:
         """Применить ярус: стек по ярусу, пересев опор от текущей точки."""
         tier = self._ladder_tier(s)
-        if tier == self._tier:
+        if tier == self._tier and self._stack_applied:
             return
+        self._stack_applied = True
         self._tier = tier
         if tier == 2 and self.handover is not None:
             # LOITER: DpVins в стеке НЕТ (позицию держит FCU), но ветровой трим
@@ -853,6 +895,16 @@ class Freefly(Step):
                          "точку, отпустил — держит")
         ctrl = self.stack.update(s)
         rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
+        if s.mode == "LAND" and self._land_exit_until > -1e8:
+            if s.now_sim < self._land_exit_until:
+                # ещё в LAND после отмены: стек молчит (в position-LAND стик =
+                # уставка скорости), газ центр — ждём выход в keep
+                rc = RcCommand(throttle=RC_CENTER)
+            elif not self._land_exit_warned:
+                self._land_exit_warned = True
+                ctx.log.error(f"    freefly: FCU не вышел из LAND за "
+                              f"{self.LAND_EXIT_SEC:g} с — уважаем LAND (тумблер/"
+                              f"режим с пульта вернёт борт)")
         if not s.armed:
             ctx.log.info("    пилот дизармил — freefly завершён")
             return _finish(rc, "FREEFLY_DONE")
@@ -952,7 +1004,8 @@ class SoftLand(Step):
                же критерий, что ярус 2 лесенки): set_mode LAND, стек ПУСТ
                (стики центр; демпфер в этой ветке командовал бы скорость, а его
                трим ветра ~44 PWM ≈ 0.14 м/с стал бы постоянным «ехать»),
-               спуск LAND_SPEED (sitl-extra.parm 15 см/с), FCU дизармит сам.
+               спуск LAND_SPD_MS (sitl-extra.parm 0.15 м/с = land_rate ветки alt;
+               ×2 пробовали 2026-09-06, пилот вернул), FCU дизармит сам.
                Не залатчил LAND за 3 с / вышел из LAND / VINS протух > 3×fresh
                → ветка alt (семантика стиков в LAND тогда неизвестна — уходим
                туда, где известна). Только вниз: обратно в pos не возвращаемся.
@@ -972,14 +1025,26 @@ class SoftLand(Step):
     через 8/12 с. Дизарм → LAND_DONE. Не сели за budget → LAND_TIMEOUT (error,
     борт в воздухе под ALT_HOLD — сажает пилот); касание без дизарма 30 с →
     LAND_STUCK (борт заармлен — громкий error, запись обязана остановиться).
-    land_state() — ключ LAND_NAMES для /mission/status (баннер LANDING в HUD)."""
+    land_state() — ключ LAND_NAMES для /mission/status (баннер LANDING в HUD).
+
+    ОТМЕНА ПОВТОРНЫМ НАЖАТИЕМ (cancel, 2026-09-06, просьба пилота): второй фронт SA
+    до касания — посадка отменяется В ЛЮБОЙ ВЕТКЕ и на любом ярусе: ветка pos —
+    шлём keep (ALT_HOLD) сразу (Freefly «уважает» LAND и сам из него не выводит),
+    goto freefly с результатом LAND_CANCEL; Freefly на входе в воздухе берёт стек
+    и опору от текущей точки, лесенка перепримет ярус (стек после ветки pos пуст —
+    _stack_applied), LOITER вернётся по своему гейту. Зажатая на входе кнопка —
+    не фронт (та же защёлка, что у Freefly). После касания отмены нет: газ уже в
+    полу, борт на земле — только предупреждение."""
 
     TOUCH_FRESH_SEC = 3.0        # свежесть extended_state для детекта FCU
 
     def __init__(self, name, stack, ground_z, budget, pilot_stabs=None, handover=None,
                  rate=0.15, alt_dz=100.0, alt_span=400.0, alt_rate_full=3.16,
-                 fresh_sec=2.0, keep="ALT_HOLD", throttle_hold=RC_CENTER):
+                 fresh_sec=2.0, keep="ALT_HOLD", throttle_hold=RC_CENTER,
+                 cancel=True, resume="freefly"):
         self.name = name
+        self.cancel = cancel          # второе нажатие SA отменяет посадку
+        self.resume = resume          # куда возвращаться (имя шага)
         self.stack = stack
         self.ground_z = ground_z
         self.budget = budget
@@ -999,6 +1064,15 @@ class SoftLand(Step):
         self._pos_latched = False
         self._touch_t = None         # sim-время касания
         self._disarm_warned = False
+        # кнопка, нажатая на входе (тот же фронт, что запустил посадку) — не отмена
+        self._land_prev = bool(getattr(s, 'pilot_land', False)) if s is not None else True
+        self._cancel_warned = False
+
+    def _cancel_press(self, s) -> bool:
+        now = bool(getattr(s, 'pilot_land', False))
+        pressed = now and not self._land_prev
+        self._land_prev = now
+        return pressed
 
     def land_state(self):
         if self._touch_t is not None:
@@ -1051,6 +1125,23 @@ class SoftLand(Step):
             ctx.log.info(f"    {self.name}: дизарм — посадка завершена "
                          f"(rel_alt={s.rel_alt}, ветка {self._branch})")
             return _finish(RcCommand(throttle=RC_MIN_THR), "LAND_DONE")
+        if self._cancel_press(s):
+            if self._touch_t is not None:
+                if not self._cancel_warned:
+                    self._cancel_warned = True
+                    ctx.log.warn(f"    {self.name}: SA повторно ПОСЛЕ касания — отмены "
+                                 f"нет (газ в полу, ждём дизарм)")
+            elif self.cancel:
+                ctx.log.warn(f"    {self.name}: SA повторно — ПОСАДКА ОТМЕНЕНА (ветка "
+                             f"{self._branch}, rel_alt={s.rel_alt}) → {self.resume}")
+                if self._branch == "pos":
+                    ctx.mode.set_mode(self.keep)      # из LAND — сразу, без лимита
+                return _goto(RcCommand(throttle=s.pilot_throttle), self.resume,
+                             "LAND_CANCEL")
+            elif not self._cancel_warned:
+                self._cancel_warned = True
+                ctx.log.warn(f"    {self.name}: SA повторно — отмена выключена "
+                             f"(ff_land_cancel=0)")
         if self._touch_t is None and self._touched(s):
             self._touch_t = s.now_sim
             ctx.log.info(f"    {self.name}: касание (rel_alt={s.rel_alt}, "

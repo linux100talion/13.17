@@ -173,7 +173,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                         loiter_track=(TrackHold() if cfg.loiter_track > 0
                                       else None),
                         loiter_bank_max=cfg.loiter_bank_max,
-                        loiter_guard=cfg.loiter_guard > 0)]
+                        loiter_guard=cfg.loiter_guard > 0,
+                        land_in_loiter=cfg.land_in_loiter > 0)]
         if soft_land:
             # кнопка SA → Freefly отдаёт NEXT (FREEFLY_LAND) → сюда; дизарм
             # руками по-прежнему завершает миссию из самого Freefly (FINISH)
@@ -188,7 +189,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                                  alt_span=cfg.alt_span,
                                  alt_rate_full=cfg.alt_rate_full,
                                  fresh_sec=cfg.vins_fresh_sec, keep=keep,
-                                 throttle_hold=cfg.throttle_hold))
+                                 throttle_hold=cfg.throttle_hold,
+                                 cancel=cfg.ff_land_cancel > 0))
         return plan
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold

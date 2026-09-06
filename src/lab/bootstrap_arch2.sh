@@ -344,6 +344,10 @@ ARGS=()
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")
+# второе нажатие SA до касания отменяет посадку (config.ff_land_cancel): 0 = как раньше
+[ -n "${BS_FF_LAND_CANCEL:-}" ]  && ARGS+=(--ff-land-cancel "$BS_FF_LAND_CANCEL")
+# кнопка SA на ярусе LOITER (config.land_in_loiter): 0 = отвергается (отмена из LAND не работает)
+[ -n "${BS_LAND_IN_LOITER:-}" ]  && ARGS+=(--land-in-loiter "$BS_LAND_IN_LOITER")
 [ -n "${BS_LAND_ALT_MAX:-}" ]    && ARGS+=(--land-alt-max "$BS_LAND_ALT_MAX")
 [ -n "${BS_LAND_V_MAX:-}" ]      && ARGS+=(--land-v-max "$BS_LAND_V_MAX")
 [ -n "${BS_LAND_RATE:-}" ]       && ARGS+=(--land-rate "$BS_LAND_RATE")

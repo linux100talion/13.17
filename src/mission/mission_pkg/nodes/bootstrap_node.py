@@ -1169,6 +1169,10 @@ def _parse() -> tuple:
     p.add_argument('--dpvins-pin-t', dest='dpvins_pin_t', type=float, default=_D.dpvins_pin_t)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
+    p.add_argument('--ff-land-cancel', dest='ff_land_cancel', type=float,
+                   default=_D.ff_land_cancel)
+    p.add_argument('--land-in-loiter', dest='land_in_loiter', type=float,
+                   default=_D.land_in_loiter)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,
                    default=_D.land_alt_max)
     p.add_argument('--land-v-max', dest='land_v_max', type=float,
