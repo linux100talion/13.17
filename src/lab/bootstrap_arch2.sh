@@ -153,6 +153,8 @@ ARGS=()
 [ -n "${BS_IPM_DEROT:-}" ]     && ARGS+=(--ipm-derot "$BS_IPM_DEROT")
 [ -n "${BS_IPM_WZ_TAU:-}" ]    && ARGS+=(--ipm-wz-tau "$BS_IPM_WZ_TAU")
 [ -n "${BS_IPM_WZ_GATE:-}" ]         && ARGS+=(--ipm-wz-gate "$BS_IPM_WZ_GATE")
+# кап оценки нуля ω_z (config.ipm_wz_bias_max): капкан гейта после долгих кругов (полёт 195742)
+[ -n "${BS_IPM_WZ_BIAS_MAX:-}" ]  && ARGS+=(--ipm-wz-bias-max "$BS_IPM_WZ_BIAS_MAX")
 [ -n "${BS_IPM_WIN:-}" ]       && ARGS+=(--ipm-win "$BS_IPM_WIN")
 # адаптивная полоса IPM: 0 = статичная 3-6 м (потолок ~5.85 м), >0 = запас к границе видимости
 [ -n "${BS_IPM_ADAPT:-}" ]     && ARGS+=(--ipm-adapt "$BS_IPM_ADAPT")

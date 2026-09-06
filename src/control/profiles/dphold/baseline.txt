@@ -62,6 +62,8 @@ BS_ROLL_SOFT_NOISE=0
 BS_IPM_WIN=0.3
 BS_IPM_DEROT=1.0
 BS_IPM_WZ_GATE=0.1
+# кап оценки нуля ω_z, рад/с (с 2026-09-06 гейт — по абсолютной |ω_z|; капкан после долгих кругов — полёт 195742)
+BS_IPM_WZ_BIAS_MAX=0.05
 BS_IPM_WZ_TAU=2.0
 BS_ATT_INTERP=1
 BS_ATT_LATENCY=0.02

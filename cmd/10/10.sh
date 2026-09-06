@@ -17,8 +17,8 @@ set -a
 . src/control/profiles/loiter/guard.txt
 set +a
 
-export WIND_SPD="${WIND_SPD:-1}"
-export WIND_GUST="${WIND_GUST:-spd=8 at=30 rise=2 hold=5 fall=4 every=20}"
+export WIND_SPD="${WIND_SPD:-2}"
+export WIND_GUST="${WIND_GUST:-spd=5 at=30 rise=2 hold=5 fall=4 every=20}"
 echo ">>> cmd/10/10.sh: профили dphold/baseline + dpvins/brake5_stop + vins/scale25 + loiter/guard;" \
      "SCALE_ALT_MAX=$BS_VINS_SCALE_ALT_MAX SCALE_IPM_MIN=$BS_VINS_SCALE_IPM_MIN VEL_SRC=$BS_VINS_VEL_SRC LOITER_GUARD=$BS_LOITER_GUARD WIND_SPD=$WIND_SPD WIND_GUST=\"$WIND_GUST\""
 exec bash src/lab/freefly_lv.sh "$@"

@@ -38,7 +38,8 @@ class IpmChannel:
 
     def _init_ipm(self, ipm, ipm_x0, ipm_x1, ipm_yhalf, ipm_res, ipm_win,
                   ipm_model, ipm_derot, ipm_wz_tau, ipm_adapt, ipm_vel_tau,
-                  ipm_alt_floor, ipm_scale_ref, ipm_acc_tau, ipm_wz_gate):
+                  ipm_alt_floor, ipm_scale_ref, ipm_acc_tau, ipm_wz_gate,
+                  ipm_wz_bias_max=0.0):
         # --- КАНАЛ ВИДА СВЕРХУ (IPM): МЕТРИЧЕСКОЕ смещение и скорость ---
         # Масштабный канал (kf_logs) меряет log(масштаб) созвездия, и цена метра у него
         # плавает в 14 раз: глубина точек не контролируется, точка на земле в 5 м даёт
@@ -157,6 +158,19 @@ class IpmChannel:
         # замерзает на развороте и продолжает в висении, где ω_z ≈ 0 (FCU держит
         # курс) и смещение видно чище всего. 0 = без гейта (прежнее правило).
         self.ipm_wz_gate = float(ipm_wz_gate)
+        # КАП оценки нуля ω_z (рад/с; 0 = без капа). КАПКАН гейта (полёт 195742,
+        # 2026-09-06): гейт сравнивал ω_z с ТЕКУЩЕЙ оценкой, и медленно растущее
+        # вращение (круги 11–16°/с, набор за секунды) оценка «нуля» тащила за собой
+        # (2 → 16°/с), а после остановки |ω_z − оценка| = 16°/с > гейта — оценка
+        # замерла НАВСЕГДА: деротация вычитала фантом X·0.27 рад/с ≈ 1.5–3 м/с
+        # боковой скорости, канал читал ~0 при истинном сносе 1.5–2.6 м/с, демпфер
+        # гнал борт с этой скоростью, трим намотался до 150 PWM, «ветер» 12 м/с.
+        # Реплей кадров: без гейта оценка отпускает за секунды (гейн боковой 0.5–1.0
+        # весь полёт), с гейтом — 0. Лечение: гейт по АБСОЛЮТНОЙ |ω_z| (разворот —
+        # не двигать, висение — двигать) + кап |оценка| ≤ bias_max: настоящие
+        # смещения гироскопа 0.003–0.028 рад/с (замер τ), оценка выше физики —
+        # это разворот, не ноль.
+        self.ipm_wz_bias_max = float(ipm_wz_bias_max)
         self._wz_bias = None
         self._wz_t = None
         self._wz_n = 0
@@ -375,11 +389,17 @@ class IpmChannel:
             self._wz_bias = wz          # старт с первого отсчёта, а не с нуля: иначе первые
             self._wz_t = stamp          # τ секунд поправка работала бы по СЫРОМУ смещению
             self._wz_n = 1
+            if self.ipm_wz_bias_max > 0.0:
+                self._wz_bias = max(-self.ipm_wz_bias_max,
+                                    min(self.ipm_wz_bias_max, self._wz_bias))
             return 0.0
         dt = stamp - self._wz_t
         self._wz_t = stamp
-        if self.ipm_wz_gate > 0.0 and abs(wz - self._wz_bias) > self.ipm_wz_gate:
-            return wz - self._wz_bias   # разворот: оценку нуля не трогаем
+        if self.ipm_wz_gate > 0.0 and abs(wz) > self.ipm_wz_gate:
+            # разворот (АБСОЛЮТНАЯ |ω_z| > гейта): оценку нуля не трогаем. Не
+            # «|ω_z − оценка|»: так оценка тащилась за медленно растущим вращением
+            # и замирала после него навсегда (капкан, см. ipm_wz_bias_max)
+            return wz - self._wz_bias
         self._wz_n += 1
         if dt > 0.0:
             # ⚠️ РАЗГОН ОЦЕНКИ. Один отсчёт ω_z шумит на 0.13 рад/с — вшестеро больше самого
@@ -391,6 +411,9 @@ class IpmChannel:
             # это ТОЧНОЕ среднее по всему, что пришло, и лишь дальше — забывающее окно τ.
             a = max(1.0 - math.exp(-dt / self.ipm_wz_tau), 1.0 / self._wz_n)
             self._wz_bias += a * (wz - self._wz_bias)
+            if self.ipm_wz_bias_max > 0.0:
+                self._wz_bias = max(-self.ipm_wz_bias_max,
+                                    min(self.ipm_wz_bias_max, self._wz_bias))
         return wz - self._wz_bias
 
     def _ipm_update(self, gray, stamp, alt, pitch, roll, wz=0.0):

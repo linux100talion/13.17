@@ -118,6 +118,7 @@ class BootstrapArch2Node(Node):
                                             ipm_derot=cfg.ipm_derot,
                                             ipm_wz_tau=cfg.ipm_wz_tau,
                                             ipm_wz_gate=cfg.ipm_wz_gate,
+                                            ipm_wz_bias_max=cfg.ipm_wz_bias_max,
                                             ipm_win=cfg.ipm_win,
                                             ipm_adapt=cfg.ipm_adapt,
                                             ipm_vel_tau=cfg.ipm_vel_tau,
@@ -931,6 +932,8 @@ def _parse() -> tuple:
                    default=_D.origin_alt)
     p.add_argument('--ipm-wz-tau', dest='ipm_wz_tau', type=float, default=_D.ipm_wz_tau)
     p.add_argument('--ipm-wz-gate', dest='ipm_wz_gate', type=float, default=_D.ipm_wz_gate)
+    p.add_argument('--ipm-wz-bias-max', dest='ipm_wz_bias_max', type=float,
+                   default=_D.ipm_wz_bias_max)
     p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
     p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,
                    default=_D.ipm_max_speed)
