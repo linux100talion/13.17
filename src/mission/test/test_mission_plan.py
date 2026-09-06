@@ -106,19 +106,6 @@ def main():
     checks.append(("stab: GzPosHold держит все 3 оси",
                    len(gz) == 1 and gz[0].axes == {"roll", "pitch", "yaw"}))
     checks.append(("stab: manual → []", build_stabilizers(cfg, "manual") == []))
-    # общий ветровой трим: рама демпфера и DpVins держат ОДИН объект
-    from control_pkg.domain.control.wind_trim import WindTrim
-    from mission_pkg.recipes import build_vins_stab
-    wt = WindTrim()
-    cfg_y = replace(cfg, station_frame="yaw", vins_stab="dpvins")
-    dh = build_stabilizers(cfg_y, "DpHoldM", wind=wt)[0]
-    dv = build_vins_stab(cfg_y, wind=wt)
-    checks.append(("wind_trim: рама DpHold и DpVins — один WindTrim",
-                   getattr(dh, "frame", None) is not None and dh.frame.wind is wt
-                   and getattr(dv, "wind", None) is wt))
-    checks.append(("wind_trim=None: рама без ветра, DpVins без ветра (как было)",
-                   build_stabilizers(cfg_y, "DpHoldM")[0].frame.wind is None
-                   and build_vins_stab(cfg_y).wind is None))
     try:
         build_stabilizers(cfg, "Nonsense")
         bad = False

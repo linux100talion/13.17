@@ -26,7 +26,6 @@ from rclpy.parameter import Parameter
 from std_msgs.msg import Bool, Empty
 
 from control_pkg.application.arbiter import Arbiter
-from control_pkg.domain.control.wind_trim import WindTrim
 from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
 from control_pkg.domain.control.stabilization import VinsHold
@@ -138,15 +137,10 @@ class BootstrapArch2Node(Node):
 
         # рантайм switch Flow→Vins: флаг + стабилизатор яруса 1 (VinsHold |
         # DpVins по cfg.vins_stab, строится в recipes.build_vins_stab)
-        # ОБЩИЙ ВЕТРОВОЙ ТРИМ ярусов 0/1 (WindTrim; config.wind_trim): один вектор
-        # в валюте PWM каналов по курсу AHRS — без посева между ярусами, переживает
-        # переключения, LOITER и перерождение VINS; сброс на фронте арма
-        self.wind = (WindTrim(imax=max(cfg.dpvins_imax, cfg.roll_imax, cfg.pitch_imax))
-                     if cfg.wind_trim > 0 else None)
         handover = None
         if cfg.handover_vins and (cfg.control_mode == 'flow_assist' or
                                   (use_mission and 'Dp' in stab_spec)):
-            vins = build_vins_stab(cfg, wind=self.wind)
+            vins = build_vins_stab(cfg)
             handover = VinsHandover(vins, cfg.vins_min, cfg.vins_fresh_sec,
                                     v_max=cfg.vins_v_max, ipm_tol=cfg.vins_ipm_tol,
                                     sane_n=cfg.vins_sane_n,
@@ -178,7 +172,7 @@ class BootstrapArch2Node(Node):
         live_pilot = pilot_kind in ('joy', 'ros')
         if use_mission:
             tokens = resolve_mission(cfg, cfg.mission)
-            plan = compile_mission(cfg, tokens, stab_spec, handover, wind=self.wind,
+            plan = compile_mission(cfg, tokens, stab_spec, handover,
                                    live_pilot=live_pilot)
             self.logger.info(f"MISSION={cfg.mission} stab={stab_spec} "
                              f"level={cfg.mv_level} токены={tokens}")
@@ -442,8 +436,6 @@ class BootstrapArch2Node(Node):
         s = self.telemetry.snapshot()
         armed_front = bool(s.armed) and not self._armed_prev
         self._armed_prev = bool(s.armed)
-        if armed_front and self.wind is not None:
-            self.wind.reset()                        # новый полёт — ветер учим заново
         if armed_front and self._vins_restart_pub is not None:
             # сброс VINS по арму: окно инициализации, накопленное на земле, обнуляется
             # (см. config.vins_restart_arm); на земле одометрии ещё нет — терять нечего
@@ -1176,8 +1168,6 @@ def _parse() -> tuple:
                    default=_D.dpvins_settle_brake)
     p.add_argument('--dpvins-pin-t', dest='dpvins_pin_t', type=float, default=_D.dpvins_pin_t)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
-    # общий ветровой трим ярусов 0/1 (config.wind_trim)
-    p.add_argument('--wind-trim', dest='wind_trim', type=float, default=_D.wind_trim)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--ff-land-cancel', dest='ff_land_cancel', type=float,
                    default=_D.ff_land_cancel)

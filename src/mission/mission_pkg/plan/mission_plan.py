@@ -126,7 +126,7 @@ def resolve_mission(cfg, spec):
 
 
 def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
-                    live_pilot=False, wind=None):
+                    live_pilot=False):
     """mission: имя/список токенов; stab_spec: имя(+склейка) стабилизатора. → [Step]."""
     tokens = resolve_mission(cfg, mission)
     # --- freefly: миссия-одиночка, весь цикл руками пилота (см. грамматику) ---
@@ -145,7 +145,7 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         # возврата борта как «ветер» (cmd_3/wind_right: −56 PWM при +57 у демпфера,
         # BRAKE заморозил — унос 46 м). Со второго входа (после 1→0 лесенка клала в
         # стек pilot_stabs) посев работал — так и жил незамеченным.
-        pilot_stabs = build_stabilizers(cfg, stab_spec, wind=wind)
+        pilot_stabs = build_stabilizers(cfg, stab_spec)
         stack = ControlStack(pilot_stabs,
                              RcTransmitter(cfg.pilot_deadzone, cfg.pilot_full,
                                            cfg.pilot_pitch_sign, cfg.pilot_roll_sign),

@@ -165,13 +165,7 @@ class DpVins(StabilizationStrategy):
         self._pin_pending = False          # гвоздь заказан (стик жил, ждём стопа)
         self._pend_fwd = self._pend_rgt = False   # хвост защёлки по осям (latch_axis)
         self._moved = False                # ярус видел движение (|v| > _PIN_V)
-        self._itx = self._ity = 0.0        # трим (PWM) в осях МИРА (x, y) — без WindTrim
-        # ОБЩИЙ ВЕТРОВОЙ ТРИМ (wind_trim.py): задаётся снаружи (recipes/нода). С ним
-        # трим читается/пишется в валюте PWM каналов по курсу AHRS att_yaw, посев и
-        # сброс по перерождению — no-op, «ветер выучен» = wind.learned. None — как было.
-        self.wind = None
-        self._last_att_yaw = 0.0
-        self._armed_local = False
+        self._itx = self._ity = 0.0        # трим (PWM) в осях МИРА (x, y)
         self._trim_armed = False           # ветровой трим выучен (первый стоп прошёл)
         self._last_yaw = 0.0               # vins_yaw последнего rc() — для trim_pwm()
         self._vff = self._vfl = 0.0        # ФНЧ скорости внутреннего контура
@@ -199,23 +193,10 @@ class DpVins(StabilizationStrategy):
         self._vf_init = False
         self._it = s.now_sim
 
-    @property
-    def _trim_armed(self) -> bool:
-        return self.wind.learned if self.wind is not None else self._armed_local
-
-    @_trim_armed.setter
-    def _trim_armed(self, v) -> None:
-        if self.wind is not None:
-            self.wind.learned = bool(v)
-        else:
-            self._armed_local = bool(v)
-
     def reset_trim(self) -> None:
         """Обнулить ветровой трим и «ветер выучен». Зовёт VinsHandover на
         фактическом /restart VINS: мировая рама перерождается, хранимый мировой
         вектор в новой раме недействителен (при trim_keep=False — enter())."""
-        if self.wind is not None:
-            return                          # ветер физический, рама VINS ему не рама
         self._itx = self._ity = 0.0
         self._trim_armed = False
         self._moved = False
@@ -231,8 +212,6 @@ class DpVins(StabilizationStrategy):
         начатое обучение (дребезг гейта, trim_keep) и выученный ветер не
         перетираем — свой свежее. Посев ВЗВОДИТ «ветер выучен» (armed): дальше
         рабочий ki, не ki_trim — см. комментарий в теле (вход на ходу)."""
-        if self.wind is not None:
-            return False                    # общий трим: сеять нечего, он и так один
         if self._trim_armed or math.hypot(self._itx, self._ity) >= 1.0:
             return False
         i_fwd = self.psign * float(pitch_off)
@@ -273,8 +252,6 @@ class DpVins(StabilizationStrategy):
         активном ярусе свеж), с аргументом — заданный курс (LOITER: DpVins не
         тикает, кэш заморожен на выходе из яруса, а борт крутится — нода даёт
         текущий s.vins_yaw). Девственный трим честно отдаёт (0, 0)."""
-        if self.wind is not None:
-            return self.wind.channel(self._last_att_yaw if yaw is None else yaw)
         if yaw is None:
             yaw = self._last_yaw
         c = math.cos(yaw)
@@ -423,14 +400,8 @@ class DpVins(StabilizationStrategy):
         # стопе, обычно на висении зрелости при малой v); после первого гвоздя
         # (_trim_armed) трим на торможении ЗАМОРОЖЕН, учится только на удержании
         # → чистые стопы без возврата. На живом стике заморожен всегда.
-        if self.wind is not None:
-            # общий трим: валюта каналов по курсу AHRS → пре-знаковые единицы DpVins
-            self._last_att_yaw = s.att_yaw
-            pitch_off, roll_off = self.wind.channel(s.att_yaw)
-            i_fwd, i_rgt = self.psign * pitch_off, self.rsign * roll_off
-        else:
-            i_fwd = self._itx * c + self._ity * sn    # мировой трим (PWM) → тело (курс)
-            i_rgt = -self._itx * sn + self._ity * c
+        i_fwd = self._itx * c + self._ity * sn        # мировой трим (PWM) → тело (курс)
+        i_rgt = -self._itx * sn + self._ity * c
         # прямая передача стика (ff, см. __init__): только на стик-цели; знак —
         # как у P при v < цели (наклон в сторону цели)
         ff_fwd = -self.ff * tv_fwd if (self.ff > 0.0 and stick_fwd) else 0.0
@@ -493,18 +464,13 @@ class DpVins(StabilizationStrategy):
             # Замороженная ось в мир не крутится (её компонента = 0).
             ef = err_fwd * ki_fwd * dt_i
             er = err_rgt * ki_rgt * dt_i
-            if self.wind is not None:
-                i_fwd = clamp(i_fwd + ef, -self.imax, self.imax)
-                i_rgt = clamp(i_rgt + er, -self.imax, self.imax)
-                self.wind.set_channel(s.att_yaw, self.psign * i_fwd, self.rsign * i_rgt)
-            else:
-                ex_w = ef * c - er * sn
-                ey_w = ef * sn + er * c
-                self._itx = clamp(self._itx + ex_w, -self.imax, self.imax)
-                self._ity = clamp(self._ity + ey_w, -self.imax, self.imax)
-                # пересчёт выхода со свежим тримом (для среза; в упоре кламп ниже)
-                i_fwd = self._itx * c + self._ity * sn
-                i_rgt = -self._itx * sn + self._ity * c
+            ex_w = ef * c - er * sn
+            ey_w = ef * sn + er * c
+            self._itx = clamp(self._itx + ex_w, -self.imax, self.imax)
+            self._ity = clamp(self._ity + ey_w, -self.imax, self.imax)
+            # пересчёт выхода со свежим тримом (для среза; в упоре кламп ниже)
+            i_fwd = self._itx * c + self._ity * sn
+            i_rgt = -self._itx * sn + self._ity * c
             po = self.psign * (self.kp_fwd * err_fwd + i_fwd + ff_fwd)
             ro = self.rsign * (self.kp_lat * err_rgt + i_rgt + ff_rgt)
         self._it = now
