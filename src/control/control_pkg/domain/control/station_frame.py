@@ -33,8 +33,13 @@ class StationFrame:
     оси x против часовой (ENU-курс). Сброс пути перцепцией (ipm_* = 0 на новом
     сегменте) распознаётся по точному нулю пары и приращения не даёт."""
 
-    def __init__(self, heading=None):
+    def __init__(self, heading=None, wind=None):
         self.heading = heading if heading is not None else (lambda s: s.att_yaw)
+        # ОБЩИЙ ВЕТРОВОЙ ТРИМ (WindTrim, wind_trim.py): если задан, trim_body/
+        # set_trim_body ходят в него в валюте PWM каналов (знак оси — аргумент
+        # sign = osign демпфера), а reset() его НЕ трогает — ветер переживает
+        # входы в ярус/LOITER. None — трим в self.trim, как было (бит в бит).
+        self.wind = wind
         self.reset()
 
     def reset(self):
@@ -90,17 +95,25 @@ class StationFrame:
         c, si = self._rot()
         return ex * c + ey * si if axis == "pitch" else -ex * si + ey * c
 
-    def trim_body(self, axis) -> float:
+    def trim_body(self, axis, sign=1.0) -> float:
+        """Компонента трима вдоль оси ТЕКУЩЕГО курса (пре-osign единицы оси)."""
+        if self.wind is not None:
+            return sign * self.wind.channel_axis(self.psi, axis)
         tx, ty = self.trim
         c, si = self._rot()
-        return tx * c + ty * si if axis == "pitch" else -tx * si + ty * c
+        f, l = tx * c + ty * si, -tx * si + ty * c
+        return f if axis == "pitch" else l
 
-    def set_trim_body(self, axis, value) -> None:
+    def set_trim_body(self, axis, value, sign=1.0) -> None:
+        """Записать компоненту оси в мировой вектор (другая компонента не тронута)."""
+        if self.wind is not None:
+            self.wind.set_channel_axis(self.psi, axis, sign * value)
+            return
         f, l = self.trim_body("pitch"), self.trim_body("roll")
         if axis == "pitch":
-            f = float(value)
+            f = value
         else:
-            l = float(value)
+            l = value
         c, si = self._rot()
         self.trim = [f * c - l * si, f * si + l * c]
 

@@ -297,6 +297,11 @@ class _FlowDamper1D(StabilizationStrategy):
         self._sp = 0.0
         self._sp_rate = 0.0
         self.station.reset()
+        # общий ветер уже выучен другим ярусом — фазу захвата (ki_trim в первом
+        # брейке) не проходим, как посев делал для DpVins
+        if self.frame is not None and getattr(self.frame, "wind", None) is not None \
+                and self.frame.wind.learned:
+            self.station.trim_armed = False
 
     def _soft_factor(self, s) -> float:
         """Мягкость по высоте, 1.0 = полная жёсткость. Хук: база не знает высоты."""
@@ -387,7 +392,7 @@ class _FlowDamper1D(StabilizationStrategy):
                     # оси = компонента мирового вектора трима вдоль оси ТЕКУЩЕГО курса
                     fr.advance(s)
                     fr.stick(self._axis, cmd != 0.0)
-                    self._i = fr.trim_body(self._axis)
+                    self._i = fr.trim_body(self._axis, self.osign)
                 if pos is not None and cmd == 0.0:
                     # СТАНЦИЯ: «СНАЧАЛА ТОРМОЗИ, ПОТОМ ГВОЗДЬ» (механика LOITER,
                     # полёт 2026-08-18: точка в момент отпускания = «рулю против
@@ -432,7 +437,9 @@ class _FlowDamper1D(StabilizationStrategy):
                     self._i_frozen |= not brake_trim     # …или анти-виндап в упоре
             self._i = i_new
             if fr is not None:
-                fr.set_trim_body(self._axis, self._i)   # компонента → мировой вектор
+                fr.set_trim_body(self._axis, self._i, self.osign)   # компонента → мировой вектор
+                if fr.wind is not None and not self._trim_armed:
+                    fr.wind.learned = True      # первый брейк прошёл — ветер выучен для всех ярусов
             u = clamp(self.kp * self._soft ** self._SOFT_KP_EXP * err + self._i + d,
                       -self.max, self.max)
             self._out = self.osign * blend * u
