@@ -361,6 +361,21 @@ class DpHold(StabilizationStrategy):
             return None
         return (po or 0.0, ro or 0.0)
 
+    def station_phase(self):
+        """(фаза тангажа, фаза крена, И заморожен тангаж, И заморожен крен) для
+        полей `brk=`/`ifz=` статуса — зеркало DpVins.station_phase. None, если
+        осей со станцией нет."""
+        ph = {}
+        for x in self._subs:
+            f = getattr(x, "station_phase", None)
+            ax = getattr(x, "_axis", None)
+            if f is not None and ax in ("pitch", "roll"):
+                ph[ax] = f()
+        if not ph:
+            return None
+        pp = ph.get("pitch", ("-", False)); rr = ph.get("roll", ("-", False))
+        return (pp[0], rr[0], pp[1], rr[1])
+
     def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
         rc = RcCommand(throttle=RC_CENTER)
         for x in self._subs:

@@ -541,6 +541,7 @@ class BootstrapArch2Node(Node):
         # точен как readout висенного ветра). Требует EK3_DRAG_BCOEF>0
         # (BS_EKF_DRAG) + WIND в стриме (nav_up); иначе в LOITER стрелки нет.
         s.wind_src = ''
+        s.st_phase = s.st_ifz = ''
         tier = ladder.tier if ladder is not None else 0
         if tier >= 2:
             wage = s.now_sim - s.wind_ekf_sim
@@ -559,6 +560,12 @@ class BootstrapArch2Node(Node):
                     s.wind_p, s.wind_r = v
                     s.wind_src = ('vins' if getattr(st_, 'seed_trim', None)
                                   is not None else 'ipm')
+                # фаза станции того же стаба (brk=/ifz= — см. hud._station_fields)
+                sph = getattr(st_, 'station_phase', None)
+                ph = sph() if sph is not None else None
+                if ph is not None:
+                    s.st_phase = f"{ph[0]}/{ph[1]}"
+                    s.st_ifz = f"{int(ph[2])}/{int(ph[3])}"
         # |скорость| борта АКТИВНОГО датчика вида (рядом с компасом): ярус 0 —
         # канал IPM (тело), ярусы 1/2 — одометрия VINS (мир). Не привязано к
         # источнику ветра: показывает, как быстро реально несёт по тому сенсору,

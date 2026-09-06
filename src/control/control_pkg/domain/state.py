@@ -127,6 +127,11 @@ class DroneState:
     wind_src: str = ""               # 'ekf' | 'ipm' (демпфер) | 'vins' (DpVins); '' = нет
     vel_mag: float = -1.0            # |скорость| борта м/с активного датчика вида
                                      # (ярус 0: ipm_vfwd/vlat; ярусы 1/2: vins_vx/vy); -1 = нет
+    # Фаза станции активного стабилизатора (нода пуллит station_phase() из стека
+    # ярусов 0/1 перед hud_status): 'тангаж/крен' кодами rel|set|hold|brk и
+    # 'заморожен ли И-член' 1/0 по осям. '' = стека со станцией нет (LOITER).
+    st_phase: str = ""               # brk= : напр. 'hold/brk'
+    st_ifz: str = ""                 # ifz= : напр. '0/1'
     # Оценка ветра EKF3 (drag-фьюжн) — фильтрованная, физика, во ВСЕХ режимах.
     # /mavros/wind_estimation (WIND msg от FCU), скорость воздушной массы в
     # мире ENU. ПЕРВИЧНЫЙ источник стрелки ветра HUD (windspeed.md). Требует

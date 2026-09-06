@@ -159,6 +159,7 @@ class _FlowDamper1D(StabilizationStrategy):
         # Класс-дефолт False (прежнее поведение бит-в-бит); лётный — config.
         self.anti_windup = bool(anti_windup)
         self._i = 0.0
+        self._i_frozen = False
         self._prev_err = 0.0
         self._last_seq = -1
         self._out = 0.0
@@ -250,6 +251,16 @@ class _FlowDamper1D(StabilizationStrategy):
 
     def _signal(self, s): raise NotImplementedError
     def _cmd(self, sp): raise NotImplementedError
+
+    # коды фазы станции для /mission/status (brk=): один формат у демпфера и DpVins
+    _PHASE_CODE = {"released": "rel", "settling": "set", "hold": "hold", "brake": "brk"}
+
+    def station_phase(self):
+        """(код фазы станции, И-член заморожен) — поле `brk=`/`ifz=` статуса.
+        Фаза — StationKeeper.phase (rel/set/hold/brk), заморозка — защёлка
+        _TRIM_LATCH либо анти-виндап в упоре на последнем кадре. До сих пор фазу
+        BRAKE в bag было не видно, разбор шёл по косвенным признакам (cmd/3–5)."""
+        return self._PHASE_CODE.get(self.station.phase, "?"), bool(getattr(self, "_i_frozen", False))
 
     def _pos_signal(self, s):
         """Накопленный ПУТЬ вдоль оси (для станции-кипинга) — None, если оси нечем."""
@@ -401,6 +412,7 @@ class _FlowDamper1D(StabilizationStrategy):
                   else self.ki * self._soft ** self._SOFT_KI_EXP)
             i_new = (self._i if self._i_hold
                      else clamp(self._i + ki * err * fdt, -self.imax, self.imax))
+            self._i_frozen = bool(self._i_hold)      # для статуса (ifz=): защёлка…
             dot = self._signal_dot(s)
             # разность соседних кадров уже считает производную ОШИБКИ (уставка в err),
             # готовой производной сигнала уставку надо вычесть руками
@@ -412,10 +424,12 @@ class _FlowDamper1D(StabilizationStrategy):
                 if abs(u_raw) > self.max and u_raw * err > 0.0 and not self._i_hold:
                     # выход в упоре, ошибка толкает глубже — И-член не наматывать
                     # (см. __init__); в упоре БРЕЙКА — копить трим ветра (_BRAKE_TRIM)
+                    brake_trim = bool(self._pos_brake and self._BRAKE_TRIM
+                                      and self._trim_armed)
                     i_new = (clamp(self._i + self.ki_trim * sig * fdt,
                                    -self.imax, self.imax)
-                             if self._pos_brake and self._BRAKE_TRIM and self._trim_armed
-                             else self._i)
+                             if brake_trim else self._i)
+                    self._i_frozen |= not brake_trim     # …или анти-виндап в упоре
             self._i = i_new
             if fr is not None:
                 fr.set_trim_body(self._axis, self._i)   # компонента → мировой вектор

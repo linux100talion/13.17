@@ -128,6 +128,8 @@ class DpVins(StabilizationStrategy):
         self._vff = self._vfl = 0.0        # ФНЧ скорости внутреннего контура
         self._vf_init = False
         self._it = None
+        self._stick_fwd = self._stick_rgt = False   # стик последнего update (статус)
+        self._learn_fwd = self._learn_rgt = True    # трим учился на последнем кадре
 
     def enter(self, s: DroneState) -> None:
         self._pinx = self._piny = None
@@ -182,6 +184,22 @@ class DpVins(StabilizationStrategy):
         self._trim_armed = True
         return True
 
+    def station_phase(self):
+        """(фаза вперёд, фаза вбок, трим заморожен вперёд, вбок) — поля `brk=`/
+        `ifz=` статуса, зеркало DpHold.station_phase. Коды как у демпфера:
+        rel — стик этой оси живой; set — гвоздя нет (тормозим до стопа);
+        hold — гвоздь, RETURN; brk — гвоздь, фаза BRAKE станции этой оси.
+        Заморозка — по последнему update (защёлка, хвост до гвоздя, брейк при
+        brake_t ≥ 0, анти-виндап). Раньше фазу BRAKE в bag было не видно."""
+        def code(stick, st):
+            if stick:
+                return "rel"
+            if self._pinx is None:
+                return "set"
+            return "brk" if st.braking else "hold"
+        return (code(self._stick_fwd, self._st_fwd), code(self._stick_rgt, self._st_rgt),
+                not self._learn_fwd, not self._learn_rgt)
+
     def trim_pwm(self, yaw=None):
         """Трим в валюте PWM КАНАЛОВ (pitch_off, roll_off) — ОБРАТНАЯ к
         seed_trim операция и зеркало DpHold.trim_pwm (общий интерфейс пулла:
@@ -234,6 +252,7 @@ class DpVins(StabilizationStrategy):
         stick_fwd = abs(sp.c_fwd) > self._I_DZ
         stick_rgt = abs(sp.c_right) > self._I_DZ
         stick = stick_fwd or stick_rgt
+        self._stick_fwd, self._stick_rgt = stick_fwd, stick_rgt
 
         # цель скорости (тело): стик → прямая; отпущен → внешний контур к гвоздю
         if stick:
@@ -345,6 +364,7 @@ class DpVins(StabilizationStrategy):
             ki_rgt = 0.0 if (fz_rgt or sat_rgt) else (self.ki if stick else ki)
         else:
             ki_fwd = ki_rgt = 0.0 if (frozen or sat) else ki
+        self._learn_fwd, self._learn_rgt = ki_fwd > 0.0, ki_rgt > 0.0   # статус ifz=
         if ((ki_fwd > 0.0 or ki_rgt > 0.0) and self._it is not None
                 and now > self._it):
             dt_i = now - self._it

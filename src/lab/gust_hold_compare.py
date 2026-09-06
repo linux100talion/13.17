@@ -133,6 +133,23 @@ def sustained(S, pred, t_from, dur):
     return None
 
 
+def brake_secs(S, a, b):
+    """Секунды фазы BRAKE (поле brk= статуса, любая ось) в [a, b]; nan — поля
+    в bag нет (прогоны до 2026-09-06)."""
+    tot, prev, seen = 0.0, None, False
+    for d in S:
+        if d['t'] < a:
+            continue
+        if d['t'] > b:
+            break
+        if 'brk' in d:
+            seen = True
+            if prev is not None and 'brk' in prev.get('brk', ''):
+                tot += min(d['t'] - prev['t'], 0.5)
+        prev = d
+    return tot if seen else float('nan')
+
+
 def window_metrics(T, TT, a, b, gust):
     rows = seg(TT, T, a, b)
     if len(rows) < 10:
@@ -214,8 +231,10 @@ def analyze(label, bag, gust, min_seg):
         vv = seg(VT, V, a, b); tv = seg(TT, T, a, b)
         ratio = ((sum(r[4] for r in vv) / len(vv)) / (sum(r[4] for r in tv) / len(tv))
                  if vv and tv and sum(r[4] for r in tv) > 0 else float('nan'))
+        for x in w['gusts']:
+            x['brk'] = brake_secs(sw, x['t'], x['t'] + gust['every'])
         w.update(label=label, tier=TIER_NAMES.get(tr, tr), t_off=t_off, t_calm=t_calm,
-                 t_land=t_land,
+                 t_land=t_land, brk_s=brake_secs(sw, a, b),
                  flips=sum(1 for i in range(1, len(sw)) if sw[i].get('tier') != sw[i - 1].get('tier')),
                  reb=int(d1.get('reb', 0)) - int(d0.get('reb', 0)),
                  scl=int(d1.get('scl', 0)) - int(d0.get('scl', 0)), ratio=ratio)
@@ -248,7 +267,7 @@ def main():
     print(f"{'прогон':14} {'ярус':7} {'от':>6} {'до':>6} {'dur':>5} {'z':>5} {'yaw°':>5} "
           f"{'exc_max':>7} {'exc_rms':>7} {'final':>6} {'vmax':>5} {'vrms':>5} {'dz':>5} | "
           f"{'циклов':>6} {'pk_mean':>7} {'pk_max':>6} {'rs_mean':>7} {'t_pk':>5} {'ang°':>5} | "
-          f"{'flips':>5} {'reb':>3} {'scl':>3} {'V/ист':>5}")
+          f"{'flips':>5} {'reb':>3} {'scl':>3} {'V/ист':>5} {'brk_s':>5}")
     for w in wins:
         g = w['gusts']
         print(f"{w['label']:14} {w['tier']:7} {w['a']:6.1f} {w['b']:6.1f} {w['dur']:5.1f} "
@@ -257,13 +276,14 @@ def main():
               f"{len(g):6d} {m([x['peak'] for x in g]):7.2f} {m([x['peak'] for x in g], max):6.2f} "
               f"{m([x['resid'] for x in g]):7.2f} {m([x['t_peak'] for x in g]):5.1f} "
               f"{m([x['ang'] for x in g]):5.0f} | {w['flips']:5d} {w['reb']:3d} {w['scl']:3d} "
-              f"{w['ratio']:5.2f}")
+              f"{w['ratio']:5.2f} {w['brk_s']:5.1f}")
     if not a.no_gusts:
-        print("\n=== ПО ЦИКЛАМ ПОРЫВА: [фронт pk пик rs остаток v vmax] ===")
+        print("\n=== ПО ЦИКЛАМ ПОРЫВА: [фронт pk пик rs остаток v vmax b секунд BRAKE] ===")
         for w in wins:
             if w['gusts']:
                 print(f"{w['label']:14} {w['tier']:7} " + "  ".join(
-                    f"[{x['t']:.0f}s pk {x['peak']:.2f} rs {x['resid']:.2f} v {x['vmax']:.1f}]"
+                    f"[{x['t']:.0f}s pk {x['peak']:.2f} rs {x['resid']:.2f} v {x['vmax']:.1f}"
+                    f" b {x['brk']:.1f}]"
                     for x in w['gusts']))
     if a.csv:
         import csv
@@ -272,7 +292,7 @@ def main():
             wr = csv.writer(f)
             wr.writerow(['run', 'tier', 'a', 'b', 'dur', 'z', 'yaw', 'exc_max', 'exc_rms', 'final',
                          'vmax', 'vrms', 'dz', 'n_gusts', 'pk_mean', 'rs_mean', 'flips', 'reb',
-                         'scl', 'ratio'])
+                         'scl', 'ratio', 'brk_s'])
             for w in wins:
                 g = w['gusts']
                 wr.writerow([w['label'], w['tier'], f"{w['a']:.2f}", f"{w['b']:.2f}",
@@ -280,15 +300,16 @@ def main():
                              f"{w['exc_max']:.2f}", f"{w['exc_rms']:.2f}", f"{w['final']:.2f}",
                              f"{w['vmax']:.2f}", f"{w['vrms']:.2f}", f"{w['z_dev']:.2f}", len(g),
                              f"{m([x['peak'] for x in g]):.2f}", f"{m([x['resid'] for x in g]):.2f}",
-                             w['flips'], w['reb'], w['scl'], f"{w['ratio']:.2f}"])
+                             w['flips'], w['reb'], w['scl'], f"{w['ratio']:.2f}",
+                             f"{w['brk_s']:.1f}"])
         with open(os.path.join(a.csv, 'gusts.csv'), 'w') as f:
             wr = csv.writer(f)
-            wr.writerow(['run', 'tier', 't_front', 'peak', 'resid', 'vmax', 't_peak', 'ang'])
+            wr.writerow(['run', 'tier', 't_front', 'peak', 'resid', 'vmax', 't_peak', 'ang', 'brk'])
             for w in wins:
                 for x in w['gusts']:
                     wr.writerow([w['label'], w['tier'], f"{x['t']:.1f}", f"{x['peak']:.2f}",
                                  f"{x['resid']:.2f}", f"{x['vmax']:.2f}", f"{x['t_peak']:.1f}",
-                                 f"{x['ang']:.0f}"])
+                                 f"{x['ang']:.0f}", f"{x['brk']:.1f}"])
         print(f"\nCSV → {a.csv}/windows.csv, gusts.csv")
 
 

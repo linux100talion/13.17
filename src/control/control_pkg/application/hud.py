@@ -189,7 +189,8 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
             + _gate_fields(s, loiter_alt, ripe_sec, ripe_min)
             + _ladder_fields(s, ladder, fresh_sec, vins_min)
             + _frame_fields(s)
-            + _wind_fields(s))
+            + _wind_fields(s)
+            + _station_fields(s))
 
 
 def _gate_fields(s, loiter_alt, ripe_sec, ripe_min) -> str:
@@ -233,6 +234,19 @@ def _wind_fields(s) -> str:
     if vm >= 0.0:
         out += f" spd={vm:.2f}"
     return out
+
+
+def _station_fields(s) -> str:
+    """Фаза станции активного стаба (ярусы 0/1): `brk=тангаж/крен` кодами
+    rel (стик живой) | set (гвоздя нет, тормозим) | hold (гвоздь, RETURN) |
+    brk (BRAKE — уходим от гвоздя, цель −brake·v) и `ifz=` — И-член (трим)
+    заморожен по осям (защёлка стик→гвоздь, хвост, анти-виндап в упоре). До
+    2026-09-06 фазу BRAKE в bag было не видно, разбор шёл по косвенным
+    признакам (cmd/3–5). Только при живом источнике — «чего нет в источниках,
+    того нет и в строке»."""
+    if not getattr(s, 'st_phase', ''):
+        return ""
+    return f" brk={s.st_phase} ifz={s.st_ifz}"
 
 
 def _frame_fields(s) -> str:
