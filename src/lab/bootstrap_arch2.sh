@@ -329,6 +329,10 @@ ARGS=()
 [ -n "${BS_DPVINS_POS_BRAKE_T:-}" ]    && ARGS+=(--dpvins-pos-brake-t "$BS_DPVINS_POS_BRAKE_T")
 # по-осевая защёлка трима DpVins (как _TRIM_LATCH демпфера; config.dpvins_latch_axis): 0 = любой стик морозит обе оси
 [ -n "${BS_DPVINS_LATCH_AXIS:-}" ]     && ARGS+=(--dpvins-latch-axis "$BS_DPVINS_LATCH_AXIS")
+# гвоздь сразу на входе при посеянном триме (config.dpvins_pin_armed): 0 = только по стопу после движения
+[ -n "${BS_DPVINS_PIN_ARMED:-}" ]      && ARGS+=(--dpvins-pin-armed "$BS_DPVINS_PIN_ARMED")
+# источник скорости VINS для стека/гейта (config.vins_vel_src): diff (разность позы, было) | twist (из одометрии)
+[ -n "${BS_VINS_VEL_SRC:-}" ]          && ARGS+=(--vins-vel-src "$BS_VINS_VEL_SRC")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")

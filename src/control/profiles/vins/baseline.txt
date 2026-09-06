@@ -20,6 +20,8 @@ BS_RIPE_DET=1
 # полёте — лотерея масштаба: 0.14/0.85/1.01/1.01); чек занижения против IPM ratio 0.5,
 # только ниже 4 м (выше IPM не опорник) — lv2_joy_20260905_114248
 BS_VINS_SANE_N=10
+# источник скорости VINS для стека/гейта: diff = разность позы + EMA (эталон), twist = из одометрии (кандидат vins/twist)
+BS_VINS_VEL_SRC=diff
 BS_VINS_RESTART_DIVERGE=0
 BS_VINS_SCALE_RATIO=0.5
 BS_VINS_SCALE_ALT_MAX=4

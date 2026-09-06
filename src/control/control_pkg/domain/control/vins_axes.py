@@ -67,7 +67,7 @@ class DpVins(StabilizationStrategy):
                  imax=100.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
                  pos_vmax=0.3, pos_acc=0.15, psign=1.0, rsign=1.0, vsmooth=0.1,
                  i_latch=True, trim_keep=True, brake=0.0, brake_v=0.25,
-                 brake_vmax=1.0, brake_t=0.0, latch_axis=False):
+                 brake_vmax=1.0, brake_t=0.0, latch_axis=False, pin_armed=False):
         self.kp_fwd, self.kp_lat = kp_fwd, kp_lat
         self.ki, self.imax, self.max = ki, imax, max_pwm
         self.ki_trim = ki_trim             # скорость обучения ДО первого гвоздя (0 = ki)
@@ -117,6 +117,12 @@ class DpVins(StabilizationStrategy):
         # у защёлки демпфера). sat — тоже по осям. False = старое (любой стик —
         # обе оси).
         self.latch_axis = latch_axis
+        # ГВОЗДЬ СРАЗУ НА ВХОДЕ при armed: _moved (гвоздь только по стопу ПОСЛЕ
+        # движения) нужен был фазе ki_trim — гвоздь кончал быстрый захват ветра
+        # на самом входе. После посева трим уже armed, ждать движения незачем, а
+        # цена ожидания — вход без станции: bag 130326 ярус 1 включился за 1 с до
+        # порыва (set/set), 11 с дрейфа на одном P без BRAKE, 8 м, гвоздь по стопу.
+        self.pin_armed = pin_armed
         # состояние
         self._pinx = self._piny = None     # гвоздь (мир); None = стик жив / не встал
         self._pin_pending = False          # гвоздь заказан (стик жил, ждём стопа)
@@ -281,7 +287,8 @@ class DpVins(StabilizationStrategy):
             # 30→90 + автоматом станции). _moved отсекает ложный стоп на самом
             # входе: борт ещё не понесло, гвоздь тут съел бы фазу обучения.
             if (speed < self._PIN_V and self._pinx is None
-                    and (self._pin_pending or self._moved)):
+                    and (self._pin_pending or self._moved
+                         or (self.pin_armed and self._trim_armed))):
                 self._pinx, self._piny = s.vins_x, s.vins_y   # ГВОЗДЬ по остановке
                 self._pin_pending = False
                 self._pend_fwd = self._pend_rgt = False

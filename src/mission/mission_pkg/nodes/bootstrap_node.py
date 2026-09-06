@@ -81,7 +81,8 @@ class BootstrapArch2Node(Node):
 
         # адаптеры (инфраструктура)
         self.clock = RosClock(self)
-        self.telemetry = RosTelemetry(self, self.clock, alt_src=cfg.alt_src)
+        self.telemetry = RosTelemetry(self, self.clock, alt_src=cfg.alt_src,
+                                      vel_src=cfg.vins_vel_src)
         self.actuator = MavrosActuator(self)     # RcOutput + FlightMode
         self.logger = RosLogger(self)
         self.debug = RosDebugSink(self)
@@ -1045,6 +1046,10 @@ def _parse() -> tuple:
                    default=_D.vins_ipm_tol)
     p.add_argument('--vins-sane-n', dest='vins_sane_n', type=int,
                    default=_D.vins_sane_n)
+    # источник скорости VINS: diff (разность позы + EMA) | twist (из одометрии) —
+    # config.vins_vel_src
+    p.add_argument('--vins-vel-src', dest='vins_vel_src', type=str,
+                   choices=('diff', 'twist'), default=_D.vins_vel_src)
     p.add_argument('--vins-hover-v', dest='vins_hover_v', type=float,
                    default=_D.vins_hover_v)
     p.add_argument('--vins-hover-sec', dest='vins_hover_sec', type=float,
@@ -1139,6 +1144,9 @@ def _parse() -> tuple:
     # по-осевая защёлка трима DpVins (config.dpvins_latch_axis)
     p.add_argument('--dpvins-latch-axis', dest='dpvins_latch_axis', type=float,
                    default=_D.dpvins_latch_axis)
+    # гвоздь сразу на входе при посеянном триме (config.dpvins_pin_armed)
+    p.add_argument('--dpvins-pin-armed', dest='dpvins_pin_armed', type=float,
+                   default=_D.dpvins_pin_armed)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,

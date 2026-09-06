@@ -1,0 +1,34 @@
+# КАНДИДАТ A/B — brake5_axis + ГВОЗДЬ СРАЗУ НА ВХОДЕ при посеянном триме
+# (BS_DPVINS_PIN_ARMED=1). Всё остальное = dpvins/brake5_axis.txt. Дата: 2026-09-06.
+# Цепочка: bag 130326 (cmd/5, первый полёт с полем фазы brk=): ярус 1 включился в 89.2 с
+# без гвоздя (set/set — гвоздь только по стопу ПОСЛЕ движения, _moved), порыв в 90.0 →
+# 11 с дрейфа на одном P без BRAKE, 8 м (первый цикл pk 7.99 против 2.9–3.1 в остальных),
+# гвоздь взят лишь по стопу в 100.1. Посев трима работал (10 → 70), станции не было.
+# _moved нужен был фазе ki_trim (гвоздь кончал быстрый захват ветра на самом входе);
+# после посева трим уже armed — ждать движения незачем. Вход на ходу — как прежде,
+# гвоздь по стопу. Тест test_dpvins §24.
+# ОЖИДАНИЕ: brk= на первом же кадре яруса 1 hold/hold (борт стоит), порыв на входе
+# держится как установившийся цикл (пик от гвоздя ~2.2, не 8); остальное = cmd/5.
+# ЧЕМ ДОКАЗЫВАТЬ: включить ярус 1 (CH6 центр) за 1–3 с до фронта порыва (wind_gust.log,
+# порывы каждые 20 с от 30) — brake_phase.py: «set/set до него — 0.0 с», первый цикл
+# pk ≤ 3.5; провал — set/set на входе (посев не сработал → wns/трим 0 — смотреть seed).
+BS_VINS_STAB=dpvins
+BS_DPVINS_KP_FWD=40
+BS_DPVINS_KP_LAT=32
+BS_DPVINS_KI=8
+BS_DPVINS_KI_TRIM=60
+BS_DPVINS_IMAX=120
+BS_DPVINS_CMD_GAIN=4
+BS_DPVINS_VSMOOTH=0.3
+BS_DPVINS_POS_KP=0.3
+BS_DPVINS_POS_VMAX=0.3
+BS_DPVINS_POS_ACC=0.15
+BS_DPVINS_POS_BRAKE=5
+BS_DPVINS_POS_BRAKE_V=0.25
+BS_DPVINS_POS_BRAKE_VMAX=2.0
+BS_DPVINS_POS_BRAKE_T=-1
+BS_DPVINS_LATCH_AXIS=1
+BS_DPVINS_TRIM_KEEP=1
+BS_DPVINS_TRIM_SEED=1
+BS_VINS_I_LATCH=1
+BS_DPVINS_PIN_ARMED=1

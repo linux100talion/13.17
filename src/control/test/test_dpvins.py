@@ -532,6 +532,30 @@ check("latch_axis=1: после отпускания хвост до гвозд�
       f"(itx 0, ity растёт {ity0:.1f} → {vh23b._ity:.1f})",
       abs(vh23b._itx) < 1e-9 and abs(vh23b._ity) > abs(ity0) + 2.0)
 
+# 24. ГВОЗДЬ СРАЗУ НА ВХОДЕ (pin_armed, bag 130326): трим посеян (armed) и борт стоит →
+# гвоздь первым кадром; без посева (девственный трим) — как раньше, только по стопу после
+# движения; вход на ходу — гвоздь по стопу.
+vh24a = make(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, pin_armed=True)
+vh24a.seed_trim(-20.0, 30.0, st())
+vh24a.update(st(vx=0.05, t=100.05), Setpoint(), DT)
+check("pin_armed + посев + стоим: гвоздь первым кадром", vh24a._pinx is not None)
+vh24b = make(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, pin_armed=True)
+vh24b.update(st(vx=0.05, t=100.05), Setpoint(), DT)
+check("pin_armed без посева (девственный): гвоздя нет — фаза ki_trim ждёт движения",
+      vh24b._pinx is None and not vh24b._trim_armed)
+vh24c = make(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, pin_armed=False)
+vh24c.seed_trim(-20.0, 30.0, st())
+vh24c.update(st(vx=0.05, t=100.05), Setpoint(), DT)
+check("pin_armed=0 (старое): посев есть, стоим — гвоздя нет до движения", vh24c._pinx is None)
+vh24d = make(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, pin_armed=True)
+vh24d.seed_trim(-20.0, 30.0, st()); t = 100.05
+for i in range(10):
+    vh24d.update(st(vx=0.85, x=0.85 * DT * i, t=t), Setpoint(), DT); t += DT
+moving = vh24d._pinx is None
+for i in range(3):
+    vh24d.update(st(vx=0.1, x=0.5, t=t), Setpoint(), DT); t += DT
+check("pin_armed на ходу 0.85 м/с: гвоздя нет, по стопу — есть", moving and vh24d._pinx is not None)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

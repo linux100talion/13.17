@@ -22,9 +22,19 @@ from ..domain.state import DroneState
 
 
 class RosTelemetry:
-    def __init__(self, node, clock, alt_src='global'):
+    def __init__(self, node, clock, alt_src='global', vel_src='diff'):
         self._clock = clock
         self._s = DroneState()
+        # ИСТОЧНИК СКОРОСТИ VINS для стека/гейта (config.vins_vel_src): 'diff' —
+        # конечная разность позы по штампам + EMA (VinsTrack, как было); 'twist' —
+        # скорость из самого сообщения одометрии (состояние эстиматора, преинтеграция
+        # IMU). Проверено по bag 130326 (twist_check): рама twist = рама позы (МНК-
+        # поворот к истине +3.2° против +2.7° у разности), масштаб 1.008, лаг к истине
+        # по штампам 0.00 с против 0.14 у разности, шум на висении 0.008±0.005 м/с
+        # против 0.025±0.049 — в 10 раз тише. Разность остаётся для детекта
+        # перерождения (VinsTrack) и зрелости (residual). Лаг петли DpVins 0.35 →
+        # ~0.11 с (приход) — запас по фазе под kp/ki (стенд dpvins_gust_stand).
+        self._vel_src = vel_src
         self._ripe = VinsRipeness()   # детектор зрелости VINS (2-я ступень гейта)
         self._gt_px = self._gt_py = None
         self._gt_pt = None
@@ -118,7 +128,10 @@ class RosTelemetry:
         q = m.pose.pose.orientation
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-        self._s.vins_vx, self._s.vins_vy = self._track.vx, self._track.vy
+        if self._vel_src == 'twist':
+            self._s.vins_vx, self._s.vins_vy = float(v.x), float(v.y)
+        else:
+            self._s.vins_vx, self._s.vins_vy = self._track.vx, self._track.vy
         self._s.vins_x, self._s.vins_y, self._s.vins_yaw = x, y, yaw
         self._s.vins_valid = True
 
