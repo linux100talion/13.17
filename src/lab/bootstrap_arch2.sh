@@ -327,6 +327,8 @@ ARGS=()
 [ -n "${BS_DPVINS_POS_BRAKE_V:-}" ]    && ARGS+=(--dpvins-pos-brake-v "$BS_DPVINS_POS_BRAKE_V")
 [ -n "${BS_DPVINS_POS_BRAKE_VMAX:-}" ] && ARGS+=(--dpvins-pos-brake-vmax "$BS_DPVINS_POS_BRAKE_VMAX")
 [ -n "${BS_DPVINS_POS_BRAKE_T:-}" ]    && ARGS+=(--dpvins-pos-brake-t "$BS_DPVINS_POS_BRAKE_T")
+# по-осевая защёлка трима DpVins (как _TRIM_LATCH демпфера; config.dpvins_latch_axis): 0 = любой стик морозит обе оси
+[ -n "${BS_DPVINS_LATCH_AXIS:-}" ]     && ARGS+=(--dpvins-latch-axis "$BS_DPVINS_LATCH_AXIS")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")

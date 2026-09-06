@@ -67,7 +67,7 @@ class DpVins(StabilizationStrategy):
                  imax=100.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
                  pos_vmax=0.3, pos_acc=0.15, psign=1.0, rsign=1.0, vsmooth=0.1,
                  i_latch=True, trim_keep=True, brake=0.0, brake_v=0.25,
-                 brake_vmax=1.0, brake_t=0.0):
+                 brake_vmax=1.0, brake_t=0.0, latch_axis=False):
         self.kp_fwd, self.kp_lat = kp_fwd, kp_lat
         self.ki, self.imax, self.max = ki, imax, max_pwm
         self.ki_trim = ki_trim             # скорость обучения ДО первого гвоздя (0 = ki)
@@ -85,7 +85,13 @@ class DpVins(StabilizationStrategy):
         # ошибочного трима), трим снова учится. Без этого петля запиралась:
         # ошибочный трим → снос → BRAKE → трим заморожен → снос вечен
         # (cmd_3/wind_right/1: 46 м без возврата при триме −56 вместо +57).
-        # 0 = морозить всю фазу (закон демпфера как есть).
+        # 0 = морозить всю фазу; < 0 = НЕ МОРОЗИТЬ — правило демпфера как есть:
+        # в брейке трим учится (ошибка ×(1+brake)), стоит только анти-виндап в
+        # упоре (sat ниже). Запирание при этом невозможно по построению (оно
+        # живёт в ненасыщенном упоре, где трим учится), таймер не нужен. Цена —
+        # эффективный ki в брейке ×(1+brake): ki 15 раскачивает (стенд 5.6/1.9),
+        # ki 8–10 держит порыв на уровне демпфера (2.3–2.5 против 4.3 с таймером):
+        # трим берёт порыв за секунды и работает как feed-forward ветра.
         self.brake_t = brake_t
         self._brake_since = None           # sim-старт текущей фазы BRAKE
         self._st_fwd = StationKeeper(kp=pos_kp, vmax=pos_vmax, brake=brake,
@@ -97,9 +103,24 @@ class DpVins(StabilizationStrategy):
         self.psign, self.rsign = psign, rsign
         self.vsmooth = vsmooth
         self.i_latch = i_latch
+        # ПО-ОСЕВАЯ ЗАЩЁЛКА (как _TRIM_LATCH демпфера: каждый _FlowDamper1D морозит
+        # только СВОЙ И-член). До неё любой стик морозил трим по ОБЕИМ осям — на
+        # крейсере стиком тангажа с ветром сбоку боковой трим стоял, P-канал kp 32
+        # держал остаток 0.56–0.76 м/с (6–15 м за плечо, полёт 113224) даже при
+        # верном триме висения: боковая сила на ходу больше (лобовое ∝ |v_возд|·
+        # v_возд, ~×1.9 при 1.6 вперёд и 1 сбоку), её надо доучивать на ходу;
+        # у демпфера свободная ось учится → 0.16 м/с. latch_axis: морозится
+        # только компонента ошибки вдоль ДВИЖИМОЙ оси (и её же хвост до гвоздя),
+        # свободная ось учится рабочим ki (не ki_trim: гвоздя на стике не будет,
+        # фаза быстрого захвата не кончилась бы). Движимую ось не учим: там трим
+        # выучил бы «ветер + лобовое крейсера», после стопа — рывок (та же причина
+        # у защёлки демпфера). sat — тоже по осям. False = старое (любой стик —
+        # обе оси).
+        self.latch_axis = latch_axis
         # состояние
         self._pinx = self._piny = None     # гвоздь (мир); None = стик жив / не встал
         self._pin_pending = False          # гвоздь заказан (стик жил, ждём стопа)
+        self._pend_fwd = self._pend_rgt = False   # хвост защёлки по осям (latch_axis)
         self._moved = False                # ярус видел движение (|v| > _PIN_V)
         self._itx = self._ity = 0.0        # трим (PWM) в осях МИРА (x, y)
         self._trim_armed = False           # ветровой трим выучен (первый стоп прошёл)
@@ -111,6 +132,7 @@ class DpVins(StabilizationStrategy):
     def enter(self, s: DroneState) -> None:
         self._pinx = self._piny = None
         self._pin_pending = False
+        self._pend_fwd = self._pend_rgt = False
         self._moved = False
         self._st_fwd.reset()
         self._st_rgt.reset()
@@ -209,12 +231,16 @@ class DpVins(StabilizationStrategy):
                 self._vfl += a * (v_rgt - self._vfl)
             v_fwd, v_rgt = self._vff, self._vfl
 
-        stick = abs(sp.c_fwd) > self._I_DZ or abs(sp.c_right) > self._I_DZ
+        stick_fwd = abs(sp.c_fwd) > self._I_DZ
+        stick_rgt = abs(sp.c_right) > self._I_DZ
+        stick = stick_fwd or stick_rgt
 
         # цель скорости (тело): стик → прямая; отпущен → внешний контур к гвоздю
         if stick:
             self._pinx = self._piny = None     # точка отпущена
             self._pin_pending = True           # гвоздь заказан на ближайший стоп
+            self._pend_fwd |= stick_fwd        # хвост защёлки — только движимой оси
+            self._pend_rgt |= stick_rgt
             self._st_fwd.release(False)        # брейк погашен (гвоздя нет)
             self._st_rgt.release(False)
             # цель скорости тела: у VinsHold команда setpoint'а в осях тела
@@ -239,6 +265,7 @@ class DpVins(StabilizationStrategy):
                     and (self._pin_pending or self._moved)):
                 self._pinx, self._piny = s.vins_x, s.vins_y   # ГВОЗДЬ по остановке
                 self._pin_pending = False
+                self._pend_fwd = self._pend_rgt = False
                 self._trim_armed = True      # первый стоп прошёл — ветер выучен
             if self._pinx is not None:
                 ex = self._pinx - s.vins_x
@@ -279,8 +306,9 @@ class DpVins(StabilizationStrategy):
         # 10 ~100 PWM, кап 50 не держал — снос 1-1.3 м/с, унос 9-18 м,
         # lv2_joy_082437), а в насыщении торможения momentum не наматывается
         # (иначе перелёт первого стопа ∝ imax). Как anti_windup демпфера.
-        sat = ((abs(po) >= self.max and po * err_fwd > 0.0)
-               or (abs(ro) >= self.max and ro * err_rgt > 0.0))
+        sat_fwd = abs(po) >= self.max and po * err_fwd > 0.0
+        sat_rgt = abs(ro) >= self.max and ro * err_rgt > 0.0
+        sat = sat_fwd or sat_rgt
         # заморозка: живой стик или ТОРМОЖЕНИЕ после стика (pin_pending) при
         # выученном ветре. Именно pin_pending, не «нет гвоздя»: после enter()
         # гвоздя нет, но и торможения нет — там трим ДОЛЖЕН учиться (рабочим
@@ -291,9 +319,10 @@ class DpVins(StabilizationStrategy):
                 self._brake_since = now
         else:
             self._brake_since = None
-        # заморозка на торможении — всю фазу (brake_t 0) или первые brake_t с
-        brake_frozen = braking and (self.brake_t <= 0.0
-                                    or now - self._brake_since < self.brake_t)
+        # заморозка на торможении — всю фазу (brake_t 0), первые brake_t с,
+        # или никогда (brake_t < 0: правило демпфера, только анти-виндап)
+        brake_frozen = braking and self.brake_t >= 0.0 and (
+            self.brake_t == 0.0 or now - self._brake_since < self.brake_t)
         frozen = self.i_latch and (stick
                                    or (self._trim_armed
                                        and (self._pin_pending or brake_frozen)))
@@ -305,18 +334,32 @@ class DpVins(StabilizationStrategy):
         # в PWM, чтобы смена скорости не дёргала выход.
         ki = (self.ki_trim if self.ki_trim > 0.0 and not self._trim_armed
               else self.ki)
-        if (ki > 0.0 and self._it is not None and now > self._it
-                and not frozen and not sat):
-            di = (now - self._it) * ki
+        if self.latch_axis:
+            # ПО-ОСЕВАЯ ЗАЩЁЛКА (см. __init__): движимая ось (и её хвост до
+            # гвоздя) заморожена, свободная учится; на живом стике — рабочим ki
+            fz_fwd = self.i_latch and (stick_fwd or (self._trim_armed
+                                                     and (self._pend_fwd or brake_frozen)))
+            fz_rgt = self.i_latch and (stick_rgt or (self._trim_armed
+                                                     and (self._pend_rgt or brake_frozen)))
+            ki_fwd = 0.0 if (fz_fwd or sat_fwd) else (self.ki if stick else ki)
+            ki_rgt = 0.0 if (fz_rgt or sat_rgt) else (self.ki if stick else ki)
+        else:
+            ki_fwd = ki_rgt = 0.0 if (frozen or sat) else ki
+        if ((ki_fwd > 0.0 or ki_rgt > 0.0) and self._it is not None
+                and now > self._it):
+            dt_i = now - self._it
             # ⚠️ ТРИМ В ОСЯХ МИРА (как StationFrame DpHold): ветер — мировой,
             # трим тела устаревал после разворота (prog lv2_joy_075118: держит
             # при фикс. курсе, сносит 1.5 м/с при развороте «за/против ветра»).
             # Интегрируем ошибку скорости, повёрнутую в мир, храним (itx, ity),
             # проецируем на ТЕКУЩИЙ курс — трим следует за курсом под разворотом.
-            ex_w = err_fwd * c - err_rgt * sn
-            ey_w = err_fwd * sn + err_rgt * c
-            self._itx = clamp(self._itx + ex_w * di, -self.imax, self.imax)
-            self._ity = clamp(self._ity + ey_w * di, -self.imax, self.imax)
+            # Замороженная ось в мир не крутится (её компонента = 0).
+            ef = err_fwd * ki_fwd * dt_i
+            er = err_rgt * ki_rgt * dt_i
+            ex_w = ef * c - er * sn
+            ey_w = ef * sn + er * c
+            self._itx = clamp(self._itx + ex_w, -self.imax, self.imax)
+            self._ity = clamp(self._ity + ey_w, -self.imax, self.imax)
             # пересчёт выхода со свежим тримом (для среза; в упоре кламп ниже)
             i_fwd = self._itx * c + self._ity * sn
             i_rgt = -self._itx * sn + self._ity * c

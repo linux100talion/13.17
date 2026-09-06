@@ -30,7 +30,10 @@ BS_DPVINS_POS_ACC=0.15
 BS_DPVINS_POS_BRAKE=0
 BS_DPVINS_POS_BRAKE_V=0.25
 BS_DPVINS_POS_BRAKE_VMAX=1.0
+# brake_t: 0 = морозить трим всю фазу BRAKE, N = первые N с, −1 = не морозить (правило демпфера, кандидат brake5_tail)
 BS_DPVINS_POS_BRAKE_T=8
+# защёлка трима на стике: 0 = любой стик морозит обе оси (эталон), 1 = по-осевая как у демпфера (кандидат brake5_axis)
+BS_DPVINS_LATCH_AXIS=0
 # трим переживает входы в ярус; посев трима от демпфера на входе (унос ~2 → 0 м)
 BS_DPVINS_TRIM_KEEP=1
 BS_DPVINS_TRIM_SEED=1

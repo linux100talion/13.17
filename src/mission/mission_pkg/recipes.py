@@ -111,7 +111,8 @@ def _dpvins(cfg):
                   trim_keep=cfg.dpvins_trim_keep > 0,
                   brake=cfg.dpvins_pos_brake, brake_v=cfg.dpvins_pos_brake_v,
                   brake_vmax=cfg.dpvins_pos_brake_vmax,
-                  brake_t=cfg.dpvins_pos_brake_t)
+                  brake_t=cfg.dpvins_pos_brake_t,
+                  latch_axis=cfg.dpvins_latch_axis > 0)
 
 
 def build_vins_stab(cfg):

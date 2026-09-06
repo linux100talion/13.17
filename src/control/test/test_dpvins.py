@@ -459,7 +459,7 @@ check("enter(): фаза BRAKE сброшена", not vh_g.braking)
 # 21. ЗАПИРАНИЕ BRAKE и страховка brake_t (cmd_3/wind_right/1): ошибочный трим ПО ветру
 # + боковая ось kp 32: тормоз развернуть снос не может, фаза не выходит, трим заморожен —
 # унос вечен. brake_t: после N с непрерывного BRAKE трим снова учится.
-def locked(brake_t):
+def locked(brake_t, secs=12.0):
     vh = make(kp_fwd=32.0, kp_lat=32.0, ki=15.0, brake=5.0, brake_vmax=2.0, brake_t=brake_t)
     t = 100.05
     for i in range(5):
@@ -469,7 +469,7 @@ def locked(brake_t):
     vh._itx = -56.0                                                    # ошибочный трим
     x, it0 = 0.5, vh._itx
     seen_brake = False
-    for i in range(int(12.0 / DT)):                                    # 12 с уноса 0.5 м/с
+    for i in range(int(secs / DT)):                                    # secs с уноса 0.5 м/с
         x += 0.5 * DT
         vh.update(st(vx=0.5, x=x, t=t), Setpoint(), DT); t += DT
         seen_brake |= vh.braking
@@ -480,6 +480,14 @@ check("brake_t=0: BRAKE активен весь унос, трим заморо�
 vh21b, br_b, it_b = locked(8.0)
 check("brake_t=8: через 8 с непрерывного BRAKE трим снова учится (страховка)",
       br_b and abs(vh21b._itx - it_b) > 5.0)
+# brake_t < 0 — хвост брейка как у демпфера: трим учится с первой секунды BRAKE (только
+# анти-виндап в упоре), таймера нет; за 3 с уноса при brake_t 8 трим ещё стоит
+vh21c, br_c, it_c = locked(-1.0, secs=3.0)
+vh21d, br_d, it_d = locked(8.0, secs=3.0)
+check("brake_t=-1: трим учится в BRAKE сразу (правило демпфера), при 8 — ещё заморожен",
+      br_c and br_d and abs(vh21c._itx - it_c) > 5.0 and abs(vh21d._itx - it_d) < 1e-9)
+check("brake_t=-1: трим в брейке ПРОТИВ уноса (ошибка ×6 по знаку скорости)",
+      (vh21c._itx - it_c) > 0.0)
 # 22. посев взводит armed → обучение рабочим ki, не ki_trim
 vh22 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
 vh22.seed_trim(-40.0, 10.0, st(t=100.05))
@@ -490,6 +498,39 @@ for i in range(20):                                # 1 с движения 0.85 
 d22 = abs(vh22._itx - it0)
 check(f"после посева 1 с хода 0.85 м/с меняет трим на {d22:.1f} PWM (ki 6, не ki_trim 60 ≈ 51)",
       d22 < 10.0)
+
+# 23. ПО-ОСЕВАЯ ЗАЩЁЛКА (latch_axis, полёт 113224): крейсер стиком тангажа с боковым
+# сносом 0.5 м/с (курс 0: fwd = x, right = −y… для DpVins v_rgt = −vx·sinψ + vy·cosψ = vy).
+# Старое: любой стик морозит обе оси — боковой трим стоит. Новое: свободная (боковая) ось
+# учится рабочим ki, движимая (продольная) заморожена; после отпускания хвост до гвоздя
+# только у движимой; оба стика — обе заморожены.
+def cruise(latch_axis, secs=5.0, c_right=0.0):
+    vh = make(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, latch_axis=latch_axis)
+    vh.seed_trim(0.0, 0.0, st()); vh._trim_armed = True          # ветер «выучен»
+    t = 100.05
+    for i in range(int(secs / DT)):                              # стик вперёд, снос вправо
+        vh.update(st(vx=1.5, vy=0.5, x=1.5 * DT * i, y=0.5 * DT * i, t=t),
+                  Setpoint(c_fwd=-0.4, c_right=c_right), DT); t += DT
+    return vh, t
+vh23a, _ = cruise(False)
+check("latch_axis=0: стик тангажа морозит ОБЕ оси (боковой трим стоит)",
+      abs(vh23a._ity) < 1e-9 and abs(vh23a._itx) < 1e-9)
+vh23b, t23 = cruise(True)
+check(f"latch_axis=1: свободная боковая ось учится на стике тангажа (ity {vh23b._ity:.1f} PWM ≈ 0.5·8·5 = 20)",
+      15.0 < abs(vh23b._ity) < 25.0)
+check("latch_axis=1: движимая продольная ось заморожена (itx 0)", abs(vh23b._itx) < 1e-9)
+vh23c, _ = cruise(True, c_right=0.3)
+check("latch_axis=1: оба стика — обе оси заморожены",
+      abs(vh23c._itx) < 1e-9 and abs(vh23c._ity) < 1e-9)
+# отпустили стик тангажа: продольная ось в хвосте защёлки (до гвоздя) — стоит,
+# боковая — учится дальше; торможение вперёд 1.0 м/с с боковым 0.5
+ity0 = vh23b._ity
+for i in range(20):
+    vh23b.update(st(vx=1.0, vy=0.5, x=10.0 + 1.0 * DT * i, y=3.0 + 0.5 * DT * i, t=t23),
+                 Setpoint(), DT); t23 += DT
+check("latch_axis=1: после отпускания хвост до гвоздя только у движимой оси "
+      f"(itx 0, ity растёт {ity0:.1f} → {vh23b._ity:.1f})",
+      abs(vh23b._itx) < 1e-9 and abs(vh23b._ity) > abs(ity0) + 2.0)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")
