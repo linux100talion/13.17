@@ -140,3 +140,8 @@ kp 90, pin_v/soft 0.75, _POS_PIN_T 3 с + BRAKE. cmd/8 ДОКАЗАН полёт
 одинаково», bag не разбирался): settle_brake (BS_DPVINS_SETTLE_BRAKE: −brake·v с капом без точки) + pin_t 3
 (BS_DPVINS_PIN_T), профиль brake5_stop.txt = текущий лучший DpVins. Дальше: kp на лаге twist, затем единый
 демпфер ([[unified-damper-signal-adapter]]).
+cmd/9 (2026-09-06, полётом не доказан): гейты яруса 2 (LOITER) как у яруса 1 — Freefly.loiter_guard
+(BS_LOITER_GUARD, loiter/guard.txt): у LOITER уже был vins_sane/свежесть/extnav (выход на демпфер за тик),
+не было зрелости после перерождения (мост латчит молодую раму, extnav_ready истинен навсегда), удержания
+5 с после выхода и реакции на закрытый мост brg=0 (иначе EKF слепнет → FCU в LAND по EKF-failsafe, нода
+уважает → посадка вместо демпфера). Тест ladder §14. Дыра всех ярусов: масштаб VINS выше 4 м.
