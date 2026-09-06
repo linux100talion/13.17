@@ -81,6 +81,9 @@ class RayTracer(Node):
         # жёсткой подтяжки, м (0 = выкл) и τ мягкого дожима, с (0 = выкл).
         self.declare_parameter("anchor_relatch_m", 1.0)
         self.declare_parameter("anchor_tau_sec", 5.0)
+        # грейс после (пере)латча, с: якорь стоит, EKF сам ресетится к vision
+        # (frame_anchor.py; полёт 173102 — дедлок гейта моста без грейса)
+        self.declare_parameter("anchor_grace_sec", 10.0)
         # ГЕЙТ ЗДОРОВЬЯ МОСТА (bridge_gate.py; полёт 142811 — разнос VINS через
         # 687 подтяжек якоря отравил ориентацию EKF, DpHold унесло): мост закрыт
         # при |twist| > v_max, перерождении потока (дыра/скачок), шторме подтяжек
@@ -120,7 +123,8 @@ class RayTracer(Node):
         # перевёрнутыми смещениями → положительная ОС LOITER, разнос 15 м/с)
         self.anchor = FrameAnchor(
             relatch_m=float(self.get_parameter("anchor_relatch_m").value),
-            tau_sec=float(self.get_parameter("anchor_tau_sec").value))
+            tau_sec=float(self.get_parameter("anchor_tau_sec").value),
+            grace_sec=float(self.get_parameter("anchor_grace_sec").value))
         self.gate = (BridgeGate(
             v_max=float(self.get_parameter("bridge_v_max").value),
             v_jump=float(self.get_parameter("bridge_v_jump").value),

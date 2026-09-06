@@ -41,14 +41,28 @@ def _wrap(a):
 
 
 class FrameAnchor:
-    def __init__(self, relatch_m=1.0, tau_sec=5.0):
+    def __init__(self, relatch_m=1.0, tau_sec=5.0, grace_sec=10.0):
         self.relatch_m = float(relatch_m)
         self.tau = float(tau_sec)
+        # ГРЕЙС ПОСЛЕ ЛАТЧА (полёт 173102, 2026-09-06): после (пере)латча якорь
+        # grace_sec НЕ подтягивается и не дожимается вовсе. Зачем: в GPS-denied
+        # EKF после свапа на extnav сам следует vision, и подтяжка «к EKF» —
+        # круговая: пока мост открыт непрерывно, расход = инновация (дециметры)
+        # и всё тихо; но стоит мосту закрыться (гейт здоровья, bridge_gate) —
+        # EKF без aiding уезжает (в 173102 до 12–14 м/с при истине 1), и на
+        # открытии свежий латч + подтяжка на каждой одометрии делают vision =
+        # текущей позиции убежавшего EKF → инновации нет → EKF никогда не
+        # ресетится к vision, а шторм подтяжек снова закрывает мост через 0.3 с
+        # — дедлок (15 закрытий за 2 мин, LOITER на 20 м не брался). С грейсом
+        # якорь стоит, vision идёт консистентная, инновация растёт за гейт →
+        # EKF3 по таймауту позиции ресетится к extnav и дальше следует ей.
+        self.grace = float(grace_sec)
         self.yaw_off = 0.0            # поворот кадра VINS → кадр EKF, рад
         self.t = np.zeros(3)          # трансляция после поворота, м
         self.latched = False
         self.relatch_n = 0            # счётчик жёстких подтяжек (для лога)
         self._last_wall = 0.0
+        self._latch_wall = -1e9       # момент последнего (пере)латча
 
     def reset(self):
         """Латч ЗАНОВО (перерождение потока VINS / шторм подтяжек, см.
@@ -58,6 +72,7 @@ class FrameAnchor:
         self.latched = False
         self.yaw_off = 0.0
         self.t = np.zeros(3)
+        self._latch_wall = -1e9
 
     def rotate(self, p):
         """Rz(yaw_off) @ p — для позиций и world-скоростей VINS."""
@@ -86,15 +101,23 @@ class FrameAnchor:
             self.yaw_off = _wrap(ekf_yaw - vins_yaw)
             self.t = ekf_pos - self.rotate(vins_pos)
             self._last_wall = now
+            self._latch_wall = now
             return 'latch'
         delta = (ekf_pos - self.rotate(vins_pos)) - self.t
-        dn = float(np.linalg.norm(delta))
+        # РАСХОД — ТОЛЬКО XY (полёт 173102): z EKF — баро (EK3_SRC1_POSZ=1), z
+        # vision он не фьюзит, а VINS z на быстром наборе отстаёт на ~1 м —
+        # 3D-норма давала «подтяжки» по z на самом наборе (17 за 7 с при xy
+        # 0.06–0.5) → ложный шторм → мост закрыт ровно когда EKF нужен aiding
+        dn = float(np.linalg.norm(delta[:2]))
         dt = min(max(now - self._last_wall, 0.0), 0.5)
         self._last_wall = now
+        if now - self._latch_wall < self.grace:
+            return None                       # грейс: якорь стоит (см. __init__)
         if self.relatch_m > 0 and dn > self.relatch_m:
             self.yaw_off = _wrap(ekf_yaw - vins_yaw)
             self.t = ekf_pos - self.rotate(vins_pos)
             self.relatch_n += 1
+            self._latch_wall = now
             return 'relatch'
         if self.tau > 0 and dt > 0:
             self.t = self.t + (1.0 - math.exp(-dt / self.tau)) * delta

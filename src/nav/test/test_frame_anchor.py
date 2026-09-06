@@ -58,7 +58,7 @@ vins_track = [rz(THETA, p - true_track[0]) + v0 for p in true_track]
 true_yaw = -0.4                            # курс борта в ENU (любой)
 vins_yaw = true_yaw + THETA                # тот же борт в кадре VINS
 
-an = FrameAnchor(relatch_m=1.0, tau_sec=5.0)
+an = FrameAnchor(relatch_m=1.0, tau_sec=5.0, grace_sec=0.0)   # легаси: без грейса
 ev = an.update(vins_track[0], vins_yaw, true_track[0], true_yaw, now=100.0)
 check("латч на первой паре поз", ev == 'latch' and an.latched)
 check("Δyaw = −170° (выпрямление кадра)",
@@ -82,14 +82,14 @@ check("rotate(): world-скорость VINS → кадр EKF",
       np.linalg.norm(an.rotate(v_vins) - v_true) < 1e-9)
 
 # --- 2. нулевой Δyaw: поведение тождественно прежней трансляции -----------
-an = FrameAnchor(relatch_m=1.0, tau_sec=5.0)
+an = FrameAnchor(relatch_m=1.0, tau_sec=5.0, grace_sec=0.0)
 an.update(np.array([1.0, 2.0, 3.0]), 0.3, np.array([4.0, 6.0, 3.0]), 0.3, 100.0)
 check("Δyaw=0: map == vins + (EKF−VINS) (легаси-поведение)",
       np.linalg.norm(an.map(np.array([2.0, 2.0, 3.0]))
                      - np.array([5.0, 6.0, 3.0])) < 1e-9)
 
 # --- 3. мягкий дожим: тянет ТОЛЬКО t, τ работает --------------------------
-an = FrameAnchor(relatch_m=10.0, tau_sec=5.0)
+an = FrameAnchor(relatch_m=10.0, tau_sec=5.0, grace_sec=0.0)
 an.update(np.zeros(3), 0.0, np.zeros(3), 0.0, 100.0)
 # EKF уполз на 0.5 м (< relatch_m): дожим по экспоненте, yaw не трогается
 for i in range(1, 11):
@@ -105,7 +105,7 @@ check("дожим тянет t к расходу (~63% за τ)", 0.55 < an.t[0]
 check("дожим НЕ трогает Δyaw", an.yaw_off == 0.0)
 
 # --- 4. жёсткая подтяжка перелатчивает И поворот --------------------------
-an = FrameAnchor(relatch_m=1.0, tau_sec=5.0)
+an = FrameAnchor(relatch_m=1.0, tau_sec=5.0, grace_sec=0.0)
 an.update(np.zeros(3), 0.0, np.zeros(3), 0.0, 100.0)
 ev = an.update(np.array([10.0, 0.0, 0.0]), 0.5,
                np.array([0.0, 10.0, 0.0]), 0.5 + math.pi / 2, 100.5)
@@ -145,6 +145,24 @@ check("reset(): якорь тождественен до нового латча
       (not fa_r.latched) and abs(fa_r.yaw_off) < 1e-12 and float(np.linalg.norm(fa_r.t)) < 1e-12)
 ev = fa_r.update(np.array([1.0, 2.0, 0.0]), 0.3, np.array([5.0, 5.0, 1.0]), 1.0, 1.0)
 check("после reset() первая пара — 'latch' (не 'relatch')", ev == 'latch' and fa_r.latched)
+
+# xy-only + грейс (полёт 173102): расход по z не подтягивает; в грейсе якорь стоит
+fa_g = FrameAnchor(relatch_m=1.0, tau_sec=5.0, grace_sec=10.0)
+fa_g.update(np.array([0.0, 0.0, 0.0]), 0.0, np.array([0.0, 0.0, 0.0]), 0.0, 0.0)
+t_before = fa_g.t.copy()
+ev = fa_g.update(np.array([0.0, 0.0, 0.0]), 0.0, np.array([0.0, 0.0, 2.0]), 0.0, 11.0)   # z ушёл на 2 м
+check("расход только по z (2 м) — не подтяжка, t по xy не тронут", ev is None and abs(fa_g.t[0]) < 1e-12)
+ev = fa_g.update(np.array([0.0, 0.0, 0.0]), 0.0, np.array([3.0, 0.0, 0.0]), 0.0, 11.5)   # xy ушёл на 3 м, грейс прошёл
+check("расход xy 3 м после грейса — подтяжка", ev == 'relatch' and fa_g.relatch_n == 1)
+ev = fa_g.update(np.array([0.0, 0.0, 0.0]), 0.0, np.array([6.0, 0.0, 0.0]), 0.0, 12.0)   # ещё 3 м, но грейс от подтяжки
+check("в грейсе 10 с после подтяжки — якорь стоит (нет подтяжки и дожима)",
+      ev is None and abs(fa_g.t[0] - 3.0) < 1e-12)
+ev = fa_g.update(np.array([0.0, 0.0, 0.0]), 0.0, np.array([6.0, 0.0, 0.0]), 0.0, 22.0)
+check("грейс прошёл — подтяжка к 6 м", ev == 'relatch' and abs(fa_g.t[0] - 6.0) < 1e-12)
+fa_0 = FrameAnchor(relatch_m=1.0, tau_sec=5.0, grace_sec=0.0)
+fa_0.update(np.zeros(3), 0.0, np.zeros(3), 0.0, 0.0)
+ev = fa_0.update(np.zeros(3), 0.0, np.array([2.0, 0.0, 0.0]), 0.0, 0.1)
+check("grace_sec=0 — прежнее поведение (подтяжка сразу)", ev == 'relatch')
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FRAME ANCHOR OK" if ok_all else "❌ СБОЙ")
