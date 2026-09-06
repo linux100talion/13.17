@@ -41,3 +41,25 @@ EKF_STATUS_REPORT (только ESTIMATOR_STATUS PX4) — флагов EKF ArduP
 Hover throttle: MOT_HOVER_LEARN=2 (дефолт), учится в ALT_HOLD/LOITER (наш демпфер тоже),
 сохраняется на дизарме в eeprom (volume sim_sitl_eeprom, живёт через fresh-start);
 прочитано 0.3378 (30.08). Связано: [[sf-master-ladder]], [[openhd-debug-hud]].
+
+2026-09-06 (просьба пилота): (1) ОТМЕНА повторным нажатием SA до касания — в любой ветке и ярусе:
+SoftLand ловит второй фронт (зажатая на входе кнопка — не фронт), в ветке pos шлёт keep (ALT_HOLD)
+сразу (Freefly «уважает» LAND и сам из него не выводит), goto freefly с LAND_CANCEL; Freefly.enter в
+воздухе: стек+опора от текущей точки, «возврат в свободный полёт», _stack_applied — первый
+_ladder_apply перепринимает стек (после ветки pos он пуст), LOITER вернётся по своему гейту; после
+касания отмены нет (газ в полу). Ручка BS_FF_LAND_CANCEL (дефолт 1). Тест test_freefly_land §10–12.
+(2) LAND_SPD_MS: пробовали 0.30, пилот вернул 0.15 = land_rate ветки alt (одинаково на всех ярусах).
+ПОЛЁТ 180821: отмена на ярусах 0/1 работает (damper 26 с, vinshold 56 с → freefly); в LOITER НЕ
+сработала: SoftLand слал один async set_mode(ALT_HOLD) из LAND, а Freefly._mode_target LAND «уважает»
+(EKF-failsafe) — борт продолжал садиться, стек в position-LAND командовал бы скорость. ФИКС: Freefly.enter
+в LAND → окно LAND_EXIT_SEC 5 с: _mode_target возвращает keep (ре-ассерт каждые 2 с) + set_mode сразу,
+стики в центре пока mode==LAND; не вышел за 5 с → error, дальше LAND уважаем. Тест §13. Полётом не
+проверено (bag 181111 на момент разбора ещё писался).
+ПОЛЁТ 182028 с фиксом (ре-ассерт keep 5 с): «так не работает» — отмена из LAND в LOITER всё равно не
+срабатывает; bag 181111/182028 обрываются на входе в LOITER (запись не дописана после kill стека /
+ещё идёт) — что ответил FCU, не видно. По просьбе пилота кнопка SA на ярусе LOITER ОТКЛЮЧЕНА
+(BS_LAND_IN_LOITER, дефолт 0: отказ с подсказкой «сажай руками или CH6 вниз → ярус 0/1 → SA»),
+тест §14; ветка pos SoftLand и код отмены из LAND остаются под ручкой land_in_loiter=1 до разбора
+поведения FCU (гипотезы: ArduCopter не принимает смену режима из LAND по нашему SetMode — проверять
+по mavros.log «Mode change failed»/COMMAND_ACK; или наш set_mode шлётся до того, как FCU залатчил
+LAND, и потом LAND ре-ассертится SoftLand'ом… нет — SoftLand уже завершён).
