@@ -556,6 +556,63 @@ for i in range(3):
     vh24d.update(st(vx=0.1, x=0.5, t=t), Setpoint(), DT); t += DT
 check("pin_armed на ходу 0.85 м/с: гвоздя нет, по стопу — есть", moving and vh24d._pinx is not None)
 
+# 25. ЛИНИЯ НА ПЛЕЧЕ (line_hold, плечи 150448): стик тангажа — гвоздь остаётся, свободная
+# (боковая) ось держит проекцию гвоздя: уход вправо → цель боковой скорости к линии
+# (RETURN) / BRAKE при уходе быстрее brake_v; старое: гвоздь снят, цель 0.
+def leg(line_hold, vy=0.0, y=0.0, yaw=0.0, n=10):
+    vh = make(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, pin_armed=True, line_hold=line_hold,
+              brake=5.0, brake_vmax=2.0, brake_t=-1.0)
+    vh.seed_trim(0.0, 0.0, st()); vh.update(st(vx=0.05, t=100.05), Setpoint(), DT)   # гвоздь (0,0)
+    t = 100.1
+    for i in range(n):
+        vh.update(st(vx=2.0, vy=vy, x=2.0 * DT * i, y=y + vy * DT * i, yaw=yaw, t=t),
+                  Setpoint(c_fwd=-0.5), DT); t += DT
+    return vh, t
+vh25a, _ = leg(False, y=1.0)
+check("line_hold=0: стик тангажа снимает гвоздь", vh25a._pinx is None)
+vh25b, t25 = leg(True, y=1.0)
+check("line_hold=1: гвоздь остаётся на плече", vh25b._pinx is not None)
+# курс 0: боковая ось тела = +y (влево); борт в y=+1 (слева от линии) → цель вправо (−)
+# RETURN: kp_pos 0.3·(−1) = −0.3, √-кап 0.15 → −0.55 → −0.3
+ph = vh25b.station_phase()
+check(f"line_hold=1: фаза rel/hold (движимая rel, свободная hold) — {ph[:2]}", ph[:2] == ('rel', 'hold'))
+ro_b = vh25b.update(st(vx=2.0, vy=0.0, x=3.0, y=1.0, t=t25), Setpoint(c_fwd=-0.5), DT).roll - RC_CENTER
+vh25c, t25c = leg(False, y=1.0)
+ro_c = vh25c.update(st(vx=2.0, vy=0.0, x=3.0, y=1.0, t=t25c), Setpoint(c_fwd=-0.5), DT).roll - RC_CENTER
+check(f"line_hold=1: слева от линии в покое поперёк — крен К линии ({ro_b:+d}), старое — 0 ({ro_c:+d})",
+      ro_b != 0 and ro_c == 0)
+vh25d, _ = leg(True, vy=0.6, y=0.0, n=20)          # уход влево 0.6 м/с от линии → BRAKE боковой
+check("line_hold=1: уход от линии 0.6 м/с — BRAKE свободной оси", vh25d._st_rgt.braking)
+vh25e, _ = leg(True, y=1.0, yaw=0.5)               # курс ушёл на 0.5 рад > 0.3 → перезахват
+check("line_hold=1: уход курса > 17° — линия перезахвачена в текущей точке",
+      vh25e._pinx is not None and abs(vh25e._pin_yaw - 0.5) < 1e-9)
+# отпускание после плеча: гвоздь снят, по стопу — новый
+vh25b.update(st(vx=1.0, x=4.0, y=1.0, t=t25 + DT), Setpoint(), DT)
+check("line_hold=1: стик отпущен — гвоздь плеча снят (нет возврата на всё плечо)", vh25b._pinx is None)
+for i in range(3):
+    vh25b.update(st(vx=0.1, x=4.5, y=1.0, t=t25 + DT * (2 + i)), Setpoint(), DT)
+check("line_hold=1: по стопу — новый гвоздь в точке стопа",
+      vh25b._pinx is not None and abs(vh25b._pinx - 4.5) < 1e-9)
+# 26. ПРЯМАЯ ПЕРЕДАЧА СТИКА (ff): при v = цель P даёт 0, ff даёт наклон к цели; на цели
+# станции (висение) ff не действует
+vh26a = make(kp_fwd=40.0, kp_lat=32.0, ki=0.0, ff=10.0)
+vh26b = make(kp_fwd=40.0, kp_lat=32.0, ki=0.0, ff=0.0)
+sp26 = Setpoint(c_fwd=-0.5)                          # цель −2 м/с (назад? знак: c_fwd·gain = −2)
+pa = vh26a.update(st(vx=-2.0, t=100.05), sp26, DT).pitch - RC_CENTER
+pb = vh26b.update(st(vx=-2.0, t=100.05), sp26, DT).pitch - RC_CENTER
+p_lag = vh26b.update(st(vx=-1.5, t=100.10), sp26, DT).pitch - RC_CENTER   # v медленнее цели → P
+check(f"ff=10: на цели ±2 м/с выход {pa:+d} (ff·2 = 20 PWM), без ff {pb:+d}; знак как у P при v<цели ({p_lag:+d})",
+      pb == 0 and abs(abs(pa) - 20) <= 1 and (pa * p_lag > 0))
+vh26c = make(kp_fwd=40.0, kp_lat=32.0, ki=0.0, ff=10.0, pin_armed=True)
+vh26c.seed_trim(0.0, 0.0, st()); vh26c._trim_armed = True
+vh26c.update(st(vx=0.05, t=100.05), Setpoint(), DT)
+pc = vh26c.update(st(vx=0.0, x=0.5, t=100.10), Setpoint(), DT).pitch - RC_CENTER   # RETURN-цель, стик центр
+vh26d = make(kp_fwd=40.0, kp_lat=32.0, ki=0.0, ff=0.0, pin_armed=True)
+vh26d.seed_trim(0.0, 0.0, st()); vh26d._trim_armed = True
+vh26d.update(st(vx=0.05, t=100.05), Setpoint(), DT)
+pd = vh26d.update(st(vx=0.0, x=0.5, t=100.10), Setpoint(), DT).pitch - RC_CENTER
+check(f"ff не действует на цель станции (висение): {pc:+d} == {pd:+d}", pc == pd)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

@@ -6,8 +6,10 @@ twist как источник скорости для стека (BS_VINS_VEL_SR
 того же поворота для конечной разности позы (совпали → twist в раме позы); (2) лаг к истине
 и масштаб |v| кросс-корреляцией по штампам (сетка 0.02 с) для twist и для разности + EMA 0.4
 (как VinsTrack); (3) шум на висении (истина |v| < 0.1): средняя ошибка и СКО.
-Bag lv2_joy_20260906_130326: поворот +3.2° / +2.7°, лаг 0.00 / 0.14 с, масштаб 1.008 / 0.997,
-шум 0.008±0.005 / 0.025±0.049 м/с. Запуск внутри nav:
+Bag lv2_joy_20260906_130326 (висение, курс ~0°): поворот +3.2° / +2.7°, лаг 0.00 / 0.14 с,
+масштаб 1.008 / 0.997, шум 0.008±0.005 / 0.025±0.049 м/с. ⚠️ twist истины Gazebo — в осях
+ТЕЛА (child_frame): здесь он поворачивается в мир по курсу истины (исправлено 2026-09-06;
+на висении у курса 0° разницы не было). Запуск внутри nav:
   docker exec p1317_nav bash -lc "source /opt/ros/humble/setup.bash; \\
     source /root/sim_ws/install/setup.bash; \\
     python3 /lab/vins_twist_check.py /root/sim_ws/output/joystick/<RUN>"
@@ -34,7 +36,15 @@ def load(bag):
         topic, raw, _ = r.read_next()
         m = deserialize_message(raw, Odometry)
         p, v = m.pose.pose.position, m.twist.twist.linear
-        (V if topic == '/odometry' else T).append((stamp(m), p.x, p.y, v.x, v.y))
+        if topic == '/odometry':
+            V.append((stamp(m), p.x, p.y, v.x, v.y))
+        else:
+            # twist истины Gazebo — В ОСЯХ ТЕЛА (child_frame; проверено по Δpos/dt) →
+            # в мир по курсу истины, иначе сравнение с мировым twist VINS врёт вне курса 0°
+            q = m.pose.pose.orientation
+            ps = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+            T.append((stamp(m), p.x, p.y, v.x * math.cos(ps) - v.y * math.sin(ps),
+                      v.x * math.sin(ps) + v.y * math.cos(ps)))
     V.sort(); T.sort()
     return V, T
 

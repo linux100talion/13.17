@@ -6,7 +6,10 @@
 
 Сегменты стика — |rcp| или |rcr| > 20 PWM по /mission/status не короче --min-seg с;
 на каждом: ярус, стик в начале, средняя скорость вперёд и БОКОВАЯ скорость тела
-(ЛЕВО+, как ipm_vlat; истина Gazebo /model/iris_cam/odometry в осях курса истины), её RMS, боковой
+(ЛЕВО+, как ipm_vlat; истина Gazebo /model/iris_cam/odometry — её twist УЖЕ В ОСЯХ ТЕЛА,
+child_frame, проверено по Δpos/dt: ошибка 0.02 м/с в теле против 3.1 в мире; до 2026-09-06
+скрипт крутил его ещё раз по курсу — на курсах у 0° почти верно, у 180° знак вперёд
+переворачивался), её RMS, боковой
 снос ∫v_lat dt, трим стрелки ветра (wnp, wnr) в начале и в конце и его модуль — по нему
 видно, живёт ли трим на ходу (стоит → модуль и компоненты константы; вращается с курсом
 → модуль константа, компоненты едут). Запуск внутри nav (rosbag2_py):
@@ -74,7 +77,7 @@ def main():
     S, T = load(bag)
     tt = [x[0] for x in T]
     print(f"# {label}: сегменты стика ≥ {a.min_seg:g} с; боковая скорость тела (лево+) по истине "
-          f"Gazebo, курс истины; трим — стрелка ветра статуса (wnp, wnr)")
+          f"Gazebo (twist в теле); трим — стрелка ветра статуса (wnp, wnr)")
     print("  t0     t1   dur tier   rcp   rcr  vfwd  vlat_mean vlat_rms  lat_disp  трим начало→конец   |трим|")
     for t0, t1, d0 in segments(S, a.min_seg):
         d1 = max((d for d in S if d['t'] <= t1), key=lambda d: d['t'])
@@ -84,8 +87,7 @@ def main():
             t, _, _, vx, vy, ps = x
             if t > t1:
                 break
-            vf = vx * math.cos(ps) + vy * math.sin(ps)
-            vl = -vx * math.sin(ps) + vy * math.cos(ps)
+            vf, vl = vx, vy                   # twist истины уже в теле: x вперёд, y влево
             if tp is not None:
                 disp += vl * (t - tp)
             tp = t; n += 1; sf += vf; sl += vl; sl2 += vl * vl

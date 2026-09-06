@@ -1156,6 +1156,10 @@ def _parse() -> tuple:
     # гвоздь сразу на входе при посеянном триме (config.dpvins_pin_armed)
     p.add_argument('--dpvins-pin-armed', dest='dpvins_pin_armed', type=float,
                    default=_D.dpvins_pin_armed)
+    # прямая передача стика и линия на плече (config.dpvins_ff / dpvins_line_hold)
+    p.add_argument('--dpvins-ff', dest='dpvins_ff', type=float, default=_D.dpvins_ff)
+    p.add_argument('--dpvins-line-hold', dest='dpvins_line_hold', type=float,
+                   default=_D.dpvins_line_hold)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,

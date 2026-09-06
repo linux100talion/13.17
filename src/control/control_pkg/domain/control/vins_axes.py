@@ -62,12 +62,15 @@ class DpVins(StabilizationStrategy):
 
     _I_DZ = 0.02       # |c_*| выше — стик живой (трим замораживается, гвоздь снят)
     _PIN_V = 0.3       # м/с: гвоздь по остановке / порог «встал»
+    _YAW_TOL = 0.3     # рад: уход курса на плече больше — линия перезахватывается
+                       # в текущей точке (зеркало _POS_YAW_TOL демпфера)
 
     def __init__(self, kp_fwd=200.0, kp_lat=120.0, ki=20.0, ki_trim=0.0,
                  imax=100.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
                  pos_vmax=0.3, pos_acc=0.15, psign=1.0, rsign=1.0, vsmooth=0.1,
                  i_latch=True, trim_keep=True, brake=0.0, brake_v=0.25,
-                 brake_vmax=1.0, brake_t=0.0, latch_axis=False, pin_armed=False):
+                 brake_vmax=1.0, brake_t=0.0, latch_axis=False, pin_armed=False,
+                 ff=0.0, line_hold=False):
         self.kp_fwd, self.kp_lat = kp_fwd, kp_lat
         self.ki, self.imax, self.max = ki, imax, max_pwm
         self.ki_trim = ki_trim             # скорость обучения ДО первого гвоздя (0 = ki)
@@ -123,8 +126,27 @@ class DpVins(StabilizationStrategy):
         # цена ожидания — вход без станции: bag 130326 ярус 1 включился за 1 с до
         # порыва (set/set), 11 с дрейфа на одном P без BRAKE, 8 м, гвоздь по стопу.
         self.pin_armed = pin_armed
+        # ПРЯМАЯ ПЕРЕДАЧА СТИКА (ff, PWM на м/с ЦЕЛИ стика; cmd/7, плечи 150448):
+        # движимая ось — чистый P (трим на стике заморожен, иначе рывок после
+        # стопа), установившаяся ошибка = (лобовое + ветер)/kp: при kp 40 на
+        # 3–4 м/с это 0.75–1 м/с — стик в упор давал 2.5–3.7 м/с при цели 4.0
+        # (DpHold 4.2). ff·цель добавляется к выходу как наклон «за лобовое»
+        # (зеркало BS_YAW_PILOT_GAIN рыскания): стик = наклон, контур только
+        # правит. Только на стик-цели, не на цели станции (висение не трогаем).
+        # Оценка: ветер 5 м/с ≈ 44 PWM-экв., 10 ≈ 100 → лобовое на 4 м/с ~35–55.
+        self.ff = ff
+        # ЛИНИЯ НА ПЛЕЧЕ (line_hold; cmd/7): при живом стике ОДНОЙ оси 2D-гвоздь
+        # не снимается — свободная ось держит проекцию гвоздя на себя в ТЕКУЩЕМ
+        # курсе (линия через гвоздь вдоль курса, как StationFrame демпфера:
+        # «эта ось держит линию»), с BRAKE своей станции; уход курса > _YAW_TOL
+        # — перезахват в текущей точке. Без этого свободная ось на плече лишь
+        # держала скорость 0 на P kp 32: порыв 75 PWM-экв. → 2.3 м/с поперёк,
+        # RMS 0.7–0.97 против 0.49 у DpHold, худшее плечо 7.5 м (150448). После
+        # отпускания стика гвоздь снимается — заново по стопу (как прежде).
+        self.line_hold = line_hold
         # состояние
         self._pinx = self._piny = None     # гвоздь (мир); None = стик жив / не встал
+        self._pin_yaw = 0.0                # курс VINS при взятии гвоздя (линия, line_hold)
         self._pin_pending = False          # гвоздь заказан (стик жил, ждём стопа)
         self._pend_fwd = self._pend_rgt = False   # хвост защёлки по осям (latch_axis)
         self._moved = False                # ярус видел движение (|v| > _PIN_V)
@@ -262,18 +284,42 @@ class DpVins(StabilizationStrategy):
 
         # цель скорости (тело): стик → прямая; отпущен → внешний контур к гвоздю
         if stick:
-            self._pinx = self._piny = None     # точка отпущена
             self._pin_pending = True           # гвоздь заказан на ближайший стоп
             self._pend_fwd |= stick_fwd        # хвост защёлки — только движимой оси
             self._pend_rgt |= stick_rgt
-            self._st_fwd.release(False)        # брейк погашен (гвоздя нет)
-            self._st_rgt.release(False)
             # цель скорости тела: у VinsHold команда setpoint'а в осях тела
             # выходит (c_fwd·g, −c_right·g) — проекция мировой vsp(cmd) назад по
             # курсу; повторяем, иначе правый стик уводит борт влево
             tv_fwd = sp.c_fwd * self.cmd_gain
             tv_rgt = -sp.c_right * self.cmd_gain
+            if (self.line_hold and self._pinx is not None
+                    and not (stick_fwd and stick_rgt)):
+                # ЛИНИЯ: гвоздь остаётся, свободная ось держит его проекцию на
+                # себя в текущем курсе (см. __init__); курс ушёл — перезахват
+                dyaw = math.atan2(math.sin(s.vins_yaw - self._pin_yaw),
+                                  math.cos(s.vins_yaw - self._pin_yaw))
+                if abs(dyaw) > self._YAW_TOL:
+                    self._pinx, self._piny = s.vins_x, s.vins_y
+                    self._pin_yaw = s.vins_yaw
+                ex = self._pinx - s.vins_x
+                ey = self._piny - s.vins_y
+                if stick_fwd:
+                    self._st_fwd.release(False)
+                    tv_rgt = self._st_rgt.target(-ex * sn + ey * c, v_rgt)
+                else:
+                    self._st_rgt.release(False)
+                    tv_fwd = self._st_fwd.target(ex * c + ey * sn, v_fwd)
+            else:
+                self._pinx = self._piny = None     # точка отпущена
+                self._st_fwd.release(False)        # брейк погашен (гвоздя нет)
+                self._st_rgt.release(False)
         else:
+            if self._pin_pending and self._pinx is not None:
+                # стик отпущен после плеча с линией: гвоздь плеча снят — заново
+                # по стопу (возврат на всё плечо к старой точке не нужен)
+                self._pinx = self._piny = None
+                self._st_fwd.release(False)
+                self._st_rgt.release(False)
             speed = math.hypot(s.vins_vx, s.vins_vy)
             if speed > self._PIN_V:
                 self._moved = True             # ярус видел движение
@@ -290,6 +336,7 @@ class DpVins(StabilizationStrategy):
                     and (self._pin_pending or self._moved
                          or (self.pin_armed and self._trim_armed))):
                 self._pinx, self._piny = s.vins_x, s.vins_y   # ГВОЗДЬ по остановке
+                self._pin_yaw = s.vins_yaw
                 self._pin_pending = False
                 self._pend_fwd = self._pend_rgt = False
                 self._trim_armed = True      # первый стоп прошёл — ветер выучен
@@ -325,8 +372,12 @@ class DpVins(StabilizationStrategy):
         # → чистые стопы без возврата. На живом стике заморожен всегда.
         i_fwd = self._itx * c + self._ity * sn        # мировой трим (PWM) → тело (курс)
         i_rgt = -self._itx * sn + self._ity * c
-        po = self.psign * (self.kp_fwd * err_fwd + i_fwd)
-        ro = self.rsign * (self.kp_lat * err_rgt + i_rgt)
+        # прямая передача стика (ff, см. __init__): только на стик-цели; знак —
+        # как у P при v < цели (наклон в сторону цели)
+        ff_fwd = -self.ff * tv_fwd if (self.ff > 0.0 and stick_fwd) else 0.0
+        ff_rgt = -self.ff * tv_rgt if (self.ff > 0.0 and stick_rgt) else 0.0
+        po = self.psign * (self.kp_fwd * err_fwd + i_fwd + ff_fwd)
+        ro = self.rsign * (self.kp_lat * err_rgt + i_rgt + ff_rgt)
         # АНТИ-ВИНДАП: выход в упоре и ошибка толкает ГЛУБЖЕ — трим не мотать.
         # Так imax можно держать высоким (ветру нужен трим до ~ветра: при ветре
         # 10 ~100 PWM, кап 50 не держал — снос 1-1.3 м/с, унос 9-18 м,
@@ -390,8 +441,8 @@ class DpVins(StabilizationStrategy):
             # пересчёт выхода со свежим тримом (для среза; в упоре кламп ниже)
             i_fwd = self._itx * c + self._ity * sn
             i_rgt = -self._itx * sn + self._ity * c
-            po = self.psign * (self.kp_fwd * err_fwd + i_fwd)
-            ro = self.rsign * (self.kp_lat * err_rgt + i_rgt)
+            po = self.psign * (self.kp_fwd * err_fwd + i_fwd + ff_fwd)
+            ro = self.rsign * (self.kp_lat * err_rgt + i_rgt + ff_rgt)
         self._it = now
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
