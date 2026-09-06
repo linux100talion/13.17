@@ -280,6 +280,8 @@ ARGS=()
 # схема «SF-мастер» селектора (BS_SF_MASTER=1): SF (CH7) = мастер сырых стиков,
 # SC (CH6) = потолок лесенки демпфер/VinsHold/LOITER (⚠️ не под старые реплеи)
 [ -n "${BS_SF_MASTER:-}" ]       && ARGS+=(--sf-master "$BS_SF_MASTER")
+# гейты яруса 2 (LOITER) как у яруса 1: зрелость потока, удержание 5 с после выхода, закрытый мост = выход (config.loiter_guard)
+[ -n "${BS_LOITER_GUARD:-}" ]  && ARGS+=(--loiter-guard "$BS_LOITER_GUARD")
 # штатный LOITER-на-VINS: freefly-центр CH6 (BS_FF_LOITER=1) и бюджет гейта loiter<t>
 [ -n "${BS_FF_LOITER:-}" ]       && ARGS+=(--ff-loiter "$BS_FF_LOITER")
 [ -n "${BS_LOITER_ALT:-}" ]      && ARGS+=(--loiter-alt "$BS_LOITER_ALT")

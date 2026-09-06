@@ -8,6 +8,8 @@
 # «нос ведёт траекторию», крен виража ≤ 8° (YawBankLimit, ab_bank8); путь 1 (TrackHold,
 # стики в осях мира) выкл
 BS_FF_LOITER=1
+# гейты яруса 2 как у яруса 1 (зрелость потока, удержание 5 с после выхода, закрытый мост = выход): 0 = эталон, 1 = кандидат loiter/guard
+BS_LOITER_GUARD=0
 BS_MODE_BUDGET=80
 BS_LOITER_BANK_MAX=8
 BS_LOITER_TRACK=0

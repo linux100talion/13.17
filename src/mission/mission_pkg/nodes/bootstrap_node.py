@@ -1087,6 +1087,9 @@ def _parse() -> tuple:
     # потолок лесенки зрелости (см. config.sf_master; ⚠️ не под старые реплеи)
     p.add_argument('--sf-master', dest='sf_master', type=float, default=_D.sf_master)
     # штатный LOITER-на-VINS: freefly-селектор (центр CH6) и бюджет гейта loiter<t>
+    # гейты яруса 2 как у яруса 1: зрелость, удержание, мост (config.loiter_guard)
+    p.add_argument('--loiter-guard', dest='loiter_guard', type=float,
+                   default=_D.loiter_guard)
     p.add_argument('--ff-loiter', dest='ff_loiter', type=float, default=_D.ff_loiter)
     # гейт «в воздухе» LOITER-на-VINS, м (одна правда: Freefly+LoiterHold+HUD)
     p.add_argument('--loiter-alt', dest='loiter_alt', type=float,

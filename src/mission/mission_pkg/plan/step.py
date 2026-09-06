@@ -503,10 +503,22 @@ class Freefly(Step):
     def __init__(self, name, stack, keep="ALT_HOLD", pilot_stabs=None,
                  handover=None, loiter_center=False, vins_fresh=2.0,
                  sf_master=False, loiter_alt=1.5, land_gate=None,
-                 loiter_track=None, loiter_bank_max=0.0):
+                 loiter_track=None, loiter_bank_max=0.0, loiter_guard=False):
         self.name = name
         self.stack = stack
         self.keep = keep
+        # ГЕЙТЫ ЯРУСА 2 КАК У ЯРУСА 1 (loiter_guard, cmd/9, 2026-09-06): (1) ЗРЕЛОСТЬ —
+        # вход и удержание LOITER требуют vins_odom_count ≥ vins_min (после
+        # перерождения VINS мост латчит молодую раму с масштабом-лотереей, а
+        # extnav_ready после первой очереди истинен навсегда — LOITER верил ей
+        # сразу); (2) УДЕРЖАНИЕ TIER_HOLD_SEC после выхода по здоровью/зрелости/
+        # мосту — без него LOITER перезаходил первым же READY-тиком (дребезг);
+        # (3) МОСТ ЗАКРЫТ (brg=0, bridge_gate ray_tracer: скачок/шторм подтяжек/
+        # потолок, что vins_sane может не поймать) — выход из LOITER на демпфер за
+        # тик, иначе EKF слепнет и FCU сам уходит в LAND по EKF-failsafe (мы его
+        # уважаем — борт садится вместо перехода на демпфер). False = старое.
+        self.loiter_guard = loiter_guard
+        self._loiter_hold_until = -1e9
         self._pilot_stabs = pilot_stabs
         self.loiter_alt = loiter_alt   # гейт «в воздухе» (см. config.loiter_alt)
         # TrackHold яруса LOITER (config.loiter_track): стики roll/pitch — уставки
@@ -631,11 +643,22 @@ class Freefly(Step):
         # LOITER (_in_loiter=False) → _ladder_tier не форсит ярус 2 → падение на
         # демпфер (санити яруса 1 добивает), /restart — от фронта vins_sane.
         insane = self.handover is not None and not self.handover.vins_sane(s)
+        # loiter_guard (см. __init__): незрелый поток / закрытый мост — как «не sane»
+        immature = (self.loiter_guard and self.handover is not None
+                    and s.vins_odom_count < self.handover.min_count)
+        bridge_closed = (self.loiter_guard and getattr(s, 'bridge_seen', False)
+                         and not getattr(s, 'bridge_open', True))
+        held = self.loiter_guard and s.now_sim < self._loiter_hold_until
         if self._in_loiter:
-            if (not s.extnav_ready or fresh_age > 3.0 * self.vins_fresh or insane):
+            if (not s.extnav_ready or fresh_age > 3.0 * self.vins_fresh or insane
+                    or immature or bridge_closed):
                 self._in_loiter = False
+                if self.loiter_guard:
+                    self._loiter_hold_until = s.now_sim + self.TIER_HOLD_SEC
                 ctx.log.warn("    LOITER: {} — откат {}".format(
                     "VINS РАЗНЁССЯ (гейт здоровья)" if insane
+                    else "МОСТ VINS→EKF ЗАКРЫТ (bridge_gate)" if bridge_closed
+                    else "VINS ПЕРЕРОДИЛСЯ (незрелый поток)" if immature
                     else "VINS/extnav протух",
                     "на ярус ниже (лесенка)" if self.sf_master
                     else "в ALT_HOLD (стики = наклоны)"))
@@ -654,7 +677,8 @@ class Freefly(Step):
                                  "ФАКТИЧЕСКИ чистый ALT_HOLD, стики = наклоны; "
                                  "тумблер вверх вернёт наш стек"))
         elif (s.extnav_ready and fresh_age < self.vins_fresh
-                and (s.rel_alt or 0.0) > self.loiter_alt and not insane):
+                and (s.rel_alt or 0.0) > self.loiter_alt and not insane
+                and not immature and not bridge_closed and not held):
             self._in_loiter = True
             self._loiter_warned = False
             self._loiter_since = s.now_sim

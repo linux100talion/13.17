@@ -126,16 +126,20 @@ def make(loiter_center=True):
 
 
 def snap(t, lvl=0, sw=-1, alt=3.0, odom=0, vins_age=None, extnav=False,
-         mode="ALT_HOLD", vins_vx=0.0):
+         mode="ALT_HOLD", vins_vx=0.0, bridge=None):
     """vins_age: возраст последней одометрии, с (None = одометрии не было).
-    vins_vx: скорость VINS (для санити-гейта — >v_max = разнос)."""
-    return DroneState(mode=mode, armed=True, rel_alt=alt, now_sim=t,
-                      pilot_switch=sw, pilot_level=lvl,
-                      pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER,
-                      pilot_throttle=RC_CENTER, pilot_yaw=RC_CENTER,
-                      vins_odom_count=odom, vins_vx=vins_vx,
-                      vins_last_sim=(t - vins_age) if vins_age is not None else -1e9,
-                      extnav_ready=extnav)
+    vins_vx: скорость VINS (для санити-гейта — >v_max = разнос).
+    bridge: None = /nn1/bridge не было; True/False = мост открыт/закрыт (brg=)."""
+    s = DroneState(mode=mode, armed=True, rel_alt=alt, now_sim=t,
+                   pilot_switch=sw, pilot_level=lvl,
+                   pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER,
+                   pilot_throttle=RC_CENTER, pilot_yaw=RC_CENTER,
+                   vins_odom_count=odom, vins_vx=vins_vx,
+                   vins_last_sim=(t - vins_age) if vins_age is not None else -1e9,
+                   extnav_ready=extnav)
+    if bridge is not None:
+        s.bridge_seen, s.bridge_open = True, bool(bridge)
+    return s
 
 
 def tick_until(runner, clock, dur, dt=0.05, **kw):
@@ -370,6 +374,48 @@ tick_until(r, clock, 6.0, lvl=1, odom=20, vins_age=0.1)                 # зре
 check("rebirth: count 20 (<40) — ярус 0 держится", names(stack) == ['damper', 'yawd'])
 tick_until(r, clock, 1.0, lvl=1, odom=45, vins_age=0.1)                 # зрелость
 check("rebirth: count 45 (≥40) — ярус 1 вернулся", names(stack) == ['yawd', 'vins'])
+
+# --- 14. loiter_guard (cmd/9): гейты яруса 2 как у яруса 1 — зрелость потока,
+# удержание TIER_HOLD после выхода, закрытый мост VINS→EKF = выход. Без ручки
+# LOITER заходил на незрелом (реборн) потоке и не реагировал на мост.
+def make_guard(guard):
+    clock, mode = FakeClock(), FakeMode()
+    vins = FakeVins()
+    stack = FakeStack([DAMPER, YAWD])
+    step = Freefly("freefly", stack, pilot_stabs=[DAMPER, YAWD],
+                   handover=VinsHandover(vins, min_count=40, fresh_sec=2.0,
+                                         v_max=12.0, ipm_tol=4.0, sane_n=3),
+                   loiter_center=True, vins_fresh=2.0, sf_master=True, loiter_guard=guard)
+    runner = PlanRunner([step], clock, mode, FakeLog())
+    return runner, clock, mode, step
+# 14a. незрелый поток (odom 10 < 40): старое — LOITER заходит; guard — ждёт зрелости
+r0, c0, m0, st0 = make_guard(False)
+tick_until(r0, c0, 3.0, lvl=2, odom=10, vins_age=0.1, extnav=True)
+r1, c1, m1, st1 = make_guard(True)
+tick_until(r1, c1, 3.0, lvl=2, odom=10, vins_age=0.1, extnav=True)
+check("guard=0: LOITER заходит на незрелом потоке (odom 10 < 40) — старое",
+      st0._in_loiter and "LOITER" in m0.modes)
+check("guard=1: незрелый поток — LOITER не выбран", not st1._in_loiter and "LOITER" not in m1.modes)
+tick_until(r1, c1, 3.0, lvl=2, odom=500, vins_age=0.1, extnav=True)
+check("guard=1: поток созрел (odom 500) — LOITER выбран", st1._in_loiter)
+# 14b. перерождение в LOITER (odom → 1): выход + удержание 5 с, потом вход
+tick_until(r1, c1, 0.5, lvl=2, odom=1, vins_age=0.1, extnav=True, mode="LOITER")
+check("guard=1: перерождение (odom 1) в LOITER — выход", not st1._in_loiter)
+t_exit = c1.t
+tick_until(r1, c1, 3.0, lvl=2, odom=500, vins_age=0.1, extnav=True)
+check("guard=1: через 3 с после выхода при зрелом потоке — ещё удержание, LOITER не выбран",
+      not st1._in_loiter)
+tick_until(r1, c1, 3.0, lvl=2, odom=500, vins_age=0.1, extnav=True)
+check("guard=1: через 6 с — LOITER снова выбран", st1._in_loiter and c1.t - t_exit >= 5.0)
+# 14c. мост закрыт в LOITER (brg=0): выход; открыт + удержание прошло — вход
+tick_until(r1, c1, 0.5, lvl=2, odom=500, vins_age=0.1, extnav=True, mode="LOITER", bridge=False)
+check("guard=1: мост VINS→EKF закрыт — выход из LOITER", not st1._in_loiter)
+tick_until(r1, c1, 6.0, lvl=2, odom=500, vins_age=0.1, extnav=True, bridge=True)
+check("guard=1: мост открыт, удержание прошло — LOITER снова выбран", st1._in_loiter)
+r2, c2, m2, st2 = make_guard(False)
+tick_until(r2, c2, 3.0, lvl=2, odom=500, vins_age=0.1, extnav=True)
+tick_until(r2, c2, 1.0, lvl=2, odom=500, vins_age=0.1, extnav=True, mode="LOITER", bridge=False)
+check("guard=0: закрытый мост LOITER не отпускает — старое", st2._in_loiter)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FREEFLY LADDER OK" if ok_all else "❌ СБОЙ")

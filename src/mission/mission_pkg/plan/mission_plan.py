@@ -172,7 +172,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                                    if soft_land else None),
                         loiter_track=(TrackHold() if cfg.loiter_track > 0
                                       else None),
-                        loiter_bank_max=cfg.loiter_bank_max)]
+                        loiter_bank_max=cfg.loiter_bank_max,
+                        loiter_guard=cfg.loiter_guard > 0)]
         if soft_land:
             # кнопка SA → Freefly отдаёт NEXT (FREEFLY_LAND) → сюда; дизарм
             # руками по-прежнему завершает миссию из самого Freefly (FINISH)
