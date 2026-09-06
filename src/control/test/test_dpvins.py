@@ -613,6 +613,33 @@ vh26d.update(st(vx=0.05, t=100.05), Setpoint(), DT)
 pd = vh26d.update(st(vx=0.0, x=0.5, t=100.10), Setpoint(), DT).pitch - RC_CENTER
 check(f"ff не действует на цель станции (висение): {pc:+d} == {pd:+d}", pc == pd)
 
+# 27. ТОРМОЗ С ОТПУСКАНИЯ (settle_brake) и ГВОЗДЬ ПО ТАЙМАУТУ (pin_t), полёт 160730
+def released(settle_brake, pin_t=0.0):
+    vh = make(kp_fwd=40.0, kp_lat=32.0, ki=0.0, brake=5.0, brake_vmax=2.0, brake_t=-1.0,
+              settle_brake=settle_brake, pin_t=pin_t)
+    vh.seed_trim(0.0, 0.0, st()); t = 100.05
+    for i in range(5):                                        # стик вперёд, разгон 3 м/с
+        vh.update(st(vx=3.0, x=3.0 * DT * i, t=t), Setpoint(c_fwd=-0.6), DT); t += DT
+    return vh, t
+vh27a, t27 = released(False)
+pa = vh27a.update(st(vx=3.0, x=1.0, t=t27), Setpoint(), DT).pitch - RC_CENTER
+vh27b, t27b = released(True)
+pb = vh27b.update(st(vx=3.0, x=1.0, t=t27b), Setpoint(), DT).pitch - RC_CENTER
+check(f"отпущен на 3 м/с: settle_brake=0 → P·v = 120 ({pa:+d}); =1 → цель −2 (кап), упор 150 ({pb:+d})",
+      abs(pa) == 120 and abs(pb) == 150 and pa * pb > 0)
+check("settle_brake: фаза set/set (гвоздя нет), станция не задействована",
+      vh27b.station_phase()[:2] == ('set', 'set') and vh27b._pinx is None)
+pc = vh27b.update(st(vx=0.2, x=2.0, t=t27b + DT), Setpoint(), DT)
+check("settle_brake: скорость упала < pin_v → гвоздь по стопу", vh27b._pinx is not None)
+# pin_t: под ветром |v| держится 0.5 > pin_v — без таймаута гвоздя нет 10 с, с pin_t 3 — есть
+vh27c, t27c = released(False, pin_t=0.0); vh27d, t27d = released(False, pin_t=3.0)
+for i in range(int(4.0 / DT)):
+    vh27c.update(st(vx=0.5, x=1.0 + 0.5 * DT * i, t=t27c), Setpoint(), DT); t27c += DT
+    vh27d.update(st(vx=0.5, x=1.0 + 0.5 * DT * i, t=t27d), Setpoint(), DT); t27d += DT
+check("pin_t=0: 4 с на 0.5 м/с — гвоздя нет (унос без тормоза)", vh27c._pinx is None)
+check("pin_t=3: через 3 с — гвоздь принудительно, дальше BRAKE станции",
+      vh27d._pinx is not None and vh27d._st_fwd.braking)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ DPVINS OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

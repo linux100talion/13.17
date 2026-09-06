@@ -114,7 +114,8 @@ def _dpvins(cfg):
                   brake_t=cfg.dpvins_pos_brake_t,
                   latch_axis=cfg.dpvins_latch_axis > 0,
                   pin_armed=cfg.dpvins_pin_armed > 0,
-                  ff=cfg.dpvins_ff, line_hold=cfg.dpvins_line_hold > 0)
+                  ff=cfg.dpvins_ff, line_hold=cfg.dpvins_line_hold > 0,
+                  settle_brake=cfg.dpvins_settle_brake > 0, pin_t=cfg.dpvins_pin_t)
 
 
 def build_vins_stab(cfg):

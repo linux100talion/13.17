@@ -70,7 +70,7 @@ class DpVins(StabilizationStrategy):
                  pos_vmax=0.3, pos_acc=0.15, psign=1.0, rsign=1.0, vsmooth=0.1,
                  i_latch=True, trim_keep=True, brake=0.0, brake_v=0.25,
                  brake_vmax=1.0, brake_t=0.0, latch_axis=False, pin_armed=False,
-                 ff=0.0, line_hold=False):
+                 ff=0.0, line_hold=False, settle_brake=False, pin_t=0.0):
         self.kp_fwd, self.kp_lat = kp_fwd, kp_lat
         self.ki, self.imax, self.max = ki, imax, max_pwm
         self.ki_trim = ki_trim             # скорость обучения ДО первого гвоздя (0 = ki)
@@ -144,6 +144,21 @@ class DpVins(StabilizationStrategy):
         # RMS 0.7–0.97 против 0.49 у DpHold, худшее плечо 7.5 м (150448). После
         # отпускания стика гвоздь снимается — заново по стопу (как прежде).
         self.line_hold = line_hold
+        # ТОРМОЗ С МОМЕНТА ОТПУСКАНИЯ (settle_brake; cmd/8, полёт 160730): пока
+        # гвоздя нет (стик отпущен / вход на ходу), цель не 0, а −brake·v с капом
+        # brake_vmax — тот же закон BRAKE, что у станции, только без точки: стоп
+        # там, где отпустил (как BRAKE у LOITER). Без него выбег — чистый P с
+        # τ = 1/(α·kp) = 2.5 с при kp 40: с 5 м/с до гвоздя (0.3 м/с) 5–12 с и
+        # 7–16 м (демпфер: 2.4 с, 5 м — kp 90 плюс гвоздь при 0.75 и BRAKE ×4),
+        # а под ветром 0.3 не достигается вовсе — гвоздь не берётся, тормоза нет.
+        # Скорость гаснет → цель сама уходит в 0 → гвоздь по стопу как прежде.
+        self.settle_brake = settle_brake
+        # ГВОЗДЬ ПО ТАЙМАУТУ (pin_t, с; 0 = выкл): не встал за pin_t после
+        # отпускания — гвоздь принудительно (зеркало _POS_PIN_T демпфера 3 с):
+        # иначе на злом ветре |v| никогда не падает ниже порога и станция без
+        # точки вырождается в чистый P (полёт 160730: «гвоздь не взят» 8–11 с).
+        self.pin_t = pin_t
+        self._settle_since = None          # sim-старт торможения без гвоздя
         # состояние
         self._pinx = self._piny = None     # гвоздь (мир); None = стик жив / не встал
         self._pin_yaw = 0.0                # курс VINS при взятии гвоздя (линия, line_hold)
@@ -164,6 +179,7 @@ class DpVins(StabilizationStrategy):
         self._pin_pending = False
         self._pend_fwd = self._pend_rgt = False
         self._moved = False
+        self._settle_since = None
         self._st_fwd.reset()
         self._st_rgt.reset()
         self._brake_since = None
@@ -285,6 +301,7 @@ class DpVins(StabilizationStrategy):
         # цель скорости (тело): стик → прямая; отпущен → внешний контур к гвоздю
         if stick:
             self._pin_pending = True           # гвоздь заказан на ближайший стоп
+            self._settle_since = None          # торможение начнётся с отпускания
             self._pend_fwd |= stick_fwd        # хвост защёлки — только движимой оси
             self._pend_rgt |= stick_rgt
             # цель скорости тела: у VinsHold команда setpoint'а в осях тела
@@ -332,11 +349,19 @@ class DpVins(StabilizationStrategy):
             # 220204; демпфер той же болезнью болел — звон 10.7 с, лечился kp
             # 30→90 + автоматом станции). _moved отсекает ложный стоп на самом
             # входе: борт ещё не понесло, гвоздь тут съел бы фазу обучения.
-            if (speed < self._PIN_V and self._pinx is None
+            if self._pinx is None:
+                if self._settle_since is None:
+                    self._settle_since = s.now_sim
+            else:
+                self._settle_since = None
+            timeout = (self.pin_t > 0.0 and self._settle_since is not None
+                       and s.now_sim - self._settle_since > self.pin_t)
+            if ((speed < self._PIN_V or timeout) and self._pinx is None
                     and (self._pin_pending or self._moved
                          or (self.pin_armed and self._trim_armed))):
                 self._pinx, self._piny = s.vins_x, s.vins_y   # ГВОЗДЬ по остановке
                 self._pin_yaw = s.vins_yaw
+                self._settle_since = None
                 self._pin_pending = False
                 self._pend_fwd = self._pend_rgt = False
                 self._trim_armed = True      # первый стоп прошёл — ветер выучен
@@ -348,6 +373,11 @@ class DpVins(StabilizationStrategy):
                 # закон станции: BRAKE (−brake·v, пока уходим) / RETURN (√-кап)
                 tv_fwd = self._st_fwd.target(e_fwd, v_fwd)
                 tv_rgt = self._st_rgt.target(e_rgt, v_rgt)
+            elif self.settle_brake and self.brake > 0.0:
+                # тормоз без точки (см. __init__): −brake·v с капом, обе оси
+                vmax = self.brake_vmax if self.brake_vmax > 0.0 else self.pos_vmax
+                tv_fwd = clamp(-self.brake * v_fwd, -vmax, vmax)
+                tv_rgt = clamp(-self.brake * v_rgt, -vmax, vmax)
             else:
                 tv_fwd = tv_rgt = 0.0          # тормозим к нулю до гвоздя
 

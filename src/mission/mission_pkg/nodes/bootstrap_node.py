@@ -1160,6 +1160,10 @@ def _parse() -> tuple:
     p.add_argument('--dpvins-ff', dest='dpvins_ff', type=float, default=_D.dpvins_ff)
     p.add_argument('--dpvins-line-hold', dest='dpvins_line_hold', type=float,
                    default=_D.dpvins_line_hold)
+    # тормоз с отпускания и гвоздь по таймауту (config.dpvins_settle_brake / dpvins_pin_t)
+    p.add_argument('--dpvins-settle-brake', dest='dpvins_settle_brake', type=float,
+                   default=_D.dpvins_settle_brake)
+    p.add_argument('--dpvins-pin-t', dest='dpvins_pin_t', type=float, default=_D.dpvins_pin_t)
     # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
     p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
     p.add_argument('--land-alt-max', dest='land_alt_max', type=float,
