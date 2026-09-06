@@ -35,10 +35,11 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import CameraInfo, Imu
-from std_msgs.msg import Float64
+from std_msgs.msg import Bool, Float64, String
 from vision_msgs.msg import Detection2DArray
 
 from nav_pkg.nn1 import geo
+from nav_pkg.nn1.bridge_gate import BridgeGate
 from nav_pkg.nn1.frame_anchor import FrameAnchor, quat_yaw
 
 
@@ -80,6 +81,19 @@ class RayTracer(Node):
         # жёсткой подтяжки, м (0 = выкл) и τ мягкого дожима, с (0 = выкл).
         self.declare_parameter("anchor_relatch_m", 1.0)
         self.declare_parameter("anchor_tau_sec", 5.0)
+        # ГЕЙТ ЗДОРОВЬЯ МОСТА (bridge_gate.py; полёт 142811 — разнос VINS через
+        # 687 подтяжек якоря отравил ориентацию EKF, DpHold унесло): мост закрыт
+        # при |twist| > v_max, перерождении потока (дыра/скачок), шторме подтяжек
+        # (≥ n за win с) и по вердикту лётной ноды (/vins/sane), hold_sec латч.
+        self.declare_parameter("bridge_gate", True)
+        self.declare_parameter("bridge_v_max", 12.0)
+        self.declare_parameter("bridge_v_jump", 12.0)
+        self.declare_parameter("bridge_gap_sec", 1.0)
+        self.declare_parameter("bridge_relatch_n", 3)
+        self.declare_parameter("bridge_relatch_win", 5.0)
+        self.declare_parameter("bridge_hold_sec", 5.0)
+        self.declare_parameter("vins_sane_topic", "/vins/sane")
+        self.declare_parameter("vins_restart_topic", "/restart")
 
         self.db_path = self.get_parameter("db_path").value
         self.alpha = float(self.get_parameter("correction_alpha").value)
@@ -107,6 +121,17 @@ class RayTracer(Node):
         self.anchor = FrameAnchor(
             relatch_m=float(self.get_parameter("anchor_relatch_m").value),
             tau_sec=float(self.get_parameter("anchor_tau_sec").value))
+        self.gate = (BridgeGate(
+            v_max=float(self.get_parameter("bridge_v_max").value),
+            v_jump=float(self.get_parameter("bridge_v_jump").value),
+            gap_sec=float(self.get_parameter("bridge_gap_sec").value),
+            relatch_n=int(self.get_parameter("bridge_relatch_n").value),
+            relatch_win=float(self.get_parameter("bridge_relatch_win").value),
+            hold_sec=float(self.get_parameter("bridge_hold_sec").value))
+            if bool(self.get_parameter("bridge_gate").value) else None)
+        self._gate_open = True          # последнее состояние — для лога переходов
+        self._ext_sane = None           # вердикт лётной ноды (/vins/sane)
+        self._ext_wall = 0.0
 
         # I/O
         self.create_subscription(CameraInfo, self.get_parameter("camera_info_topic").value,
@@ -126,6 +151,14 @@ class RayTracer(Node):
         self.pub_anchor = self.create_publisher(PoseWithCovarianceStamped, "/nn1/anchor_pose", 10)
         self.pub_corr = self.create_publisher(Odometry, "/nn1/corrected_odom", 10)
         self.pub_drift = self.create_publisher(Vector3Stamped, "/nn1/drift", 10)
+        # состояние моста (open|closed причина подтяжек закрытий перерождений) —
+        # лётная нода кладёт в /mission/status (brg=…), пишется в bag
+        self.pub_bridge = self.create_publisher(String, "/nn1/bridge", 10)
+        if self.gate is not None:
+            self.create_subscription(Bool, self.get_parameter("vins_sane_topic").value,
+                                     self._on_vins_sane, 10)
+            self.create_subscription(Bool, self.get_parameter("vins_restart_topic").value,
+                                     self._on_vins_restart, 1)
 
         self.publish_vp = bool(self.get_parameter("publish_vision_pose").value)
         self.vp_frame = self.get_parameter("vision_pose_frame").value
@@ -163,6 +196,19 @@ class RayTracer(Node):
     def _on_rel_alt(self, msg):
         self.rel_alt = float(msg.data)
 
+    def _on_vins_sane(self, msg):
+        # вердикт гейта здоровья лётной ноды (handover.vins_sane, 20 Гц);
+        # протухает за 1 с (см. _on_vins) — без ноды мост живёт своими проверками
+        self._ext_sane = bool(msg.data)
+        self._ext_wall = time.time()
+
+    def _on_vins_restart(self, msg):
+        # наш /restart VINS: поток родится заново — якорь и гейт с чистого листа
+        if self.gate is not None and msg.data:
+            self.gate.reset()
+            self.anchor.reset()
+            self.get_logger().info("мост: /restart VINS — якорь кадра заново")
+
     def _on_ekf_pose(self, msg):
         p = msg.pose.position
         q = msg.pose.orientation
@@ -176,6 +222,28 @@ class RayTracer(Node):
         q = msg.pose.pose.orientation
         self.vins_pos = np.array([p.x, p.y, p.z])
         vins_yaw = quat_yaw(q.x, q.y, q.z, q.w)
+        # ГЕЙТ ЗДОРОВЬЯ МОСТА (bridge_gate.py): по штампу одометрии (одна шкала
+        # с потоком), |twist|, вердикту лётной ноды (свежий < 1 с)
+        gate_open = True
+        if self.gate is not None:
+            th = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            tv = msg.twist.twist.linear
+            ext = (self._ext_sane if time.time() - self._ext_wall < 1.0 else None)
+            gate_open = self.gate.on_odom(th, p.x, p.y, math.hypot(tv.x, tv.y), ext)
+            if self.gate.take_relatch():
+                self.anchor.reset()
+            if gate_open != self._gate_open:
+                self._gate_open = gate_open
+                if gate_open:
+                    self.get_logger().info("мост VINS→EKF ОТКРЫТ (якорь %s)" % (
+                        "заново" if not self.anchor.latched else "прежний"))
+                else:
+                    self.get_logger().warn(
+                        f"мост VINS→EKF ЗАКРЫТ: {self.gate.reason} (|v| "
+                        f"{math.hypot(tv.x, tv.y):.1f} м/с, закрытий {self.gate.closes}, "
+                        f"перерождений {self.gate.rebirths}) — vision_pose не идёт, "
+                        f"якорь заморожен")
+            self.pub_bridge.publish(String(data=self.gate.state_line(th)))
         # Якорение КАДРА (полёт 2026-08-20 №4): мир VINS рождается в точке его
         # инициализации — в воздухе, куда борт уже улетел от точки арма, а кадр
         # EKF считается от арма. Офсет кадров (9.6 м в том полёте) выносит
@@ -202,10 +270,20 @@ class RayTracer(Node):
         # связь стабильна. Если EKF умер в const_pos, его поза замирает и
         # слежение поведёт якорь к ней — фьюжн к тому моменту уже потерян
         # (in-flight aiding не рестартует, LV4), хуже не делает.
-        if (not self.have_fix and self.ekf_pos is not None
+        if (gate_open and not self.have_fix and self.ekf_pos is not None
                 and time.time() - self.ekf_pos_wall < 2.0):
             ev = self.anchor.update(self.vins_pos, vins_yaw,
                                     self.ekf_pos, self.ekf_yaw, time.time())
+            if ev == 'relatch' and self.gate is not None and self.gate.on_relatch(
+                    msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9):
+                # шторм подтяжек = разнос: мост закрыт, якорь заново
+                self.anchor.reset()
+                gate_open = False
+                self._gate_open = False
+                self.get_logger().warn(
+                    f"мост VINS→EKF ЗАКРЫТ: шторм подтяжек якоря "
+                    f"(№{self.anchor.relatch_n}, закрытий {self.gate.closes}) — "
+                    f"разнос VINS, якорь заново")
             if ev == 'latch':
                 self.get_logger().info(
                     f"кадр VINS заякорен на EKF: Δyaw="
@@ -244,7 +322,7 @@ class RayTracer(Node):
         # До латча якорь тождественен => прокидываем сырой VINS (нужно ArduPilot
         # для GPS-denied); после — в кадре EKF с вшитой коррекцией дрейфа.
         # Yaw-коррекция ПО ЗАСЕЧКЕ NN1 — отдельный шаг (якорь правит кадр).
-        if self.pub_vision is not None:
+        if self.pub_vision is not None and gate_open:
             vp = PoseStamped()
             vp.header = msg.header
             vp.header.frame_id = self.vp_frame

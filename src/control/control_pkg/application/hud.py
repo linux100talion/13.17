@@ -190,7 +190,8 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
             + _ladder_fields(s, ladder, fresh_sec, vins_min)
             + _frame_fields(s)
             + _wind_fields(s)
-            + _station_fields(s))
+            + _station_fields(s)
+            + _bridge_fields(s))
 
 
 def _gate_fields(s, loiter_alt, ripe_sec, ripe_min) -> str:
@@ -234,6 +235,18 @@ def _wind_fields(s) -> str:
     if vm >= 0.0:
         out += f" spd={vm:.2f}"
     return out
+
+
+def _bridge_fields(s) -> str:
+    """Мост VINS→EKF (ray_tracer, гейт здоровья bridge_gate.py): `brg=1/0` —
+    vision_pose идёт / мост закрыт, `brw=` — причина последнего закрытия
+    (reborn | vNN | relatch | ext | -), `brl=` — жёстких подтяжек якоря в окне,
+    `brc=` — закрытий за полёт. Полёт 142811: 687 подтяжек и отравленная
+    ориентация EKF были видны только в sim_nav.log. Только при живом мосте."""
+    if not getattr(s, 'bridge_seen', False):
+        return ""
+    return (f" brg={int(s.bridge_open)} brw={s.bridge_why} "
+            f"brl={s.bridge_relatch} brc={s.bridge_closes}")
 
 
 def _station_fields(s) -> str:

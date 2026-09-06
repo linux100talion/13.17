@@ -132,6 +132,13 @@ class DroneState:
     # 'заморожен ли И-член' 1/0 по осям. '' = стека со станцией нет (LOITER).
     st_phase: str = ""               # brk= : напр. 'hold/brk'
     st_ifz: str = ""                 # ifz= : напр. '0/1'
+    # Мост VINS→EKF (ray_tracer, /nn1/bridge; гейт здоровья bridge_gate.py):
+    # открыт/закрыт, причина последнего закрытия, подтяжек якоря в окне, закрытий
+    bridge_seen: bool = False        # сообщения моста были (иначе полей в статусе нет)
+    bridge_open: bool = True
+    bridge_why: str = "-"
+    bridge_relatch: int = 0
+    bridge_closes: int = 0
     # Оценка ветра EKF3 (drag-фьюжн) — фильтрованная, физика, во ВСЕХ режимах.
     # /mavros/wind_estimation (WIND msg от FCU), скорость воздушной массы в
     # мире ENU. ПЕРВИЧНЫЙ источник стрелки ветра HUD (windspeed.md). Требует

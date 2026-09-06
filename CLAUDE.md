@@ -142,6 +142,12 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   к VINS (сброс дрейфа) → `/nn1/anchor_pose`, `/nn1/corrected_odom`, `/nn1/drift`.
   Инкремент 3: публикует скорректированную позу в `/mavros/vision_pose/pose`
   (ArduPilot EK3 External Nav) — ray_tracer = единственный мост VINS→полётник.
+  **Гейт здоровья моста** (`nn1/bridge_gate.py`, с 2026-09-06): vision_pose не идёт и
+  якорь заморожен при |twist| > 12 м/с, перерождении потока (дыра/скачок позы),
+  шторме подтяжек якоря (≥3 за 5 с) и по вердикту лётной ноды `/vins/sane`;
+  перерождение → якорь латчится ЗАНОВО. Повод — полёт 142811: разнёсшийся VINS через
+  687 подтяжек отравил ориентацию EKF3 (крен/тангаж 6–12°, курс 20–33°), DpHold унесло.
+  Состояние моста — `/nn1/bridge` → `brg=/brw=/brl=/brc=` в `/mission/status`.
   Кадры выравнивает **`FrameAnchor`** (`frame_anchor.py`, офлайн-тест
   `src/nav/test/test_frame_anchor.py`): Δyaw + трансляция латчатся по паре поз
   EKF/VINS — мир монокуляра рождается с курсом первого кадра, и спавн с курсом

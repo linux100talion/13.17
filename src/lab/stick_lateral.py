@@ -6,7 +6,7 @@
 
 Сегменты стика — |rcp| или |rcr| > 20 PWM по /mission/status не короче --min-seg с;
 на каждом: ярус, стик в начале, средняя скорость вперёд и БОКОВАЯ скорость тела
-(right+, истина Gazebo /model/iris_cam/odometry в осях курса истины), её RMS, боковой
+(ЛЕВО+, как ipm_vlat; истина Gazebo /model/iris_cam/odometry в осях курса истины), её RMS, боковой
 снос ∫v_lat dt, трим стрелки ветра (wnp, wnr) в начале и в конце и его модуль — по нему
 видно, живёт ли трим на ходу (стоит → модуль и компоненты константы; вращается с курсом
 → модуль константа, компоненты едут). Запуск внутри nav (rosbag2_py):
@@ -73,7 +73,7 @@ def main():
     label, bag, _ = resolve(a.run)
     S, T = load(bag)
     tt = [x[0] for x in T]
-    print(f"# {label}: сегменты стика ≥ {a.min_seg:g} с; боковая скорость тела (right+) по истине "
+    print(f"# {label}: сегменты стика ≥ {a.min_seg:g} с; боковая скорость тела (лево+) по истине "
           f"Gazebo, курс истины; трим — стрелка ветра статуса (wnp, wnr)")
     print("  t0     t1   dur tier   rcp   rcr  vfwd  vlat_mean vlat_rms  lat_disp  трим начало→конец   |трим|")
     for t0, t1, d0 in segments(S, a.min_seg):

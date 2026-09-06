@@ -538,7 +538,7 @@ export BS_YAW_SMOOTH="${BS_YAW_SMOOTH:-5}"
 # (debug-HUD): joy_timeline показывает переходы «HUD: LOITER READY» / «HUD: ярус …».
 # /feature — счётчик фич трекера для строки FEAT пост-рендера HUD (hud_video.py);
 # PointCloud 10 sim-Гц — копейки против /image_color.
-export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /mission/status /feature /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /flow_dbg10 /mavros/imu/data}"
+export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/state /mission/status /feature /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /flow_dbg10 /mavros/imu/data /nn1/bridge /vins/sane}"
 export GDRIVE_UP="${GDRIVE_UP:-0}"
 export MP4="${MP4:-1}"
 export FRAMES="${FRAMES:-0}"    # JPEG-кадры не нужны (просьба 2026-08-22): только mp4

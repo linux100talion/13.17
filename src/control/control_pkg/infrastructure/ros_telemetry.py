@@ -14,7 +14,7 @@ from geometry_msgs.msg import PoseStamped, TwistWithCovarianceStamped
 from mavros_msgs.msg import RCIn, State
 from nav_msgs.msg import Odometry
 from rclpy.qos import qos_profile_sensor_data
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, String
 
 from ..application.ripeness import VinsRipeness
 from ..application.vins_track import VinsTrack
@@ -54,6 +54,8 @@ class RosTelemetry:
         # /odometry — фактический топик форка VINS-MONO-ROS2 (в ROS2 нет приватного
         # пространства ноды; старый /vins_estimator/odometry не имел издателя).
         node.create_subscription(Odometry, '/odometry', self._on_odom, 10)
+        # состояние моста VINS→EKF (ray_tracer bridge_gate) — в статус brg=/brw=/brl=/brc=
+        node.create_subscription(String, '/nn1/bridge', self._on_bridge, 10)
         node.create_subscription(RCIn, '/mavros/rc/in', self._on_rcin, qos_profile_sensor_data)
         node.create_subscription(Odometry, '/model/iris_cam/odometry', self._on_gt, 10)
         # Пульс позиции EKF: local_position публикуется, ПОКА у EKF есть позиция
@@ -134,6 +136,16 @@ class RosTelemetry:
             self._s.vins_vx, self._s.vins_vy = self._track.vx, self._track.vy
         self._s.vins_x, self._s.vins_y, self._s.vins_yaw = x, y, yaw
         self._s.vins_valid = True
+
+    def _on_bridge(self, m):
+        # 'open|closed <причина> <подтяжек в окне> <закрытий> <перерождений>'
+        w = m.data.split()
+        if len(w) >= 5:
+            self._s.bridge_open = (w[0] == 'open')
+            self._s.bridge_why = w[1]
+            self._s.bridge_relatch = int(w[2])
+            self._s.bridge_closes = int(w[3])
+            self._s.bridge_seen = True
 
     def reset_vins_stream(self) -> None:
         """Нода послала /restart VINS: поток объявлен оборванным ЗДЕСЬ И СЕЙЧАС,

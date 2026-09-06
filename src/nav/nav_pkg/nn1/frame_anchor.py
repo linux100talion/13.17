@@ -50,6 +50,15 @@ class FrameAnchor:
         self.relatch_n = 0            # счётчик жёстких подтяжек (для лога)
         self._last_wall = 0.0
 
+    def reset(self):
+        """Латч ЗАНОВО (перерождение потока VINS / шторм подтяжек, см.
+        bridge_gate.py): старые Δyaw и t — от прежней рамы, их дожим или подтяжка
+        делают мусор «консистентным» для EKF (полёт 142811: Δyaw +18° пережил
+        выздоровление VINS). До нового латча якорь тождественен."""
+        self.latched = False
+        self.yaw_off = 0.0
+        self.t = np.zeros(3)
+
     def rotate(self, p):
         """Rz(yaw_off) @ p — для позиций и world-скоростей VINS."""
         c, s = math.cos(self.yaw_off), math.sin(self.yaw_off)

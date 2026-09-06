@@ -402,6 +402,11 @@ class BootstrapArch2Node(Node):
             self._vins_restart_pub = self.create_publisher(Bool, '/restart', 1)
         # восстановление VINS после демоута-по-разносу (см. config.vins_restart_diverge)
         self._handover = handover
+        # ВЕРДИКТ ГЕЙТА ЗДОРОВЬЯ VINS → мосту ray_tracer (/vins/sane, каждый тик):
+        # мост закрывает vision_pose и морозит якорь по нему (bridge_gate.py) —
+        # полёт 142811: разнос VINS через мост отравил ориентацию EKF, DpHold унесло.
+        self._sane_pub = (self.create_publisher(Bool, '/vins/sane', 10)
+                          if handover is not None else None)
         self._restart_diverge = cfg.vins_restart_diverge > 0
         self._restart_cd = cfg.vins_restart_cd
         self._last_restart_t = -1e9
@@ -585,6 +590,10 @@ class BootstrapArch2Node(Node):
         # joy_timeline объясняет демоут яруса 1 при свежем и «медленном» VINS.
         if self._handover is not None:
             line += f" scl={self._handover.scale_trips}"
+        if self._sane_pub is not None:
+            # vins_sane идемпотентен в пределах тика (кэш по now_sim) — счётчики
+            # не двигаются дважды, если лесенка уже спросила
+            self._sane_pub.publish(Bool(data=bool(self._handover.vins_sane(s))))
         # переход гейта LOITER, яруса ИЛИ посадки — в лог (виден и в sim_nav.log)
         st = ' '.join(w for w in line.split()
                       if w.startswith(('st=', 'tier=', 'land=')))

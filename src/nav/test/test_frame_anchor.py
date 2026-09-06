@@ -137,6 +137,15 @@ an.update(np.zeros(3), math.radians(175.0), np.zeros(3),
 check("обёртка углов на ±180°: Δyaw = +6°",
       abs(math.degrees(an.yaw_off) - 6.0) < 1e-9)
 
+# reset(): латч заново (перерождение VINS / шторм подтяжек, bridge_gate.py)
+fa_r = FrameAnchor(relatch_m=1.0, tau_sec=5.0)
+fa_r.update(np.array([1.0, 2.0, 0.0]), 0.3, np.array([5.0, 5.0, 1.0]), 1.0, 0.0)
+fa_r.reset()
+check("reset(): якорь тождественен до нового латча",
+      (not fa_r.latched) and abs(fa_r.yaw_off) < 1e-12 and float(np.linalg.norm(fa_r.t)) < 1e-12)
+ev = fa_r.update(np.array([1.0, 2.0, 0.0]), 0.3, np.array([5.0, 5.0, 1.0]), 1.0, 1.0)
+check("после reset() первая пара — 'latch' (не 'relatch')", ev == 'latch' and fa_r.latched)
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FRAME ANCHOR OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)
