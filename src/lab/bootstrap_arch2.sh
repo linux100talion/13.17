@@ -345,6 +345,11 @@ ARGS=()
 [ -n "${BS_VINS_VEL_SRC:-}" ]          && ARGS+=(--vins-vel-src "$BS_VINS_VEL_SRC")
 # мягкая посадка по кнопке SA в freefly (config.ff_land): гейт «низко и стоим»,
 # скорость снижения ветки ALT_HOLD, где кнопка в /joy ('b0' | 'a7' | '')
+# общий ветровой трим ярусов 0/1 (config.wind_trim): 0 = у каждого яруса свой + посев (старое)
+[ -n "${BS_WIND_TRIM:-}" ]       && ARGS+=(--wind-trim "$BS_WIND_TRIM")
+# снимок устойчивого hold общего трима (config.wind_steady_*): серия, с; «стоим», м/с
+[ -n "${BS_WIND_STEADY_SEC:-}" ] && ARGS+=(--wind-steady-sec "$BS_WIND_STEADY_SEC")
+[ -n "${BS_WIND_STEADY_V:-}" ]   && ARGS+=(--wind-steady-v "$BS_WIND_STEADY_V")
 [ -n "${BS_FF_LAND:-}" ]         && ARGS+=(--ff-land "$BS_FF_LAND")
 # второе нажатие SA до касания отменяет посадку (config.ff_land_cancel): 0 = как раньше
 [ -n "${BS_FF_LAND_CANCEL:-}" ]  && ARGS+=(--ff-land-cancel "$BS_FF_LAND_CANCEL")

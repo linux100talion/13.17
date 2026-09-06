@@ -190,6 +190,7 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
             + _ladder_fields(s, ladder, fresh_sec, vins_min)
             + _frame_fields(s)
             + _wind_fields(s)
+            + _wind_trim_fields(s)
             + _station_fields(s)
             + _bridge_fields(s))
 
@@ -214,6 +215,18 @@ def _ladder_fields(s, ladder, fresh_sec, vins_min) -> str:
     t1, w1 = vinshold_gate(s, fresh_sec, vins_min)
     return (f" lvl={ladder.level} tier={ladder.tier} lat={ladder.latch_age:.1f}"
             f" t1={t1} w1={w1} vmin={vins_min}")
+
+
+def _wind_trim_fields(s) -> str:
+    """Общий ветровой трим WindTrim (BS_WIND_TRIM=1, wind_trim.py): `wt=` =
+    <устойчивость>/<вердикт входа>/<снимок>/<выучен>. Устойчивость: S — серия
+    устойчивого hold набрана (снимок обновляется), s — копится, - — нет;
+    вердикт последнего входа в ярус: L — живой трим, S — откат к снимку, N —
+    ноль (снимка не было); снимок — |снимок| в PWM каналов (-1 = нет); выучен
+    0/1. Поля нет при BS_WIND_TRIM=0. Разбор: joy_timeline/gust_hold_compare
+    по вердикту на фронтах tier=."""
+    wt = getattr(s, 'wt_state', '')
+    return f" wt={wt}" if wt else ""
 
 
 def _wind_fields(s) -> str:

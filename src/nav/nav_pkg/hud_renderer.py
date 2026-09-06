@@ -29,6 +29,20 @@ HUD_GREEN = (60, 200, 60)
 HUD_YELLOW = (0, 210, 240)
 HUD_RED = (50, 50, 230)
 HUD_WHITE = (235, 235, 235)
+# стрелка ветра из ТРИМА (wns=ipm/vins): гаснет ниже LO PWM, полная с HI (hud.md 3.13)
+WIND_ARROW_LO = 8.0
+WIND_ARROW_HI = 15.0
+
+
+def wind_arrow_fade(pwm, src) -> float:
+    """Яркость стрелки ветра 0..1 по |трим| PWM: 0 ниже WIND_ARROW_LO (стрелки
+    нет, подпись calm), 1 с WIND_ARROW_HI, между — линейно (без дребезга на
+    пороге). Только источники-тримы (IPM/VINS): направление слабого трима — шум
+    (полёты 185004/191610 «стрелка крутится», базовый ветер 1 м/с ≈ 6 PWM; 2 м/с
+    ≈ 15 PWM по стенду). Ветер EKF (LOITER) — всегда 1."""
+    if str(src).upper() not in ("IPM", "VINS"):
+        return 1.0
+    return max(0.0, min(1.0, (pwm - WIND_ARROW_LO) / (WIND_ARROW_HI - WIND_ARROW_LO)))
 HUD_SCENE = (0, 255, 255)
 # Причина брака кадра IPM (ipmf= в /mission/status) — та же таблица, что
 # FlowEstimator.ipm_fail. ⚠️ ТОЛЬКО ASCII: Hershey-шрифт OpenCV кириллицу не
@@ -316,6 +330,14 @@ class HudRenderer:
         pwm = math.hypot(p, r)
         spd = 10.0 * math.sqrt(pwm / 100.0)
         a = math.atan2(-r, p)              # куда дует, по часовой от носа
+        src = self.status.get("wns", "").upper()
+        # ЗАТУХАНИЕ СТРЕЛКИ ТРИМА (2026-09-06): ниже WIND_ARROW_LO PWM стрелки нет,
+        # к WIND_ARROW_HI — полная яркость, между — линейно (без дребезга на пороге).
+        # Направление слабого трима — шум (полёты 185004/191610: «стрелка крутится»
+        # при базовом ветре 1 м/с ≈ 6 PWM; ветер 2 м/с ≈ 15 PWM по стенду). Только
+        # для источников-тримов (IPM/VINS); ветер EKF (LOITER) рисуем как есть.
+        fade = wind_arrow_fade(pwm, src)
+        col = tuple(int(round(c * (0.25 + 0.75 * fade))) for c in HUD_WHITE)
         rad = round(34 * k)
         cx = frame.shape[1] - round(10 * k) - rad
         cy = frame.shape[0] - round(14 * k) - rad
@@ -326,14 +348,14 @@ class HudRenderer:
                  HUD_WHITE, thick)         # метка носа
         dx, dy = math.sin(a), -math.cos(a)
         e = 0.72 * rad
-        cv2.arrowedLine(frame, (round(cx - e * dx), round(cy - e * dy)),
-                        (round(cx + e * dx), round(cy + e * dy)),
-                        HUD_WHITE, thick + 1, tipLength=0.35)
-        src = self.status.get("wns", "").upper()
-        text = f"WIND {spd:.1f} {src}"
+        if fade > 0.0:
+            cv2.arrowedLine(frame, (round(cx - e * dx), round(cy - e * dy)),
+                            (round(cx + e * dx), round(cy + e * dy)),
+                            col, thick + 1, tipLength=0.35)
+        text = f"WIND {spd:.1f} {src}" if fade > 0.0 else f"WIND calm {src}"
         tw, _th, base, _t = self._metrics(k, text, 0.7)
         self._box(frame, k, frame.shape[1] - tw - round(10 * k),
-                  cy - rad - base - round(8 * k), text, HUD_WHITE, 0.7, None)
+                  cy - rad - base - round(8 * k), text, col, 0.7, None)
         # |скорость| того же датчика — СЛЕВА от компаса (как быстро реально
         # несёт по тому же сенсору, чей ветер показан). spd= в статусе, м/с;
         # поля нет (нет активного датчика) — числа не рисуем.

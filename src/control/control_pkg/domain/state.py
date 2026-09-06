@@ -125,6 +125,9 @@ class DroneState:
     wind_p: float = 0.0              # трим тангажа, PWM канала
     wind_r: float = 0.0              # трим крена, PWM канала
     wind_src: str = ""               # 'ekf' | 'ipm' (демпфер) | 'vins' (DpVins); '' = нет
+    wt_state: str = ""               # общий трим WindTrim (wt=): <устойчивость S/s/->/
+                                     # <вердикт входа L/S/N>/<снимок PWM, -1 нет>/<выучен>;
+                                     # '' = BS_WIND_TRIM=0 (wind_trim.py, hud._wind_trim_fields)
     vel_mag: float = -1.0            # |скорость| борта м/с активного датчика вида
                                      # (ярус 0: ipm_vfwd/vlat; ярусы 1/2: vins_vx/vy); -1 = нет
     # Фаза станции активного стабилизатора (нода пуллит station_phase() из стека

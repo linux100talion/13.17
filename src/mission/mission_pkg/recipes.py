@@ -118,10 +118,13 @@ def _dpvins(cfg):
                   settle_brake=cfg.dpvins_settle_brake > 0, pin_t=cfg.dpvins_pin_t)
 
 
-def build_vins_stab(cfg):
-    """Стабилизатор яруса 1 по cfg.vins_stab: 'dpvins' → DpVins, иначе VinsHold."""
+def build_vins_stab(cfg, wind=None):
+    """Стабилизатор яруса 1 по cfg.vins_stab: 'dpvins' → DpVins, иначе VinsHold.
+    wind — общий WindTrim (wind_trim.py): DpVins читает/пишет трим в него."""
     if str(cfg.vins_stab).lower() == 'dpvins':
-        return _dpvins(cfg)
+        st = _dpvins(cfg)
+        st.wind = wind
+        return st
     return VinsHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax, cfg.gz_max,
                     cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain,
                     kd_err=cfg.vins_kd_err > 0, i_latch=cfg.vins_i_latch > 0,
@@ -183,10 +186,12 @@ _STAB = {
 STAB_NAMES = tuple(_STAB)
 
 
-def build_stabilizers(cfg, spec):
+def build_stabilizers(cfg, spec, wind=None):
     """spec: имя или '+'-склейка ('DpRollHold+DpYawHold') → список стратегий (может быть пуст).
     Так «пульт + только yaw» = 'DpYawHold', «пульт + flow(roll)» = 'DpRollHold', боевой
-    пре-VINS = 'DpRollHold+DpYawHold', демпфер всех осей = 'DpHold'."""
+    пре-VINS = 'DpRollHold+DpYawHold', демпфер всех осей = 'DpHold'.
+    wind — общий WindTrim (wind_trim.py): рама станции демпфера (StationFrame) и DpVins
+    держат трим в нём; None — у каждого свой (как было)."""
     out = []
     for part in str(spec).split('+'):
         part = part.strip()
@@ -196,6 +201,12 @@ def build_stabilizers(cfg, spec):
             raise ValueError(f"неизвестный стабилизатор {part!r}; допустимо: {STAB_NAMES}")
         st = _STAB[part](cfg)
         if st is not None:
+            if wind is not None:
+                fr = getattr(st, "frame", None)
+                if fr is not None:
+                    fr.wind = wind                  # DpHold: рама общая обеим осям
+                if hasattr(st, "seed_trim"):
+                    st.wind = wind                  # DpVins в spec (VinsHold-ветка)
             out.append(st)
     return out
 

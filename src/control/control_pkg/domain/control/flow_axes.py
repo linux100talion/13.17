@@ -12,6 +12,7 @@ from ..rc import RC_CENTER, RcCommand, clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
 from .base import StabilizationStrategy
+from .station_keeper import HOLD
 from .flow_damper import _FlowDamper1D
 
 
@@ -382,4 +383,33 @@ class DpHold(StabilizationStrategy):
             out = x.update(s, sp, dt)
             for ax in x.axes:
                 setattr(rc, ax, getattr(out, ax))
+        wind = getattr(self.frame, "wind", None) if self.frame is not None else None
+        if wind is not None:
+            # снимок устойчивого hold для общего трима (wind_trim.py п.2); подпись
+            # рамой — в ярусе 1 композит тень, его наблюдения WindTrim отбросит
+            wind.observe(s.now_sim, self._wind_steady(s, wind), who=self.frame)
         return rc
+
+    def _wind_steady(self, s: DroneState, wind) -> bool:
+        """Устойчивый hold станции ОБЕИХ осей: гвоздь и фаза hold (не брейк, не
+        выбег, стик в центре), трим учится (не защёлка, не анти-виндап), кадр
+        канала свежий, |v| канала IPM < steady_v И VINS (если жив и свеж) не видит
+        движения — фантом канала (195742: IPM читал 0 при сносе 2 м/с) станция
+        сама не видит, чужой датчик видит."""
+        n = 0
+        for x in self._subs:
+            if getattr(x, "_axis", None) not in ("roll", "pitch"):
+                continue
+            st = getattr(x, "station", None)
+            if st is None or st.phase != HOLD or st.i_hold \
+                    or getattr(x, "_i_frozen", False) \
+                    or s.now_sim - x._last_ok_sim > x.stale:
+                return False
+            n += 1
+        if n == 0 or not s.ipm_ok \
+                or math.hypot(s.ipm_vfwd, s.ipm_vlat) > wind.steady_v:
+            return False
+        if s.vins_valid and s.now_sim - s.vins_last_sim < 0.5 \
+                and math.hypot(s.vins_vx, s.vins_vy) > wind.steady_v:
+            return False
+        return True
