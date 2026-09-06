@@ -92,6 +92,8 @@ def main():
     ap.add_argument('--scale-alt-max', type=float, default=4.0)
     ap.add_argument('--scale-hold', type=float, default=30.0)
     ap.add_argument('--dt', type=float, default=0.05)
+    ap.add_argument('--vins-scale', type=float, default=1.0,
+                    help='ЭМУЛЯЦИЯ коллапса масштаба: скорость VINS × k (0.2 = реборн с масштабом 0.2)')
     a = ap.parse_args()
 
     od, d8, d9, stat, gt = load(a.bag)
@@ -101,7 +103,7 @@ def main():
     tr, vel = VinsTrack(), []
     for t, x, y in od:
         tr.on_odom(t, x, y)
-        vel.append((t, tr.vx, tr.vy))
+        vel.append((t, tr.vx * a.vins_scale, tr.vy * a.vins_scale))
     T_od = [v[0] for v in vel]
     T8 = [x[0] for x in d8]
     T9 = [x[0] for x in d9]
@@ -162,7 +164,8 @@ def main():
           f"{alt_max if alt_max is not None else '--'} м")
     print(f"  ручки: v_max {a.v_max} sane_n {a.sane_n} hover_v {a.hover_v} "
           f"scale ratio {a.scale_ratio} ipm_min {a.scale_ipm_min} sec {a.scale_sec} "
-          f"alt_max {a.scale_alt_max} hold {a.scale_hold}")
+          f"alt_max {a.scale_alt_max} hold {a.scale_hold}"
+          + (f" | ЭМУЛЯЦИЯ: VINS × {a.vins_scale}" if a.vins_scale != 1.0 else ""))
     print(f"  фронты sane→insane: {len(events)}; тиков insane {insane_ticks} "
           f"({insane_ticks * a.dt:.1f} с); тиков с условием занижения "
           f"{under_ticks} ({under_ticks * a.dt:.1f} с); срабатываний чека занижения "
