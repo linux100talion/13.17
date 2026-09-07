@@ -17,7 +17,8 @@ src/
   nav/         — пакет nav_pkg: нейросети навигации (NN1/NN2, пока болванки)
                  + openhd_streamer (даунлинк в OpenHD с оверлеем детекций)
   orin_shutdown/ — Go-утилита graceful shutdown через MAVLink
-distro/        — деплой на Orin (etc/, home/andriy/, usr/) — systemd, сети, скрипты
+distro/        — деплой на Orin (etc/, home/andriy/, usr/, doc/, deploy.sh) —
+                 ⚠️ ЗАМОРОЖЕН как есть до этапа деплоя (см. «Боевой стек»)
 tools/mdtopdf/ — генератор CLAUDE.pdf (reportlab)
 ```
 
@@ -236,7 +237,18 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 
 **Systemd (в `distro/etc/systemd/system/`):** `mavros`, `vins`/`vins_m`
 (запуск VINS; суффикс `_m` = ручной режим без ожидания арминга),
-`auto-bag`/`auto-bag-m`, `orin-shutdown`. Скрипты — `distro/home/andriy/`.
+`auto-bag`/`auto-bag-m`, `orin-shutdown`. Скрипты — `distro/home/andriy/vins_ws/`.
+
+> ⚠️ **`distro/` ЗАМОРОЖЕН до отдельного этапа деплоя на дрон** (решение
+> 2026-09-07): каталог — снимок старого состояния Jetson, залитый как есть
+> (коммит 49f66d8), НЕ источник кода и не трогать при работе над симуляцией.
+> Известные несоответствия, разобрать ПРИ ДЕПЛОЕ: `vins_ws/vins_service*.sh`
+> запускают python `cam_node.py` вместо C++ `camera_node` и не поднимают
+> `openhd_streamer` (актуальная версия скриптов — `git show 634119d:distro/home/andriy/vins_service.sh`);
+> `vins_ws/src/plus/cuda/camera_node.cpp` — древний монолит с битой строкой
+> x264enc (боевой код — `src/camera/`, едет в контейнер bind mount'ом);
+> заглушка `usr/local/bin/orin_shutdown__bin` удалена. Секреты
+> (`doc/ssh-keys/jetson`, `doc/wifi.txt`) — в `.gitignore`, репо публичный.
 
 ---
 
