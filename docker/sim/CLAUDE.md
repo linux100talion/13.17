@@ -27,8 +27,11 @@ speed.md                    — шпаргалка: чем ограничена 
                               PSC_ANGLE_MAX/LOIT_SPEED_MS; терминальные v)
 env.default                 — ЭТАЛОН .env (коммитится): .env при отсутствии сеется
                               его копией автоматически (make ensure-env / freefly_lv)
-env.md                      — шпаргалка: .env — локальный профиль бокса (кто читает,
-                              лесенка приоритетов, текущие ключи LV/BS_SF_MASTER/WORLD)
+env.md                      — шпаргалка: слои ручек прогона (профили cmd/ + profiles/ >
+                              env > .env > freefly_lv > нода), .env как профиль бокса,
+                              6 настоящих ключей env.default + 13 дублей BS_* профилей
+rviz.md                     — шпаргалка: bag прогона в RViz2 на хосте (src/lab/bag_rviz.sh:
+                              путь, стрелка носа, видео; почему «jump back in time»)
 CMD.txt                     — актуальные заметки (холодный старт; Q.txt —
                               вопросы-ответы по freefly — переехал в doc/tmp/)
 LV1_loiter.md               — путь до LOITER-на-VINS в профиле LV=1 (GPS жив на

@@ -5,7 +5,9 @@
 #   bash cmd/bl/bl.sh            # B: WindTrim ВКЛ (wind/trim.txt)
 #   WT=0 bash cmd/bl/bl.sh       # A: старое — свой трим у каждого яруса + посев (wind/baseline.txt)
 # Зачем и что меняет — README.txt рядом. WIND_SPD / WIND_GUST снаружи перекрывают дефолты строки
-# (env сильнее профиля — см. src/control/profiles/README.md). Доп. аргументы → freefly_lv.sh.
+# (они через ${X:-…}); ключи BS_* из профилей, наоборот, перекрывают внешний env и .env —
+# профиль = голые KEY=VALUE через set -a (см. src/control/profiles/README.md, docker/sim/env.md).
+# Доп. аргументы → freefly_lv.sh.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
