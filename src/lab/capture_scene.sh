@@ -160,22 +160,50 @@ fi
 # В НАЧАЛЕ прогона: с хоста удаляем старый bag, кадры и видео; на Google Drive
 # чистим корневую папку проекта (ТОЛЬКО её, GDRIVE_ROOT). Свежие артефакты этого
 # прогона создаются ниже.
+# ⚠️ ЗДЕСЬ УМИРАЕТ BAG ПРОШЛОГО ПРОГОНА. С 2026-09-07 freefly_lv кладёт в архив
+# КОПИЮ, а настоящий каталог оставляет в output/scene_bag — чтобы сразу после
+# записи из него играл `ros2 bag play` и работали инструменты с дефолтным
+# SCENE_BAG. Живёт он ровно до этой строки, то есть до старта следующего прогона;
+# архив joystick/<NAME>/bag не трогаем. Если прогон шёл с KEEP_BAG=0 или архив не
+# получился — здесь пропадает единственная копия (freefly_lv предупреждает вслух).
 log "очистка артефактов прошлого прогона"
-echo "  хост: rm $OUTPUT_DIR/scene_bag*  +  $IMG_HOST (кадры + scene.mp4)"
+echo "  хост: чищу СОДЕРЖИМОЕ $OUTPUT_DIR/scene_bag (сама папка остаётся)" \
+     "+ rm $IMG_HOST (кадры + scene.mp4)"
+# САМ КАТАЛОГ scene_bag НЕ УДАЛЯЕТСЯ НИКОГДА (решение 2026-09-07) — чистим только
+# содержимое. Удалить и создать заново нельзя даже «на миг»: это ДРУГОЙ inode, и
+# всё, что держало каталог (терминал с cd, открытый дескриптор, наблюдатель),
+# оказывается в удалённой директории. Поэтому rosbag2 пишет в свой временный
+# каталог output/.rec (он отказывается писать в существующий: «Output folder
+# 'scene_bag' already exists», флага overwrite в Humble нет — проверено), а на
+# стопе записи файлы ПЕРЕЕЗЖАЮТ в эту же папку (шаги 2 и 4). Соседей вида
+# scene_bag_* (старые имена, оборванные прогоны) и остатки .rec сносим целиком.
 # Бэг/кадры пишет root ВНУТРИ контейнера; на хосте под обычным юзером (ноут, в
 # отличие от root-бокса GCE) rm упирается в права. Остатки добиваем через
 # контейнер (root); output/ — общий bind mount, путь в контейнере фиксирован.
-rm -rf "$OUTPUT_DIR"/scene_bag* "$IMG_HOST" 2>/dev/null || true
-if compgen -G "$OUTPUT_DIR/scene_bag*" >/dev/null || [ -e "$IMG_HOST" ]; then
+rm -rf "$OUTPUT_DIR"/scene_bag/* "$OUTPUT_DIR"/scene_bag/.[!.]* 2>/dev/null || true
+find "$OUTPUT_DIR" -maxdepth 1 -name 'scene_bag?*' -exec rm -rf {} + 2>/dev/null || true
+rm -rf "$OUTPUT_DIR/.rec" "$IMG_HOST" 2>/dev/null || true
+# «грязно» = в scene_bag что-то осталось, или жив сосед scene_bag_*, или scene_img
+bag_dirty() {
+    [ -n "$(ls -A "$OUTPUT_DIR/scene_bag" 2>/dev/null || true)" ] && return 0
+    compgen -G "$OUTPUT_DIR/scene_bag?*" >/dev/null && return 0
+    [ -e "$OUTPUT_DIR/.rec" ] && return 0
+    [ -e "$IMG_HOST" ] && return 0
+    return 1
+}
+if bag_dirty; then
     echo "  хост: артефакты принадлежат root — удаляю через контейнер $NAV"
     docker start "$NAV" >/dev/null 2>&1 || true
     docker exec "$NAV" bash -c \
-        'rm -rf /root/sim_ws/output/scene_bag* /root/sim_ws/output/scene_img' || {
+        'rm -rf /root/sim_ws/output/scene_bag/* /root/sim_ws/output/scene_bag/.[!.]*;
+         find /root/sim_ws/output -maxdepth 1 -name "scene_bag?*" -exec rm -rf {} +;
+         rm -rf /root/sim_ws/output/.rec /root/sim_ws/output/scene_img' || {
         echo "ОШИБКА: не смог удалить root-артефакты (контейнер $NAV недоступен)." >&2
-        echo "  вручную: docker exec $NAV rm -rf /root/sim_ws/output/scene_bag* /root/sim_ws/output/scene_img" >&2
+        echo "  вручную: docker exec $NAV rm -rf /root/sim_ws/output/scene_bag/* /root/sim_ws/output/scene_img" >&2
         exit 1
     }
 fi
+mkdir -p "$OUTPUT_DIR/scene_bag"   # папка живёт между прогонами (пустая — это норма)
 mkdir -p "$IMG_HOST"        # каталог нужен make_video.py (пишет сюда scene.mp4)
 if [ "$GDRIVE_UP" = "1" ] && [ -n "$GDRIVE_ROOT" ] && [ "$GDRIVE_ROOT" != "/" ]; then
     if rclone listremotes 2>/dev/null | grep -qx "${GDRIVE_REMOTE}:"; then
@@ -231,7 +259,16 @@ fi
 # ── 2. старт записи rosbag (вокруг всей последовательности команд) ─────────────
 if [ "$RECORD" = "1" ]; then
     log "старт записи rosbag $TOPIC + $POSE_TOPIC${TOPICS_EXTRA:+ + $TOPICS_EXTRA}"
-    docker exec "$NAV" bash -lc "$SRC; cd /root/sim_ws/output && exec ros2 bag record -o scene_bag $TOPIC $POSE_TOPIC $TOPICS_EXTRA" &
+    # ПИШЕМ ВО ВРЕМЕННЫЙ РОДИТЕЛЬСКИЙ КАТАЛОГ output/.rec, а не прямо в scene_bag:
+    # rosbag2 (Humble) не пишет в существующий каталог («[ERROR] [ros2bag]: Output
+    # folder 'scene_bag' already exists», флага overwrite нет — проверено 2026-09-07),
+    # а удалять и пересоздавать живую папку нельзя: другой inode ломает всех, кто её
+    # держит. Имя внутри .rec — ТО ЖЕ scene_bag, поэтому файлы получаются штатные
+    # (scene_bag_0.db3 + metadata.yaml с теми же относительными путями), и шаг 4
+    # просто переносит их в постоянную папку (rename на том же ФС — мгновенно).
+    rm -rf "$OUTPUT_DIR/.rec" 2>/dev/null || true
+    mkdir -p "$OUTPUT_DIR/.rec"
+    docker exec "$NAV" bash -lc "$SRC; cd /root/sim_ws/output/.rec && exec ros2 bag record -o scene_bag $TOPIC $POSE_TOPIC $TOPICS_EXTRA" &
     sleep 3
 fi
 
@@ -278,7 +315,35 @@ done
 if [ "$RECORD" = "1" ]; then
     log "стоп записи rosbag"
     docker exec "$NAV" pkill -INT -f "ros2 bag record" || true
-    sleep 2
+    # metadata.yaml рекордер дописывает уже ПОСЛЕ SIGINT — ждём его по факту
+    # (фиксированный sleep 2 на медленном боксе иногда не покрывал финализацию).
+    for _ in $(seq 1 15); do
+        [ -f "$OUTPUT_DIR/.rec/scene_bag/metadata.yaml" ] && break
+        sleep 1
+    done
+    # ФАЙЛЫ — В ПОСТОЯННУЮ ПАПКУ (см. шаг 2): mv содержимого, сам каталог scene_bag
+    # не трогаем, его inode тот же, что был до прогона. Изнутри контейнера (root):
+    # bag пишет root, а с хоста под обычным юзером mv упирается в права.
+    MOVE='set -e; shopt -s dotglob nullglob
+        src=/root/sim_ws/output/.rec/scene_bag; dst=/root/sim_ws/output/scene_bag
+        [ -f "$src/metadata.yaml" ] || exit 3
+        mkdir -p "$dst"; mv "$src"/* "$dst"/
+        rmdir "$src" /root/sim_ws/output/.rec 2>/dev/null || true'
+    RC_MOVE=0
+    docker exec "$NAV" bash -c "$MOVE" 2>/dev/null || RC_MOVE=$?
+    if [ "$RC_MOVE" != "0" ]; then      # контейнер недоступен/права — пробуем с хоста
+        ( set -e; shopt -s dotglob nullglob
+          [ -f "$OUTPUT_DIR/.rec/scene_bag/metadata.yaml" ] || exit 3
+          mv "$OUTPUT_DIR"/.rec/scene_bag/* "$OUTPUT_DIR"/scene_bag/
+          rmdir "$OUTPUT_DIR/.rec/scene_bag" "$OUTPUT_DIR/.rec" 2>/dev/null || true
+        ) 2>/dev/null && RC_MOVE=0
+    fi
+    case "$RC_MOVE" in
+        0) echo "  bag: $BAG_HOST (папка та же, что была до прогона — inode не менялся)" ;;
+        3) echo "⚠️ metadata.yaml не появился — запись не состоялась (рекордер не стартовал?)" >&2 ;;
+        *) echo "⚠️ НЕ СМОГ перенести запись в $BAG_HOST (rc=$RC_MOVE) — bag лежит в" >&2
+           echo "   $OUTPUT_DIR/.rec/scene_bag; забери руками, следующий прогон его сотрёт" >&2 ;;
+    esac
     du -sh "$BAG_HOST" 2>/dev/null || true
 else
     log "ГОТОВО (без записи: RECORD=0)"

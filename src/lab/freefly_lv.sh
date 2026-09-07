@@ -279,7 +279,7 @@ bash "$SCRIPT_DIR/capture_scene.sh" "$RES" bootstrap_arch2 || RC=$?
 # чистая камера. scene_hud.mp4 = тот же полёт глазами пилота OpenHD:
 # hud_video.py восстанавливает оверлей из топиков bag ТЕМ ЖЕ кодом
 # (nav_pkg/hud_renderer.py), что рисует живой поток.
-if [ "${HUD_MP4:-1}" = "1" ] && [ -d "$SIMDIR/output/scene_bag" ]; then
+if [ "${HUD_MP4:-1}" = "1" ] && [ -f "$SIMDIR/output/scene_bag/metadata.yaml" ]; then
     echo "=== пост-рендер debug-HUD (scene_hud.mp4) ==="
     docker exec "$NAV" bash -lc 'source /opt/ros/humble/setup.bash;
         source /opt/overlay/install/setup.bash;
@@ -295,7 +295,7 @@ fi
 # истиной Gazebo. Конфиг канала — из ЭТОГО окружения (те же BS_*, что летели),
 # поэтому проброс BS_* тем же автосписком, что в capture_scene.sh (рукописный
 # белый список уже терял ручки молча).
-if [ "${IPM_MP4:-1}" = "1" ] && [ -d "$SIMDIR/output/scene_bag" ]; then
+if [ "${IPM_MP4:-1}" = "1" ] && [ -f "$SIMDIR/output/scene_bag/metadata.yaml" ]; then
     echo "=== пост-рендер канала вида сверху (scene_ipm.mp4) ==="
     # лётный конфиг канала — из тех же профилей (BootstrapConfig.from_run → PROFILES)
     docker exec -e PROFILES "$NAV" bash -lc 'source /opt/ros/humble/setup.bash;
@@ -349,19 +349,50 @@ elif [ "${IPM_MP4:-1}" = "1" ]; then
     echo "⚠️ scene_ipm.mp4 нет (ipm_video.py упал или bag не писался)" >&2
 fi
 if [ "$KEEP_BAG" = "1" ]; then
-    if [ -d "$SIMDIR/output/scene_bag" ]; then
-        # mv — ИЗНУТРИ контейнера (root): bag создан root'ом, а перенос каталога
-        # в другой родитель требует записи на сам каталог (обновляется его "..") —
-        # с хоста (andriy) это Permission denied. Так пропал bag прогона 182409.
-        if docker exec "$NAV" mv /root/sim_ws/output/scene_bag \
-                "/root/sim_ws/output/joystick/$NAME/bag" 2>/dev/null \
-           || mv "$SIMDIR/output/scene_bag" "$RUN_DIR/bag" 2>/dev/null; then
-            echo "    bag → joystick/$NAME/bag ($(du -sh "$RUN_DIR/bag" 2>/dev/null | cut -f1))"
+    if [ -f "$SIMDIR/output/scene_bag/metadata.yaml" ]; then
+        # КОПИЯ, А НЕ ПЕРЕЕЗД (2026-09-07): в архив едет копия, а НАСТОЯЩИЙ bag
+        # остаётся в output/scene_bag до следующего прогона. Раньше был mv, и
+        # привычный путь исчезал ровно в тот момент, когда он нужен больше всего —
+        # сразу после записи: `ros2 bag play output/scene_bag`, analyze.sh без RUN и
+        # всё, что знает SCENE_BAG по умолчанию (drift_check, attitude, hud_video,
+        # ipm_video, extract_frames, analyze_*.py в output/), приходилось переучивать
+        # на новый путь. Вариант «оставить симлинк на архив» отвергнут (решение
+        # 2026-09-07): играть и разбирать — из настоящего каталога, не через ссылку.
+        # Цена — двойной объём (bag 2+ ГБ) до старта следующего
+        # прогона, который снесёт output/scene_bag* (capture_scene, шаг 0); архив цел.
+        # Копируем СНАЧАЛА С ХОСТА (после capture_scene файлы уже наши: chown_output
+        # в его trap) — так копия сразу host-owned. Если прав нет (chown не прошёл,
+        # bag остался root'овым) — тем же копированием изнутри контейнера, там мы root,
+        # и возвращаем владельца хосту. Между попытками чистим цель: cp -r в
+        # СУЩЕСТВУЮЩИЙ каталог кладёт вложенный scene_bag/, а не заменяет.
+        BAG_OK=0
+        rm -rf "$RUN_DIR/bag" 2>/dev/null || true
+        if cp -r "$SIMDIR/output/scene_bag" "$RUN_DIR/bag" 2>/dev/null; then
+            BAG_OK=1
         else
-            echo "⚠️ bag НЕ переехал (mv не удался) — остался в output/scene_bag" >&2
+            rm -rf "$RUN_DIR/bag" 2>/dev/null || true
+            # именно `if`, а не `cmd && BAG_OK=1`: под `set -e` упавший последний
+            # AND-список в теле else уронил бы весь шаг 4 (архив остался бы без
+            # joy.log/сценария), а мы хотим предупредить и доделать остальное
+            if docker exec "$NAV" bash -lc "rm -rf '/root/sim_ws/output/joystick/$NAME/bag';
+                    cp -r /root/sim_ws/output/scene_bag '/root/sim_ws/output/joystick/$NAME/bag' &&
+                    chown -R $(id -u):$(id -g) '/root/sim_ws/output/joystick/$NAME/bag'" 2>/dev/null; then
+                BAG_OK=1
+            fi
+        fi
+        if [ "$BAG_OK" = "1" ]; then
+            echo "    bag → joystick/$NAME/bag ($(du -sh "$RUN_DIR/bag" 2>/dev/null | cut -f1)),"
+            echo "         оригинал остался в output/scene_bag — играть можно сразу:"
+            echo "         ros2 bag play docker/sim/output/scene_bag  (живёт до следующего прогона)"
+        else
+            echo "⚠️ bag НЕ скопировался в архив — есть только output/scene_bag," >&2
+            echo "   и его сотрёт следующий прогон: забери руками (cp -r) прямо сейчас" >&2
         fi
     else
-        echo "⚠️ output/scene_bag нет — запись не состоялась (RECORD=0 или прогон упал)" >&2
+        # каталог output/scene_bag теперь живёт между прогонами (пустой — норма),
+        # поэтому судим по metadata.yaml: нет его — записи не было
+        echo "⚠️ в output/scene_bag нет metadata.yaml — запись не состоялась " \
+             "(RECORD=0 или прогон упал)" >&2
     fi
 fi
 if [ -f "$SIMDIR/output/joy.log" ]; then
