@@ -324,6 +324,7 @@ class WaitEkfPos(Step):
         self.budget = budget
         self.fresh_sec = fresh_sec
         self.keep = keep
+        self._tel_warned = -1e9      # elapsed последнего предупреждения о телеметрии
 
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=self.throttle)
@@ -331,9 +332,26 @@ class WaitEkfPos(Step):
         if (s.now_sim - s.ekf_pos_last_sim) < self.fresh_sec:
             ctx.log.info(f"    {self.name}: EKF держит позицию — к арму")
             return _next(rc)
+        # Позицию EKF судим по /mavros/local_position — а его нет и без позиции, и
+        # когда MAVROS вообще не получает потоков от FCU (RAW_IMU/ATTITUDE/POSITION
+        # шлются только по запросу). Прогон 122716: 200 с «EKF не захватил» при
+        # живом мосте позы — молчала телеметрия. Различаем по IMU (tel_last_sim):
+        # молчит IMU → это не EKF, потоки запросит сторож ноды (_telemetry_watch).
+        tel_silent = (s.now_sim - s.tel_last_sim) > self.fresh_sec
+        if tel_silent and ctx.elapsed() - self._tel_warned > 10.0:
+            self._tel_warned = ctx.elapsed()
+            ctx.log.warn(f"    {self.name}: телеметрия FCU молчит (нет /mavros/imu/data "
+                         f"{ctx.elapsed():.0f} с) — позицию EKF судить не по чему; "
+                         "потоки не запрошены/не идут, сторож ноды запрашивает сам")
         if ctx.elapsed() > self.budget:
-            ctx.log.warn(f"⚠️ {self.name}: EKF не захватил позицию за "
-                         f"{self.budget:g} с — дальше (loiter пропустится гейтом)")
+            if tel_silent:
+                ctx.log.warn(f"⚠️ {self.name}: телеметрия FCU так и не пошла за "
+                             f"{self.budget:g} с (нет IMU) — EKF тут ни при чём; дальше "
+                             "(loiter пропустится гейтом), см. nav_up/stream_rate.log")
+            else:
+                ctx.log.warn(f"⚠️ {self.name}: EKF не захватил позицию за "
+                             f"{self.budget:g} с (телеметрия идёт, local_position нет) — "
+                             "дальше (loiter пропустится гейтом)")
             return _next(rc)
         return _run(rc)
 

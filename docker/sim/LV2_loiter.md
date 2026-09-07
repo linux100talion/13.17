@@ -99,6 +99,18 @@ aiding ТОЛЬКО на земле (в воздухе не начинает —
 
 `ekf_warmup` (WaitEkfPos) ждёт свежий `local_position` — EKF держит позицию
 на мосте уже через ~8 с от старта ноды (vs 43-44 с GPS-прогрева LV=1).
+
+⚠️ **`local_position` — это поток телеметрии, а не факт позиции.** ArduPilot шлёт
+`LOCAL_POSITION_NED`/`ATTITUDE`/`RAW_IMU` только по запросу GCS (`SR0_*` в eeprom
+нули). Прогон `lv2_joy_20260907_122716`: мост отработал (FCU: «EKF3 IMU0 is using
+external nav data, initial pos NED 0,0,0» на 5-й секунде), но потоки не были
+запрошены 200 с — `nav_up.sh` печатал «nav: готово» до бута FCU, его фоновый цикл
+запросов дал потоки через 3.5 мин, узел все 200 с видел `ekf=0` и «EKF не захватил
+позицию» (ложно). С 2026-09-07 три страховки: `sitl_lv_profile.py` пишет `SR0_*` в
+eeprom (потоки с бута), `nav_up.sh` печатает «готово» только после потоков (иначе
+«nav: ОШИБКА», `make wait` падает), узел сам запрашивает `SET_MESSAGE_INTERVAL`,
+пока молчит `/mavros/imu/data` (`_telemetry_watch`), а в статусе/HUD `tel=` и
+баннер `FCU TELEMETRY SILENT` отличают «MAVROS молчит» от «EKF без позиции».
 HUD: «EKF WARMUP» (жёлт) → «EKF READY - TAKEOFF OK» (зел).
 
 ### Фазы 2-3 — арм, взлёт (ярус 0), init VINS на отрыве

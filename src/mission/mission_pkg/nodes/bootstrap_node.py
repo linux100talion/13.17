@@ -31,6 +31,25 @@ from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
 from control_pkg.domain.control.stabilization import VinsHold
 from control_pkg.domain.rc import RC_CENTER, RcCommand
+
+# ПОТОКИ ТЕЛЕМЕТРИИ FCU, которые читает нода (сторож _telemetry_watch): id
+# MAVLink, Гц, имя. Темпы = запросам nav_up.sh (стримы RAW_SENS 200 / POSITION 25 /
+# EXTRA1 50 / EXT_STAT 2 / EXTRA2 5 + WIND 5), чтобы сторож, сработав, дал ровно
+# те темпы, что летали. Не ручка полёта — инфраструктура; в профилях не живёт.
+TEL_STREAMS = (
+    (27, 200.0, 'RAW_IMU'),              # /mavros/imu/data_raw, гироскоп для IPM
+    (29, 200.0, 'SCALED_PRESSURE'),      # /mavros/imu/static_pressure (баро, alt_src=baro)
+    (30, 50.0, 'ATTITUDE'),              # /mavros/imu/data (ориентация → крен/тангаж/курс)
+    (32, 25.0, 'LOCAL_POSITION_NED'),    # /mavros/local_position/pose (ekf=, гейт арма)
+    (33, 25.0, 'GLOBAL_POSITION_INT'),   # /mavros/global_position/rel_alt
+    (1, 2.0, 'SYS_STATUS'),              # /mavros/state расширения, батарея
+    (245, 2.0, 'EXTENDED_SYS_STATE'),    # /mavros/extended_state (landed)
+    (24, 2.0, 'GPS_RAW_INT'),            # /mavros/global_position/raw (LV=1)
+    (74, 5.0, 'VFR_HUD'),                # /mavros/vfr_hud
+    (168, 5.0, 'WIND'),                  # /mavros/wind_estimation (стрелка ветра HUD)
+)
+TEL_SILENT_SEC = 2.0     # IMU молчит дольше — телеметрия «мёртвая»
+TEL_RETRY_SEC = 3.0      # период запросов, пока молчит
 from control_pkg.infrastructure.mavros_actuator import MavrosActuator
 from control_pkg.infrastructure.ros_clock import RosClock
 from control_pkg.infrastructure.ros_io import RosDebugSink, RosLogger
@@ -420,6 +439,13 @@ class BootstrapArch2Node(Node):
         self._last_restart_t = -1e9
         self._rebirths_prev = 0    # детект перерождения VINS (VinsTrack) → трим/лог
         self._scale_trips_prev = 0 # срабатываний чека занижения (лог)
+        # --- ПОТОКИ ТЕЛЕМЕТРИИ FCU — сторож (см. TEL_STREAMS / _telemetry_watch) ---
+        from mavros_msgs.srv import MessageInterval
+        self._tel_cli = self.create_client(MessageInterval, '/mavros/set_message_interval')
+        self._tel_last_req = -1e9          # wall-время последнего запроса
+        self._tel_req_n = 0                # сколько раз запрашивали
+        self._tel_silent = True            # текущее состояние «молчит»
+        self._tel_silent_since = time.time()
         self.timer = self.create_timer(0.05, self._tick)
         self.logger.info(
             f"alt_hold_bootstrap ARCH2: mode={cfg.control_mode} alt={cfg.alt}м "
@@ -440,8 +466,67 @@ class BootstrapArch2Node(Node):
         script = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}.get(cfg.control_mode, [])
         return ScriptedPilot(self.clock, script)
 
+    def _telemetry_watch(self, s):
+        """Сторож потоков телеметрии FCU: пока /mavros/imu/data молчит дольше
+        TEL_SILENT_SEC — раз в TEL_RETRY_SEC просим SET_MESSAGE_INTERVAL на всё,
+        что читает нода (TEL_STREAMS). Первый запрос — сразу на старте (снапшот
+        пуст), дальше до первого IMU; после — только если телеметрия пропадёт.
+
+        Зачем: ArduPilot шлёт RAW_IMU/ATTITUDE/LOCAL_POSITION_NED только по
+        запросу (SR0_* в eeprom нули, пока sitl_lv_profile их не записал), просил
+        фоновый цикл nav_up.sh. Прогон lv2_joy_20260907_122716: «nav: готово»
+        вышло до бута FCU, цикл дал потоки через 3.5 мин, а узел все 200 с ждал
+        «EKF» при живом мосте позы (FCU: «is using external nav data» на 5-й с) и
+        принял пустой IMU за «EKF не захватил позицию». Сторож делает узел
+        независимым от порядка старта: потоки запросит тот, кто в них нуждается.
+        Темпы = запросам nav_up.sh (те же, что летали все серии)."""
+        silent = (s.now_sim - s.tel_last_sim) > TEL_SILENT_SEC
+        if not silent:
+            if self._tel_silent and self._tel_req_n:
+                self.logger.info(
+                    f"телеметрия FCU пошла (IMU) через "
+                    f"{time.time() - self._tel_silent_since:.0f} с, "
+                    f"запросов потоков: {self._tel_req_n}")
+            self._tel_silent = False
+            return
+        if not self._tel_silent:
+            self._tel_silent = True
+            self._tel_silent_since = time.time()
+            self.logger.warn("телеметрия FCU пропала (нет /mavros/imu/data > "
+                             f"{TEL_SILENT_SEC:g} с) — перезапрашиваю потоки")
+        if time.time() - self._tel_last_req < TEL_RETRY_SEC:
+            return
+        self._tel_last_req = time.time()
+        if not self._tel_cli.service_is_ready():
+            if self._tel_req_n == 0:
+                self.logger.warn("телеметрия FCU молчит, а /mavros/set_message_interval "
+                                 "ещё недоступен — MAVROS не поднялся? жду")
+            return
+        from mavros_msgs.srv import MessageInterval
+        self._tel_req_n += 1
+        n = self._tel_req_n
+        if n <= 3 or n % 10 == 0:
+            self.logger.warn(
+                f"телеметрия FCU молчит {time.time() - self._tel_silent_since:.0f} с "
+                f"(нет /mavros/imu/data) — это НЕ EKF: запрашиваю потоки "
+                f"SET_MESSAGE_INTERVAL (попытка {n}): "
+                + ' '.join(f"{name}@{hz:g}" for _id, hz, name in TEL_STREAMS))
+        for mid, hz, name in TEL_STREAMS:
+            req = MessageInterval.Request()
+            req.message_id = int(mid)
+            req.message_rate = float(hz)
+            fut = self._tel_cli.call_async(req)
+
+            def _done(f, name=name):
+                r = f.result()
+                if r is None or not r.success:
+                    self.logger.debug(f"set_message_interval {name}: отказ MAVROS "
+                                      "(FCU не подключён?) — ретрай сторожем")
+            fut.add_done_callback(_done)
+
     def _tick(self):
         s = self.telemetry.snapshot()
+        self._telemetry_watch(s)
         armed_front = bool(s.armed) and not self._armed_prev
         self._armed_prev = bool(s.armed)
         if armed_front and self.wind is not None:

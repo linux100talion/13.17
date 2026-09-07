@@ -405,6 +405,12 @@ class HudRenderer:
                 elif ekf == "1":
                     y = self._line(frame, k, y, "EKF READY - TAKEOFF OK",
                                    HUD_GREEN, scale=1.0, fill=HUD_GREEN)
+                elif self.status.get("tel") == "0":
+                    # tel=0 — MAVROS не получает потоков FCU (нет IMU): ekf=0
+                    # не про EKF, а про телеметрию (прогон 122716). Красный:
+                    # взлетать нельзя и ждать бесполезно — смотреть nav_up.
+                    y = self._line(frame, k, y, "FCU TELEMETRY SILENT", HUD_RED,
+                                   scale=1.0, fill=HUD_RED)
                 else:
                     y = self._line(frame, k, y, "EKF WARMUP", HUD_YELLOW,
                                    scale=1.0, fill=HUD_YELLOW)

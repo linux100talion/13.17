@@ -140,63 +140,55 @@ if ! pgrep -f "mavros_node" >/dev/null; then
         -p conn/timesync_mode:=NONE \
         >"$LOG/mavros.log" 2>&1 &
     echo "  MAVROS   -> $LOG/mavros.log"
-    # Поднять частоты потоков MAVLink. КРИТИЧНО ждать коннект MAVROS<->FCU ПО ФАКТУ,
-    # а не фиксированным sleep: раньше был `sleep 20` — на медленном старте / низком
-    # RTF MAVROS к 20-й секунде ещё НЕ подключён к FCU, REQUEST_DATA_STREAM уходит в
-    # никуда, и /mavros/imu/data_raw остаётся ПУСТЫМ весь прогон (источник флаки
-    # "в части прогонов IMU не пишется"). Ниже: ждём connected=True, затем ставим
-    # потоки с РЕТРАЯМИ, пока IMU реально не пойдёт (запрос может потеряться на UDP).
-    # (accel-калибровка делается ОДИН раз через make sitl-cal и живёт в
-    #  персистентном eeprom — на каждом старте не повторяется, FCU не ребутит.)
-    (
-        for _ in $(seq 1 60); do
-            [ "$(ros2 topic echo --once --field connected /mavros/state 2>/dev/null | head -1)" = "True" ] && break
-            sleep 3
-        done
-        # Потоки телеметрии запрашиваем РАБОЧИМ методом — REQUEST_DATA_STREAM
-        # (set_stream_rate). SET_MESSAGE_INTERVAL (/mavros/cmd/command 511) в этом
-        # SITL НЕ отрабатывает (ATTITUDE не включался → /mavros/imu/data был ПУСТ).
-        # Статические SR*/MAV* в конфиге тоже не применяются для router-канала
-        # (см. sitl-extra.parm «Стрим IMU»). Три стрима:
-        #   1  RAW_SENSORS → RAW_IMU → /mavros/imu/data_raw (вход VINS, FFT гиро)
-        #   6  POSITION    → LOCAL_POSITION_NED + GLOBAL_POSITION_INT → pose + rel_alt
-        #   10 EXTRA1      → ATTITUDE → /mavros/imu/data (ориентация → угол, attitude.py)
-        #   2  EXTENDED_STATUS (2 Гц) → EXTENDED_SYS_STATE → /mavros/extended_state:
-        #      landed_state (детектор посадки FCU) — детект касания SoftLand
-        #      (кнопка SA) в дополнение к баро/gt. Копейки трафика.
-        # ⚠️ IMU-телеметрия в этом SITL капается ~24-34 sim-Гц (200 не отдаёт; потолок
-        # SCHED_LOOP=100 телеметрией тоже недостижим) — лимит SITL, не конфига.
-        for _ in $(seq 1 20); do
+    # ── ПОТОКИ ТЕЛЕМЕТРИИ FCU — В ФОРГРАУНДЕ, «nav: готово» ТОЛЬКО ПОСЛЕ НИХ ──
+    # ArduPilot шлёт RAW_IMU/ATTITUDE/LOCAL_POSITION_NED только по запросу (SR0_*
+    # в eeprom нули, пока sitl_lv_profile их не записал). Раньше этот цикл жил в
+    # фоне `( … ) &`, а «nav: готово» печаталось сразу: прогон 122716 (2026-09-07)
+    # — «готово» за 7 с ДО бута FCU, узел стартовал до heartbeat, цикл дал потоки
+    # через 3.5 мин, и узел 200 с «ждал EKF» при живом мосте позы. Теперь: готово
+    # = потоки идут; не пошли — «nav: ОШИБКА» (make wait падает, секвенсор не летит).
+    # Лог цикла — свой файл: mavros_node держит mavros.log открытым через `>` и
+    # затирал строки, дописанные сюда через `>>` (потому в 122716 следов и не было).
+    SLOG="$LOG/stream_rate.log"; : > "$SLOG"
+    echo "  потоки FCU: жду MAVROS connected (до 180 с)..."
+    ok=0
+    for _ in $(seq 1 60); do
+        [ "$(ros2 topic echo --once --field connected /mavros/state 2>/dev/null | head -1)" = "True" ] && { ok=1; break; }
+        sleep 3
+    done
+    if [ "$ok" != 1 ]; then
+        echo "nav: ОШИБКА: MAVROS не подключился к FCU за 180 с — см. $LOG/mavros.log, $LOG/sitl.log"
+        exit 1
+    fi
+    ok=0
+    for i in $(seq 1 8); do
+        echo "--- попытка $i $(date +%T)" >> "$SLOG"
+        while read -r sid rate; do
             ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-                '{stream_id: 1, message_rate: 200, on_off: true}' >> "$LOG/mavros.log" 2>&1
-            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-                '{stream_id: 6, message_rate: 25, on_off: true}' >> "$LOG/mavros.log" 2>&1
-            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-                '{stream_id: 10, message_rate: 50, on_off: true}' >> "$LOG/mavros.log" 2>&1
-            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-                '{stream_id: 2, message_rate: 2, on_off: true}' >> "$LOG/mavros.log" 2>&1
-            #   11 EXTRA2 + msg 168 (WIND) → /mavros/wind_estimation: оценка
-            #      ветра EKF3 (drag-фьюжн) для стрелки ветра HUD (windspeed.md).
-            #      Как ATTITUDE, WIND не в стриме роутер-канала по умолчанию
-            #      (проба Ф0: топик молчал, пока не запросили). SET_MESSAGE_
-            #      INTERVAL для 168 в этом SITL ОТРАБАТЫВАЕТ (в отличие от
-            #      ATTITUDE) — шлём и его, и stream_id 11, что сработает.
-            #      Данные идут только при EK3_DRAG_BCOEF>0 (BS_EKF_DRAG).
-            ros2 service call /mavros/set_stream_rate mavros_msgs/srv/StreamRate \
-                '{stream_id: 11, message_rate: 5, on_off: true}' >> "$LOG/mavros.log" 2>&1
-            ros2 service call /mavros/set_message_interval mavros_msgs/srv/MessageInterval \
-                '{message_id: 168, message_rate: 5.0}' >> "$LOG/mavros.log" 2>&1
-            # Подтверждаем по SIM-частоте data_raw (на низком RTF wall-rate мизер).
-            hz=$(python3 /scripts/imu_rate.py 40 15 2>/dev/null | tail -1)
-            echo "  stream_rate: /mavros/imu/data_raw ≈ ${hz:-?} sim-Гц (EXTRA1 запрошен)" >> "$LOG/mavros.log"
-            if [ -n "$hz" ] && awk "BEGIN{exit !(${hz:-0}>=15)}"; then
-                echo "  stream_rate: IMU идёт ${hz} sim-Гц, ATTITUDE/EXTRA1 запрошен"; break
-            fi
-            sleep 3
-        done
-    ) &
+                "{stream_id: $sid, message_rate: $rate, on_off: true}" >> "$SLOG" 2>&1 || true
+        done <<'STREAMS'
+1 200
+6 25
+10 50
+2 2
+11 5
+STREAMS
+        ros2 service call /mavros/set_message_interval mavros_msgs/srv/MessageInterval \
+            '{message_id: 168, message_rate: 5.0}' >> "$SLOG" 2>&1 || true
+        hz=$(python3 /scripts/imu_rate.py 40 15 2>>"$SLOG" | tail -1)
+        echo "  IMU ≈ ${hz:-?} sim-Гц" >> "$SLOG"
+        if [ -n "$hz" ] && awk "BEGIN{exit !(${hz:-0}>=15)}"; then
+            ok=1
+            echo "  stream_rate: IMU идёт ${hz} sim-Гц (попытка $i) — RAW_SENS/POSITION/EXTRA1/EXT_STAT/EXTRA2 + WIND запрошены"
+            break
+        fi
+        sleep 3
+    done
+    if [ "$ok" != 1 ]; then
+        echo "nav: ОШИБКА: потоки FCU не пошли за 8 попыток (IMU молчит) — см. $SLOG и $LOG/mavros.log"
+        exit 1
+    fi
 else
     echo "  MAVROS   уже запущен"
 fi
-
 echo "nav: готово. Логи: docker/sim/output/"

@@ -48,6 +48,24 @@ PROFILE = {
           'EK3_SRC1_VELXY': 0.0},
 }
 
+# ПОТОКИ ТЕЛЕМЕТРИИ FCU В EEPROM — для всех LV. В ArduPilot 4.7+ группа стримов
+# SRn_* переименована в MAVn_* с нумерацией С ЕДИНИЦЫ: MAV1_* = первый MAVLink-канал
+# = SERIAL0 (tcp 5760, mavlink_router → MAVROS); «SR0_RAW_SENS» прошивка не знает
+# (нет эха PARAM_VALUE — проверено 2026-09-07). ArduPilot не шлёт RAW_IMU, ATTITUDE,
+# LOCAL_POSITION_NED, пока темпы нули; REQUEST_DATA_STREAM из nav_up.sh прошивка
+# сама СОХРАНЯЕТ в eeprom (persist_streamrates), так что после первого удачного
+# цикла значения уже там — здесь они закрепляются явно и восстанавливаются после
+# `make clean`/нового бокса. Прогон 122716 (2026-09-07): MAVROS 200 с без единого
+# потока при живом мосте позы, узел «ждал EKF» (ekf=0 = молчал MAVROS); первопричина
+# на стороне FCU не установлена — потоки, «готово» после потоков и сторож в ноде =
+# три независимые страховки (WIND 168 — только SET_MESSAGE_INTERVAL, в MAV нет).
+# Значения = запросам nav_up.sh (те же темпы, что летали все серии): RAW_SENS 200
+# (RAW_IMU, SCALED_PRESSURE, GPS_RAW), POSITION 25 (LOCAL_POSITION_NED,
+# GLOBAL_POSITION_INT), EXTRA1 50 (ATTITUDE), EXT_STAT 2 (SYS_STATUS,
+# EXTENDED_SYS_STATE), EXTRA2 5 (VFR_HUD).
+STREAMS = {'MAV1_RAW_SENS': 200.0, 'MAV1_POSITION': 25.0, 'MAV1_EXTRA1': 50.0,
+           'MAV1_EXT_STAT': 2.0, 'MAV1_EXTRA2': 5.0}
+
 
 def read_param(m, name, budget=8.0):
     t0 = time.time()
@@ -80,6 +98,7 @@ def main():
         print(f"ОШИБКА: LV={lv} (ожидаю 0, 1 или 2)")
         return 2
     want = dict(want)     # копия: не мутируем PROFILE между вызовами
+    want.update(STREAMS)  # потоки телеметрии — всегда (см. STREAMS)
     # BS_EKF_DRAG — drag-фьюжн ветра EKF3 (BCOEF, кг/м²; 0 = выкл). Наблюдаемость
     # на VINS-external-nav доказана Ф0 (ветер сошёлся к истине 10 м/с). Даёт
     # стрелку ветра HUD во ВСЕХ режимах (windspeed.md). ⚠️ МЕНЯЕТ EKF (добавляет

@@ -146,6 +146,10 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
     None = шаг посадки не активен, поля land= в строке нет. Кнопка посадки
     пилота (sa=) — всегда: её фронт в ленте joy_timeline объясняет переход."""
     ekf = int(s.now_sim - s.ekf_pos_last_sim < EKF_FRESH_SEC)
+    # tel — жива ли телеметрия FCU вообще (свежий /mavros/imu/data). ekf=0 при tel=0
+    # значит «MAVROS не получает потоков», а не «EKF без позиции» (прогон 122716:
+    # 200 с ложного WARMUP при живом мосте позы). HUD: баннер FCU TELEMETRY SILENT.
+    tel = int(s.now_sim - s.tel_last_sim < EKF_FRESH_SEC)
     age = s.now_sim - s.vins_last_sim
     st, why = loiter_gate(s, fresh_sec, loiter_alt)
     # res/rat — диагностика детектора зрелости (ripeness.py): residual
@@ -176,7 +180,8 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
     # t — sim-время снапшота. /mission/status — String без header: в bag он лежит по
     # СТЕНОЧНОМУ времени приёма, а RTF плывёт, и стики/раму из него было не выровнять
     # с истиной Gazebo (ab_frame: сдвиг −2…−5 с) — та же болезнь, что у /joy.
-    return (f"t={s.now_sim:.2f} st={st} why={why} ekf={ekf} extnav={int(s.extnav_ready)} "
+    return (f"t={s.now_sim:.2f} st={st} why={why} ekf={ekf} tel={tel} "
+            f"extnav={int(s.extnav_ready)} "
             f"odom={s.vins_odom_count} age={min(age, 999.0):.1f} "
             f"reb={getattr(s, 'vins_rebirths', 0)} "
             f"alt={(s.rel_alt or 0.0):.1f} zekf={zekf} palt={palt} "

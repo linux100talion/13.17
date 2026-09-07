@@ -128,12 +128,14 @@ status:          ## что запустилось, что упало (проце
 	  echo "  -- mavros --"; \
 	  grep -i "error\|FCU:\|connected\|timeout" /root/sim_ws/output/mavros.log 2>/dev/null | tail -3 || true'
 
-wait:            ## ждать пока nav_up.sh напишет «nav: готово» (до 5 мин)
+wait:            ## ждать «nav: готово» от nav_up.sh (до 5 мин); «nav: ОШИБКА» — падаем сразу
 	@echo "Жду завершения nav_up.sh..."
-	@timeout 300 bash -c '\
-	  S=$$(docker inspect -f "{{.State.StartedAt}}" p1317_nav); \
-	  until docker logs --since "$$S" p1317_nav 2>&1 | grep -q "nav: готово"; do sleep 3; done' \
-	  && echo "nav: готово" || echo "TIMEOUT (5 мин)"
+	@S=$$(docker inspect -f "{{.State.StartedAt}}" p1317_nav); \
+	  timeout 300 bash -c 'until docker logs --since "'"$$S"'" p1317_nav 2>&1 | grep -qE "nav: (готово|ОШИБКА)"; do sleep 3; done' \
+	  || { echo "TIMEOUT (5 мин): nav_up.sh не дописал ни «готово», ни «ОШИБКА» — make logs"; exit 1; }; \
+	  if docker logs --since "$$S" p1317_nav 2>&1 | grep -q "nav: ОШИБКА"; then \
+	    docker logs --since "$$S" p1317_nav 2>&1 | grep "nav: ОШИБКА"; exit 1; fi; \
+	  echo "nav: готово"
 # ⚠️ --since StartedAt обязателен: docker logs переживают stop/start (чистятся
 # только на пересоздание), и после restart-all грело ложное «nav: готово» от
 # ПРОШЛОЙ жизни контейнера — секвенсор стартовал на полуподнятом стеке

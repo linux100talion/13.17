@@ -87,6 +87,17 @@ d = kv(hud_status(DroneState(now_sim=7.0, ekf_pos_last_sim=4.0, ekf_z=2.34),
                   FRESH))
 check("zekf: local_position протух → '--', не последнее значение",
       d['zekf'] == '--')
+
+# 8a. Живость телеметрии FCU (tel=): ekf=0 при tel=0 — MAVROS не получает
+# потоков (прогон 122716: 200 с ложного WARMUP), а не EKF без позиции.
+d = kv(hud_status(DroneState(now_sim=5.0), FRESH))
+check("tel: IMU не было вовсе → tel=0 (и ekf=0)", d['tel'] == '0' and d['ekf'] == '0')
+d = kv(hud_status(DroneState(now_sim=5.0, tel_last_sim=4.5), FRESH))
+check("tel: свежий /mavros/imu/data → tel=1, ekf по-прежнему 0 (позиции нет)",
+      d['tel'] == '1' and d['ekf'] == '0')
+d = kv(hud_status(DroneState(now_sim=9.0, tel_last_sim=4.5, ekf_pos_last_sim=8.5), FRESH))
+check("tel: IMU протух, а local_position свежий — противоречие не маскируем (tel=0, ekf=1)",
+      d['tel'] == '0' and d['ekf'] == '1')
 d = kv(hud_status(DroneState(now_sim=5.0, ekf_pos_last_sim=4.0), FRESH))
 check("zekf: свежесть есть, z ещё не пришёл (None) → '--'", d['zekf'] == '--')
 

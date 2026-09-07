@@ -56,6 +56,13 @@ class DroneState:
     # ARMING_CHECK=0 проходит до захвата GPS EKF'ом, а начать aiding в воздухе
     # на манёврах EK3 не смог — полёт без позиции, Loiter refused.
     ekf_pos_last_sim: float = -1e9
+    # Sim-время последнего /mavros/imu/data — ЖИВА ЛИ ТЕЛЕМЕТРИЯ FCU ВООБЩЕ.
+    # ArduPilot шлёт IMU/ATTITUDE/LOCAL_POSITION только по запросу потоков; прогон
+    # 122716 (2026-09-07): потоки не были запрошены 200 с, ekf=0 при живом мосте
+    # позы — «EKF не захватил позицию» было ложным диагнозом. По этому полю узел
+    # сам запрашивает потоки (bootstrap_node), WaitEkfPos и HUD (tel=) отличают
+    # «MAVROS молчит» от «EKF без позиции».
+    tel_last_sim: float = -1e9
     # z из того же /mavros/local_position/pose — «высота глазами EKF3» (fusion
     # баро+vision). Нужна HUD'у парой к rel_alt: расхождение баро/EKF по
     # вертикали — ровно та ошибка, что занижает масштаб IPM у земли (прогон

@@ -49,7 +49,7 @@ doc/tmp/                    — архив (FAQ*, todo*, README, laptop_move.md,
 make host-setup     # один раз: v4l2loopback + xhost (нужен sudo)
 make build          # собрать образы (долго: SITL+Gazebo+OpenCV из исходников)
 make up             # поднять контейнеры; sim_up.sh + nav_up.sh стартуют сами
-make wait           # ждать «nav: готово» (до 5 мин)
+make wait           # ждать «nav: готово» (= потоки FCU идут; до 5 мин), «nav: ОШИБКА» — падает
 make logs           # хвост output/*.log
 make restart-all    # быстрый перезапуск (stop→start, ephemeral state жив)
 make fresh-start    # полный сброс (down→up, ephemeral state теряется)
@@ -359,3 +359,12 @@ make CPU=1 sitl-cal                         # ОДИН раз: accel-cal → eep
   на `fresh-start`; `config/sitl-extra.parm` переживает. → решение №12.
 - **Принудительный colcon** — `make nav-rebuild`; полный снос томов — `make clean`.
   → раздел volumes.
+- **«nav: готово» = потоки телеметрии FCU идут** (с 2026-09-07). ArduPilot шлёт
+  IMU/ATTITUDE/LOCAL_POSITION только по запросу; раньше цикл запросов жил в фоне,
+  и «готово» печаталось до бута FCU — прогон 122716: узел 200 с «ждал EKF» при
+  живом мосте позы (`ekf=0` = молчал MAVROS, не EKF). Теперь `nav_up.sh` ждёт
+  потоки в форграунде (лог `output/stream_rate.log`; не в `mavros.log` — его
+  затирает mavros_node), иначе печатает «nav: ОШИБКА» и `make wait` падает;
+  `sitl_lv_profile.py` пишет `SR0_*` в eeprom (потоки с бута); узел сам
+  запрашивает `SET_MESSAGE_INTERVAL`, пока молчит `/mavros/imu/data`; в статусе
+  `tel=`, в HUD красный `FCU TELEMETRY SILENT`. → `LV2_loiter.md` фаза 1.

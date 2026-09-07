@@ -14,6 +14,7 @@ from geometry_msgs.msg import PoseStamped, TwistWithCovarianceStamped
 from mavros_msgs.msg import RCIn, State
 from nav_msgs.msg import Odometry
 from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import Imu
 from std_msgs.msg import Float64, String
 
 from ..application.ripeness import VinsRipeness
@@ -43,6 +44,10 @@ class RosTelemetry:
         # стопора эстиматора → ложный «разнос» (lv2_joy_20260905_114248)
         self._track = VinsTrack()
         node.create_subscription(State, '/mavros/state', self._on_state, 10)
+        # Живость телеметрии FCU (tel_last_sim): IMU — первый и самый частый поток
+        # MAVROS; молчит — значит потоки не запрошены/не идут (см. DroneState).
+        node.create_subscription(Imu, '/mavros/imu/data', self._on_imu_alive,
+                                 qos_profile_sensor_data)
         # Источник rel_alt: 'global' — GLOBAL_POSITION_INT (замерзает без GPS);
         # 'baro' — сырой барометр (GPS-denied / боевой борт). См. baro_alt.py.
         if alt_src == 'baro':
@@ -162,6 +167,9 @@ class RosTelemetry:
     def _on_rcin(self, m):
         if len(m.channels) >= 3:
             self._s.rcin_throttle = m.channels[2]
+
+    def _on_imu_alive(self, _m):
+        self._s.tel_last_sim = self._clock.now_sim()
 
     def _on_lpos(self, m):
         self._s.ekf_pos_last_sim = self._clock.now_sim()
