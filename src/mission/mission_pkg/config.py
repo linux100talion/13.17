@@ -1357,6 +1357,7 @@ CHOICES = {
 # Ключи, которые ЖИВУТ В ПРОФИЛЯХ / env, но нодой не читаются: кто их ест.
 EXTRA_KEYS = {
     'BS_EKF_DRAG': 'SITL eeprom (sitl_lv_profile.py: EK3_DRAG_BCOEF_*)',
+    'BS_FCU_PARAMS': 'SITL eeprom (sitl_lv_profile.py: параметры FCU прогона, «NAME=VALUE …»)',
     'BS_JOY_DEV': 'bootstrap_arch2.sh: устройство пульта для joy_linux_node',
     'BS_REPLAY_SCENARIO': 'bootstrap_arch2.sh → joy_replay.py (аргумент прогона)',
     'BS_REPLAY_RAW': 'bootstrap_arch2.sh → joy_replay.py (аргумент прогона)',

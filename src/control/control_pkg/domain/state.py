@@ -197,6 +197,10 @@ class DroneState:
     # мягкую посадку (SoftLand) через гейт «низко и почти стоим»
     # (config.land_alt_max / land_v_max). Вне freefly игнорируется.
     pilot_land: bool = False
+    # ВОЗВРАТ ДОМОЙ (RTL полётника): one-shot от оператора (/mission/rth, make rth) —
+    # кнопки на пульте нет. Узел выставляет на ОДИН тик; шаг Freefly прыгает на шаг
+    # rth, повторный импульс там ОТМЕНЯЕТ возврат. Вне freefly игнорируется.
+    pilot_rth: bool = False
 
     # --- Детектор посадки FCU (/mavros/extended_state ← EXTENDED_SYS_STATE) ---
     # MAV_LANDED_STATE: 1 ON_GROUND, 2 IN_AIR, 3 TAKEOFF, 4 LANDING; -1 = данных

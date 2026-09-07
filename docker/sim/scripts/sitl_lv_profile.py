@@ -113,6 +113,19 @@ def main():
     elif lv == '2':
         want['EK3_DRAG_BCOEF_X'] = 0.0   # выкл явно (мог остаться в eeprom)
         want['EK3_DRAG_BCOEF_Y'] = 0.0
+    # BS_FCU_PARAMS — ПАРАМЕТРЫ FCU ПРОГОНА, «NAME=VALUE» через пробел (профиль
+    # loiter/, ключ EXTRA_KEYS). Для случаев, когда поведением командует полётник, а
+    # не нода: возврат домой RTL (cmd/rth: RTL_ALT_M, RTL_LOIT_TIME, LAND_ALT_LOW_M).
+    # Идут ПОСЛЕДНИМИ — перекрывают профиль LV и потоки, если имена совпали. В
+    # loiter/baseline.txt стоят СТОКОВЫЕ значения: eeprom переживает прогоны, и без
+    # явного восстановления кандидат отравил бы соседние полёты.
+    for tok in (os.environ.get('BS_FCU_PARAMS', '') or '').split():
+        name, _, val = tok.partition('=')
+        try:
+            want[name.strip()] = float(val)
+        except ValueError:
+            print(f"  ОШИБКА: BS_FCU_PARAMS: не разбирается {tok!r} (жду NAME=ЧИСЛО)")
+            return 2
     print(f"  eeprom-профиль LV={lv}: подключаюсь к SITL ({CONN})...", flush=True)
     try:
         m = mavutil.mavlink_connection(CONN, source_system=253)

@@ -22,7 +22,7 @@ bootstrap_arch2.sh   load.py $PROFILES → env BS_* → ros2 run mission_pkg boo
 | `dpvins/` | ярус 1 — ГЕЙНЫ `DpVins` (velocity-каскад, позиционный контур, трим, BRAKE) |
 | `vinshold/` | ярус 1 — ГЕЙНЫ И ФЛАГИ `VinsHold` (2D-PID, флаги eagle, Gz-hold, потолки/гейты уверенности осей). Грузится ВСЕГДА рядом с `dpvins/` |
 | `vins/` | ярусы 1 и 2 — опора VINS: СЕЛЕКТОР `BS_VINS_STAB` (dpvins \| vinshold, откат — `vins/vinshold.txt`), защёлка трима, хэндовер и зрелость, свежесть, гейт здоровья (три канала), мост VINS→EKF |
-| `loiter/` | ярус 2 — штатный LOITER на EKF-от-VINS: гейты миссии, TrackHold/YawBankLimit, GPS-denied/origin/EKF (LV=2 запечён здесь), `BS_EKF_DRAG` для SITL |
+| `loiter/` | ярус 2 — штатный LOITER на EKF-от-VINS: гейты миссии, TrackHold/YawBankLimit, GPS-denied/origin/EKF (LV=2 запечён здесь), `BS_EKF_DRAG` и `BS_FCU_PARAMS` для SITL (`rth.txt` = guard + параметры возврата RTL в eeprom, cmd/rth) |
 | `wind/` | ярусы 0 и 1 — сквозной ветровой трим `WindTrim` |
 | `mission/` | миссия и пилот: `BS_PILOT`/`BS_MISSION`, SF-мастер, кнопка SA, знаки/зона стиков, высота и контур AltHold, бюджеты фаз, геозабор, мягкая посадка, скриптовые миссии; `replay.txt` — реплей пульта |
 | `legacy/` | поля ноды ВНЕ активного стека (control_mode/gz-shuttle, DpRollHold/DpPitchHold, старый flow-путь, KF-высота) значениями = прежние дефолты ноды. Кандидат на вычистку из кода вместе с файлом |

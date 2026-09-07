@@ -117,7 +117,11 @@ class RepoProfiles(unittest.TestCase):
                 if f == 'baseline.txt' or not f.endswith('.txt'):
                     continue
                 text = open(os.path.join(d, f)).read()
-                self.assertIn('include baseline.txt', text, f'{sub}/{f}: кандидат без include')
+                # цепочка допустима: кандидат может наследовать не эталон напрямую, а
+                # другого кандидата (loiter/rth = guard + дельта возврата). Проверяем
+                # СМЫСЛ — ключи эталона на месте, — а не букву 'include baseline.txt'
+                self.assertRegex(text, r'(?m)^include \S+\.txt$',
+                                 f'{sub}/{f}: кандидат без include')
                 cand = load.resolve_file(os.path.join(d, f))
                 self.assertTrue(set(base) <= set(cand), f'{sub}/{f}: потерял ключи эталона')
 

@@ -43,7 +43,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help ensure-env host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
+.PHONY: help ensure-env host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm rth fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
 
 # .env (локальный профиль бокса, в .gitignore) сеется из эталона env.default
 # (в git): свежий клон получает боевые дефолты (WORLD/LV/BS_SF_MASTER) без
@@ -165,6 +165,9 @@ pilot-done:      ## живой полёт: завершить бессрочны
 
 sa-land:         ## freefly: «кнопка SA» с хоста (мягкая посадка SoftLand; гейт: rel_alt ≤ 5 м и |v| ≤ 1 м/с)
 	docker exec $(NAV) bash -lc 'source /opt/ros/humble/setup.bash; ros2 topic pub --once /mission/land std_msgs/msg/Empty "{}"'
+
+rth:             ## freefly: ВОЗВРАТ ДОМОЙ — RTL полётника к home (шаг rth); повторный вызов ОТМЕНЯЕТ
+	docker exec $(NAV) bash -lc 'source /opt/ros/humble/setup.bash; ros2 topic pub --once /mission/rth std_msgs/msg/Empty "{}"'
 
 disarm:          ## дизарм
 	docker exec $(NAV) bash /lab/disarm.sh

@@ -34,6 +34,13 @@ BS_EKF_POS_BUDGET=120
 # HUD в LOITER; ekf3-drag-wind); 0 = выкл
 BS_EKF_DRAG=32
 
+# слой: env (sitl_lv_profile) — ПАРАМЕТРЫ FCU ПРОГОНА в eeprom SITL, «NAME=VALUE» через
+# пробел (пусто = не трогать). Нужны там, где поведением командует не нода, а полётник:
+# возврат домой RTL (cmd/rth). Здесь стоят СТОКОВЫЕ значения нарочно — eeprom переживает
+# прогоны, и без явного восстановления кандидат отравлял бы всех соседей (LAND_ALT_LOW_M
+# правит ещё и ветку pos мягкой посадки SoftLand). Дельта — loiter/rth.txt.
+BS_FCU_PARAMS=RTL_ALT_M=15 RTL_LOIT_TIME=5000 LAND_ALT_LOW_M=10
+
 # слой: SITL — справочно, применяется НЕ через env (docker/sim/config/sitl-extra.parm,
 # docker/sim/scripts/sitl_lv_profile.py для LV=2):
 #SITL LOIT_SPEED_MS 5          # скорость уставки LOITER при полном стике, м/с (4.8: LOIT_SPEED→_MS)

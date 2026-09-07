@@ -524,7 +524,7 @@ class Freefly(Step):
                  handover=None, loiter_center=False, vins_fresh=2.0,
                  sf_master=False, loiter_alt=1.5, land_gate=None,
                  loiter_track=None, loiter_bank_max=0.0, loiter_guard=False,
-                 land_in_loiter=False):
+                 land_in_loiter=False, rth=False):
         self.name = name
         self.stack = stack
         self.keep = keep
@@ -562,6 +562,10 @@ class Freefly(Step):
         # (SoftLand). None — кнопки нет (ff_land=0), сажает пилот руками.
         self.land_gate = land_gate
         self._land_prev = False
+        # ВОЗВРАТ ДОМОЙ: True = в плане есть шаг «rth» (эпилог), импульс
+        # /mission/rth прыгает туда. Гейта «низко и стоим» здесь нет (в отличие
+        # от SA): возврат — это как раз «далеко и высоко», судит его FCU.
+        self.rth = bool(rth)
         # handover Flow→Vins: срабатывает ТОЛЬКО в позиции селектора «наш стек»
         # (−1 или тумблер не трогали) — «вверх» = лучший доступный стек (демпфер
         # до готовности VINS, VinsHold после); центр/MANUAL свапом не трогаем.
@@ -929,6 +933,17 @@ class Freefly(Step):
         # кнопка посадки (SA) — фронт через гейт → следующий шаг (SoftLand)
         if self.land_gate is not None and self._land_press(ctx, s):
             return _next(rc, "FREEFLY_LAND")
+        # ВОЗВРАТ ДОМОЙ (/mission/rth, make rth) — прыжок на шаг rth (эпилог плана,
+        # НЕ следующий индекс: следующий — SoftLand кнопки SA). Импульс one-shot,
+        # фронт ловить не надо. В MANUAL отказ: там Арбитр отдаёт пилоту все оси
+        # сырыми, и «возврат» был бы виден только как смена режима FCU.
+        if self.rth and getattr(s, 'pilot_rth', False):
+            if s.pilot_switch == 1:
+                ctx.log.warn("    RTH: отказ — MANUAL (SF не вверх); верни стек и повтори")
+            else:
+                ctx.log.info("    RTH: ВОЗВРАТ ДОМОЙ (rel_alt={}) → шаг rth".format(
+                    s.rel_alt))
+                return _goto(rc, "rth", "FREEFLY_RTH")
         # страховка дизарма (см. docstring): жест на земле дольше порога →
         # дизармим за FCU сами (сервис → force). Пороги PWM — как жесты
         # joy_timeline (GESTURE_LVL 0.85 → центр−340). «На земле» — баро ИЛИ
@@ -1213,6 +1228,105 @@ class SoftLand(Step):
             ctx.log.error(f"    {self.name}: касание не подтверждено за {self.budget:g} с "
                           f"(rel_alt={s.rel_alt}) — завершаю, борт в воздухе, сажает пилот")
             return _finish(rc, "LAND_TIMEOUT")
+        return _run(rc)
+
+
+class Rth(Step):
+    """ВОЗВРАТ ДОМОЙ ШТАТНЫМ RTL ПОЛЁТНИКА — эпилог freefly по /mission/rth (make rth).
+
+    Мы НЕ ведём борт домой сами: точка `home` живёт в FCU (ставится при арме от
+    EKF-origin — в LV=2 это SET_GPS_GLOBAL_ORIGIN ноды, без единой секунды GPS), и
+    RTL летит к ней по прямой в раме EKF — той самой, которую кормит мост
+    VINS→vision_pose. Голубая линия /ekf/path в RViz к этому отношения не имеет:
+    её строит хост из /mavros/local_position/pose, борт её не видит. Значит
+    физическая ошибка возврата = ДРЕЙФ EKF на момент возврата (замер 171812:
+    0.75 м на 31 м пути) плюс сдвиг рамы, если FrameAnchor перелатчился в полёте.
+
+    ПОЧЕМУ ЭТО ШАГ ПЛАНА, А НЕ `ros2 service call set_mode` С ХОСТА: Freefly
+    ре-ассертит свой режим каждый тик (runner.keep_mode, порог 2 с) — внешний RTL
+    был бы снят через ≤2 с и выглядел бы как «FCU не принял». Владелец режима один,
+    и это план.
+
+    Поведение: стек ПУСТ (в RTL пилотские оси полётник игнорирует, а наш демпфер
+    командовал бы наклоны против навигации), стики в центре, газ центр; set_mode
+    RTL раз в sim-секунду (ctx.try_cmd), пока не залатчится. Дальше борт ведёт FCU:
+    набор до RTL_ALT_M, прямая на home, RTL_LOIT_TIME над точкой, снижение и LAND со
+    своим самодизармом. Эти ручки — В EEPROM ПОЛЁТНИКА, не у нас: прогон cmd/rth ставит
+    их через BS_FCU_PARAMS (loiter/rth.txt — 7 м / 1 с / мягкие последние 3 м на
+    LAND_SPD_MS 0.15), стоковые 15 м / 5 с / 10 м возвращает loiter/baseline.txt.
+    Бюджет шага — бэкстоп на самый долгий (стоковый) вариант. Дизарм → RTH_DONE.
+
+    ВЫХОДЫ ОБРАТНО В ПОЛЁТ (все — goto freefly, борт заармлен, стек и опора берутся
+    от текущей точки):
+      RTH_CANCEL   — повторный импульс /mission/rth (передумали): keep сразу;
+      RTH_MANUAL   — пилот забрал борт в MANUAL (SF не вверх) — сознательный жест;
+      RTH_REFUSED  — RTL не залатчился за LATCH_SEC: у EKF нет позиции («requires
+                     position») либо home не задан. Возврат невозможен — отдаём
+                     борт пилоту, а не молчим в чужом режиме;
+      RTH_EJECT    — FCU сам вышел из RTL (failsafe/пилот с пульта FCU): уважаем.
+    Не сели за budget → RTH_TIMEOUT (error, борт в воздухе — сажает пилот).
+    ⚠️ Здоровье моста VINS→EKF шаг НЕ судит: RTL летит к точке в раме EKF, и если
+    мост закрылся или якорь перелатчился, борт честно вернётся «в старые цифры».
+    Это известная цена первой версии (см. cmd/rth/README.txt)."""
+
+    LATCH_SEC = 3.0          # столько ждём латча RTL, дальше — отказ пилоту
+    BUDGET_SEC = 180.0       # бэкстоп на стоковый RTL (15 м + LAND 0.15 м/с с 10 м) ≈ 90–120 с
+
+    def __init__(self, name, stack, budget=BUDGET_SEC, keep="ALT_HOLD",
+                 throttle_hold=RC_CENTER, resume="freefly", mode="RTL"):
+        self.name = name
+        self.stack = stack
+        self.budget = budget
+        self.keep = keep
+        self.throttle_hold = throttle_hold
+        self.resume = resume
+        self.mode = mode
+        self._latched = False
+        self._eject_warned = False
+
+    def enter(self, ctx, s) -> None:
+        self._latched = False
+        self._eject_warned = False
+        self.stack.switch_stabilization([])      # позицию ведёт FCU
+        if ctx is not None:
+            ctx.log.info(f"    {self.name}: RTL полётника — домой по EKF (стек пуст, "
+                         f"стики в центре); повторный /mission/rth отменит")
+
+    def tick(self, ctx, s) -> StepResult:
+        rc = RcCommand(throttle=self.throttle_hold)
+        if not s.armed:
+            ctx.log.info(f"    {self.name}: дизарм — возврат завершён "
+                         f"(rel_alt={s.rel_alt})")
+            return _finish(RcCommand(throttle=RC_MIN_THR), "RTH_DONE")
+        if getattr(s, 'pilot_rth', False):
+            ctx.log.warn(f"    {self.name}: повторный импульс — ВОЗВРАТ ОТМЕНЁН "
+                         f"(rel_alt={s.rel_alt}) → {self.resume}")
+            ctx.mode.set_mode(self.keep)
+            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_CANCEL")
+        if s.pilot_switch == 1:
+            ctx.log.warn(f"    {self.name}: пилот забрал борт (MANUAL) → {self.resume}")
+            ctx.mode.set_mode(self.keep)
+            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_MANUAL")
+        if s.mode == self.mode:
+            if not self._latched:
+                self._latched = True
+                ctx.log.info(f"    {self.name}: {self.mode} залатчен — борт ведёт FCU")
+        elif self._latched:
+            ctx.log.warn(f"    {self.name}: FCU вышел из {self.mode} (mode={s.mode}) "
+                         f"— уважаем → {self.resume}")
+            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_EJECT")
+        elif ctx.elapsed() > self.LATCH_SEC:
+            ctx.log.error(f"    {self.name}: {self.mode} не залатчился за "
+                          f"{self.LATCH_SEC:g} с (mode={s.mode}) — нет позиции EKF "
+                          f"(requires position?) или home не задан → {self.resume}")
+            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_REFUSED")
+        else:
+            ctx.try_cmd(lambda: ctx.mode.set_mode(self.mode))
+        if ctx.elapsed() > self.budget:
+            ctx.log.error(f"    {self.name}: не сели за {self.budget:g} с "
+                          f"(rel_alt={s.rel_alt}, mode={s.mode}) — завершаю, борт в "
+                          f"воздухе, сажает пилот")
+            return _finish(rc, "RTH_TIMEOUT")
         return _run(rc)
 
 

@@ -64,7 +64,7 @@ from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
 from .step import (Arm, AwaitMode, Climb, Control, Freefly, Land, LoiterHold,
-                   SoftLand, WaitEkfPos)
+                   Rth, SoftLand, WaitEkfPos)
 
 _TOKEN = re.compile(r'^([a-z_]+?)(-?\d+(?:\.\d+)?)?$')
 
@@ -174,7 +174,8 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                                       else None),
                         loiter_bank_max=cfg.loiter_bank_max,
                         loiter_guard=cfg.loiter_guard > 0,
-                        land_in_loiter=cfg.land_in_loiter > 0)]
+                        land_in_loiter=cfg.land_in_loiter > 0,
+                        rth=True)]
         if soft_land:
             # кнопка SA → Freefly отдаёт NEXT (FREEFLY_LAND) → сюда; дизарм
             # руками по-прежнему завершает миссию из самого Freefly (FINISH)
@@ -191,6 +192,12 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                                  fresh_sec=cfg.vins_fresh_sec, keep=keep,
                                  throttle_hold=cfg.throttle_hold,
                                  cancel=cfg.ff_land_cancel > 0))
+        # ВОЗВРАТ ДОМОЙ (/mission/rth, make rth) — ПОСЛЕДНИМ в списке нарочно:
+        # шаг достижим только прыжком по имени (Freefly → goto "rth"), а «следующий
+        # индекс» после freefly обязан остаться посадкой по кнопке SA. Ручек у шага
+        # нет: точку home, высоту и скорость возврата держит FCU (RTL_ALT_M,
+        # RTL_SPEED_MS, LAND_SPD_MS) — нода лишь просит режим и отдаёт борт.
+        plan.append(Rth("rth", stack, keep=keep, throttle_hold=cfg.throttle_hold))
         return plan
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold

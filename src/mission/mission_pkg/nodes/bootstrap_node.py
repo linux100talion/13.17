@@ -417,6 +417,9 @@ class BootstrapArch2Node(Node):
         self._land_req = False
         self.create_subscription(Empty, '/mission/land',
                                  lambda _m: setattr(self, '_land_req', True), 1)
+        self._rth_req = False
+        self.create_subscription(Empty, '/mission/rth',
+                                 lambda _m: setattr(self, '_rth_req', True), 1)
         self._hud_st = ''      # последний st= в /mission/status (лог переходов)
         self._armed_prev = False   # фронт armed → латч нуля высоты перцепции, сброс VINS
         # ФРОНТ ARMED → сброс VINS (/restart → restart_callback эстиматора). Пока
@@ -580,6 +583,8 @@ class BootstrapArch2Node(Node):
         # кнопка посадки: пульт (уровень) ИЛИ one-shot /mission/land
         s.pilot_land = bool(self.pilot.land_switch()) or self._land_req
         self._land_req = False
+        # возврат домой: one-shot /mission/rth (make rth) — кнопки на пульте нет
+        s.pilot_rth, self._rth_req = self._rth_req, False
         s.extnav_ready = self._extnav_ready()    # гейт штатного LOITER-на-VINS
 
         self._send_origin()              # безжпсный бут: origin до подтверждения
