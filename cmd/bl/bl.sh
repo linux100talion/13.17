@@ -6,28 +6,29 @@
 #   WT=0 bash cmd/bl/bl.sh       # A: старое — свой трим у каждого яруса + посев (wind/baseline.txt)
 # Зачем и что меняет — README.txt рядом. WIND_SPD / WIND_GUST снаружи перекрывают дефолты строки
 # (они через ${X:-…}); ключи BS_* из профилей, наоборот, перекрывают внешний env и .env —
-# профиль = голые KEY=VALUE через set -a (см. src/control/profiles/README.md, docker/sim/env.md).
+# профили собирает src/control/profiles/load.py (include + дельта, дубль ключа между профилями =
+# ошибка; см. src/control/profiles/README.md, docker/sim/env.md). Реплей пульта:
+#   BS_PILOT=replay BS_REPLAY_SCENARIO=<…>.json bash cmd/bl/bl.sh   (профиль mission/replay)
 # Доп. аргументы → freefly_lv.sh.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
 
 WT="${WT:-1}"
+P=(dphold/baseline dpvins/brake5_stop vinshold/baseline vins/scale25 loiter/guard)
+if [ "$WT" = "0" ]; then P+=(wind/baseline); else P+=(wind/trim); fi
+# миссия/пилот и легаси-поля ноды — тоже из профилей (с 2026-09-07 у каждого поля ноды есть
+# место в профилях; сценарий реплея — аргумент прогона, не параметр)
+if [ "${BS_PILOT:-}" = "replay" ]; then P+=(mission/replay); else P+=(mission/baseline); fi
+P+=(legacy/baseline)
 set -a
-. src/control/profiles/dphold/baseline.txt
-. src/control/profiles/dpvins/brake5_stop.txt
-. src/control/profiles/vins/scale25.txt
-. src/control/profiles/loiter/guard.txt
-if [ "$WT" = "0" ]; then
-  . src/control/profiles/wind/baseline.txt
-else
-  . src/control/profiles/wind/trim.txt
-fi
+eval "$(python3 src/control/profiles/load.py "${P[@]}")"
 set +a
 
 export WIND_SPD="${WIND_SPD:-2}"
 export WIND_GUST="${WIND_GUST:-spd=5 at=30 rise=2 hold=5 fall=4 every=20}"
 echo ">>> cmd/bl/bl.sh: плечо $([ "$WT" = "0" ] && echo 'A (wind/baseline: свой трим + посев)' || echo 'B (wind/trim: WindTrim)');" \
      "WIND_TRIM=$BS_WIND_TRIM STEADY_SEC=$BS_WIND_STEADY_SEC STEADY_V=$BS_WIND_STEADY_V" \
-     "VEL_SRC=$BS_VINS_VEL_SRC LOITER_GUARD=$BS_LOITER_GUARD WIND_SPD=$WIND_SPD WIND_GUST=\"$WIND_GUST\""
+     "VEL_SRC=$BS_VINS_VEL_SRC LOITER_GUARD=$BS_LOITER_GUARD PILOT=$BS_PILOT WIND_SPD=$WIND_SPD WIND_GUST=\"$WIND_GUST\"" \
+     "(профили: ${P[*]})"
 exec bash src/lab/freefly_lv.sh "$@"

@@ -30,26 +30,11 @@
 # стрелка ветра на ходу ЖИВАЯ (wnr меняется), без рывка после стопа (|v| после отпускания
 # гаснет монотонно) и без качания; провал — снос как был (≥ 0.5) → смотреть sat/знак;
 # рывок после стопа → хвост защёлки движимой оси не сработал; качание боковое → ki 6.
-BS_VINS_STAB=dpvins
-
-# ГЕЙНЫ — как в brake5_tail
-BS_DPVINS_KP_FWD=40
-BS_DPVINS_KP_LAT=32
+include baseline.txt
 BS_DPVINS_KI=8
-BS_DPVINS_KI_TRIM=60
-BS_DPVINS_IMAX=120
-BS_DPVINS_CMD_GAIN=4
-BS_DPVINS_VSMOOTH=0.3
-BS_DPVINS_POS_KP=0.3
-BS_DPVINS_POS_VMAX=0.3
-BS_DPVINS_POS_ACC=0.15
 # ФАЗА BRAKE станции; brake_t −1 = трим в брейке не морозить (правило демпфера)
 BS_DPVINS_POS_BRAKE=5
-BS_DPVINS_POS_BRAKE_V=0.25
 BS_DPVINS_POS_BRAKE_VMAX=2.0
 BS_DPVINS_POS_BRAKE_T=-1
 # ПО-ОСЕВАЯ ЗАЩЁЛКА ТРИМА (как _TRIM_LATCH демпфера): 1 = морозить только движимую ось
 BS_DPVINS_LATCH_AXIS=1
-BS_DPVINS_TRIM_KEEP=1
-BS_DPVINS_TRIM_SEED=1
-BS_VINS_I_LATCH=1

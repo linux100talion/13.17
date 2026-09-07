@@ -1,0 +1,60 @@
+# МИССИЯ И ПИЛОТ — ручки полёта вне стабилизаторов: эталон 2026-09-07 (то, чем летает cmd/bl).
+# До этого дня эти ключи жили в трёх местах: freefly_lv.sh (BS_PILOT/BS_MISSION), env.default
+# (BS_SF_MASTER/BS_LAND_JOY) и дефолты ноды (всё остальное — молча). Здесь они собраны ЯВНО
+# теми же значениями; поведение прогона не меняется (A/B: мета lv2_joy_20260906_231055).
+# Формат — README.md. Аргументы ПРОГОНА (не параметры) сюда не входят: BS_REPLAY_SCENARIO /
+# BS_REPLAY_RAW / BS_REPLAY_FENCE — путь к сценарию и его забор задаются в команде запуска
+# (см. mission/replay.txt).
+
+# слой: env (freefly_lv.sh) — источник стиков и плейлист. joy = живой пульт TX12 по USB
+# (joy_linux_node → /joy); freefly = «свободный полёт»: взлёт руками, ярусы лесенки по
+# CH6/SF, посадка по SA. Реплей сценария — mission/replay.txt.
+BS_PILOT=joy
+BS_MISSION=freefly
+
+# слой: env (env.default) — SF (CH7) = мастер сырых стиков, SC (CH6) = потолок лесенки
+# демпфер/VinsHold/LOITER (sf-master-ladder); нужен микс SF→CH7 в EdgeTX
+BS_SF_MASTER=1
+# кнопка SA (мягкая посадка SoftLand) в /joy пульта: b<i>/a<i>. ⚠️ ЗАВИСИТ ОТ МИКШЕРА
+# ПУЛЬТА — другой пульт/прошивка → перемерить src/lab/joystick/js_probe.py
+BS_LAND_JOY=b1
+
+# слой: нода — пульт: устройство (bootstrap_arch2.sh, ⚠️ машинно-зависимо) и знаки осей
+# "r,p,t,y" (пусто = JOY_SIGNS_DEFAULT из control_pkg, выверены полётом TX12)
+BS_JOY_DEV=/dev/input/js0
+BS_JOY_SIGNS=
+
+# слой: нода — ВЫСОТА: целевая (скриптовые миссии) и внешний контур AltHold
+# (обоснование чисел — control_pkg/domain/control/altitude.py: kp 0.6 → 0.6 м/с на метр
+# ошибки, rate_max 1.2 → набор 3 м за ~3 с, tol 0.10 → у цели контур молчит)
+BS_ALT=3
+BS_ALT_KP=0.6
+BS_ALT_RATE_MAX=1.2
+BS_ALT_TOL=0.10
+
+# слой: нода — бюджеты фаз, sim-с (mode_budget — в loiter/: латч режима 80 с)
+BS_ARM_BUDGET=40
+BS_CLIMB_BUDGET=60
+BS_LAND_BUDGET=45
+
+# слой: нода — ГЕОЗАБОР, м от точки старта (0 = выкл): ушли дальше — сегмент прерывается,
+# план прыгает на land. Меньше чистого круга сцены (35 м): борт дважды садился в крону
+BS_FENCE=25
+# предельная длительность EXCITE, sim-с (0 = выкл; для пилот-режимов — когда садиться)
+BS_EXCITE_MAX=0
+
+# слой: нода — МЯГКАЯ ПОСАДКА по кнопке SA (sa-soft-land): шаг SoftLand в плане freefly;
+# второе нажатие до касания ОТМЕНЯЕТ (с 2026-09-06); на ярусе LOITER кнопка ВЫКЛ (отмена из
+# LAND полётника не сработала — сажать руками либо CH6 вниз → ярус 0/1 → SA); гейт кнопки
+# rel_alt ≤ 5 м и |v| ≤ 1 м/с; снижение 0.15 м/с (= LAND_SPD_MS ветки pos)
+BS_FF_LAND=1
+BS_FF_LAND_CANCEL=1
+BS_LAND_IN_LOITER=0
+BS_LAND_ALT_MAX=5
+BS_LAND_V_MAX=1.0
+BS_LAND_RATE=0.15
+
+# слой: нода — СКРИПТОВЫЕ миссии (BS_MISSION=climb3,mv_fwd2,…): уровень стика mv_*
+# сегментов и газ подъёма, PWM. В freefly инертны, но поле ноды — значение обязано быть
+BS_MV_LEVEL=0.3
+BS_THROTTLE_CLIMB=1650

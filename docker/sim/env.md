@@ -3,20 +3,24 @@
 Ручки прогона собираются из СЛОЁВ. Сверху вниз, верхний перекрывает нижние:
 
 ```
-1. профили src/control/profiles/*/*.txt, которые source'ит cmd/<имя>/<имя>.sh
+1. профили src/control/profiles/*/*.txt — собирает load.py, вызывает cmd/<имя>/<имя>.sh
 2. env снаружи             (WIND_SPD=5 LV=1 bash cmd/bl/bl.sh …)
 3. docker/sim/.env         (локальный профиль бокса; эталон — env.default)
 4. дефолты freefly_lv.sh   (LV=1 и т.п. — если ничего выше не задало)
 5. дефолты ноды            (mission_pkg/config.py через bootstrap_arch2.sh)
 ```
 
-Слой 1 — голые `KEY=VALUE` через `set -a; . файл`, поэтому для СВОИХ ключей
-профиль перекрывает и внешний env, и `.env`: `BS_ROLL_RATE_KP=50 bash cmd/bl/bl.sh`
-полетит с 90 из `dphold/baseline.txt`. Env снаружи сильнее профиля только там,
-где скрипт cmd сам пишет `${X:-…}` (`WIND_SPD`, `WIND_GUST` в `bl.sh`), и для
-ключей, которых в профиле нет (`LV`, `BS_SF_MASTER`, `RES`, `KEEP_BAG`…).
-`freefly_lv.sh` применяет строку `.env` ТОЛЬКО к незаданной переменной — что
-пришло из профиля или env снаружи, он не трогает.
+Слой 1 — `eval "$(python3 src/control/profiles/load.py …)"` под `set -a`
+(с 2026-09-07; include + дельта, дубль ключа между профилями = ошибка), поэтому
+для СВОИХ ключей профиль перекрывает и внешний env, и `.env`:
+`BS_ROLL_RATE_KP=50 bash cmd/bl/bl.sh` полетит с 90 из `dphold/baseline.txt`.
+С 2026-09-07 в профилях ВСЕ `BS_*` ноды, включая миссию/пилота (`mission/`) и
+легаси (`legacy/`) — под `cmd/*` слои 3–5 для `BS_*` затенены целиком. Env
+снаружи сильнее профиля только там, где скрипт cmd сам пишет `${X:-…}`
+(`WIND_SPD`, `WIND_GUST` в `bl.sh`), и для ключей вне профилей (`LV`, `RES`,
+`KEEP_BAG`, аргументы реплея `BS_REPLAY_*`…). `freefly_lv.sh` применяет строку
+`.env` ТОЛЬКО к незаданной переменной — что пришло из профиля или env снаружи,
+он не трогает.
 
 Кто за что отвечает:
 
@@ -72,16 +76,18 @@
 
 **Ещё 13 строк `BS_*` в `env.default` — ДУБЛИ профилей, не источник истины**
 (решение 2026-09-07: оставить): `BS_LOITER_TRACK`, `BS_LOITER_BANK_MAX`
-(`loiter/`), `BS_VINS_STAB`, `BS_VINS_I_LATCH` (`dpvins/`, `vinshold/`),
+(`loiter/`), `BS_VINS_STAB`, `BS_VINS_I_LATCH` (селектор и защёлка — `vins/`),
 `BS_VINS_KD_ERR`, `BS_VINS_PIN_STOP`, `BS_GZ_KD`, `BS_VINS_PREDICT`,
 `BS_VINS_VSMOOTH` (`vinshold/`), `BS_VINS_RESTART_DIVERGE`, `BS_VINS_SANE_N`,
-`BS_VINS_SCALE_RATIO`, `BS_VINS_SCALE_ALT_MAX` (`vins/`). Под любым `cmd/*` их
-значения из `.env` затенены профилем. Смысл дублей — страховка для ГОЛОГО
-`bash src/lab/freefly_lv.sh` без cmd: без них он полетел бы на дефолтах ноды
-(VinsHold вместо DpVins, гейт здоровья как в коде). Держать их равными
-`baseline.txt` профилей; обоснования, даты и полёты-доказательства каждой ручки —
-в шапках профилей (`# слой:` над блоками), не здесь. Ручек WindTrim
-(`BS_WIND_*`) и `BS_VINS_VEL_SRC` в `env.default` нет — только в `wind/`, `vins/`.
+`BS_VINS_SCALE_RATIO`, `BS_VINS_SCALE_ALT_MAX` (`vins/`). `BS_SF_MASTER` и
+`BS_LAND_JOY` из таблицы выше с 2026-09-07 тоже есть в `mission/baseline.txt`.
+Под любым `cmd/*` их значения из `.env` затенены профилем. Смысл дублей —
+страховка для ГОЛОГО `bash src/lab/freefly_lv.sh` без cmd: без них он полетел
+бы на дефолтах ноды (VinsHold вместо DpVins, гейт здоровья как в коде). Держать
+их равными `baseline.txt` профилей (`check.sh` по мете голого прогона);
+обоснования, даты и полёты-доказательства каждой ручки — в шапках профилей
+(`# слой:` над блоками), не здесь. Ручек WindTrim (`BS_WIND_*`) и
+`BS_VINS_VEL_SRC` в `env.default` нет — только в `wind/`, `vins/`.
 
 ⚠️ **Реплей СТАРЫХ сценариев** (без ключа `"sf"`, записи с 6 осями) под
 `BS_SF_MASTER=1` летит целиком на сырых стиках — запускать явно:

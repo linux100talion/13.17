@@ -12,23 +12,10 @@
 # ЧЕМ ДОКАЗЫВАТЬ: включить ярус 1 (CH6 центр) за 1–3 с до фронта порыва (wind_gust.log,
 # порывы каждые 20 с от 30) — brake_phase.py: «set/set до него — 0.0 с», первый цикл
 # pk ≤ 3.5; провал — set/set на входе (посев не сработал → wns/трим 0 — смотреть seed).
-BS_VINS_STAB=dpvins
-BS_DPVINS_KP_FWD=40
-BS_DPVINS_KP_LAT=32
+include baseline.txt
 BS_DPVINS_KI=8
-BS_DPVINS_KI_TRIM=60
-BS_DPVINS_IMAX=120
-BS_DPVINS_CMD_GAIN=4
-BS_DPVINS_VSMOOTH=0.3
-BS_DPVINS_POS_KP=0.3
-BS_DPVINS_POS_VMAX=0.3
-BS_DPVINS_POS_ACC=0.15
 BS_DPVINS_POS_BRAKE=5
-BS_DPVINS_POS_BRAKE_V=0.25
 BS_DPVINS_POS_BRAKE_VMAX=2.0
 BS_DPVINS_POS_BRAKE_T=-1
 BS_DPVINS_LATCH_AXIS=1
-BS_DPVINS_TRIM_KEEP=1
-BS_DPVINS_TRIM_SEED=1
-BS_VINS_I_LATCH=1
 BS_DPVINS_PIN_ARMED=1

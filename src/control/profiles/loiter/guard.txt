@@ -19,19 +19,5 @@
 # сценарий 142811 (разнос VINS после init): brake_phase/статус: tier 2 не берётся до
 # зрелости (t1 WAIT odom), brg=0 на разносе, после выздоровления и 300 сообщений — tier 2;
 # полёт без разноса — как раньше (joy_timeline: переходы tier без дребезга 2→0→2 < 5 с).
-BS_FF_LOITER=1
+include baseline.txt
 BS_LOITER_GUARD=1
-BS_MODE_BUDGET=80
-BS_LOITER_BANK_MAX=8
-BS_LOITER_TRACK=0
-BS_LOITER_ALT=0.5
-BS_LOITER_GATE_BUDGET=60
-BS_GPS_DENIED=1
-BS_GPS_DISABLE=0
-BS_SET_ORIGIN=1
-BS_ALT_SRC=baro
-BS_ORIGIN_LAT=50.450100
-BS_ORIGIN_LON=30.523400
-BS_ORIGIN_ALT=180.0
-BS_EKF_POS_BUDGET=120
-BS_EKF_DRAG=32

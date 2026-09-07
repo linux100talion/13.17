@@ -99,6 +99,8 @@ BS_YAW_MAX_RATE=100
 BS_YAW_SMOOTH=5
 BS_YAW_ARM_FRAMES=5
 BS_YAW_V_GATE=0.5
+# слой: нода — ручной override гейна yaw-стика (свип); пусто = None = yaw_flow_scale·yaw_rate_full
+BS_YAW_CMD_GAIN=
 # слой: нода
 BS_YAW_OSIGN=1
 BS_YAW_TRANS_FIX=1

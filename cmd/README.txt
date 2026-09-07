@@ -10,12 +10,17 @@ cmd/ — команды запуска полётов и кампаний
 
 Скрипты не зависят от текущего каталога (корень репы вычисляется от своего
 расположения), ручки берут из src/control/profiles/*/*.txt (эталон baseline +
-кандидаты). Профиль — голые KEY=VALUE через `set -a; . файл`, поэтому для СВОИХ
-ключей он перекрывает и внешний env, и docker/sim/.env: `BS_ROLL_RATE_KP=50 bash
-cmd/bl/bl.sh` полетит с 90 из dphold/baseline. Внешний env сильнее только для
-ключей, которых в профиле нет, и для WIND_SPD/WIND_GUST (в скрипте через ${X:-…}).
-Поменять ручку из профиля = копия cmd/bl → cmd/<имя>/ с файлом-кандидатом
-(см. src/control/profiles/README.md; лесенка приоритетов — docker/sim/env.md).
+кандидаты `include baseline.txt` + дельта) через загрузчик:
+    P=(dphold/baseline dpvins/brake5_stop vinshold/baseline vins/scale25 loiter/guard
+       wind/trim mission/baseline legacy/baseline)
+    set -a; eval "$(python3 src/control/profiles/load.py "${P[@]}")"; set +a
+(с 2026-09-07; дубль ключа между профилями = ошибка, mission/ и legacy/ — все поля
+ноды вне стабилизаторов). Профиль перекрывает и внешний env, и docker/sim/.env для
+СВОИХ ключей: `BS_ROLL_RATE_KP=50 bash cmd/bl/bl.sh` полетит с 90 из dphold/baseline.
+Внешний env сильнее только для ключей вне профилей (аргументы реплея BS_REPLAY_*,
+LV, RES…) и для WIND_SPD/WIND_GUST (в скрипте через ${X:-…}). Поменять ручку из
+профиля = копия cmd/bl → cmd/<имя>/ с файлом-кандидатом (см.
+src/control/profiles/README.md; лесенка приоритетов — docker/sim/env.md).
 
 Раскладка (с 2026-09-06):
 

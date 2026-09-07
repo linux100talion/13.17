@@ -1,8 +1,14 @@
 # ОПОРА VINS — общее для ярусов 1 и 2: эталон 2026-09-05 (коммит 3a5205c). Хэндовер
 # демпфер→VINS и зрелость потока, гейт здоровья VINS (три канала, Handover.vins_sane —
-# роняет ярус 1 И выводит из LOITER), мост VINS→EKF (ray_tracer/FrameAnchor). Стабилизатор
-# яруса 1 выбирается отдельно: dpvins/ или vinshold/. Разбор гейта — control.md «Гейт
-# здоровья», память dpvins-gust-restart-scale. Формат — README.md.
+# роняет ярус 1 И выводит из LOITER), мост VINS→EKF (ray_tracer/FrameAnchor), СЕЛЕКТОР
+# стабилизатора яруса 1 (гейны обоих — dpvins/ и vinshold/, грузятся всегда). Разбор гейта —
+# control.md «Гейт здоровья», память dpvins-gust-restart-scale. Формат — README.md.
+
+# слой: env — СТАБИЛИЗАТОР ЯРУСА 1: dpvins (velocity-каскад DpVins, дефолт с 2026-09-03)
+# | vinshold (2D position-PID, откат — vins/vinshold.txt); защёлка трима от живого стика до
+# гвоздя — ручка VinsHold, DpVins её тоже читает (frozen в update)
+BS_VINS_STAB=dpvins
+BS_VINS_I_LATCH=1
 
 # слой: env — ХЭНДОВЕР И ЗРЕЛОСТЬ: ярус 1 по ≥300 сообщений одометрии (счётчик и время
 # первого сообщения обнуляются на перерождении VINS — зрелость заново); /restart VINS на

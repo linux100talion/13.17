@@ -1,0 +1,5 @@
+# ОТКАТ яруса 1 на VinsHold (2D position-PID): всё как vins/baseline, стабилизатор — vinshold.
+# Гейны VinsHold — vinshold/baseline.txt (в стеке всегда), DpVins при этом инертен.
+#   P=(dphold/baseline dpvins/brake5_stop vinshold/baseline vins/vinshold loiter/guard …)
+include baseline.txt
+BS_VINS_STAB=vinshold

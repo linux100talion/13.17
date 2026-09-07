@@ -8,14 +8,18 @@
 # WIND_SPD / WIND_GUST снаружи перекрывают дефолты строки (env сильнее профиля —
 # см. src/control/profiles/README.md). Доп. аргументы уходят в freefly_lv.sh.
 set -euo pipefail
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"   # cmd/history/<кампания>/<n>/ → корень репы
 cd "$REPO"
 
+P=()
+P+=(dphold/baseline)
+P+=(dpvins/brake5_axis)
+P+=(vins/baseline)
+P+=(loiter/baseline)
+# профили собирает load.py (с 2026-09-07: include + дельта, дубль = ошибка); mission/ и legacy/ —
+# поля ноды вне стабилизаторов теми же значениями, что летали (дефолты ноды/env) — поведение то же
 set -a
-. src/control/profiles/dphold/baseline.txt
-. src/control/profiles/dpvins/brake5_axis.txt
-. src/control/profiles/vins/baseline.txt
-. src/control/profiles/loiter/baseline.txt
+eval "$(python3 src/control/profiles/load.py "${P[@]}" vinshold/baseline mission/baseline legacy/baseline)"
 set +a
 
 export WIND_SPD="${WIND_SPD:-1}"

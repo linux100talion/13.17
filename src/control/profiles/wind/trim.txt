@@ -18,6 +18,5 @@
 # (путь демпфера через объект бит в бит, офлайн-повтор 191610).
 # ЧЕМ ДОКАЗЫВАТЬ: A/B тем же полётом WT=0 / WT=1 (cmd/bl/README.txt), joy_timeline по wt= на
 # фронтах tier=, gust_hold_compare на висениях обоих ярусов, стрелка на scene_hud.mp4.
+include baseline.txt
 BS_WIND_TRIM=1
-BS_WIND_STEADY_SEC=3
-BS_WIND_STEADY_V=0.5

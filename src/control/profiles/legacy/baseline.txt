@@ -1,0 +1,37 @@
+# ЛЕГАСИ — поля ноды, которых нет в активном стеке (DpHoldM + DpYawHold / DpVins / LOITER):
+# эталон 2026-09-07, значения = дефолты ноды (mission_pkg/config.py) — поведение не меняется.
+# Собраны здесь, чтобы у КАЖДОГО поля ноды было место в профилях: следующий этап — нода без
+# дефолтов, отсутствующий ключ = ошибка. Кандидат на вычистку из кода вместе с этим файлом;
+# пока код читает эти поля, профиль обязан их задавать. Формат — README.md.
+
+# слой: нода — ЛЕГАСИ-ЯРЛЫК control_mode (shuttle | assisted | manual | flow_assist):
+# слепляет стабилизатор + траекторию; при заданном BS_MISSION игнорируется (recipes.py).
+# gz-shuttle — челнок gz-hold (Shuttle): уровень стика [-1..1] на плече, плечо с, пауза с,
+# FWD=1 — продольный
+BS_CONTROL_MODE=shuttle
+BS_GZ_SHUTTLE_LEVEL=0.3
+BS_GZ_SHUTTLE_LEG=3
+BS_GZ_SHUTTLE_PAUSE=2
+BS_GZ_SHUTTLE_FWD=0
+
+# слой: нода — DpRollHold / DpPitchHold: flow-позиционный демпфер ДО DpHoldM (spec
+# 'DpRollHold+DpYawHold'); активный стек летает на rate-осях (dphold/: BS_*_RATE_*).
+# kp/ki/kd/cmd_gain и окно сглаживания потока (кадров)
+BS_ROLL_KP=48
+BS_ROLL_KI=0
+BS_ROLL_KD=0
+BS_ROLL_CMD_GAIN=10
+BS_ROLL_SMOOTH=25
+BS_PITCH_KP=1500
+BS_PITCH_KI=0
+BS_PITCH_KD=1500
+BS_PITCH_CMD_GAIN=0
+BS_PITCH_SMOOTH=9
+
+# слой: нода — старый flow-путь: наблюдатель потока без управления (BS_FLOW_OBS=1 →
+# --flow-observe) и KF-высота кейфреймов (пусто = None = выкл; flow_estimator keyframe)
+BS_FLOW_OBS=0
+BS_KF_ALT_HOLD=
+BS_KF_ALT_MAX=
+BS_KF_SEG_FRAC=
+BS_KF_SEG_MIN=

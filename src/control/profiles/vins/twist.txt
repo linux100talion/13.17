@@ -22,23 +22,5 @@
 #   успех — цикл не хуже 130326 (пик от гвоздя ≤ 2.2, перелёт ≤ 2.1, BRAKE входит не
 #   позже +3.5 с), spd= статуса без дрожи на висении, σθ не хуже, reb/scl 0;
 #   провал — новый звон/дрожь (шум twist в петле) → vsmooth 0.5; демоуты по гейту → V_MAX.
-BS_HANDOVER_VINS=1
-BS_VINS_MIN=300
-BS_VINS_RESTART_ARM=1
-BS_RIPE_SEC=30
-BS_RIPE_DET=1
-BS_VINS_SANE_N=10
+include baseline.txt
 BS_VINS_VEL_SRC=twist
-BS_VINS_RESTART_DIVERGE=0
-BS_VINS_SCALE_RATIO=0.5
-BS_VINS_SCALE_ALT_MAX=4
-BS_VINS_V_MAX=12
-BS_VINS_HOVER_V=3
-BS_VINS_HOVER_SEC=2
-BS_VINS_IPM_TOL=0
-BS_VINS_RESTART_CD=6
-BS_VINS_SCALE_IPM_MIN=2
-BS_VINS_SCALE_SEC=3
-BS_VINS_SCALE_HOLD=30
-BS_VISION_POSE_SRC=extern
-BS_VISION_VEL=1

@@ -20,23 +20,7 @@
 # → в статусе scl=0 весь полёт, brake_phase/gust_hold_compare как раньше; (2) реплей на новых
 # bag: vins_sane_replay.py с ручками профиля — 0 ложных, с --vins-scale 0.2 — срабатывания на
 # плечах; (3) ipm_alt_quality.py на боевых bag Orin — гейн/шум по высотам перед включением там.
-BS_HANDOVER_VINS=1
-BS_VINS_MIN=300
-BS_VINS_RESTART_ARM=1
-BS_RIPE_SEC=30
-BS_RIPE_DET=1
-BS_VINS_SANE_N=10
+include baseline.txt
 BS_VINS_VEL_SRC=twist
-BS_VINS_RESTART_DIVERGE=0
-BS_VINS_SCALE_RATIO=0.5
 BS_VINS_SCALE_ALT_MAX=25
-BS_VINS_V_MAX=12
-BS_VINS_HOVER_V=3
-BS_VINS_HOVER_SEC=2
-BS_VINS_IPM_TOL=0
-BS_VINS_RESTART_CD=6
 BS_VINS_SCALE_IPM_MIN=1.2
-BS_VINS_SCALE_SEC=3
-BS_VINS_SCALE_HOLD=30
-BS_VISION_POSE_SRC=extern
-BS_VISION_VEL=1

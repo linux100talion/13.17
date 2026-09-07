@@ -18,25 +18,13 @@
 # отпусканием на ходу, то же на DpHold; разбор src/lab/release_stop.py (t до гвоздя, путь до
 # гвоздя, |v| при гвозде): успех — путь до гвоздя ≤ 6 м и ≤ 3 с с 5 м/с (как DpHold), «гвоздь
 # не взят» 0, уход за 5 с после гвоздя ≤ 1.5 м; провал — рывок/откат при стопе → brake 3.
-BS_VINS_STAB=dpvins
-BS_DPVINS_KP_FWD=40
-BS_DPVINS_KP_LAT=32
+include baseline.txt
 BS_DPVINS_KI=8
-BS_DPVINS_KI_TRIM=60
-BS_DPVINS_IMAX=120
 BS_DPVINS_CMD_GAIN=5
-BS_DPVINS_VSMOOTH=0.3
-BS_DPVINS_POS_KP=0.3
-BS_DPVINS_POS_VMAX=0.3
-BS_DPVINS_POS_ACC=0.15
 BS_DPVINS_POS_BRAKE=5
-BS_DPVINS_POS_BRAKE_V=0.25
 BS_DPVINS_POS_BRAKE_VMAX=2.0
 BS_DPVINS_POS_BRAKE_T=-1
 BS_DPVINS_LATCH_AXIS=1
-BS_DPVINS_TRIM_KEEP=1
-BS_DPVINS_TRIM_SEED=1
-BS_VINS_I_LATCH=1
 BS_DPVINS_PIN_ARMED=1
 BS_DPVINS_FF=10
 BS_DPVINS_LINE_HOLD=1

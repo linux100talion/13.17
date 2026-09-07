@@ -1,0 +1,6 @@
+# РЕПЛЕЙ ПУЛЬТА вместо живого пилота (src/lab/joystick/): всё как mission/baseline,
+# источник стиков — записанный сценарий. САМ сценарий — аргумент прогона, не параметр:
+#   BS_PILOT=replay BS_REPLAY_SCENARIO=<…>.json bash cmd/bl/bl.sh      (bl.sh берёт этот профиль
+#   при BS_PILOT=replay; BS_REPLAY_RAW=<…>.jsonl — сырой лог; BS_REPLAY_FENCE — забор реплея)
+include baseline.txt
+BS_PILOT=replay

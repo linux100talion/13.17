@@ -7,20 +7,24 @@
 # Зачем и что меняет — README.txt рядом. WIND_SPD / WIND_GUST снаружи перекрывают дефолты строки
 # (env сильнее профиля — см. src/control/profiles/README.md). Доп. аргументы → freefly_lv.sh.
 set -euo pipefail
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"   # cmd/history/<кампания>/<n>/ → корень репы
 cd "$REPO"
 
 WT="${WT:-1}"
-set -a
-. src/control/profiles/dphold/baseline.txt
-. src/control/profiles/dpvins/brake5_stop.txt
-. src/control/profiles/vins/scale25.txt
-. src/control/profiles/loiter/guard.txt
+P=()
+P+=(dphold/baseline)
+P+=(dpvins/brake5_stop)
+P+=(vins/scale25)
+P+=(loiter/guard)
 if [ "$WT" = "0" ]; then
-  . src/control/profiles/wind/baseline.txt
+  P+=(wind/baseline)
 else
-  . src/control/profiles/wind/trim.txt
+  P+=(wind/trim)
 fi
+# профили собирает load.py (с 2026-09-07: include + дельта, дубль = ошибка); mission/ и legacy/ —
+# поля ноды вне стабилизаторов теми же значениями, что летали (дефолты ноды/env) — поведение то же
+set -a
+eval "$(python3 src/control/profiles/load.py "${P[@]}" vinshold/baseline mission/baseline legacy/baseline)"
 set +a
 
 export WIND_SPD="${WIND_SPD:-2}"
