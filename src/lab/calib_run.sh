@@ -70,15 +70,13 @@ DRY_RUN="${DRY_RUN:-0}"
 # прогоне без крен-контура.
 TOPICS_EXTRA="${TOPICS_EXTRA:-/flow_dbg /flow_dbg2 /flow_dbg3 /flow_dbg4 /flow_dbg5 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /flow_dbg10 /model/iris_cam/odometry /mavros/imu/data /mavros/global_position/rel_alt /gz_imu/data_flu /mavros/imu/data_raw}"
 
-# Бюджеты фаз — как в эталонном прогоне bootstrap_arch2 (CPU-бокс, низкий RTF).
-export BS_THROTTLE_CLIMB="${BS_THROTTLE_CLIMB:-1800}"
-export BS_MODE_BUDGET="${BS_MODE_BUDGET:-80}"
-export BS_ARM_BUDGET="${BS_ARM_BUDGET:-80}"
-export BS_CLIMB_BUDGET="${BS_CLIMB_BUDGET:-120}"
-export BS_LAND_BUDGET="${BS_LAND_BUDGET:-180}"
-# Зрение поднимаем ВСЕГДА, даже когда демпфера в стеке нет: перцепт пишется в
-# /flow_dbg* и меряется на том же движении, ради которого прогон и затеян.
-export BS_FLOW_OBS="${BS_FLOW_OBS:-1}"
+# 2026-09-07: ручки ноды (бюджеты фаз 1800/80/80/120/180, BS_FLOW_OBSERVE=1, миссия
+# калибровки) — ТОЛЬКО профили: задай PROFILES с кандидатом mission/<calib>.txt
+# (include baseline + дельта). Экспорты BS_* здесь удалены — до ноды они не доезжают.
+if [ -z "${PROFILES:-}" ]; then
+    echo "ОШИБКА: calib_run требует PROFILES (профиль миссии калибровки, см. src/control/profiles/README.md)" >&2
+    exit 2
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

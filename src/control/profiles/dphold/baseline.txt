@@ -24,7 +24,7 @@ BS_SLEW=300
 BS_ROLL_RATE_KD=0
 BS_PITCH_RATE_KD=0
 BS_PITCH_IMAX=120
-BS_RATE_AWU=1
+BS_RATE_ANTI_WINDUP=1
 
 # слой: env — СТАНЦИЯ (StationKeeper над псевдопозицией-интегралом пути): возврат
 # pos_kp 0.3 с капом 0.3 м/с и √-разгоном 0.15; тормоз BRAKE 3 (−brake·v) до 1.0 м/с при
@@ -78,8 +78,8 @@ BS_IPM_MODEL=exact
 BS_IPM_ALT_STILL=0.5
 BS_IPM_MAX_SPEED=0
 BS_IPM_ARM_FRAMES=0
-BS_IPM_ALT_FWD=0
-BS_IPM_ALT_LAT=0
+BS_IPM_ALT_BAND_FWD=0
+BS_IPM_ALT_BAND_LAT=0
 BS_ATT_EXTRAP=0
 BS_ATT_WAIT_MAX=0.15
 # слой: env — высота перцепции: EKF local z + латч нуля по арму (damper-low-alt)
@@ -101,6 +101,14 @@ BS_YAW_ARM_FRAMES=5
 BS_YAW_V_GATE=0.5
 # слой: нода — ручной override гейна yaw-стика (свип); пусто = None = yaw_flow_scale·yaw_rate_full
 BS_YAW_CMD_GAIN=
+# слой: нода (2026-09-07 — до этого без проводки BS_): DpYawHold — потолок И-члена и
+# команды (PWM), гейты уверенности потока; yaw_flow_scale — масштаб «поток → °/с»
+# (гейн yaw-стика = yaw_flow_scale·yaw_rate_full, если BS_YAW_CMD_GAIN пуст)
+BS_YAW_IMAX=200
+BS_YAW_MAX=150
+BS_YAW_CONF_MIN=0.05
+BS_YAW_CONF_FULL=0.2
+BS_YAW_FLOW_SCALE=0.324
 # слой: нода
 BS_YAW_OSIGN=1
 BS_YAW_TRANS_FIX=1

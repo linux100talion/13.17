@@ -15,7 +15,6 @@ RosPilot легаси — см. ros_pilot.py про петлю rc/override→rc/
     ros2 run mission_pkg bootstrap_arch2 --control-mode assisted            # срез 2 (пульт-намерение)
     ros2 run mission_pkg bootstrap_arch2 --control-mode manual              # срез 2 (ручной)
 """
-import argparse
 import math
 import os
 import time
@@ -31,6 +30,19 @@ from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
 from control_pkg.domain.control.stabilization import VinsHold
 from control_pkg.domain.rc import RC_CENTER, RcCommand
+
+from control_pkg.infrastructure.mavros_actuator import MavrosActuator
+from control_pkg.infrastructure.ros_clock import RosClock
+from control_pkg.infrastructure.ros_io import RosDebugSink, RosLogger
+from control_pkg.infrastructure.ros_perception import RosPerception
+from control_pkg.infrastructure.ros_pilot import JoyPilot, RosPilot, ScriptedPilot
+from control_pkg.infrastructure.ros_telemetry import RosTelemetry
+
+from ..config import BootstrapConfig
+from ..plan.bootstrap_plan import build_bootstrap_plan
+from ..plan.mission_plan import compile_mission, resolve_mission
+from ..plan.runner import PlanRunner
+from ..recipes import build_control_stack, build_vins_stab
 
 # ПОТОКИ ТЕЛЕМЕТРИИ FCU, которые читает нода (сторож _telemetry_watch): id
 # MAVLink, Гц, имя. Темпы = запросам nav_up.sh (стримы RAW_SENS 200 / POSITION 25 /
@@ -50,18 +62,6 @@ TEL_STREAMS = (
 )
 TEL_SILENT_SEC = 2.0     # IMU молчит дольше — телеметрия «мёртвая»
 TEL_RETRY_SEC = 3.0      # период запросов, пока молчит
-from control_pkg.infrastructure.mavros_actuator import MavrosActuator
-from control_pkg.infrastructure.ros_clock import RosClock
-from control_pkg.infrastructure.ros_io import RosDebugSink, RosLogger
-from control_pkg.infrastructure.ros_perception import RosPerception
-from control_pkg.infrastructure.ros_pilot import JoyPilot, RosPilot, ScriptedPilot
-from control_pkg.infrastructure.ros_telemetry import RosTelemetry
-
-from ..config import BootstrapConfig
-from ..plan.bootstrap_plan import build_bootstrap_plan
-from ..plan.mission_plan import compile_mission, resolve_mission
-from ..plan.runner import PlanRunner
-from ..recipes import build_control_stack, build_vins_stab
 
 # Экстринсик камеры (R_cam_imu) + знак derotation — из sim.yaml/монолита, ПОДТВЕРЖДЕНЫ
 # flow_derotation_check (остаток 0.55× baseline). Интринсики — из разрешения (см. RosPerception).
@@ -904,400 +904,16 @@ class BootstrapArch2Node(Node):
 
 
 def _parse() -> tuple:
-    _D = BootstrapConfig()          # источник дефолтов для осевых гейнов (см. ниже)
-    p = argparse.ArgumentParser()
-    p.add_argument('--control-mode', dest='control_mode', default='shuttle',
-                   choices=['shuttle', 'assisted', 'manual', 'flow_assist'],
-                   help='ЛЕГАСИ-ярлык (стабилизатор+траектория). Игнор при заданном --mission')
-    # ОРТОГОНАЛЬНЫЙ путь профиль-миссий (см. plan/mission_plan.py, recipes.build_stabilizers)
-    p.add_argument('--stab', default='',
-                   help="стабилизатор(ы): GzPosHold|DpRollHold+DpYawHold|DpHold|VinsHold|manual "
-                        "('' → GzPosHold при --mission)")
-    p.add_argument('--mission', default='',
-                   help="плейлист профилей: имя из MISSIONS или 'climb3,mv_fwd2,mv_bkwd4,landing3' "
-                        "('' → легаси bootstrap по --control-mode)")
-    p.add_argument('--mv-level', dest='mv_level', type=float, default=0.3,
-                   help='глобальный уровень стика для mv_* профиль-сегментов [-1..1]')
-    p.add_argument('--pilot', default='scripted', choices=['scripted', 'joy', 'ros'],
-                   help='источник стиков: scripted (sim-профиль) | joy (живой пульт '
-                        'через /joy, мимо FCU) | ros (ЛЕГАСИ /mavros/rc/in — под '
-                        'override это эхо собственной команды)')
-    p.add_argument('--joy-signs', dest='joy_signs', default=_D.joy_signs,
-                   help='знаки осей пульта "r,p,t,y", напр. "-1,1,1,-1" '
-                        '(пусто = JOY_SIGNS_DEFAULT, выверены полётом TX12)')
-    p.add_argument('--fence', type=float, default=_D.fence,
-                   help='геозабор, м от старта: ушли дальше — сразу на посадку (0=выкл)')
-    p.add_argument('--excite-max-sec', dest='excite_max_sec', type=float, default=0.0,
-                   help='предел длительности EXCITE, sim-сек (0=авто для пилот-режимов)')
-    p.add_argument('--alt', type=float, default=3.0)
-    p.add_argument('--throttle-climb', dest='throttle_climb', type=int, default=1650)
-    p.add_argument('--throttle-hold', dest='throttle_hold', type=int, default=RC_CENTER)
-    p.add_argument('--ground-z', dest='ground_z', type=float, default=0.3)
-    p.add_argument('--mode-budget', dest='mode_budget', type=float, default=40.0)
-    p.add_argument('--arm-budget', dest='arm_budget', type=float, default=40.0)
-    p.add_argument('--climb-budget', dest='climb_budget', type=float, default=60.0)
-    p.add_argument('--land-budget', dest='land_budget', type=float, default=45.0)
-    p.add_argument('--gz-kp', dest='gz_kp', type=float, default=40.0)
-    p.add_argument('--gz-kd', dest='gz_kd', type=float, default=120.0)
-    p.add_argument('--gz-ki', dest='gz_ki', type=float, default=8.0)
-    p.add_argument('--gz-imax', dest='gz_imax', type=float, default=100.0)
-    p.add_argument('--gz-max', dest='gz_max', type=float, default=150.0)
-    p.add_argument('--gz-psign', dest='gz_psign', type=float, default=1.0)
-    p.add_argument('--gz-rsign', dest='gz_rsign', type=float, default=1.0)
-    p.add_argument('--gz-cmd-gain', dest='gz_cmd_gain', type=float, default=0.8)
-    p.add_argument('--gz-shuttle-level', dest='gz_shuttle_level', type=float, default=0.3)
-    p.add_argument('--gz-shuttle-leg', dest='gz_shuttle_leg', type=float, default=3.0)
-    p.add_argument('--gz-shuttle-pause', dest='gz_shuttle_pause', type=float, default=2.0)
-    p.add_argument('--gz-shuttle-fwd', dest='gz_shuttle_fwd', action='store_true')
-    p.add_argument('--slew', dest='slew', type=float, default=_D.slew,
-                   help='предел скорости изменения выхода, PWM/сек (0=выкл); τ борта 0.27с')
-    p.add_argument('--roll-imax', dest='roll_imax', type=float, default=_D.roll_imax)
-    p.add_argument('--pitch-imax', dest='pitch_imax', type=float, default=_D.pitch_imax)
-    p.add_argument('--pilot-deadzone', dest='pilot_deadzone', type=int, default=30)
-    p.add_argument('--pilot-full', dest='pilot_full', type=int, default=400)
-    p.add_argument('--pilot-pitch-sign', dest='pilot_pitch_sign', type=float,
-                   default=_D.pilot_pitch_sign)
-    p.add_argument('--pilot-roll-sign', dest='pilot_roll_sign', type=float, default=1.0)
-    # ---- демпфер по потоку (пре-VINS): ТРИ ОСИ, у каждой свой полный набор ----
-    # Дефолты берём из BootstrapConfig (_D), а не хардкодом: parse_args всегда кладёт
-    # свой default в d → BootstrapConfig(**d), т.е. хардкод здесь МОЛЧА перекрыл бы
-    # дефолт датакласса (именно так velocity-assist один раз остался выключенным).
-    p.add_argument('--roll-kp', dest='roll_kp', type=float, default=_D.roll_kp)
-    p.add_argument('--roll-ki', dest='roll_ki', type=float, default=_D.roll_ki)
-    p.add_argument('--roll-kd', dest='roll_kd', type=float, default=_D.roll_kd)
-    p.add_argument('--roll-osign', dest='roll_osign', type=float, default=_D.roll_osign)
-    p.add_argument('--roll-cmd-gain', dest='roll_cmd_gain', type=float, default=_D.roll_cmd_gain)
-    p.add_argument('--roll-smooth', dest='roll_smooth', type=int, default=_D.roll_smooth)
-    # --- ВЫСОТА (внешний контур AltHold; обоснование — control/altitude.py) ---
-    p.add_argument('--alt-kp', dest='alt_kp', type=float, default=_D.alt_kp)
-    p.add_argument('--alt-rate-max', dest='alt_rate_max', type=float, default=_D.alt_rate_max)
-    p.add_argument('--alt-tol', dest='alt_tol', type=float, default=_D.alt_tol)
-    p.add_argument('--pitch-kp', dest='pitch_kp', type=float, default=_D.pitch_kp)
-    p.add_argument('--pitch-ki', dest='pitch_ki', type=float, default=_D.pitch_ki)
-    p.add_argument('--pitch-kd', dest='pitch_kd', type=float, default=_D.pitch_kd)
-    p.add_argument('--kf-alt-max', dest='kf_alt_max', type=float, default=_D.kf_alt_max)
-    p.add_argument('--kf-alt-hold', dest='kf_alt_hold', type=float, default=_D.kf_alt_hold)
-    p.add_argument('--yaw-trans-fix', dest='yaw_trans_fix', type=int, default=_D.yaw_trans_fix)
-    p.add_argument('--att-extrap', dest='att_extrap', type=int, default=_D.att_extrap)
-    p.add_argument('--att-interp', dest='att_interp', type=int, default=_D.att_interp)
-    p.add_argument('--att-latency', dest='att_latency', type=float, default=_D.att_latency)
-    p.add_argument('--att-wait-max', dest='att_wait_max', type=float, default=_D.att_wait_max)
-    p.add_argument('--ipm-model', dest='ipm_model', default=_D.ipm_model,
-                   choices=['legacy', 'rsign', 'exact'])
-    p.add_argument('--ipm-derot', dest='ipm_derot', type=float, default=_D.ipm_derot)
-    p.add_argument('--ipm-adapt', dest='ipm_adapt', type=float, default=_D.ipm_adapt)
-    p.add_argument('--ipm-vel-tau', dest='ipm_vel_tau', type=float,
-                   default=_D.ipm_vel_tau)
-    p.add_argument('--ipm-alt-floor', dest='ipm_alt_floor', type=float,
-                   default=_D.ipm_alt_floor)
-    # масштабно-инвариантная полоса IPM (геометрия ∝ alt/h_ref; 0 = легаси)
-    p.add_argument('--ipm-scale-ref', dest='ipm_scale_ref', type=float,
-                   default=_D.ipm_scale_ref)
-    p.add_argument('--vision-vel', dest='vision_vel', type=float,
-                   default=_D.vision_vel)
-    p.add_argument('--vision-pose-src', dest='vision_pose_src',
-                   default=_D.vision_pose_src, choices=['integral', 'extern'])
-    p.add_argument('--gps-disable', dest='gps_disable', type=float,
-                   default=_D.gps_disable)
-    p.add_argument('--gps-denied', dest='gps_denied', type=float,
-                   default=_D.gps_denied)
-    p.add_argument('--alt-src', dest='alt_src',
-                   default=_D.alt_src, choices=['global', 'baro'])
-    # высота ПЕРЦЕПЦИИ (масштаб IPM/гейты опоры) — отдельно от alt_src миссии
-    p.add_argument('--perc-alt-src', dest='perc_alt_src',
-                   default=_D.perc_alt_src, choices=['global', 'local', 'baro'])
-    # ноль высоты перцепции по арму (см. config.perc_alt_zero): чинит смещение
-    # EKF local z, из-за которого гейт земли IPM не открывался на низком полёте
-    p.add_argument('--perc-alt-zero', dest='perc_alt_zero', type=float,
-                   default=_D.perc_alt_zero)
-    # сброс VINS по арму (см. config.vins_restart_arm): окно инициализации,
-    # накопленное за стояние на земле, после отрыва не решается за полёт (O(N³))
-    p.add_argument('--vins-restart-arm', dest='vins_restart_arm', type=float,
-                   default=_D.vins_restart_arm)
-    # ФВЧ прогноза ускорения в фильтре скорости IPM (см. config.ipm_acc_tau):
-    # снимает балансирующий ветер наклон, из-за которого боковая ось смещена
-    p.add_argument('--ipm-acc-tau', dest='ipm_acc_tau', type=float,
-                   default=_D.ipm_acc_tau)
-    p.add_argument('--set-origin', dest='set_origin', type=float,
-                   default=_D.set_origin)
-    # координаты origin (примерная РЕАЛЬНАЯ точка старта — см. config.origin_lat:
-    # из них EKF строит модель магнитного поля; дефолт = дом SITL, с 2026-08-24 Киев)
-    p.add_argument('--origin-lat', dest='origin_lat', type=float,
-                   default=_D.origin_lat)
-    p.add_argument('--origin-lon', dest='origin_lon', type=float,
-                   default=_D.origin_lon)
-    p.add_argument('--origin-alt', dest='origin_alt', type=float,
-                   default=_D.origin_alt)
-    p.add_argument('--ipm-wz-tau', dest='ipm_wz_tau', type=float, default=_D.ipm_wz_tau)
-    p.add_argument('--ipm-wz-gate', dest='ipm_wz_gate', type=float, default=_D.ipm_wz_gate)
-    p.add_argument('--ipm-wz-bias-max', dest='ipm_wz_bias_max', type=float,
-                   default=_D.ipm_wz_bias_max)
-    p.add_argument('--ipm-win', dest='ipm_win', type=float, default=_D.ipm_win)
-    p.add_argument('--ipm-max-speed', dest='ipm_max_speed', type=float,
-                   default=_D.ipm_max_speed)
-    p.add_argument('--ipm-alt-band-fwd', dest='ipm_alt_band_fwd', type=float,
-                   default=_D.ipm_alt_band_fwd)
-    p.add_argument('--pitch-soft-alt', dest='pitch_soft_alt', type=float,
-                   default=_D.pitch_soft_alt)
-    p.add_argument('--roll-soft-alt', dest='roll_soft_alt', type=float,
-                   default=_D.roll_soft_alt)
-    p.add_argument('--pitch-soft-noise', dest='pitch_soft_noise', type=float,
-                   default=_D.pitch_soft_noise)
-    p.add_argument('--roll-soft-noise', dest='roll_soft_noise', type=float,
-                   default=_D.roll_soft_noise)
-    p.add_argument('--ipm-alt-band-lat', dest='ipm_alt_band_lat', type=float,
-                   default=_D.ipm_alt_band_lat)
-    p.add_argument('--ipm-alt-still', dest='ipm_alt_still', type=float,
-                   default=_D.ipm_alt_still)
-    p.add_argument('--ipm-arm-frames', dest='ipm_arm_frames', type=int,
-                   default=_D.ipm_arm_frames)
-    p.add_argument('--kf-seg-min-sec', dest='kf_seg_min_sec', type=float,
-                   default=_D.kf_seg_min_sec)
-    p.add_argument('--kf-seg-frac', dest='kf_seg_frac', type=float, default=_D.kf_seg_frac)
-    p.add_argument('--pitch-rate-kp', dest='pitch_rate_kp', type=float,
-                   default=_D.pitch_rate_kp)
-    p.add_argument('--roll-rate-kp', dest='roll_rate_kp', type=float,
-                   default=_D.roll_rate_kp)
-    # ⚠️ ki/kd rate-осей ДОЛГО СУЩЕСТВОВАЛИ БЕЗ АРГУМЕНТА: поля были в BootstrapConfig и
-    # читались в recipes.py, но argparse их не знал, а BootstrapConfig(**vars(a)) собирается
-    # ровно из разобранных аргументов — значит поле МОЛЧА получало дефолт датакласса (0.0).
-    # Свип B3s (BS_ROLL_RATE_KI=5) из-за этого отлетел с ki=0 и выглядел как «интегратор не
-    # помогает». Ручка без аргумента не отсутствует — она врёт, и врёт молча.
-    p.add_argument('--roll-rate-ki', dest='roll_rate_ki', type=float,
-                   default=_D.roll_rate_ki)
-    p.add_argument('--roll-rate-kd', dest='roll_rate_kd', type=float,
-                   default=_D.roll_rate_kd)
-    p.add_argument('--pitch-rate-ki', dest='pitch_rate_ki', type=float,
-                   default=_D.pitch_rate_ki)
-    p.add_argument('--pitch-rate-kd', dest='pitch_rate_kd', type=float,
-                   default=_D.pitch_rate_kd)
-    p.add_argument('--roll-rate-ki-trim', dest='roll_rate_ki_trim', type=float,
-                   default=_D.roll_rate_ki_trim)
-    p.add_argument('--pitch-rate-ki-trim', dest='pitch_rate_ki_trim', type=float,
-                   default=_D.pitch_rate_ki_trim)
-    # cmd_gain rate-осей: стик пилота = ЦЕЛЕВАЯ СКОРОСТЬ демпфера (м/с при полном
-    # стике), 0 = чистое удержание. Без аргумента поле повторяло судьбу ki/kd выше:
-    # в DpHoldM стики roll/pitch молча игнорировались (полёт 2026-08-17 — полный
-    # «на себя» не тормозил разгон, пилот был пассажиром до самого fence).
-    p.add_argument('--roll-rate-cmd-gain', dest='roll_rate_cmd_gain', type=float,
-                   default=_D.roll_rate_cmd_gain)
-    p.add_argument('--pitch-rate-cmd-gain', dest='pitch_rate_cmd_gain', type=float,
-                   default=_D.pitch_rate_cmd_gain)
-    # станция-кипинг rate-осей: стик в центре = держим точку по накопленному пути
-    p.add_argument('--pitch-pos-kp', dest='pitch_pos_kp', type=float,
-                   default=_D.pitch_pos_kp)
-    p.add_argument('--pitch-pos-vmax', dest='pitch_pos_vmax', type=float,
-                   default=_D.pitch_pos_vmax)
-    p.add_argument('--roll-pos-kp', dest='roll_pos_kp', type=float,
-                   default=_D.roll_pos_kp)
-    p.add_argument('--roll-pos-vmax', dest='roll_pos_vmax', type=float,
-                   default=_D.roll_pos_vmax)
-    # два закона станции + anti-windup (см. config.py, _FlowDamper1D.__init__)
-    p.add_argument('--roll-pos-brake', dest='roll_pos_brake', type=float,
-                   default=_D.roll_pos_brake)
-    p.add_argument('--roll-pos-brake-vmax', dest='roll_pos_brake_vmax', type=float,
-                   default=_D.roll_pos_brake_vmax)
-    p.add_argument('--roll-pos-acc', dest='roll_pos_acc', type=float,
-                   default=_D.roll_pos_acc)
-    p.add_argument('--pitch-pos-brake', dest='pitch_pos_brake', type=float,
-                   default=_D.pitch_pos_brake)
-    p.add_argument('--pitch-pos-brake-vmax', dest='pitch_pos_brake_vmax', type=float,
-                   default=_D.pitch_pos_brake_vmax)
-    p.add_argument('--pitch-pos-acc', dest='pitch_pos_acc', type=float,
-                   default=_D.pitch_pos_acc)
-    p.add_argument('--roll-pos-brake-v', dest='roll_pos_brake_v', type=float,
-                   default=_D.roll_pos_brake_v)
-    p.add_argument('--pitch-pos-brake-v', dest='pitch_pos_brake_v', type=float,
-                   default=_D.pitch_pos_brake_v)
-    p.add_argument('--roll-pos-alt-band', dest='roll_pos_alt_band', type=float,
-                   default=_D.roll_pos_alt_band)
-    p.add_argument('--pitch-pos-alt-band', dest='pitch_pos_alt_band', type=float,
-                   default=_D.pitch_pos_alt_band)
-    p.add_argument('--rate-anti-windup', dest='rate_anti_windup', type=float,
-                   default=_D.rate_anti_windup)
-    p.add_argument('--station-frame', dest='station_frame', choices=('body', 'yaw'),
-                   default=_D.station_frame)
-    p.add_argument('--station-heading', dest='station_heading', choices=('fcu',),
-                   default=_D.station_heading)
-    p.add_argument('--pitch-osign', dest='pitch_osign', type=float, default=_D.pitch_osign)
-    p.add_argument('--pitch-cmd-gain', dest='pitch_cmd_gain', type=float, default=_D.pitch_cmd_gain)
-    p.add_argument('--pitch-smooth', dest='pitch_smooth', type=int, default=_D.pitch_smooth)
-    p.add_argument('--yaw-kp', dest='yaw_kp', type=float, default=_D.yaw_kp)
-    p.add_argument('--yaw-ki', dest='yaw_ki', type=float, default=_D.yaw_ki)
-    p.add_argument('--yaw-kd', dest='yaw_kd', type=float, default=_D.yaw_kd)
-    p.add_argument('--yaw-leak', dest='yaw_leak', type=float, default=_D.yaw_leak)
-    p.add_argument('--yaw-osign', dest='yaw_osign', type=float, default=_D.yaw_osign)
-    p.add_argument('--yaw-cmd-gain', dest='yaw_cmd_gain', type=float, default=_D.yaw_cmd_gain)
-    p.add_argument('--yaw-smooth', dest='yaw_smooth', type=int, default=_D.yaw_smooth)
-    # °/с при ПОЛНОМ стике — общий темп рыскания (гейн DpYawHold через S, темп
-    # Gz-холдера и длительность yaw_l/r-токенов). Поле было недостижимо снаружи —
-    # полный стик крутил только 28.65°/с (жалоба пилота freefly 2026-08-18).
-    p.add_argument('--yaw-rate-full', dest='yaw_rate_full', type=float,
-                   default=_D.yaw_rate_full)
-    p.add_argument('--yaw-max-rate', dest='yaw_max_rate', type=float,
-                   default=_D.yaw_max_rate)
-    # ПРЯМАЯ ПЕРЕДАЧА yaw-стика (PWM при полном стике): лечение пружины курса —
-    # разбор spring 2026-08-27, контур разматывал 92–96% разворота обратно
-    p.add_argument('--yaw-pilot-gain', dest='yaw_pilot_gain', type=float,
-                   default=_D.yaw_pilot_gain)
-    p.add_argument('--yaw-v-gate', dest='yaw_v_gate', type=float, default=_D.yaw_v_gate)
-    p.add_argument('--yaw-arm-frames', dest='yaw_arm_frames', type=int,
-                   default=_D.yaw_arm_frames)
-    p.add_argument('--flow-hold-sec', dest='flow_hold_sec', type=float, default=_D.flow_hold_sec)
-    p.add_argument('--flow-observe', dest='flow_observe', action='store_true',
-                   help='поднять зрение без демпфера: писать /flow_dbg* для замера перцепта')
-    # рантайм switch Flow→Vins по «VINS ready» (только flow_assist)
-    p.add_argument('--handover-vins', dest='handover_vins', action='store_true')
-    p.add_argument('--vins-min', dest='vins_min', type=int, default=40)
-    p.add_argument('--vins-fresh-sec', dest='vins_fresh_sec', type=float, default=2.0)
-    # гейт здоровья VINS (авто-демоут яруса 1 при разносе; см. config.vins_v_max)
-    p.add_argument('--vins-v-max', dest='vins_v_max', type=float, default=_D.vins_v_max)
-    p.add_argument('--vins-ipm-tol', dest='vins_ipm_tol', type=float,
-                   default=_D.vins_ipm_tol)
-    p.add_argument('--vins-sane-n', dest='vins_sane_n', type=int,
-                   default=_D.vins_sane_n)
-    # источник скорости VINS: diff (разность позы + EMA) | twist (из одометрии) —
-    # config.vins_vel_src
-    p.add_argument('--vins-vel-src', dest='vins_vel_src', type=str,
-                   choices=('diff', 'twist'), default=_D.vins_vel_src)
-    p.add_argument('--vins-hover-v', dest='vins_hover_v', type=float,
-                   default=_D.vins_hover_v)
-    p.add_argument('--vins-hover-sec', dest='vins_hover_sec', type=float,
-                   default=_D.vins_hover_sec)
-    # чек занижения |vins_v| против IPM (коллапс масштаба; config.vins_scale_*)
-    p.add_argument('--vins-scale-ratio', dest='vins_scale_ratio', type=float,
-                   default=_D.vins_scale_ratio)
-    p.add_argument('--vins-scale-ipm-min', dest='vins_scale_ipm_min', type=float,
-                   default=_D.vins_scale_ipm_min)
-    p.add_argument('--vins-scale-sec', dest='vins_scale_sec', type=float,
-                   default=_D.vins_scale_sec)
-    p.add_argument('--vins-scale-alt-max', dest='vins_scale_alt_max', type=float,
-                   default=_D.vins_scale_alt_max)
-    p.add_argument('--vins-scale-hold', dest='vins_scale_hold', type=float,
-                   default=_D.vins_scale_hold)
-    # рестарт VINS после демоута-по-разносу (см. config.vins_restart_diverge)
-    p.add_argument('--vins-restart-diverge', dest='vins_restart_diverge',
-                   type=float, default=_D.vins_restart_diverge)
-    p.add_argument('--vins-restart-cd', dest='vins_restart_cd', type=float,
-                   default=_D.vins_restart_cd)
-    # зрелость VINS для EKF-свапа: sim-секунды от первой одометрии (см. config)
-    p.add_argument('--ripe-sec', dest='ripe_sec', type=float, default=_D.ripe_sec)
-    # 2-я ступень гейта — детектор residual+ratio (0 = только время)
-    p.add_argument('--ripe-det', dest='ripe_det', type=float, default=_D.ripe_det)
-    # схема «SF-мастер» селектора: SF (CH7) = мастер сырых стиков, SC (CH6) =
-    # потолок лесенки зрелости (см. config.sf_master; ⚠️ не под старые реплеи)
-    p.add_argument('--sf-master', dest='sf_master', type=float, default=_D.sf_master)
-    # штатный LOITER-на-VINS: freefly-селектор (центр CH6) и бюджет гейта loiter<t>
-    # гейты яруса 2 как у яруса 1: зрелость, удержание, мост (config.loiter_guard)
-    p.add_argument('--loiter-guard', dest='loiter_guard', type=float,
-                   default=_D.loiter_guard)
-    p.add_argument('--ff-loiter', dest='ff_loiter', type=float, default=_D.ff_loiter)
-    # гейт «в воздухе» LOITER-на-VINS, м (одна правда: Freefly+LoiterHold+HUD)
-    p.add_argument('--loiter-alt', dest='loiter_alt', type=float,
-                   default=_D.loiter_alt)
-    # ярус LOITER: стики = скорость в осях МИРА (TrackHold, см. config.loiter_track)
-    p.add_argument('--loiter-track', dest='loiter_track', type=float,
-                   default=_D.loiter_track)
-    # ярус LOITER, путь 2: потолок крена виража, ° (YawBankLimit; 0 = выкл)
-    p.add_argument('--loiter-bank-max', dest='loiter_bank_max', type=float,
-                   default=_D.loiter_bank_max)
-    # VinsHold: kd на ошибке скорости, не на абсолютной v (см. config.vins_kd_err)
-    p.add_argument('--vins-kd-err', dest='vins_kd_err', type=float,
-                   default=_D.vins_kd_err)
-    # VinsHold: защёлка трима — И-член заморожен стик→гвоздь (config.vins_i_latch)
-    p.add_argument('--vins-i-latch', dest='vins_i_latch', type=float,
-                   default=_D.vins_i_latch)
-    # VinsHold: гвоздь по остановке — уставка на точку стопа (config.vins_pin_stop)
-    p.add_argument('--vins-pin-stop', dest='vins_pin_stop', type=float,
-                   default=_D.vins_pin_stop)
-    # VinsHold: предиктор позы между отсчётами VINS (config.vins_predict)
-    p.add_argument('--vins-predict', dest='vins_predict', type=float,
-                   default=_D.vins_predict)
-    # VinsHold: сглаживание vins-скорости для D-члена, τ с (config.vins_vsmooth)
-    p.add_argument('--vins-vsmooth', dest='vins_vsmooth', type=float,
-                   default=_D.vins_vsmooth)
-    # Ярус 1: стабилизатор на опоре VINS (config.vins_stab)
-    p.add_argument('--vins-stab', dest='vins_stab', default=_D.vins_stab,
-                   help="ярус VINS: 'vinshold' (2D position-PID) | 'dpvins' "
-                        "(velocity-каскад)")
-    # DpVins (velocity-каскад) гейны (config.dpvins_*)
-    p.add_argument('--dpvins-kp-fwd', dest='dpvins_kp_fwd', type=float,
-                   default=_D.dpvins_kp_fwd)
-    p.add_argument('--dpvins-kp-lat', dest='dpvins_kp_lat', type=float,
-                   default=_D.dpvins_kp_lat)
-    p.add_argument('--dpvins-ki', dest='dpvins_ki', type=float,
-                   default=_D.dpvins_ki)
-    p.add_argument('--dpvins-cmd-gain', dest='dpvins_cmd_gain', type=float,
-                   default=_D.dpvins_cmd_gain)
-    p.add_argument('--dpvins-pos-kp', dest='dpvins_pos_kp', type=float,
-                   default=_D.dpvins_pos_kp)
-    p.add_argument('--dpvins-pos-vmax', dest='dpvins_pos_vmax', type=float,
-                   default=_D.dpvins_pos_vmax)
-    p.add_argument('--dpvins-pos-acc', dest='dpvins_pos_acc', type=float,
-                   default=_D.dpvins_pos_acc)
-    p.add_argument('--dpvins-vsmooth', dest='dpvins_vsmooth', type=float,
-                   default=_D.dpvins_vsmooth)
-    p.add_argument('--dpvins-imax', dest='dpvins_imax', type=float,
-                   default=_D.dpvins_imax)
-    p.add_argument('--dpvins-ki-trim', dest='dpvins_ki_trim', type=float,
-                   default=_D.dpvins_ki_trim)
-    p.add_argument('--dpvins-trim-keep', dest='dpvins_trim_keep', type=float,
-                   default=_D.dpvins_trim_keep)
-    p.add_argument('--dpvins-trim-seed', dest='dpvins_trim_seed', type=float,
-                   default=_D.dpvins_trim_seed)
-    # фаза BRAKE внешнего контура DpVins (config.dpvins_pos_brake*)
-    p.add_argument('--dpvins-pos-brake', dest='dpvins_pos_brake', type=float,
-                   default=_D.dpvins_pos_brake)
-    p.add_argument('--dpvins-pos-brake-v', dest='dpvins_pos_brake_v', type=float,
-                   default=_D.dpvins_pos_brake_v)
-    p.add_argument('--dpvins-pos-brake-vmax', dest='dpvins_pos_brake_vmax', type=float,
-                   default=_D.dpvins_pos_brake_vmax)
-    p.add_argument('--dpvins-pos-brake-t', dest='dpvins_pos_brake_t', type=float,
-                   default=_D.dpvins_pos_brake_t)
-    # по-осевая защёлка трима DpVins (config.dpvins_latch_axis)
-    p.add_argument('--dpvins-latch-axis', dest='dpvins_latch_axis', type=float,
-                   default=_D.dpvins_latch_axis)
-    # гвоздь сразу на входе при посеянном триме (config.dpvins_pin_armed)
-    p.add_argument('--dpvins-pin-armed', dest='dpvins_pin_armed', type=float,
-                   default=_D.dpvins_pin_armed)
-    # прямая передача стика и линия на плече (config.dpvins_ff / dpvins_line_hold)
-    p.add_argument('--dpvins-ff', dest='dpvins_ff', type=float, default=_D.dpvins_ff)
-    p.add_argument('--dpvins-line-hold', dest='dpvins_line_hold', type=float,
-                   default=_D.dpvins_line_hold)
-    # тормоз с отпускания и гвоздь по таймауту (config.dpvins_settle_brake / dpvins_pin_t)
-    p.add_argument('--dpvins-settle-brake', dest='dpvins_settle_brake', type=float,
-                   default=_D.dpvins_settle_brake)
-    p.add_argument('--dpvins-pin-t', dest='dpvins_pin_t', type=float, default=_D.dpvins_pin_t)
-    # мягкая посадка по кнопке SA в freefly (см. config.ff_land)
-    # общий ветровой трим ярусов 0/1 (config.wind_trim)
-    p.add_argument('--wind-trim', dest='wind_trim', type=float, default=_D.wind_trim)
-    p.add_argument('--wind-steady-sec', dest='wind_steady_sec', type=float,
-                   default=_D.wind_steady_sec)
-    p.add_argument('--wind-steady-v', dest='wind_steady_v', type=float,
-                   default=_D.wind_steady_v)
-    p.add_argument('--ff-land', dest='ff_land', type=float, default=_D.ff_land)
-    p.add_argument('--ff-land-cancel', dest='ff_land_cancel', type=float,
-                   default=_D.ff_land_cancel)
-    p.add_argument('--land-in-loiter', dest='land_in_loiter', type=float,
-                   default=_D.land_in_loiter)
-    p.add_argument('--land-alt-max', dest='land_alt_max', type=float,
-                   default=_D.land_alt_max)
-    p.add_argument('--land-v-max', dest='land_v_max', type=float,
-                   default=_D.land_v_max)
-    p.add_argument('--land-rate', dest='land_rate', type=float, default=_D.land_rate)
-    p.add_argument('--land-joy', dest='land_joy', default=_D.land_joy,
-                   help="кнопка посадки в /joy: 'b<i>' buttons[i] | 'a<i>' axes[i] | ''")
-    p.add_argument('--loiter-gate-budget', dest='loiter_gate_budget', type=float,
-                   default=_D.loiter_gate_budget)
-    p.add_argument('--ekf-pos-budget', dest='ekf_pos_budget', type=float,
-                   default=_D.ekf_pos_budget)
-    a = p.parse_args()
-    pilot_kind = a.pilot
-    d = vars(a)
-    d.pop('pilot')
-    cfg = BootstrapConfig(**d)
+    """Конфиг ноды — ТОЛЬКО из env BS_<ПОЛЕ> (BootstrapConfig.from_env): его выставляет
+    src/control/profiles/load.py в bootstrap_arch2.sh из профилей. Argparse на 196
+    аргументов и проводка BS_FOO → --foo (192 строки скрипта) удалены 2026-09-07: у
+    ручки было четыре места для значения (датакласс, argparse, скрипт, .env), и любое
+    из них молча подменяло профиль (свип B3s отлетел с ki=0). Нет ключа → SystemExit
+    с именем, незнакомый BS_* → SystemExit, значение не того типа → SystemExit."""
+    cfg = BootstrapConfig.from_env()
+    pilot_kind = cfg.pilot
     # Автотриггер land для пилот-режимов: садимся после демо-профиля (+2с успокоение).
-    # Профиль-миссия (--mission) сама секвенсит land — автотриггер не нужен.
+    # Профиль-миссия (mission) сама секвенсит land — автотриггер не нужен.
     if not cfg.mission and cfg.excite_max_sec <= 0 and pilot_kind == 'scripted':
         if cfg.control_mode == 'flow_assist':
             cfg.excite_max_sec = cfg.flow_hold_sec        # держим, флоу гасит снос

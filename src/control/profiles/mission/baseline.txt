@@ -23,6 +23,12 @@ BS_LAND_JOY=b1
 # "r,p,t,y" (пусто = JOY_SIGNS_DEFAULT из control_pkg, выверены полётом TX12)
 BS_JOY_DEV=/dev/input/js0
 BS_JOY_SIGNS=
+# слой: нода (2026-09-07 — до этого без проводки BS_): мёртвая зона и полный ход стика
+# (PWM от центра), знаки осей тангажа/крена пилота
+BS_PILOT_DEADZONE=30
+BS_PILOT_FULL=400
+BS_PILOT_PITCH_SIGN=-1
+BS_PILOT_ROLL_SIGN=1
 
 # слой: нода — ВЫСОТА: целевая (скриптовые миссии) и внешний контур AltHold
 # (обоснование чисел — control_pkg/domain/control/altitude.py: kp 0.6 → 0.6 м/с на метр
@@ -31,6 +37,11 @@ BS_ALT=3
 BS_ALT_KP=0.6
 BS_ALT_RATE_MAX=1.2
 BS_ALT_TOL=0.10
+# слой: нода (2026-09-07 — до этого без проводки BS_, только дефолт в коде): пересчёт
+# «PWM → командная vz» для ALT_HOLD (dz/span/rate_full: +300 PWM = +1.58 м/с по замеру)
+BS_ALT_DZ=100
+BS_ALT_SPAN=400
+BS_ALT_RATE_FULL=3.16
 
 # слой: нода — бюджеты фаз, sim-с (mode_budget — в loiter/: латч режима 80 с)
 BS_ARM_BUDGET=40
@@ -41,7 +52,9 @@ BS_LAND_BUDGET=45
 # план прыгает на land. Меньше чистого круга сцены (35 м): борт дважды садился в крону
 BS_FENCE=25
 # предельная длительность EXCITE, sim-с (0 = выкл; для пилот-режимов — когда садиться)
-BS_EXCITE_MAX=0
+BS_EXCITE_MAX_SEC=0
+# слой: нода — успокоение курса перед сегментом плана (mission_plan.yaw_settle), с
+BS_YAW_SETTLE=6
 
 # слой: нода — МЯГКАЯ ПОСАДКА по кнопке SA (sa-soft-land): шаг SoftLand в плане freefly;
 # второе нажатие до касания ОТМЕНЯЕТ (с 2026-09-06); на ярусе LOITER кнопка ВЫКЛ (отмена из
@@ -58,3 +71,6 @@ BS_LAND_RATE=0.15
 # сегментов и газ подъёма, PWM. В freefly инертны, но поле ноды — значение обязано быть
 BS_MV_LEVEL=0.3
 BS_THROTTLE_CLIMB=1650
+# газ висения (PWM) и порог «на земле» по rel_alt, м (2026-09-07 — до этого без проводки BS_)
+BS_THROTTLE_HOLD=1500
+BS_GROUND_Z=0.3

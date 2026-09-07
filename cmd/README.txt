@@ -9,18 +9,18 @@ cmd/ — команды запуска полётов и кампаний
                           как летать, чем судить, результат (дописывается после полёта)
 
 Скрипты не зависят от текущего каталога (корень репы вычисляется от своего
-расположения), ручки берут из src/control/profiles/*/*.txt (эталон baseline +
-кандидаты `include baseline.txt` + дельта) через загрузчик:
-    P=(dphold/baseline dpvins/brake5_stop vinshold/baseline vins/scale25 loiter/guard
-       wind/trim mission/baseline legacy/baseline)
-    set -a; eval "$(python3 src/control/profiles/load.py "${P[@]}")"; set +a
-(с 2026-09-07; дубль ключа между профилями = ошибка, mission/ и legacy/ — все поля
-ноды вне стабилизаторов). Профиль перекрывает и внешний env, и docker/sim/.env для
-СВОИХ ключей: `BS_ROLL_RATE_KP=50 bash cmd/bl/bl.sh` полетит с 90 из dphold/baseline.
-Внешний env сильнее только для ключей вне профилей (аргументы реплея BS_REPLAY_*,
-LV, RES…) и для WIND_SPD/WIND_GUST (в скрипте через ${X:-…}). Поменять ручку из
-профиля = копия cmd/bl → cmd/<имя>/ с файлом-кандидатом (см.
-src/control/profiles/README.md; лесенка приоритетов — docker/sim/env.md).
+расположения) и ДЕРЖАТ ТОЛЬКО СПИСОК профилей — ни eval, ни export ручек:
+    export PROFILES="dphold/baseline dpvins/brake5_stop vinshold/baseline vins/scale25
+                     loiter/guard wind/trim mission/baseline legacy/baseline world/wind2_gust5"
+    exec bash src/lab/freefly_lv.sh "$@"
+(с 2026-09-07). Список собирает freefly_lv.sh на хосте (мета, eeprom, ветер compose) и
+bootstrap_arch2.sh в контейнере (env ноды) — один load.py, строго по схеме
+BootstrapConfig: дубль/незнакомый/отсутствующий ключ = ошибка. Ручку через env
+переопределить НЕЛЬЗЯ по построению (BS_*/WIND_* из env и .env не читаются) —
+только файл-кандидат (include baseline + дельта) + копия cmd/bl → cmd/<имя>/.
+Каталоги: mission/ (пилот, миссия, посадка, бюджеты), legacy/ (поля вне стека),
+world/ (ветер). Аргументы прогона — не параметры: BS_PILOT=replay + BS_REPLAY_SCENARIO
+(сценарий) едут env'ом. См. src/control/profiles/README.md, docker/sim/env.md.
 
 Раскладка (с 2026-09-06):
 

@@ -118,17 +118,11 @@ def flight_cfg():
     Ровно та же лесенка, что у `bootstrap_arch2.sh` (`BS_IPM_WIN` → `--ipm-win`),
     и тот же источник дефолтов — иначе видео рисовалось бы по конфигу, которым
     не летели."""
-    base = BootstrapConfig()
-    cfg, defaulted = {}, []
-    for k in IPM_KNOBS:
-        d = getattr(base, k)
-        v = os.environ.get('BS_' + k.upper())
-        if v is None or v == '':
-            cfg[k] = d
-            defaulted.append(k)
-        else:
-            cfg[k] = str(v) if isinstance(d, str) else float(v)
-    return base, cfg, defaulted
+    # 2026-09-07: дефолтов в коде нет — полный env BS_* (мета прогона, load_meta) или
+    # PROFILES (пост-рендер из freefly_lv до архива); иначе SystemExit с именами ключей.
+    base = BootstrapConfig.from_run()
+    cfg = {k: getattr(base, k) for k in IPM_KNOBS}
+    return base, cfg, []
 
 
 def euler(q):
@@ -204,8 +198,8 @@ def pick_alt_src(base, have, lp, st, t_arm):
     """Какой высотой кормить оценщик — восстанавливаем лётную формулу."""
     if ALT_SRC != 'auto':
         return ALT_SRC
-    src = os.environ.get('BS_PERC_ALT_SRC', base.perc_alt_src)
-    zero = float(os.environ.get('BS_PERC_ALT_ZERO', base.perc_alt_zero))
+    src = base.perc_alt_src
+    zero = float(base.perc_alt_zero)
     if src == 'local' and len(lp):
         return 'latch' if zero > 0 and t_arm is not None else 'ekf'
     if len(st):

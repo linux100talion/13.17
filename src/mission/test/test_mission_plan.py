@@ -92,7 +92,7 @@ def run_plan(cfg, steps):
 
 def main():
     checks = []
-    cfg = BootstrapConfig(mv_level=0.3)
+    cfg = BootstrapConfig.baseline(mv_level=0.3, ff_loiter=0.0)   # эталон профилей, без LOITER-центра
 
     # 1. build_stabilizers -----------------------------------------------------
     combo = build_stabilizers(cfg, "DpRollHold+DpYawHold")
@@ -417,7 +417,12 @@ def main():
     # --- freefly + BS_FF_LOITER: центр CH6 = штатный LOITER (гейт + гистерезис) ---
     checks.append(("freefly: без BS_FF_LOITER центр = чистый ALT_HOLD (как раньше)",
                    ffs.loiter_center is False))
-    cfg_lo = BootstrapConfig(mv_level=0.3, ff_loiter=1.0)
+    # loiter_guard=0: тест проверяет ГЕЙТ ff_loiter (extnav + VINS + в воздухе), а не
+    # надстройку loiter/guard (зрелость после перерождения, удержание 5 с, мост)
+    # sf_master=0, vins_min=40: тест написан под легаси-селектор CH6 (центр = LOITER) и
+    # прежний дефолт ноды 40 odom; эталон летает SF-мастером и BS_VINS_MIN=300
+    cfg_lo = BootstrapConfig.baseline(mv_level=0.3, ff_loiter=1.0, loiter_guard=0.0,
+                                      sf_master=0.0, vins_min=40)
     ffl = compile_mission(cfg_lo, "freefly", "DpRollHold+DpYawHold", live_pilot=True)
     ffls = next(st for st in ffl if st.name == "freefly")
     checks.append(("freefly+ff_loiter: loiter_center включён", ffls.loiter_center))

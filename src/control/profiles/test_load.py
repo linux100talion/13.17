@@ -41,11 +41,11 @@ class TmpProfiles(unittest.TestCase):
     def test_duplicate_across_profiles_fails(self):
         w(self.d, 'b/dup.txt', 'BS_X=9\n')
         with self.assertRaises(SystemExit) as cm:
-            load.load([os.path.join(self.d, 'a/cand.txt'), os.path.join(self.d, 'b/dup.txt')])
+            load.load([os.path.join(self.d, 'a/cand.txt'), os.path.join(self.d, 'b/dup.txt')], strict=False)
         self.assertEqual(cm.exception.code, 2)
 
     def test_no_duplicate_ok(self):
-        r = load.load([os.path.join(self.d, 'a/cand.txt'), os.path.join(self.d, 'b/baseline.txt')])
+        r = load.load([os.path.join(self.d, 'a/cand.txt'), os.path.join(self.d, 'b/baseline.txt')], strict=False)
         self.assertEqual(set(r), {'BS_X', 'BS_Y', 'BS_EMPTY', 'BS_Z', 'BS_B'})
 
     def test_bad_line_fails(self):
@@ -76,28 +76,27 @@ class TmpProfiles(unittest.TestCase):
 
     def test_diff(self):
         envf = w(self.d, 'run.env', 'BS_X=1\nBS_Y=other\nBS_ALIEN=5\n')
-        r = load.load([os.path.join(self.d, 'a/cand.txt')])
+        r = load.load([os.path.join(self.d, 'a/cand.txt')], strict=False)
         self.assertEqual(load.diff(r, envf), 1)     # BS_Y расходится
 
 
 class RepoProfiles(unittest.TestCase):
-    STACK = ['dphold/baseline', 'dpvins/brake5_stop', 'vinshold/baseline', 'vins/scale25',
-             'loiter/guard', 'wind/trim', 'mission/baseline', 'legacy/baseline']
+    STACK = load.BASELINE_STACK
 
     def test_active_stack_loads(self):
-        r = load.load(self.STACK)
-        self.assertGreater(len(r), 150)
+        r = load.load(self.STACK)                       # строгая схема: все поля, ничего лишнего
+        self.assertGreater(len(r), 200)
         for k in ('BS_STAB', 'BS_VINS_STAB', 'BS_PILOT', 'BS_MISSION', 'BS_FENCE',
                   'BS_WIND_TRIM', 'BS_CONTROL_MODE'):
             self.assertIn(k, r)
 
     def test_selector_lives_in_vins(self):
         # dpvins/ и vinshold/ — только гейны, грузятся вместе без спора; селектор — vins/
-        r = load.load(['dpvins/baseline', 'vinshold/baseline', 'vins/baseline'])
+        r = load.load(['dpvins/baseline', 'vinshold/baseline', 'vins/baseline'], strict=False)
         self.assertEqual(r['BS_VINS_STAB'][0], 'dpvins')
         self.assertTrue(r['BS_VINS_STAB'][1][0].endswith('vins/baseline.txt'))
         self.assertTrue(r['BS_VINS_I_LATCH'][1][0].endswith('vins/baseline.txt'))
-        r = load.load(self.STACK[:3] + ['vins/vinshold'] + self.STACK[4:])
+        r = load.load(self.STACK[:3] + ['vins/vinshold'] + self.STACK[4:])   # строго: полный стек
         self.assertEqual(r['BS_VINS_STAB'][0], 'vinshold')      # откат — одним профилем
 
     def test_no_selector_in_gain_dirs(self):
@@ -122,8 +121,21 @@ class RepoProfiles(unittest.TestCase):
                 cand = load.resolve_file(os.path.join(d, f))
                 self.assertTrue(set(base) <= set(cand), f'{sub}/{f}: потерял ключи эталона')
 
+    def test_strict_schema(self):
+        # без mission/ не хватает полей — строгий загрузчик падает; лишний ключ — тоже
+        with self.assertRaises(SystemExit):
+            load.load([p for p in self.STACK if not p.startswith('mission/')])
+        d = tempfile.mkdtemp(prefix='prof_')
+        w(d, 'x/extra.txt', 'BS_NO_SUCH_FIELD=1\n')
+        with self.assertRaises(SystemExit):
+            load.load(self.STACK + [os.path.join(d, 'x/extra.txt')])
+        cfgmod = load.schema_module()
+        cfg = cfgmod.BootstrapConfig.from_profiles(self.STACK)
+        self.assertEqual(cfg.pilot, 'joy')
+        self.assertIsNone(cfg.kf_alt_hold)
+
     def test_replay_profile(self):
-        r = load.load(['mission/replay'])
+        r = load.load(['mission/replay'], strict=False)
         self.assertEqual(r['BS_PILOT'][0], 'replay')
         self.assertEqual(r['BS_MISSION'][0], 'freefly')
 

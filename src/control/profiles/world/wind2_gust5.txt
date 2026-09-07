@@ -1,0 +1,5 @@
+# Ветер 2 м/с + порывы 5 м/с каждые 20 с (cmd/bl, бывш. cmd/10–11): кампания ветра/станции
+# 2026-09-05…06 — DpHold vs DpVins под порывами, WindTrim (dphold-vs-dpvins-gusts).
+include baseline.txt
+WIND_SPD=2
+WIND_GUST=spd=5 at=30 rise=2 hold=5 fall=4 every=20

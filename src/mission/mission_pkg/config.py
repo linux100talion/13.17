@@ -1,46 +1,64 @@
 #!/usr/bin/env python3
-"""BootstrapConfig — конфиг миссии bootstrap (срез 1: gz-hold + shuttle).
+"""BootstrapConfig — конфиг лётной ноды bootstrap_arch2. БЕЗ ДЕФОЛТОВ.
 
-Frozen-подобный контейнер параметров (замена argparse-namespace монолита в части,
-нужной срезу). Имена/дефолты совместимы с флагами alt_hold_bootstrap.py, чтобы
-обёртки (liftland.sh/bootstrap.sh) мапились 1:1 при переключении на --arch2.
+С 2026-09-07 единственный источник значений — профили src/control/profiles
+(`load.py`: include + дельта, дубль/незнакомый/отсутствующий ключ = ошибка).
+Нода читает env `BS_<ПОЛЕ>` (`from_env`), стенды — мету прогона `<RUN>.env`
+(`from_env_file`) или профили (`from_profiles`), тесты — `baseline(**override)`.
+Поле без значения в источнике = SystemExit с именем ключа: дефолт в коде был
+маскировкой (свип B3s отлетел с ki=0, `check_knobs.sh`), а не защитой.
+
+Комментарии у полей — семантика и история чисел; сами числа теперь только в
+профилях (baseline.txt = эталон на дату, кандидат = include + дельта).
+Типы: float/int/str/bool + Optional[float] (пустое значение в профиле = None).
+Схема ключей = поля этого датакласса (`schema()`); внешние ключи, которые
+живут в профилях, но нодой не читаются — `EXTRA_KEYS` (SITL, скрипты, ветер).
 """
-from dataclasses import dataclass
+import importlib.util
+import os
+import sys
+from dataclasses import dataclass, fields as _dc_fields
+from pathlib import Path
+from typing import Dict, Iterable, Mapping, Optional
 
 
 @dataclass
 class BootstrapConfig:
     # режим управления фазы EXCITE: shuttle | assisted | manual (см. recipes.py).
     # ЛЕГАСИ-ярлык: слепляет стабилизатор+траекторию. Новый ортогональный путь — stab+mission.
-    control_mode: str = "shuttle"
+    control_mode: str
     # ОРТОГОНАЛЬНЫЙ путь (профиль-миссии): stab = стабилизатор(ы) '+'-склейкой
     # (GzPosHold|DpRollHold+DpYawHold|…, см. recipes.build_stabilizers), mission = плейлист
     # профиль-токенов (имя из MISSIONS или 'climb3,mv_fwd2,…', см. plan/mission_plan.py).
     # Пусто → идём легаси-путём по control_mode. Заданный mission → игнор control_mode.
-    stab: str = ""
-    mission: str = ""
-    mv_level: float = 0.3            # глобальный уровень стика для профиль-миссий (mv_*), [-1..1]
-    slew: float = 0.0                # ПРЕДЕЛ СКОРОСТИ ИЗМЕНЕНИЯ выхода, PWM/сек (0 = выкл).
+    stab: str
+    mission: str
+    # источник стиков: scripted (скриптовые миссии) | joy (живой TX12 или реплей
+    # joy_replay.py через /joy) | ros (ЛЕГАСИ /mavros/rc/in). Было аргументом --pilot
+    # мимо конфига; с 2026-09-07 — поле, как всё остальное (BS_PILOT).
+    pilot: str
+    mv_level: float            # глобальный уровень стика для профиль-миссий (mv_*), [-1..1]
+    slew: float                # ПРЕДЕЛ СКОРОСТИ ИЗМЕНЕНИЯ выхода, PWM/сек (0 = выкл).
                                      # Борт выходит на угол за τ=0.27с (замер по ступеням
                                      # A1/A2), а команда шириной в кадр даёт 11% угла.
                                      # 100 PWM/с = полный ход за 1.5с ≈ 5.5τ → 99.6%.
                                      # Подробности — docstring ControlStack.
     # предельная длительность EXCITE, sim-сек (0=выкл; для пилот-режимов = когда садиться,
     # т.к. RcTransmitter/manual сами не завершаются, в отличие от челнока с motion_done)
-    fence: float = 25.0              # ГЕОЗАБОР, м от точки старта (0 = выкл). Ушли дальше —
+    fence: float              # ГЕОЗАБОР, м от точки старта (0 = выкл). Ушли дальше —
                                      # сегмент прерывается, план прыгает на land. Ставится
                                      # МЕНЬШЕ чистого круга сцены (сейчас 35 м, ближайший
                                      # объект 35.4): дважды за день борт улетал и садился в
                                      # крону, где LAND не может засечь касание и висит до
                                      # исчерпания бюджета — при RTF 0.01 это часы.
-    excite_max_sec: float = 0.0
+    excite_max_sec: float
     # знаки осей живого пульта "r,p,t,y" (только --pilot joy); '' = JOY_SIGNS_DEFAULT
     # из control_pkg (выверены полётом TX12). Переопределять при смене пульта/прошивки.
-    joy_signs: str = ""
+    joy_signs: str
     # фазы
-    alt: float = 3.0
-    throttle_climb: int = 1650
-    throttle_hold: int = 1500
+    alt: float
+    throttle_climb: int
+    throttle_hold: int
     # --- ВЫСОТА: внешний контур (AltHold) вместо постоянного throttle ---
     # Обоснование чисел — в control_pkg/domain/control/altitude.py. Кратко:
     #   kp=0.6 → при ошибке 1 м командуем 0.6 м/с; тормозной путь внутреннего контура
@@ -50,27 +68,27 @@ class BootstrapConfig:
     #              давить в край мёртвой зоны у самой цели значит гнать дрожь;
     #   dz/span/rate_full — пересчёт «PWM → командная vz» для ALT_HOLD, откалиброван
     #              по замеру: +300 PWM давали +1.58 м/с.
-    alt_kp: float = 0.6
-    alt_rate_max: float = 1.2
-    alt_tol: float = 0.10
-    alt_dz: float = 100.0
-    alt_span: float = 400.0
-    alt_rate_full: float = 3.16
-    ground_z: float = 0.3
-    mode_budget: float = 40.0
-    arm_budget: float = 40.0
-    climb_budget: float = 60.0
-    land_budget: float = 45.0        # бэкстоп (sim-сек): касание ловит детект (баро/gt_z), не бюджет
+    alt_kp: float
+    alt_rate_max: float
+    alt_tol: float
+    alt_dz: float
+    alt_span: float
+    alt_rate_full: float
+    ground_z: float
+    mode_budget: float
+    arm_budget: float
+    climb_budget: float
+    land_budget: float        # бэкстоп (sim-сек): касание ловит детект (баро/gt_z), не бюджет
     # gz-hold (PID по истинной позе Gazebo)
-    gz_kp: float = 40.0
-    gz_kd: float = 120.0
-    gz_ki: float = 8.0
-    gz_imax: float = 100.0
-    gz_max: float = 150.0
-    gz_psign: float = 1.0
-    gz_rsign: float = 1.0
+    gz_kp: float
+    gz_kd: float
+    gz_ki: float
+    gz_imax: float
+    gz_max: float
+    gz_psign: float
+    gz_rsign: float
     # интегратор стик-команды → уставка в позиц-холдерах Gz*/Vins (setpoint-ед/с при полном стике)
-    gz_cmd_gain: float = 0.8
+    gz_cmd_gain: float
     # VinsHold: D-член на ОШИБКЕ скорости (v − v_уставки), не на абсолютной v.
     # Лечит звон ~1 Гц и долг уставки 9–12 м при полёте по прямой (серия eagle
     # 2026-09-02: качание тангажа σ 1.3–2.8° против 0.4–0.9° у демпфера/LOITER;
@@ -78,21 +96,21 @@ class BootstrapConfig:
     # стике закон бит-в-бит прежний. КАНДИДАТ, полётом не доказан: дефолт 0,
     # включается BS_VINS_KD_ERR=1 в .env бокса; в env.default — после
     # доказательства. Разбор: docker/sim/doc/tmp/eagle/eagle.txt.
-    vins_kd_err: float = 0.0
+    vins_kd_err: float
     # VinsHold: ЗАЩЁЛКА ТРИМА (аналог _TRIM_LATCH станции) — И-член заморожен от
     # живого стика до «гвоздя» (борт встал после отпускания, |v_vins| < 0.3).
     # В движении ошибка позиции = лаг слежения, не ветер: интегрировать её —
     # копить мусорный трим до капа и получать перелёт на отпускании. Выученный
     # на висении ветровой трим держится замороженным. КАНДИДАТ, полётом не
     # доказан: дефолт 0, включается BS_VINS_I_LATCH=1 в .env бокса.
-    vins_i_latch: float = 0.0
+    vins_i_latch: float
     # VinsHold: ГВОЗДЬ ПО ОСТАНОВКЕ (пункт 2б, поведение штатного LOITER) — на
     # отпускании стика, как только борт встал (|v_vins| < 0.3), уставка
     # перевязывается на точку остановки (один раз на отпускание). Убирает
     # возврат 3.6–5.3 м «назад к уставке» после быстрого стопа kd_err
     # (замер ab_ilatch): тормозим и держим ГДЕ ВСТАЛИ. КАНДИДАТ, полётом не
     # доказан: дефолт 0, включается BS_VINS_PIN_STOP=1 в .env бокса.
-    vins_pin_stop: float = 0.0
+    vins_pin_stop: float
     # VinsHold: ПРЕДИКТОР ПОЗЫ между отсчётами VINS — мёртвое счисление
     # v_vins·возраст (кап 0.3 с). Контроллер 20 Гц, уставка бежит непрерывно,
     # поза VINS шагает 10 Гц → kp·e пилит: замер eagle/1 vs /2 (2026-09-03) —
@@ -100,7 +118,7 @@ class BootstrapConfig:
     # у демпфера («не плавный» при вылеченном звоне). Тот же приём, что
     # AttitudeBuffer для углов IPM. КАНДИДАТ, полётом не доказан: дефолт 0,
     # включается BS_VINS_PREDICT=1 в .env бокса.
-    vins_predict: float = 0.0
+    vins_predict: float
     # VinsHold: доп. сглаживание vins-скорости для D-члена (ФНЧ, τ секунд; 0 =
     # выкл). Скорость в адаптере — сырая конечная разность 10 Гц позы (EMA a=0.4);
     # kd её шаг перекачивает в ПИЛУ команды (~70% пилы тангажа, замер eagle/1 vs /2
@@ -108,11 +126,11 @@ class BootstrapConfig:
     # при сохранении kd). 0.3 с = окно МНК демпфера. ⚠️ лаг D-члена ∝ τ — риск
     # подъесть демпфирование (высотный звон, BS_GZ_KD). КАНДИДАТ, полётом не
     # доказан: дефолт 0, включается BS_VINS_VSMOOTH=0.3 в .env бокса.
-    vins_vsmooth: float = 0.0
+    vins_vsmooth: float
     # ЯРУС 1 — какой стабилизатор на опоре VINS: 'vinshold' (2D position-PID,
     # дефолт, доказан сериями eagle) | 'dpvins' (velocity-каскад DpVins —
     # плавная замена, см. vins_axes.py). Переключатель BS_VINS_STAB для A/B.
-    vins_stab: str = 'vinshold'
+    vins_stab: str
     # ГЕЙТ ЗДОРОВЬЯ VINS для яруса 1 (авто-демоут при разносе). Ярус 1 включался
     # по одному счётчику odom — разнесённый VINS (|v| 1→20 на неподвижном борте,
     # вырожденный init без движения) публикует одометрию с той же частотой →
@@ -127,13 +145,13 @@ class BootstrapConfig:
     # не является. Ручка оставлена (>0 включит), но нужен другой сигнал раннего
     # обнаружения МЕДЛЕННОГО разноса (например физика висения: |vins_v| растёт при
     # центральных стиках и малом наклоне) — потолок ловит только грубый/быстрый.
-    vins_v_max: float = 12.0      # м/с, физ. потолок |vins_v| (0 = выкл)
-    vins_ipm_tol: float = 0.0     # м/с, допуск |vins_v − ipm_v| — ВЫКЛ (IPM ненадёжен)
+    vins_v_max: float      # м/с, физ. потолок |vins_v| (0 = выкл)
+    vins_ipm_tol: float     # м/с, допуск |vins_v − ipm_v| — ВЫКЛ (IPM ненадёжен)
     # sane_n — ТИКОВ лётного цикла (0.05 с sim) подряд «болен» до демоута: 10 =
     # 0.5 с. Было 3 (0.15 с): догоняющая пачка одометрии после стопора эстиматора
     # держала |v|>3 ровно 0.1–0.15 с и роняла ярус (20260905_114248). Честный
     # разнос/порыв держится дольше — 0.5 с его не пропускает.
-    vins_sane_n: int = 10         # тиков подряд «болен» до демоута (0.5 с)
+    vins_sane_n: int         # тиков подряд «болен» до демоута (0.5 с)
     # ИСТОЧНИК СКОРОСТИ VINS для стека (DpVins/VinsHold) и гейта здоровья: 'diff' —
     # конечная разность позы по штампам + EMA 0.4 (VinsTrack; лаг к истине 0.14 с по
     # штампам + приход ~0.11 = 0.35 в петле, измерено по bag cmd/1); 'twist' — скорость
@@ -143,15 +161,15 @@ class BootstrapConfig:
     # разгон через гвоздь и возврат на тримe-излишке 1.2 м/с против 0.7 у демпфера
     # kp 90; стенд τ 0.11: vmax 1.40 → 0.76 при kp 32 → 90). Разность остаётся для
     # детекта перерождения и зрелости. Кандидат vins/twist.txt, полёт cmd/6.
-    vins_vel_src: str = 'diff'
+    vins_vel_src: str
     # ФИЗИКА ВИСЕНИЯ — ловит МЕДЛЕННЫЙ разнос (потолок ловит только грубый/быстрый,
     # медленный ползёт 1→20 м/с и до |v|>12 борт уже далеко). При ЦЕНТРАЛЬНЫХ
     # стиках (пилот висит) дольше hover_sec истинная скорость ограничена ветром
     # (~1 м/с даже в 10 — контур держит); |vins_v| выше hover_v = VINS «летит» на
     # висении = разнос. VINS-независимо (стик+|vins_v|), надёжно (в отличие от IPM,
     # который сам мусорит). На быстрой прямой стики активны → чек выключен. 0 = выкл.
-    vins_hover_v: float = 3.0     # м/с, висе-неправдоподобная |vins_v| (0 = выкл)
-    vins_hover_sec: float = 2.0   # с центральных стиков до включения чека (транзиент стопа)
+    vins_hover_v: float     # м/с, висе-неправдоподобная |vins_v| (0 = выкл)
+    vins_hover_sec: float   # с центральных стиков до включения чека (транзиент стопа)
     # ЧЕК ЗАНИЖЕНИЯ |vins_v| — коллапс масштаба реборн-VINS (lv2_joy_20260905_114248:
     # VINS «0.4–0.9» при истинных 3–5.5 м/с, борт улетал ±50 м; IPM-канал был годен
     # 100 % и видел боковую 5.0). Потолок и физика висения ловят только ЗАВЫШЕНИЕ.
@@ -164,11 +182,11 @@ class BootstrapConfig:
     # VINS. Валидация офлайн-реплеем гейта (src/lab/vins_sane_replay.py) по bag:
     # 114248 срабатывает в фазе уноса, контрольные полёты 132408/133636 и серии
     # 2026-09-03/04 (ветер 10) — молчит. 0 = выкл.
-    vins_scale_ratio: float = 0.5
-    vins_scale_ipm_min: float = 2.0
-    vins_scale_sec: float = 3.0
-    vins_scale_alt_max: float = 4.0
-    vins_scale_hold: float = 30.0
+    vins_scale_ratio: float
+    vins_scale_ipm_min: float
+    vins_scale_sec: float
+    vins_scale_alt_max: float
+    vins_scale_hold: float
     # ВОССТАНОВЛЕНИЕ после разноса: на фронте демоута-по-разносу нода шлёт
     # /restart VINS (переинициализация), чтобы борт мог вернуться на ярус 1, а не
     # висеть на демпфере до конца полёта. Кулдаун между рестартами vins_restart_cd
@@ -181,8 +199,8 @@ class BootstrapConfig:
     # остаётся (демпфер порывы держит), VINS живёт со своим масштабом. Включать
     # (>0) только осознанно; зрелость после рестарта теперь считается заново
     # (RosTelemetry.reset_vins_stream / VinsTrack), но масштаб это не проверяет.
-    vins_restart_diverge: float = 0.0
-    vins_restart_cd: float = 6.0  # сек, минимум между /restart по разносу
+    vins_restart_diverge: float
+    vins_restart_cd: float  # сек, минимум между /restart по разносу
     # DpVins (velocity-каскад): внутренний контур скорости, гейны в PWM на м/с
     # ошибки скорости; ki — ветровой трим (латч на живом стике); внешний позиц.
     # контур (стик отпущен) — pos_kp/vmax/acc √-кап, как станция демпфера;
@@ -199,19 +217,19 @@ class BootstrapConfig:
     # 3.4–3.8 в норме). Прежние 80/60/0.2 (σθ ~1.05 на агрессивных прямых,
     # 0.5–0.9 на мягких live) доказаны lv2_joy_055400; стартовые 200/120/20/0.1
     # звенели втрое (v1 ab_dpvins σθ 3.5°) — гейны IPM-демпфера не перенеслись.
-    dpvins_kp_fwd: float = 40.0
-    dpvins_kp_lat: float = 32.0
-    dpvins_ki: float = 6.0
-    dpvins_cmd_gain: float = 4.0
-    dpvins_pos_kp: float = 0.3
-    dpvins_pos_vmax: float = 0.3
-    dpvins_pos_acc: float = 0.15
-    dpvins_vsmooth: float = 0.3
+    dpvins_kp_fwd: float
+    dpvins_kp_lat: float
+    dpvins_ki: float
+    dpvins_cmd_gain: float
+    dpvins_pos_kp: float
+    dpvins_pos_vmax: float
+    dpvins_pos_acc: float
+    dpvins_vsmooth: float
     # кап И-члена (трима), PWM. Ветру нужен трим до ~уровня ветра: при WIND 5 —
     # ~44 PWM, при WIND 10 — ~100 (кап 50 не держал: снос 1-1.3 м/с, унос 9-18 м,
     # lv2_joy_082437). Держим ВЫСОКИМ (120) для авторитета; момент не наматывается
     # — АНТИ-ВИНДАП по насыщению выхода (см. update), а не тесный кап.
-    dpvins_imax: float = 120.0
+    dpvins_imax: float
     # БЫСТРОЕ ОБУЧЕНИЕ ТРИМА (унос на входе в ярус 1). Трим стартует с нуля,
     # и путь по ветру до выучивания = нужный трим / ki обучения — от kp НЕ
     # зависит (kp задаёт лишь скорость дрейфа: равновесие kp·v = ветер). При
@@ -224,14 +242,14 @@ class BootstrapConfig:
     # СЕКУНДЫ: контур ki_trim слабозатухающий (ζ≈0.26), поэтому гвоздь вяжется
     # и без стика — первым стопом после движения (полёт lv2_joy_20260903_220204:
     # конец фазы был привязан к стику, голое висение раскачало, период 7.1 с).
-    dpvins_ki_trim: float = 60.0
+    dpvins_ki_trim: float
     # НЕ обнулять трим на повторных входах в ярус 1: ветер на переключении
     # яруса не исчезает, а дребезг гейта (wind_back: 1 тик insane → ярус
     # 1→0→1 за 60 мс) обнулял трим повторно — двойное обучение, унос 24 м
     # вместо 17. Трим в мировой раме VINS — валиден, пока жив мир; на
     # фактическом /restart нода зовёт handover.note_vins_restart → сброс на
     # ближайшем входе в ярус. 0 = выкл (сброс на каждом enter — старое).
-    dpvins_trim_keep: float = 1.0
+    dpvins_trim_keep: float
     # ПОСЕВ трима от демпфера на входе в ярус 1 (п.5.3 dpvins.txt): демпфер
     # секунду назад держал этот ветер — его установившийся И-член (DpHold.
     # trim_pwm, валюта PWM каналов) сеется в DpVins.seed_trim (канал → psign →
@@ -239,7 +257,7 @@ class BootstrapConfig:
     # только девственный трим (<1 PWM, не armed) — начатое обучение и выученный
     # ветер не перетираются; armed НЕ ставится: ki_trim остаётся страховкой и
     # быстро доучивает неточный посев. 0 = выкл (учить с нуля).
-    dpvins_trim_seed: float = 1.0
+    dpvins_trim_seed: float
     # ФАЗА BRAKE внешнего контура DpVins — закон станции демпфера как есть (StationKeeper
     # на оси вперёд/вбок): пока борт уходит от гвоздя быстрее brake_v, цель −brake·v
     # (кап brake_vmax) → ошибка скорости ×(1+brake), kp 40/32 → 160/128 PWM на м/с =
@@ -250,9 +268,9 @@ class BootstrapConfig:
     # гвоздя заморожен (_BRAKE_TRIM). ⚠️ Запас по фазе: усиление 160 при задержке
     # 0.9 с — полоса 1.6 рад/с, фаза 83° — на грани; стенд dpvins_gust_stand.py даёт
     # допустимый brake на текущем лаге, полный ×4 — после twist (лаг 0.65). 0 = выкл.
-    dpvins_pos_brake: float = 0.0
-    dpvins_pos_brake_v: float = 0.25
-    dpvins_pos_brake_vmax: float = 1.0
+    dpvins_pos_brake: float
+    dpvins_pos_brake_v: float
+    dpvins_pos_brake_vmax: float
     # СТРАХОВКА ОТ ЗАПИРАНИЯ BRAKE: трим на торможении заморожен только первые brake_t с
     # фазы; тормоз за это время борт не остановил (ветер сильнее авторитета или трим
     # ошибочен) → трим снова учится. cmd_3/wind_right/1: трим −56 (по ветру, посев не
@@ -269,7 +287,7 @@ class BootstrapConfig:
     # раскачка, 12 → 3.8/0.5, 10 → 2.3/0.03, 8 → 2.45/0.04 (при τ 0.5: 10 → 3.8/0.6,
     # 8 → 2.4/0.09); запирание (трим −56) ki 10 → 3.3/0.09; порыв 10 м/с ki 10 → 4.2/0.01
     # против 7.9/4.1 с таймером. Кандидат dpvins/brake5_tail.txt (ki 8, cmd/4).
-    dpvins_pos_brake_t: float = 8.0
+    dpvins_pos_brake_t: float
     # ПО-ОСЕВАЯ ЗАЩЁЛКА ТРИМА DpVins (как _TRIM_LATCH демпфера, 2026-09-06): 1 = на
     # живом стике морозится только компонента трима вдоль ДВИЖИМОЙ оси (и её хвост до
     # гвоздя), свободная ось учится рабочим ki; sat — по осям. 0 = любой стик морозит
@@ -279,45 +297,45 @@ class BootstrapConfig:
     # держит остаток 1 м/с на 32 PWM; у демпфера свободная ось учится → 0.16 м/с.
     # Движимую ось не учим: выучила бы «ветер + лобовое крейсера» → рывок после стопа.
     # Кандидат dpvins/brake5_axis.txt, полёт cmd/5.
-    dpvins_latch_axis: float = 0.0
+    dpvins_latch_axis: float
     # ГВОЗДЬ СРАЗУ НА ВХОДЕ при посеянном триме (2026-09-06): 1 = если трим выучен/
     # посеян (armed) и борт стоит (|v| < pin_v), гвоздь вяжется первым же кадром, не
     # дожидаясь движения (_moved) и стопа. _moved нужен был фазе ki_trim (гвоздь кончал
     # быстрый захват ветра), после посева трим уже armed. Bag 130326 (cmd/5): ярус 1
     # включился за 1 с до порыва без гвоздя (set/set) → 11 с дрейфа на одном P без
     # BRAKE, 8 м, гвоздь лишь по стопу. 0 = старое. Кандидат dpvins/brake5_pin.txt.
-    dpvins_pin_armed: float = 0.0
+    dpvins_pin_armed: float
     # ПРЯМАЯ ПЕРЕДАЧА СТИКА DpVins (cmd/7): PWM на м/с ЦЕЛИ стика поверх P-контура.
     # Плечи 150448 (стик в упор): DpVins 2.5–3.7 м/с при цели 4.0, DpHold 4.2 — движимая
     # ось чистый P (трим на стике заморожен), ошибка (лобовое+ветер)/kp 40 ≈ 0.75–1 м/с.
     # ff·цель = наклон «за лобовое» (ветер 5 м/с ≈ 44 PWM, 10 ≈ 100 → на 4 м/с ~35–55);
     # только на стик-цели, станция висения не трогается. 0 = выкл (старое).
-    dpvins_ff: float = 0.0
+    dpvins_ff: float
     # ЛИНИЯ НА ПЛЕЧЕ DpVins (cmd/7): 1 = при стике одной оси 2D-гвоздь остаётся, свободная
     # ось держит его проекцию на себя в текущем курсе (линия через гвоздь вдоль курса, как
     # StationFrame демпфера) с BRAKE; уход курса > 17° — перезахват. Без этого свободная ось
     # держала только скорость 0 на P kp 32: поперёк плеча RMS 0.7–0.97 против 0.49 у DpHold,
     # худшее плечо 7.5 м (150448). После отпускания гвоздь снимается — заново по стопу.
-    dpvins_line_hold: float = 0.0
+    dpvins_line_hold: float
     # ТОРМОЗ С МОМЕНТА ОТПУСКАНИЯ (cmd/8, полёт 160730): пока гвоздя нет — цель −brake·v с
     # капом brake_vmax (закон BRAKE без точки: стоп там, где отпустил). Выбег DpVins после
     # отпускания на 5 м/с был 5–12 с и 7–16 м (чистый P kp 40: τ 2.5 с), у DpHold 2.4 с и 5 м;
     # на виражах гвоздь не брался по 8–11 с. 0 = выкл (цель 0, старое).
-    dpvins_settle_brake: float = 0.0
+    dpvins_settle_brake: float
     # ГВОЗДЬ ПО ТАЙМАУТУ после отпускания, с (зеркало _POS_PIN_T демпфера 3): не встал —
     # гвоздь принудительно, дальше станция с BRAKE. 0 = выкл (только по стопу < pin_v).
-    dpvins_pin_t: float = 0.0
+    dpvins_pin_t: float
     # shuttle (челнок) как стик-профиль: ±level по плечам leg сек
-    gz_shuttle_level: float = 0.3    # уровень стика [-1..1] на плече
-    gz_shuttle_leg: float = 3.0      # длительность плеча, sim-сек
-    gz_shuttle_pause: float = 2.0
-    gz_shuttle_fwd: bool = False
+    gz_shuttle_level: float    # уровень стика [-1..1] на плече
+    gz_shuttle_leg: float      # длительность плеча, sim-сек
+    gz_shuttle_pause: float
+    gz_shuttle_fwd: bool
     # пульт (нормировка стика → c_*)
-    pilot_deadzone: int = 30         # мёртвая зона вокруг центра, PWM
-    pilot_full: int = 400            # полное отклонение стика от центра, PWM
-    pilot_pitch_sign: float = -1.0   # сырой PWM пульта → намерение; парный к _PITCH_RC_SIGN
+    pilot_deadzone: int         # мёртвая зона вокруг центра, PWM
+    pilot_full: int            # полное отклонение стика от центра, PWM
+    pilot_pitch_sign: float   # сырой PWM пульта → намерение; парный к _PITCH_RC_SIGN
                                      # в ControlStack, вместе = pass-through (борт: сверить с радио)
-    pilot_roll_sign: float = 1.0
+    pilot_roll_sign: float
     # ==== ДЕМПФЕР ПО ПОТОКУ (срез 3, БОЕВОЙ пре-VINS) — ТРИ НЕЗАВИСИМЫЕ ОСИ ====
     # Есть roll, pitch и yaw. Точка. У каждой оси СВОЙ полный набор — ничего не
     # шарится, дублирование НАМЕРЕННОЕ: тюнинг у осей разный (yaw ki=0 — интегратор
@@ -331,7 +349,7 @@ class BootstrapConfig:
     # ⚠️ масштаб 10 — первая оценка, калибруется в симе (flow_* ↔ gt-скорость).
     # smooth — медиана перцепта по N кадрам (FlowEstimator), тоже per-axis.
     # --- roll: боковой снос, сигнал flow_lateral → стик roll ---
-    roll_kp: float = 48.0            # ПОБЕДИТЕЛЬ свипа R5-R7 (класс-дефолт был 8, в
+    roll_kp: float            # ПОБЕДИТЕЛЬ свипа R5-R7 (класс-дефолт был 8, в
                                      # прогонах жило 16 через BS_ROLL_KP — порога не
                                      # искали ни разу). 48 режет ВЫБЕГ после снятия
                                      # команды вдвое-втрое: 3.05±0.72 → 1.13±0.43 м
@@ -346,7 +364,7 @@ class BootstrapConfig:
                                      # по дрожи — см. src/control/control.md).
                                      # Откат к 16, если в поле просядет ветровое
                                      # удержание: оно висением и меряется.
-    roll_ki: float = 0.0             # СВИП R8/R9: пользы НЕ показал, поэтому убран.
+    roll_ki: float             # СВИП R8/R9: пользы НЕ показал, поэтому убран.
                                      # Ставили его подтягивать остаточную скорость;
                                      # чистый снос ki=3 −2.29 ± 1.65 м (n=3) против
                                      # ki=0 −1.54 ± 1.02 м (n=4) — разброс ВНУТРИ
@@ -364,11 +382,11 @@ class BootstrapConfig:
                                      # с лётным: в прогонах K1s…R7s жило именно оно, а в
                                      # конфиге стояли 120 / 1 — иначе запуск без env даёт
                                      # НЕизмеренный контур.
-    roll_kd: float = 0.0
-    roll_imax: float = 150.0
-    roll_pos_kp: float = 0.0         # станция-кипинг боковой оси (путь ipm_lat), см.
+    roll_kd: float
+    roll_imax: float
+    roll_pos_kp: float         # станция-кипинг боковой оси (путь ipm_lat), см.
                                      # pitch_pos_kp. BS_ROLL_POS_KP / --roll-pos-kp
-    roll_pos_vmax: float = 1.0       # BS_ROLL_POS_VMAX / --roll-pos-vmax
+    roll_pos_vmax: float       # BS_ROLL_POS_VMAX / --roll-pos-vmax
     # ДВА ЗАКОНА СТАНЦИИ (см. _FlowDamper1D.__init__): pos_kp/pos_vmax — фаза RETURN
     # (мягкий возврат, по каскаду ≤0.3), brake — фаза BRAKE (уходим от точки быстрее
     # 0.3 м/с: цель = −brake·v_изм, гасим скорость с авторитетом ∝ скорости — стоп
@@ -380,17 +398,17 @@ class BootstrapConfig:
     # лагу 0.5 и к каналу, видящему 0.6 истины. Кандидат на полёт ab_brake:
     # BS_ROLL_POS_KP=0.3 BS_ROLL_POS_VMAX=0.3 BS_ROLL_POS_BRAKE=3 BS_ROLL_POS_BRAKE_VMAX=1.0
     # BS_ROLL_POS_ACC=0.15 (⚠️ BRAKE_VMAX явно: иначе кламп брейка = POS_VMAX, упора нет).
-    roll_pos_brake: float = 0.0      # безразмерный. BS_ROLL_POS_BRAKE / --roll-pos-brake
-    roll_pos_brake_vmax: float = 0.0  # м/с, 0 = pos_vmax. BS_ROLL_POS_BRAKE_VMAX / --roll-pos-brake-vmax
-    roll_pos_acc: float = 0.0        # м/с², 0 = без капа. BS_ROLL_POS_ACC / --roll-pos-acc
-    roll_pos_alt_band: float = 0.0   # станция только на установившейся высоте (полоса, м;
+    roll_pos_brake: float      # безразмерный. BS_ROLL_POS_BRAKE / --roll-pos-brake
+    roll_pos_brake_vmax: float  # м/с, 0 = pos_vmax. BS_ROLL_POS_BRAKE_VMAX / --roll-pos-brake-vmax
+    roll_pos_acc: float        # м/с², 0 = без капа. BS_ROLL_POS_ACC / --roll-pos-acc
+    roll_pos_alt_band: float   # станция только на установившейся высоте (полоса, м;
                                      # 0 = без высотной логики). Крену не нужно — см.
                                      # pitch_pos_alt_band. BS_ROLL_POS_ALT_BAND
-    roll_pos_brake_v: float = 0.0    # порог входа в BRAKE по |v_изм|, м/с; 0 = 0.3
+    roll_pos_brake_v: float    # порог входа в BRAKE по |v_изм|, м/с; 0 = 0.3
                                      # (_POS_PIN_V). Канал видит 0.4-0.6 истины: на
                                      # ab_brake_win5 пик 0.30 — брейк не проснулся;
                                      # 0.25 разбудил бы. BS_ROLL_POS_BRAKE_V / --roll-pos-brake-v
-    roll_max: float = 150.0
+    roll_max: float
     # --- боковая ось ПО МЕТРИЧЕСКОЙ СКОРОСТИ (DpRollRate, сигнал ipm_vlat в М/С) ---
     # 30 — ИЗМЕРЕННЫЙ дефолт по свипу G (n=5 на точку, DpHoldM, `rate_gain_series.sh`):
     #        kp   уход м        СКО v_lat   вбок           внутри 10 м
@@ -403,19 +421,19 @@ class BootstrapConfig:
     # но пересчёт переносит ЧУВСТВИТЕЛЬНОСТЬ, а не запас устойчивости: у ipm_vlat своё
     # запаздывание (окно МНК 0.5 с), и на нём тот же гейн уже раскачивает.
     # Тренд не выдохся → 15 стоит проверить отдельной серией.
-    roll_rate_kp: float = 30.0
-    roll_rate_ki: float = 0.0
-    roll_rate_ki_trim: float = 0.0   # ki в упоре ПЕРВОГО брейка станции (набор трима
+    roll_rate_kp: float
+    roll_rate_ki: float
+    roll_rate_ki_trim: float   # ki в упоре ПЕРВОГО брейка станции (набор трима
                                      # ветра), 0 = ki. Ручка — BS_ROLL_RATE_KI_TRIM /
                                      # --roll-rate-ki-trim; смысл — flow_damper.py,
                                      # _FlowDamper1D.__init__ (ki_trim)
-    roll_rate_kd: float = 0.0
-    roll_rate_cmd_gain: float = 0.0   # м/с при полном стике (0 = чистое удержание:
+    roll_rate_kd: float
+    roll_rate_cmd_gain: float   # м/с при полном стике (0 = чистое удержание:
                                       # стик roll в DpHoldM игнорируется). Ручка —
                                       # BS_ROLL_RATE_CMD_GAIN / --roll-rate-cmd-gain
-    roll_conf_min: float = 0.05
-    roll_conf_full: float = 0.20
-    roll_osign: float = +1.0         # ⚠️ БЫЛО −1 и это оказалось ЗНАКОМ РАЗГОНА.
+    roll_conf_min: float
+    roll_conf_full: float
+    roll_osign: float         # ⚠️ БЫЛО −1 и это оказалось ЗНАКОМ РАЗГОНА.
                                      # Разбор H4_mask: перцепт видит движение, команда растёт,
                                      # рама кладётся до −12.9°, борт разгоняется В ТУ ЖЕ
                                      # сторону до 12.8 м/с — положительная связь.
@@ -428,8 +446,8 @@ class BootstrapConfig:
                                      # слеп (S_lat=0.4 против 2.42), петля не успевала разойтись
                                      # за окно, и знак проверялся по прогонам, где крен сам же
                                      # создавал движение — такие данные о знаке не говорят.
-    roll_cmd_gain: float = 10.0
-    roll_smooth: int = 25            # см. roll_ki: сведено с лётным значением
+    roll_cmd_gain: float
+    roll_smooth: int            # см. roll_ki: сведено с лётным значением
     # --- pitch: продольный снос, сигнал flow_longitudinal → стик pitch ---
     # ⚠️ ОТДЕЛЬНО НЕ КАЛИБРОВАН: дефолты скопированы с roll (looming менее зрел,
     # в полёте ось не проверена). Свой набор — чтобы калибровать, не трогая roll.
@@ -449,9 +467,9 @@ class BootstrapConfig:
     #   kd=5000 → 55 PWM/(м/с) → 2ζω_n = 0.64 → ζ ≈ 0.98, почти критическое.
     # Было kp=2000/kd=2500 при НЕработающем kd: ζ считался 0.43, а фактически D-член
     # был шумом → автоколебание ±20 м с периодом 22 с (совпало с расчётным 16.8 с).
-    pitch_kp: float = 1500.0
-    pitch_ki: float = 0.0
-    pitch_kd: float = 1500.0         # ПОБЕДИТЕЛЬ кампании N (было 5000). Расчётное почти
+    pitch_kp: float
+    pitch_ki: float
+    pitch_kd: float         # ПОБЕДИТЕЛЬ кампании N (было 5000). Расчётное почти
                                      # критическое ζ≈0.98 оказалось не тем режимом: при
                                      # 5000 Д-пик у ВСЕХ прогонов ровно 150, то есть
                                      # половину висения выход стоял в клампе и П не значил
@@ -478,28 +496,28 @@ class BootstrapConfig:
     # пороге 2.3). Обоснование честно звучит как «не хуже по всем меркам и надёжнее по
     # попаданию в круг» — счётный признак 5/5 против 2/5 разбросом не размывается.
     # Цена против 200: снос втрое больше, платим сознательно за отсутствие раскачки.
-    pitch_rate_kp: float = 100.0
-    pitch_rate_ki: float = 0.0
-    pitch_rate_ki_trim: float = 0.0  # зеркало roll_rate_ki_trim: BS_PITCH_RATE_KI_TRIM
-    pitch_rate_kd: float = 0.0       # производная скорости = ускорение, шумно; пока 0
-    pitch_rate_cmd_gain: float = 0.0  # м/с при полном стике (0 = чистое удержание:
+    pitch_rate_kp: float
+    pitch_rate_ki: float
+    pitch_rate_ki_trim: float  # зеркало roll_rate_ki_trim: BS_PITCH_RATE_KI_TRIM
+    pitch_rate_kd: float       # производная скорости = ускорение, шумно; пока 0
+    pitch_rate_cmd_gain: float  # м/с при полном стике (0 = чистое удержание:
                                       # стик pitch в DpHoldM игнорируется — полёт
                                       # 2026-08-17: полный «на себя» не тормозил).
                                       # BS_PITCH_RATE_CMD_GAIN / --pitch-rate-cmd-gain
-    pitch_imax: float = 120.0
-    pitch_pos_kp: float = 0.0        # СТАНЦИЯ-КИПИНГ продольной оси: стик в центре →
+    pitch_imax: float
+    pitch_pos_kp: float        # СТАНЦИЯ-КИПИНГ продольной оси: стик в центре →
                                      # цель скорости = pos_kp·(точка − путь ipm_fwd), м/с
                                      # на метр ошибки; стик живой → точка отпущена (пульт
                                      # всегда главный, как LOITER). 0 = выкл (чистый
                                      # демпфер, остаточный снос 0.2-0.5 м/с копится в
                                      # метры). BS_PITCH_POS_KP / --pitch-pos-kp
-    pitch_pos_vmax: float = 1.0      # потолок скорости возврата к точке, м/с.
+    pitch_pos_vmax: float      # потолок скорости возврата к точке, м/с.
                                      # BS_PITCH_POS_VMAX / --pitch-pos-vmax
-    pitch_pos_brake: float = 0.0     # зеркало roll_pos_brake. BS_PITCH_POS_BRAKE
-    pitch_pos_brake_vmax: float = 0.0  # BS_PITCH_POS_BRAKE_VMAX / --pitch-pos-brake-vmax
-    pitch_pos_acc: float = 0.0       # BS_PITCH_POS_ACC / --pitch-pos-acc
-    pitch_pos_brake_v: float = 0.0   # BS_PITCH_POS_BRAKE_V / --pitch-pos-brake-v
-    pitch_pos_alt_band: float = 0.2  # СТАНЦИЯ ТАНГАЖА только на установившейся высоте:
+    pitch_pos_brake: float     # зеркало roll_pos_brake. BS_PITCH_POS_BRAKE
+    pitch_pos_brake_vmax: float  # BS_PITCH_POS_BRAKE_VMAX / --pitch-pos-brake-vmax
+    pitch_pos_acc: float       # BS_PITCH_POS_ACC / --pitch-pos-acc
+    pitch_pos_brake_v: float   # BS_PITCH_POS_BRAKE_V / --pitch-pos-brake-v
+    pitch_pos_alt_band: float  # СТАНЦИЯ ТАНГАЖА только на установившейся высоте:
                                      # ход по высоте читается каналом как ход вперёд —
                                      # фантом в пути ipm_fwd 0.2-0.6 м на метр (замер
                                      # ab_brake_trim: +0.4 м за набор на отрыве, −0.5 м
@@ -513,20 +531,20 @@ class BootstrapConfig:
     # ab_pos13 — за 1.5 с упора +90 PWM сверх ветра, потом размотка ЗА точку.
     # Без упора поведение не меняется вовсе (отлётанные серии без станции — бит-в-бит).
     # 1 = вкл (лётный дефолт), 0 = выкл. BS_RATE_AWU / --rate-anti-windup
-    rate_anti_windup: float = 1.0
+    rate_anti_windup: float
     # СТАНЦИЯ В ОСЯХ КУРСА (StationFrame, station_frame.py): 'yaw' — гвоздь, мировая
     # позиция и вектор трима ветра общие для крена/тангажа и повёрнуты курсом (после
     # разворота точка и трим на месте); 'body' — как было, каждая ось в осях борта
     # (разворот 200° в 5 м/с: трим смотрит назад, борт разгоняется до 1.4 м/с без
     # стика — lv2_joy_20260829_153405). BS_STATION_FRAME / --station-frame.
-    station_frame: str = 'body'
+    station_frame: str
     # Источник курса для рамы: 'fcu' — att_yaw (гиро + компас EKF). Подключаемый
     # вход: сюда встанет визуальный курс для борта без компаса. BS_STATION_HEADING
-    station_heading: str = 'fcu'
-    pitch_max: float = 150.0
-    pitch_conf_min: float = 0.05
-    pitch_conf_full: float = 0.20
-    pitch_osign: float = +1.0        # ПРОТИВОПОЛОЖЕН roll — и это НЕ опечатка. Провод у осей
+    station_heading: str
+    pitch_max: float
+    pitch_conf_min: float
+    pitch_conf_full: float
+    pitch_osign: float        # ПРОТИВОПОЛОЖЕН roll — и это НЕ опечатка. Провод у осей
                                      # развёрнут по-разному (факт 1): у roll PWM>1500 = крен
                                      # вправо = разгон ВПРАВО (знак совпадает с направлением),
                                      # у pitch PWM>1500 = нос ВВЕРХ = разгон НАЗАД (знак
@@ -538,7 +556,7 @@ class BootstrapConfig:
                                      # Проверено прогоном D1_damper_2axis с osign=−1: демпфер
                                      # командовал −124 PWM при движении вперёд 4.8 м/с и
                                      # разгонял на +0.95 м/с² до удара на 21-й секунде.
-    pitch_cmd_gain: float = 0.0       # стик НЕ задаёт целевой поток: сигнал — положение,
+    pitch_cmd_gain: float       # стик НЕ задаёт целевой поток: сигнал — положение,
                                       # и двигать надо УСТАВКУ, а не цель потока. Отсюда
                                       # единицы: log/с при полном стике (DpPitchHold в
                                       # режиме `pos` интегрирует c_fwd·cmd_gain в точку
@@ -552,65 +570,65 @@ class BootstrapConfig:
                                       # D-член вычитает скорость уставки, но kp-член
                                       # держит борт ПРИ уставке — реально достижимая
                                       # скорость ограничена max_pwm=150 и наклоном.
-    pitch_smooth: int = 9            # СВЕДЕНО с лётным (было 1): во ВСЕХ прогонах оси
+    pitch_smooth: int            # СВЕДЕНО с лётным (было 1): во ВСЕХ прогонах оси
                                      # (K1s, N0s…N4s) через env шло 9, отдельно не
                                      # свипилось. Тот же случай, что с креном: все
                                      # замеры сделаны на 9, поэтому дефолт = 9, иначе
                                      # запуск без env даёт НЕизмеренный контур.
     # --- yaw: КУРС-ХОЛД, сигнал = накопленный визуальный курс ∫flow_yaw·dt (pos-режим,
     # как у тангажа). Команда едет через интегратор уставки, а не вычитанием цели.
-    yaw_kp: float = 20.0             # курс-холд. ПОБЕДИТЕЛЬ свипа Y4: порог дрожи между
+    yaw_kp: float             # курс-холд. ПОБЕДИТЕЛЬ свипа Y4: порог дрожи между
                                      # 40 и 80 (при kp=40 СКО ω_z 25.9 °/с против 3.9 у
                                      # kp=10, PWM в потолке), рабочее — вдвое ниже порога.
                                      # Заодно лучшее удержание серии: СКО курса 1.02/1.05°
                                      # против 1.64/1.32 у kp=10. 0 = прежнее поведение
                                      # ПОБИТОВО (контроль порта), но токен тогда не крутит:
                                      # разворот делает именно П-член (замер Y2, kp=0).
-    yaw_ki: float = 0.0              # ВРЕДЕН (bias yaw_flow) — держим 0
-    yaw_kd: float = 6.0              # ПОБЕДИТЕЛЬ свипа [[yaw-hold-tuning]] (был yaw_kp):
+    yaw_ki: float              # ВРЕДЕН (bias yaw_flow) — держим 0
+    yaw_kd: float              # ПОБЕДИТЕЛЬ свипа [[yaw-hold-tuning]] (был yaw_kp):
                                      # в pos-режиме D-член = kd·(flow_yaw − скорость
                                      # уставки), т.е. прежний закон ровно. Не переигран.
-    yaw_imax: float = 200.0
-    yaw_max: float = 150.0
-    yaw_conf_min: float = 0.05
-    yaw_conf_full: float = 0.20
-    yaw_osign: float = 1.0
+    yaw_imax: float
+    yaw_max: float
+    yaw_conf_min: float
+    yaw_conf_full: float
+    yaw_osign: float
     # ТЕМП РАЗВОРОТА — единственный источник правды, из него выводятся гейны команды У
     # ОБОИХ холдеров (Dp и Gz). Держать одним числом обязательно: токен yaw_l30 считает
     # длительность из этого темпа, и разъехавшийся гейн молча превратил бы 30° в 42°.
-    yaw_rate_full: float = 28.65     # °/с при ПОЛНОМ стике (= 0.5 рад/с, темп GzHold)
-    yaw_flow_scale: float = 0.324    # S: px/кадр на °/с — ЗАМЕР Y4 по СВОЕЙ уставке.
+    yaw_rate_full: float     # °/с при ПОЛНОМ стике (= 0.5 рад/с, темп GzHold)
+    yaw_flow_scale: float    # S: px/кадр на °/с — ЗАМЕР Y4 по СВОЕЙ уставке.
                                      # Прежние 0.253 (регрессия flow_yaw на ω_z, Y1s) —
                                      # мимо: там неизвестен покадровый шаг, а токен
                                      # недодавал ровно в S_конфиг/S_истинный раз (kp=20
                                      # отдал 23.9° и 46.1° на заказ 30/60 — отношение
                                      # 0.795/0.769). S входит ТОЛЬКО в cmd_gain, ошибка
                                      # контура живёт в сырых единицах — kp/kd не трогаем.
-    yaw_settle: float = 6.0          # добор после команды внутри сегмента yaw_l/yaw_r, с
-    yaw_cmd_gain: float = None       # None = вывести из yaw_rate_full (норма); число —
+    yaw_settle: float          # добор после команды внутри сегмента yaw_l/yaw_r, с
+    yaw_cmd_gain: Optional[float]       # None = вывести из yaw_rate_full (норма); число —
                                      # ручной override для свипа, градусы тогда уедут
-    yaw_leak: float = 8.0            # утечка накопителя курса, с. Ограничивает фантом от
+    yaw_leak: float            # утечка накопителя курса, с. Ограничивает фантом от
                                      # смещения flow_yaw (−0.4°/с, Y1s) уровнем bias·T
                                      # ≈3–4° вместо роста. 0 = без утечки (разгон курса)
-    yaw_smooth: int = 5              # победитель свипа [[yaw-hold-tuning]]
+    yaw_smooth: int              # победитель свипа [[yaw-hold-tuning]]
     # --- ЗАЩИТА НАКОПИТЕЛЯ КУРСА от мусорного кадра. Обе ручки родились из YW1s1:
     # на отрыве один кадр дал flow_yaw = −43.8 px/кадр (висенческие ±1), накопитель
     # набрал −99° фантома, и контур честно довернул борт на 95° влево. Абсолютной опоры
     # у оси нет — новый курс остался на весь полёт.
-    yaw_max_rate: float = 100.0      # потолок ПРАВДОПОДОБИЯ кадра, °/с. Кадр выше —
+    yaw_max_rate: float      # потолок ПРАВДОПОДОБИЯ кадра, °/с. Кадр выше —
                                      # выбрасывается (не подрезается). Полный стик 28.65
                                      # °/с, так что запас троекратный. 0 = отсев выключен.
                                      # В ед. сигнала переводится как S·°/с (см. recipes)
-    yaw_arm_frames: int = 5          # сколько кадров подряд с conf ≥ conf_full нужно,
+    yaw_arm_frames: int          # сколько кадров подряд с conf ≥ conf_full нужно,
                                      # чтобы накопитель начал копить. Гейт conf_min=0.05
                                      # взлётный выброс пропустил (там было 0.18) —
                                      # накопителю нужен СВОЙ порог, строже выходного
-    yaw_v_gate: float = 0.0          # м/с: на ходу быстрее — картинке про курс не верить
+    yaw_v_gate: float          # м/с: на ходу быстрее — картинке про курс не верить
                                      # (кадр = «вращения нет»), курс держит FCU. Замер
                                      # ab_frame: лобовой flow_yaw при |v|>1 м/с — corr 0.58,
                                      # остаток 21 °/с → «ворочается» на прямой. Кандидат 0.8.
                                      # BS_YAW_V_GATE / --yaw-v-gate; логика — DpYawHold.
-    yaw_pilot_gain: float = 0.0      # ПРЯМАЯ ПЕРЕДАЧА yaw-стика: PWM при полном стике.
+    yaw_pilot_gain: float      # ПРЯМАЯ ПЕРЕДАЧА yaw-стика: PWM при полном стике.
                                      # >0: стик жив → PWM прямо со стика, контур курса
                                      # обнулён (пружина невозможна по построению; разбор
                                      # spring 2026-08-27: контур разматывал 92–96% разворота
@@ -618,17 +636,17 @@ class BootstrapConfig:
                                      # выкл — токены yaw_l/yaw_r идут через уставку, как
                                      # раньше. Живому пилоту freefly_lv включает 130 (по
                                      # замеру spring ~0.45 °/с на PWM → полный стик ≈60°/с)
-    kf_seg_frac: float = None        # None = дефолт оценщика (0.30). Сегмент опоры
+    kf_seg_frac: Optional[float]        # None = дефолт оценщика (0.30). Сегмент опоры
                                      # закрывается, когда УШЛА такая доля картинки (доля
                                      # потерянных точек опоры) — а не по таймеру: таймер
                                      # не знает скорости борта, и на быстром ходу опора
                                      # рассыпалась раньше, чем сегмент успевал закрыться.
-    kf_seg_min_sec: float = None     # None = дефолт оценщика (0.3 с). Пол по времени —
+    kf_seg_min_sec: Optional[float]     # None = дефолт оценщика (0.3 с). Пол по времени —
                                      # сегмента опоры: закрытие по одному лишь порогу
                                      # kf_seg_max банковало ±0.03 и при ходе 0.2 м, и при
                                      # 2.9 м — величина хода не кодировалась, а знак трети
                                      # сегментов был обратным (отсюда самоускорение борта).
-    ipm_model: str = 'exact'         # модель проекции земли в кадр для канала вида сверху:
+    ipm_model: str         # модель проекции земли в кадр для канала вида сверху:
                                      # legacy | rsign | exact (см. FlowEstimator._ipm_px).
                                      # В legacy крен крутился вокруг ОПТИЧЕСКОЙ оси и с
                                      # ОБРАТНЫМ знаком — настоящая бага. Замер по I1s1
@@ -642,7 +660,7 @@ class BootstrapConfig:
                                      # не оплачена. Остаток утечки 2.00 не объяснён.
                                      # ⚠️ Серии E8-H2 отлетаны на legacy: числа кампании
                                      # сравнивать с новыми только через контрольную серию.
-    ipm_derot: float = 1.0           # вычитать вращательное поле по гироскопу: 0 = нет,
+    ipm_derot: float           # вычитать вращательное поле по гироскопу: 0 = нет,
                                      # ±1 = знак. ⚠️ РАБОТАЕТ ТОЛЬКО В ПАРЕ С ipm_wz_tau.
                                      # ЗАЧЕМ. Медиана смещений считает поле «только сдвиг»,
                                      # поэтому разворот на dψ читается как боковой снос X·dψ
@@ -682,7 +700,7 @@ class BootstrapConfig:
                                      # — Q2s с тем же выключенным вычитанием дала 8.77. Вход в
                                      # висение тоже уехал (v_нач 0.40 → 0.59-0.69). Отсюда
                                      # правило: ручку судить ТОЛЬКО контрольной серией рядом.
-    ipm_adapt: float = 1.05          # адаптивная полоса: начало окна = max(x0, k·граница
+    ipm_adapt: float          # адаптивная полоса: начало окна = max(x0, k·граница
                                      # видимости), длина окна не меняется. 0 = выкл (статичная
                                      # полоса 3-6 м). ЗАЧЕМ: у статичной полосы потолок высоты
                                      # x1·tan(cam_tilt+vfov/2) ≈ 5.85 м — выше полоса целиком
@@ -694,7 +712,7 @@ class BootstrapConfig:
                                      # дальше границы (на кромке фичи полугаснут). Сдвиг окна
                                      # между кадрами вычитается из накопителя (см.
                                      # perception/ipm.py, _ipm_update). BS_IPM_ADAPT / --ipm-adapt
-    ipm_vel_tau: float = 0.4         # комплементарный фильтр скорости IPM: прогноз наклоном
+    ipm_vel_tau: float         # комплементарный фильтр скорости IPM: прогноз наклоном
                                      # тяги (g·sinθ, тикает каждый кадр — мостит провалы) +
                                      # коррекция МНК-наклоном с этой постоянной времени, сек.
                                      # 0 = выкл (чистый МНК-наклон, лаг ~ipm_win/2, провал
@@ -705,7 +723,7 @@ class BootstrapConfig:
                                      # Известное ограничение: на манёврах занижение ~×0.6
                                      # (наследует занижение МНК-измерения).
                                      # BS_IPM_VEL_TAU / --ipm-vel-tau
-    ipm_alt_floor: float = 0.5       # ПОЛ высоты перцепции для геометрии IPM, м: высота в
+    ipm_alt_floor: float       # ПОЛ высоты перцепции для геометрии IPM, м: высота в
                                      # варп/масштаб = max(alt, floor), гейт «на земле»
                                      # опускается 0.5 → _ALT_GROUND (0.08, по сырой высоте).
                                      # Мотив (прогоны LV2/1 174603/210917): EKF-z занижает
@@ -717,7 +735,7 @@ class BootstrapConfig:
                                      # у ступеньки разрыв масштаба на границе (см. коммент в
                                      # perception/ipm.py). 0 = старое поведение (гейт 0.5).
                                      # BS_IPM_ALT_FLOOR / --ipm-alt-floor
-    ipm_acc_tau: float = 5.0         # ФВЧ прогноза ускорения в фильтре скорости IPM,
+    ipm_acc_tau: float         # ФВЧ прогноза ускорения в фильтре скорости IPM,
                                      # сек; 0 = выкл (прежнее поведение). ЗАЧЕМ:
                                      # прогноз считает a = g·sin(наклон), что верно в
                                      # свободном полёте, но в УДЕРЖАНИИ ПРОТИВ ВЕТРА
@@ -740,7 +758,7 @@ class BootstrapConfig:
                                      # ⚠️ На ДЛИТЕЛЬНОМ настоящем разгоне среднее съело
                                      # бы сигнал — там ручку выключать.
                                      # BS_IPM_ACC_TAU / --ipm-acc-tau
-    perc_alt_zero: float = 1.0       # НУЛЕВАТЬ высоту перцепции по АРМУ (только
+    perc_alt_zero: float       # НУЛЕВАТЬ высоту перцепции по АРМУ (только
                                      # perc_alt_src='local'): alt = max(0, z − z0),
                                      # z0 латчится на фронте armed. ЗАЧЕМ (прогоны
                                      # 183305/185921, полёты на 0.26-0.27 м): EKF
@@ -760,7 +778,7 @@ class BootstrapConfig:
                                      # геометрию уходит max(alt, floor).
                                      # 0 = старое поведение (сырой z).
                                      # BS_PERC_ALT_ZERO / --perc-alt-zero
-    vins_restart_arm: float = 1.0    # СБРОС VINS ПО АРМУ: на фронте armed нода шлёт
+    vins_restart_arm: float    # СБРОС VINS ПО АРМУ: на фронте armed нода шлёт
                                      # /restart (restart_callback эстиматора: clearState
                                      # + очистка буферов). ЗАЧЕМ (odom_gets_borken,
                                      # 2026-08-28): пока борт стоит на земле, эстиматор
@@ -776,7 +794,7 @@ class BootstrapConfig:
                                      # (сброс INITIAL при >300 кадрах без ключевых).
                                      # 0 = не слать (старое поведение).
                                      # BS_VINS_RESTART_ARM / --vins-restart-arm
-    ipm_scale_ref: float = 3.0       # МАСШТАБНО-ИНВАРИАНТНАЯ полоса IPM: вся геометрия
+    ipm_scale_ref: float       # МАСШТАБНО-ИНВАРИАНТНАЯ полоса IPM: вся геометрия
                                      # (x0, длина, yhalf, res) ∝ alt/h_ref — углы взгляда
                                      # на полосу константны (~27-45°), пиксельный размер
                                      # варпа не меняется. Мотив (прогоны lv2 040737/041255):
@@ -790,7 +808,7 @@ class BootstrapConfig:
                                      # применяется ДО масштаба (полоса у земли не уже
                                      # floor/h_ref от базовой). 0 = выкл (легаси).
                                      # BS_IPM_SCALE_REF / --ipm-scale-ref
-    vision_vel: float = 0.0          # отдавать скорость IPM в EKF полётника (MAVLink
+    vision_vel: float          # отдавать скорость IPM в EKF полётника (MAVLink
                                      # VISION_SPEED_ESTIMATE через /mavros/vision_speed):
                                      # 1 = вкл. ЗАЧЕМ: без наблюдения скорости EKF не видит
                                      # тильт (A4: ложный горизонт ползёт 0.2-0.6°/с, ALT_HOLD
@@ -804,7 +822,7 @@ class BootstrapConfig:
                                      # (FCU в SITL живёт по wall, см. IMU-timesync).
                                      # Репетиция боевой архитектуры (там это место VINS/NN1).
                                      # BS_VISION_VEL / --vision-vel
-    vision_pose_src: str = 'integral'  # источник ПОЗЫ vision-фида (при vision_vel>0):
+    vision_pose_src: str  # источник ПОЗЫ vision-фида (при vision_vel>0):
                                      # 'integral' — интеграл IPM-скорости (суррогат
                                      # «хоть какая-то позиция», чтобы EK3 начал aiding);
                                      # 'extern' — позу в /mavros/vision_pose/pose даёт
@@ -813,7 +831,7 @@ class BootstrapConfig:
                                      # на земле для арма. Два издателя позы недопустимы —
                                      # поэтому взаимоисключение здесь.
                                      # BS_VISION_POSE_SRC / --vision-pose-src
-    gps_disable: float = 0.0         # SIM-ONLY: профиль «GPS теряется В ПОЛЁТЕ» —
+    gps_disable: float         # SIM-ONLY: профиль «GPS теряется В ПОЛЁТЕ» —
                                      # SIM_GPS1_ENABLE=0 через очередь параметров, но
                                      # ТОЛЬКО когда VINS публикует одометрию (>50 сообщ.)
                                      # и дрон в воздухе (rel_alt>1.5). Глушить на земле
@@ -822,7 +840,7 @@ class BootstrapConfig:
                                      # едет → AltHold (газ по EKF-z) сам сажает дрон.
                                      # Если VINS не ожил — GPS остаётся (безопасно).
                                      # BS_GPS_DISABLE / --gps-disable
-    gps_denied: float = 0.0          # профиль «GPS ОТСУТСТВУЕТ С БУТА» (LV=2 —
+    gps_denied: float          # профиль «GPS ОТСУТСТВУЕТ С БУТА» (LV=2 —
                                      # модель боевого борта без приёмника; в симе
                                      # eeprom готовит sitl_lv_profile.py 2:
                                      # SIM_GPS1_ENABLE=0 + extnav-пара POSXY=6/
@@ -844,7 +862,7 @@ class BootstrapConfig:
                                      # set_origin=1 (origin больше некому ставить)
                                      # + alt_src=baro (global rel_alt без GPS
                                      # замерзает). BS_GPS_DENIED / --gps-denied
-    set_origin: float = 0.0          # слать SET_GPS_GLOBAL_ORIGIN до подтверждения
+    set_origin: float          # слать SET_GPS_GLOBAL_ORIGIN до подтверждения
                                      # (боевой безжпсный бут: без origin EKF не даёт
                                      # локальный фрейм и не принимает extnav; с GPS
                                      # origin ставится сам — опт-ин не нужен).
@@ -859,10 +877,10 @@ class BootstrapConfig:
     # мира = начало координат Gazebo). ⚠️ Эти три точки менять только ВМЕСТЕ:
     # магнитометр SITL рисуется от дома, WMM у EK3 — от origin.
     # Боевой борт задаёт свои через BS_ORIGIN_LAT/LON/ALT.
-    origin_lat: float = 50.450100    # BS_ORIGIN_LAT / --origin-lat
-    origin_lon: float = 30.523400    # BS_ORIGIN_LON / --origin-lon
-    origin_alt: float = 180.0        # м AMSL; BS_ORIGIN_ALT / --origin-alt
-    perc_alt_src: str = 'global'     # источник ВЫСОТЫ ПЕРЦЕПЦИИ (масштаб IPM +
+    origin_lat: float    # BS_ORIGIN_LAT / --origin-lat
+    origin_lon: float    # BS_ORIGIN_LON / --origin-lon
+    origin_alt: float        # м AMSL; BS_ORIGIN_ALT / --origin-alt
+    perc_alt_src: str     # источник ВЫСОТЫ ПЕРЦЕПЦИИ (масштаб IPM +
                                      # гейты опоры; НЕ alt_src миссии!):
                                      # 'global' — rel_alt EKF (дефолт, GPS-
                                      # профили); 'local' — z локальной позы EKF
@@ -871,7 +889,7 @@ class BootstrapConfig:
                                      # LV=2); 'baro' — BaroAlt (лаг 0.35 с,
                                      # только эксперименты — улёты 2026-08-19).
                                      # BS_PERC_ALT_SRC / --perc-alt-src
-    alt_src: str = 'global'          # источник rel_alt для МИССИИ (перцепция —
+    alt_src: str          # источник rel_alt для МИССИИ (перцепция —
                                      # отдельная ручка perc_alt_src выше):
                                      # 'global' — /mavros/global_position/rel_alt
                                      # (GLOBAL_POSITION_INT; БЕЗ GPS ЗАМЕРЗАЕТ:
@@ -886,7 +904,7 @@ class BootstrapConfig:
     # ⚠️ ГЕЙТЫ ВИДА СВЕРХУ ОТКАЧЕНЫ В 0 (выключены) — 12 прогонов IG1s/IG2s/BW0s/BW1s
     # показали, что молчание оси стоит дороже фантома, разбор в tune.md. Механизм
     # (_IpmGated/_AltSettled) с тестами оставлен: включается этими же ручками.
-    ipm_max_speed: float = 0.0       # потолок ПРАВДОПОДОБИЯ кадра, М/С. Выше — кадр не
+    ipm_max_speed: float       # потолок ПРАВДОПОДОБИЯ кадра, М/С. Выше — кадр не
                                      # командует (не подрезается). Рабочее значение было 8
                                      # (ВЫШЕ худшего реального разгона 6.7 м/с у YW2s3):
                                      # гейт обязан ловить мусор, а не глушить ось ровно
@@ -897,14 +915,14 @@ class BootstrapConfig:
     # ×(soft_alt/h), пороги гвоздя/брейка ÷; ki не трогается. 0 = выкл. Зачем —
     # ipm_axes.py (шум канала вперёд ∝ h: на 8 м брейк будился шумом, тангаж
     # качало ±11°). BS_PITCH_SOFT_ALT / BS_ROLL_SOFT_ALT, --pitch-soft-alt/--roll-soft-alt.
-    pitch_soft_alt: float = 0.0
-    roll_soft_alt: float = 0.0       # боковой шум с высотой плоский (0.15–0.18) — выкл
+    pitch_soft_alt: float
+    roll_soft_alt: float       # боковой шум с высотой плоский (0.15–0.18) — выкл
     # МЯГКОСТЬ ПО ИЗМЕРЕННОМУ ШУМУ канала (м/кадр, ipm_noise_*; у земли ~0.015–0.02):
     # выше — kp/pos_kp ×√(ref/σ̂), ki ×(ref/σ̂), пороги ÷. 0 = выкл. С soft_alt — минимум.
     # BS_PITCH_SOFT_NOISE / BS_ROLL_SOFT_NOISE. Логика — ipm_axes.py, _IpmGated.
-    pitch_soft_noise: float = 0.0
-    roll_soft_noise: float = 0.0
-    ipm_alt_band_fwd: float = 0.0    # ПРОДОЛЬНАЯ ось: полоса «высота установилась», М.
+    pitch_soft_noise: float
+    roll_soft_noise: float
+    ipm_alt_band_fwd: float    # ПРОДОЛЬНАЯ ось: полоса «высота установилась», М.
                                      # Полоса земли лежит ВПЕРЕДИ (X≈3…6 м), поэтому ход по
                                      # высоте читается как ход вперёд: замер по 8 прогонам —
                                      # 4.5–7.2 м/с фантома на взлёте при истинных ≤1.3,
@@ -918,16 +936,16 @@ class BootstrapConfig:
                                      # порога глушил тангаж весь полёт, борт унесло на 39 м.
                                      # Лечить фантом надо ВЫЧИТАНИЕМ (+0.67 м/с на м/с vz),
                                      # а не молчанием. 0 = выкл.
-    ipm_alt_band_lat: float = 0.0    # БОКОВАЯ ось: по умолчанию ВЫКЛ. Геометрия её почти
+    ipm_alt_band_lat: float    # БОКОВАЯ ось: по умолчанию ВЫКЛ. Геометрия её почти
                                      # не задевает (наклон ошибки по vz +0.25 против +0.67,
                                      # насыщения крена нет ни в одном прогоне), а слепой
                                      # крен на наборе отдал бы борт ветру на все 4 секунды.
-    ipm_alt_still: float = 0.5       # сколько секунд подряд высота держится в полосе, чтобы
+    ipm_alt_still: float       # сколько секунд подряд высота держится в полосе, чтобы
                                      # считать её установившейся (у опоры тот же приём —
                                      # kf_alt_hold, отличать набор от болтанки ДЛИТЕЛЬНОСТЬЮ).
-    ipm_arm_frames: int = 0          # сколько кадров подряд должно пройти все гейты, чтобы
+    ipm_arm_frames: int          # сколько кадров подряд должно пройти все гейты, чтобы
                                      # ось начала командовать. Любой сбой обнуляет счётчик.
-    ipm_win: float = 0.5             # окно МНК, по которому канал вида сверху считает СКОРОСТЬ
+    ipm_win: float             # окно МНК, по которому канал вида сверху считает СКОРОСТЬ
                                      # (наклон пути по времени), сек. Компромисс шум/фаза:
                                      # длинное окно тише, но запаздывает, и запаздывание — это
                                      # фаза, съеденная у контура. Именно оно сейчас прикрывает
@@ -935,7 +953,7 @@ class BootstrapConfig:
                                      # ki/kp=1.67, а на тангаже они пришли только при 2.0.
                                      # ⚠️ Укоротишь — верхнюю границу ki надо ПЕРЕПРОВЕРИТЬ:
                                      # обе оси настроены под окно 0.5.
-    ipm_wz_gate: float = 0.0         # рад/с: оценку нуля ω_z двигать только при |ω_z − оценка|
+    ipm_wz_gate: float         # рад/с: оценку нуля ω_z двигать только при |ω_z − оценка|
                                      # < gate (на развороте — замораживать). 0 = без гейта.
                                      # Зачем — perception/ipm.py (ab_frame: фантом бокового
                                      # пути 0.9–4.8 м за разворот). BS_IPM_WZ_GATE / --ipm-wz-gate
@@ -943,10 +961,10 @@ class BootstrapConfig:
     # медленно растущее вращение тащило «ноль» за собой до 16°/с, после остановки
     # оценка замирала навсегда, деротация вычитала фантом 1.5–3 м/с, боковой канал
     # слеп — полёт 195742, разбор в perception/ipm.py). Плюс кап оценки:
-    ipm_wz_bias_max: float = 0.05    # рад/с: |оценка нуля ω_z| ≤ этого (настоящие смещения
+    ipm_wz_bias_max: float    # рад/с: |оценка нуля ω_z| ≤ этого (настоящие смещения
                                      # гироскопа 0.003–0.028); 0 = без капа (старое).
                                      # BS_IPM_WZ_BIAS_MAX / --ipm-wz-bias-max
-    ipm_wz_tau: float = 2.0          # постоянная времени оценки нуля ω_z, сек; 0 = не снимать.
+    ipm_wz_tau: float          # постоянная времени оценки нуля ω_z, сек; 0 = не снимать.
                                      # ПОЧЕМУ БЕЗ НЕЁ НЕЛЬЗЯ. У ω_z есть смещение нуля, СВОЁ
                                      # у каждого прогона (замер против одометрии, рад/с:
                                      # I1s1 −0.024, J2s1 −0.006, K2s2 −0.003, L2s1 −0.028).
@@ -1001,10 +1019,10 @@ class BootstrapConfig:
     # точными; ступенька ATTITUDE ~15–25 Гц × рычаг 40 м/рад). att_latency — запас на
     # транспорт MAVROS (штамп = приём; ~15–20 мс по local_position), att_wait_max —
     # сколько ждать отсчёт, дальше — прежнее правило. BS_ATT_INTERP / BS_ATT_LATENCY.
-    att_interp: bool = False
-    att_latency: float = 0.0
-    att_wait_max: float = 0.15
-    att_extrap: bool = False         # дотягивать ориентацию гироскопом до штампа кадра.
+    att_interp: bool
+    att_latency: float
+    att_wait_max: float
+    att_extrap: bool         # дотягивать ориентацию гироскопом до штампа кадра.
                                      # ⚠️ ВЫКЛ ПО ЗАМЕРУ, гипотеза не подтвердилась.
                                      # ATTITUDE 12.5 Гц против камеры 20-30 Гц: «последнее
                                      # пришедшее» держится ступенькой, ошибка угла растёт
@@ -1017,36 +1035,36 @@ class BootstrapConfig:
                                      # м/с. Код оставлен: он понадобится, когда найдётся
                                      # настоящая причина утечки, но включать его сейчас
                                      # значит платить за гипотезу, которой нет.
-    yaw_trans_fix: bool = True       # вычитать вклад СНОСА из канала курса (подгонка по
+    yaw_trans_fix: bool       # вычитать вклад СНОСА из канала курса (подгонка по
                                      # строке кадра). Прежний закон — медиана горизонтального
                                      # потока — принимал снос за разворот: доля увиденного
                                      # разворота +0.96 на неподвижном борту и −0.09 на трёх
                                      # осях, где борт идёт 1-4 м/с. False возвращает старый
                                      # закон: нужен для переигрывания по одним кадрам.
-    kf_alt_max: float = None         # None = дефолт оценщика (0.06 = 6% высоты ≈ 0.19 м
+    kf_alt_max: Optional[float]         # None = дефолт оценщика (0.06 = 6% высоты ≈ 0.19 м
                                      # на трёх метрах). Ушла высота больше — блок опоры
                                      # ЗАМИРАЕТ: кадр помечается недостоверным, регулятор
                                      # по нему не командует, но накопленное смещение
                                      # сохраняется. Порог поднимать НЕ надо: он же служит
                                      # затвором, и большой порог пускает в контур кадры,
                                      # где масштаб испорчен высотой (свип E1, ToDo5.md).
-    kf_alt_hold: float = None        # None = дефолт оценщика (1.5 с). Сколько секунд
+    kf_alt_hold: Optional[float]        # None = дефолт оценщика (1.5 с). Сколько секунд
                                      # подряд высота держится вне kf_alt_max, чтобы
                                      # признать это НАСТОЯЩИМ набором и пересеять опору.
                                      # Между болтанкой ALT_HOLD (~0.3 с) и набором
                                      # (десятки секунд). Раньше пересев шёл сразу по
                                      # порогу — точка удержания переезжала дважды в
                                      # секунду, и контур умел только гасить.
-    flow_hold_sec: float = 30.0      # flow_assist: сколько держать (флоу гасит снос) до land
-    flow_observe: bool = False       # ТОЛЬКО НАБЛЮДЕНИЕ: поднять зрение и писать /flow_dbg*,
+    flow_hold_sec: float      # flow_assist: сколько держать (флоу гасит снос) до land
+    flow_observe: bool       # ТОЛЬКО НАБЛЮДЕНИЕ: поднять зрение и писать /flow_dbg*,
                                      # когда демпфера в стеке НЕТ (Gz*/manual). Нужно, чтобы
                                      # мерить сигнал потока при ЗАДАННОМ движении (калибровка:
                                      # знаем истинную скорость → видим, что читает перцепт).
     # рантайм switch Flow→Vins по «VINS ready» (VinsHold юзает gz_* гейны)
-    handover_vins: bool = False
-    vins_min: int = 40               # сколько odom-сообщений считать сходимостью
-    vins_fresh_sec: float = 2.0      # свежесть потока odom для «ready»
-    ripe_sec: float = 30.0           # ЗРЕЛОСТЬ VINS для EKF-свапа — sim-СЕКУНД
+    handover_vins: bool
+    vins_min: int               # сколько odom-сообщений считать сходимостью
+    vins_fresh_sec: float      # свежесть потока odom для «ready»
+    ripe_sec: float           # ЗРЕЛОСТЬ VINS для EKF-свапа — sim-СЕКУНД
                                      # от первой одометрии (не счётчик! разбор
                                      # «моды 14.7 Гц» 2026-08-24: freq-контроль
                                      # feature_tracker после CPU-затыка платит
@@ -1055,7 +1073,7 @@ class BootstrapConfig:
                                      # а при штатных 10.5 Гц тянулся 57-62 с).
                                      # 30 ≈ физика + запас. Пол по счётчику —
                                      # vins_min. BS_RIPE_SEC / --ripe-sec
-    ripe_det: float = 1.0            # 2-я ступень гейта зрелости — ДЕТЕКТОР
+    ripe_det: float            # 2-я ступень гейта зрелости — ДЕТЕКТОР
                                      # (application/ripeness.py: residual
                                      # «поза/скорость» тих 4 с + вертикальный
                                      # ratio VINS/rel_alt в [0.8,1.25] на
@@ -1072,24 +1090,24 @@ class BootstrapConfig:
     # TIER_HOLD 5 с после выхода по здоровью/зрелости/мосту (дребезг), закрытый мост
     # VINS→EKF (brg=0) = выход на демпфер за тик (иначе EKF слепнет → FCU в LAND по
     # EKF-failsafe, который нода уважает). 0 = старое (только sane/свежесть/extnav).
-    loiter_guard: float = 0.0
+    loiter_guard: float
     # ОБЩИЙ ВЕТРОВОЙ ТРИМ ярусов 0/1 (WindTrim, 2026-09-06): 1 = один мировой вектор трима
     # в валюте PWM каналов по курсу AHRS для демпфера (StationFrame) и DpVins — без посева
     # между ярусами (0→1 сеял, 1→0 демпфер учил заново первым брейком, после LOITER тоже,
     # перерождение VINS обнуляло трим DpVins; посев дал провал 46 м, cmd/3); «выучен» —
     # общий флаг (второй ярус не проходит фазу захвата); сброс на фронте арма. 0 = как было.
-    wind_trim: float = 1.0
+    wind_trim: float
     # Добавки после отката 0c3c82b (wind_trim.py п.2): СНИМОК УСТОЙЧИВОГО HOLD — приёмнику
     # на входе в ярус отдаётся не живой трим (= ветер + смещение датчика источника: 195742 —
     # 150 PWM фантома IPM при ветре 2–5), а последнее значение, которое источник держал
     # устойчиво: гвоздь, фаза hold без брейка, стики в центре, трим учится, |v| < steady_v
     # по своему И чужому датчику ≥ steady_sec подряд. Источник устойчив в момент входа →
     # живой; иначе откат к снимку; снимка нет → ноль и фаза захвата яруса.
-    wind_steady_sec: float = 3.0     # с: серия устойчивости до снимка (порывы каждые 20 с
+    wind_steady_sec: float     # с: серия устойчивости до снимка (порывы каждые 20 с
                                      # оставляют ≥ 10 с тишины). BS_WIND_STEADY_SEC
-    wind_steady_v: float = 0.5       # м/с: «стоим» по IPM (тело) и VINS (мир); шум канала
+    wind_steady_v: float       # м/с: «стоим» по IPM (тело) и VINS (мир); шум канала
                                      # IPM на 20 м 0.41 — ниже порога. BS_WIND_STEADY_V
-    sf_master: float = 0.0           # схема «SF-мастер» селектора пульта (опт-ин):
+    sf_master: float           # схема «SF-мастер» селектора пульта (опт-ин):
                                      # SF (CH7, axes[6]) центр/вниз = СЫРЫЕ СТИКИ
                                      # (MANUAL-seize) при ЛЮБОМ SC — выделенный
                                      # выключатель, перехват одним щелчком; SF
@@ -1108,13 +1126,13 @@ class BootstrapConfig:
                                      # не ведут: SF вверх = наш стек (+handover),
                                      # не-вверх = MANUAL.
                                      # BS_SF_MASTER / --sf-master
-    ff_loiter: float = 0.0           # freefly: центр CH6 = штатный LOITER вместо чистого
+    ff_loiter: float           # freefly: центр CH6 = штатный LOITER вместо чистого
                                      # ALT_HOLD (гейт: extnav_ready + свежий VINS + в
                                      # воздухе; закрыт → честный ALT_HOLD). Вверх остаётся
                                      # нашим стеком (VinsHold) → A/B одним щелчком.
                                      # Требует vision-фида (vision_vel>0, pose extern).
                                      # BS_FF_LOITER / --ff-loiter
-    loiter_alt: float = 0.5          # гейт «в воздухе» LOITER-на-VINS (м, rel_alt):
+    loiter_alt: float          # гейт «в воздухе» LOITER-на-VINS (м, rel_alt):
                                      # ниже LOITER не пускаем — на земле без GPS
                                      # позиции нет, VINS без параллакса не инитится.
                                      # Было захардкожено 1.5 (осторожность к зрелости
@@ -1131,7 +1149,7 @@ class BootstrapConfig:
                                      # (перцепция на земле умирает), а перехват — SF
                                      # не-вверх (всегда ALT_HOLD).
                                      # BS_LOITER_ALT / --loiter-alt
-    loiter_track: float = 0.0        # ярус LOITER лесенки: стики roll/pitch —
+    loiter_track: float        # ярус LOITER лесенки: стики roll/pitch —
                                      # уставки скорости В ОСЯХ МИРА (TrackHold:
                                      # контр-вращение стик-вектора на Δψ от латча).
                                      # Yaw вращает ТОЛЬКО нос — траектория прямая,
@@ -1145,7 +1163,7 @@ class BootstrapConfig:
                                      # легаси-центр CH6 не трогаем. Полётом пока НЕ
                                      # доказан (кандидат, включается .env бокса).
                                      # BS_LOITER_TRACK / --loiter-track
-    loiter_bank_max: float = 0.0     # ярус LOITER, путь 2 (альтернатива loiter_track):
+    loiter_bank_max: float     # ярус LOITER, путь 2 (альтернатива loiter_track):
                                      # «нос ведёт траекторию», но крен виража ≤ этого
                                      # (°). Yaw-стабы яруса под YawBankLimit: темп
                                      # разворота режется по скорости |ω| ≤
@@ -1172,52 +1190,224 @@ class BootstrapConfig:
     #   damper/vinshold — иначе: остаёмся в ALT_HOLD (стик = наклон — семантика
     #            демпфера/VinsHold сохранена), газ ниже зоны на land_rate,
     #            касание → газ в пол → дизарм сервисом (force через 5 с).
-    ff_land: float = 1.0             # 1 = кнопка SA сажает (шаг SoftLand в плане
+    ff_land: float             # 1 = кнопка SA сажает (шаг SoftLand в плане
                                      # freefly); 0 = как раньше (сажает пилот).
                                      # BS_FF_LAND / --ff-land
-    land_in_loiter: float = 0.0      # 1 = кнопка SA сажает и на ярусе LOITER (ветка
+    land_in_loiter: float      # 1 = кнопка SA сажает и на ярусе LOITER (ветка
                                      # pos: LAND полётника); 0 = на ярусе 2 SA
                                      # отвергается с подсказкой — отмена посадки из
                                      # LAND не работает (2026-09-06: FCU не выходил
                                      # из LAND по нашим set_mode), сажать руками или
                                      # CH6 вниз → ярус 0/1 → SA. BS_LAND_IN_LOITER
-    ff_land_cancel: float = 1.0      # 1 = второе нажатие SA до касания ОТМЕНЯЕТ
+    ff_land_cancel: float      # 1 = второе нажатие SA до касания ОТМЕНЯЕТ
                                      # посадку (любая ветка/ярус: из LAND — keep
                                      # сразу, goto freefly, стек/опора заново);
                                      # 0 = как раньше. BS_FF_LAND_CANCEL
-    land_alt_max: float = 5.0        # гейт кнопки: rel_alt ≤ этого, м (выше —
+    land_alt_max: float        # гейт кнопки: rel_alt ≤ этого, м (выше —
                                      # игнор с предупреждением; LAND сам сядет с
                                      # любой высоты, но кнопка задумана «у земли»).
                                      # Бюджет шага SoftLand растёт с ним: max(
                                      # land_budget, 2·alt_max/land_rate) — 5 м на
                                      # 0.15 м/с = 33 с номинала, 45 с бэкстопа мало.
                                      # BS_LAND_ALT_MAX / --land-alt-max
-    land_v_max: float = 1.0          # гейт кнопки: |v| ≤ этого, м/с (источник по
+    land_v_max: float          # гейт кнопки: |v| ≤ этого, м/с (источник по
                                      # доступности: IPM → VINS → gt; нет ни одного
                                      # → пускаем с предупреждением).
                                      # BS_LAND_V_MAX / --land-v-max
-    land_rate: float = 0.15          # скорость снижения ветки ALT_HOLD, м/с (PWM
+    land_rate: float          # скорость снижения ветки ALT_HOLD, м/с (PWM
                                      # газа считается по alt_dz/alt_span/
                                      # alt_rate_full — той же формулой, что AltHold).
                                      # Ветка LAND — LAND_SPD_MS в sitl-extra.parm
                                      # (0.15 = как здесь; ×2 пробовали 2026-09-06,
                                      # пилот вернул).
                                      # BS_LAND_RATE / --land-rate
-    land_joy: str = 'b0'             # где кнопка в /joy: 'b<i>' — buttons[i],
+    land_joy: str             # где кнопка в /joy: 'b<i>' — buttons[i],
                                      # 'a<i>' — axes[i] > 0.5; '' — нет (только
                                      # /mission/land). Дефолт b0 = первая кнопка:
                                      # TX12 отдаёт 7 осей + 24 кнопки, SA в
                                      # миксере пока ни к чему не привязан — привязать
                                      # к CH8 и сверить фронт в ленте joy_timeline.
                                      # BS_LAND_JOY / --land-joy
-    loiter_gate_budget: float = 60.0 # токен loiter<t>: сколько ждать готовности
+    loiter_gate_budget: float # токен loiter<t>: сколько ждать готовности
                                      # extnav+VINS (sim-сек) в стабилизированном hover;
                                      # вышел — шаг пропускается (LOITER_SKIP, миссия
                                      # продолжается). BS_LOITER_GATE_BUDGET /
                                      # --loiter-gate-budget
-    ekf_pos_budget: float = 120.0    # шаг ekf_warmup (миссии с loiter): ждать до арма,
+    ekf_pos_budget: float    # шаг ekf_warmup (миссии с loiter): ждать до арма,
                                      # пока EKF захватит позицию (свежий local_position),
                                      # sim-сек. По таблице бюджетов «is using GPS»
                                      # ~+85 с от старта MAVROS. Вышел — warn и дальше
                                      # (loiter потом пропустится своим гейтом).
                                      # BS_EKF_POS_BUDGET / --ekf-pos-budget
+
+
+    # ───────────────────────── схема и загрузка ─────────────────────────
+    @classmethod
+    def schema(cls) -> Dict[str, str]:
+        """{поле: аннотация} — единственный список ключей ноды (второго нет)."""
+        return {f.name: (f.type if isinstance(f.type, str) else getattr(f.type, '__name__', str(f.type)))
+                for f in _dc_fields(cls)}
+
+    @staticmethod
+    def key(field: str) -> str:
+        """Имя env-ключа поля: BS_<ПОЛЕ в верхнем регистре>."""
+        return 'BS_' + field.upper()
+
+    @classmethod
+    def required_keys(cls) -> Dict[str, str]:
+        return {cls.key(f): f for f in cls.schema()}
+
+    @classmethod
+    def from_mapping(cls, m: Mapping[str, str], source: str = 'env') -> 'BootstrapConfig':
+        """Собрать конфиг из KEY=VALUE (env, мета прогона, профили). Строго:
+        нет поля → SystemExit со списком; незнакомый BS_* (не поле и не EXTRA_KEYS)
+        → SystemExit; значение не того типа / не из CHOICES → SystemExit."""
+        schema = cls.schema()
+        vals, missing, bad = {}, [], []
+        for name, ann in schema.items():
+            k = cls.key(name)
+            if k not in m:
+                missing.append(k)
+                continue
+            try:
+                vals[name] = _coerce(name, ann, m[k])
+            except ValueError as e:
+                bad.append(f'{k}={m[k]!r}: {e}')
+        unknown = sorted(k for k in m if k.startswith('BS_')
+                         and k not in cls.required_keys() and k not in EXTRA_KEYS)
+        problems = []
+        if missing:
+            problems.append(f'нет {len(missing)} ключей: ' + ' '.join(missing))
+        if unknown:
+            problems.append('незнакомые BS_-ключи (не поле ноды и не EXTRA_KEYS): '
+                            + ' '.join(unknown))
+        if bad:
+            problems.append('неверные значения: ' + '; '.join(bad))
+        if problems:
+            raise SystemExit(f'BootstrapConfig.from_{source}: ' + ' | '.join(problems)
+                             + ' — источник ручек: src/control/profiles (README.md)')
+        return cls(**vals)
+
+    @classmethod
+    def from_env(cls) -> 'BootstrapConfig':
+        """Нода: env BS_* (их выставляет load.py в bootstrap_arch2.sh)."""
+        return cls.from_mapping(os.environ, 'env')
+
+    @classmethod
+    def from_env_file(cls, path: str) -> 'BootstrapConfig':
+        """Стенды: мета прогона <RUN>.env (полный снимок всех ключей, пишет freefly_lv)."""
+        m = {}
+        with open(path, encoding='utf-8') as fh:
+            for raw in fh:
+                line = raw.rstrip('\n')
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                k, v = line.split('=', 1)
+                if k.isidentifier() and k.isupper():
+                    m[k] = v
+        return cls.from_mapping(m, f'env_file({path})')
+
+    @classmethod
+    def from_profiles(cls, names: Iterable[str]) -> 'BootstrapConfig':
+        """Профили по именам (dphold/baseline …) через src/control/profiles/load.py."""
+        loader = _profiles_loader()
+        res = loader.load(list(names))
+        return cls.from_mapping({k: v for k, (v, _o) in res.items()}, 'profiles')
+
+    @classmethod
+    def baseline(cls, **override) -> 'BootstrapConfig':
+        """Тесты/стенды: эталонный стек профилей (load.BASELINE_STACK) + переопределения
+        по именам полей. Явно: тест летает на эталоне, а не на «чём-то из кода»."""
+        cfg = cls.from_profiles(_profiles_loader().BASELINE_STACK)
+        for k, v in override.items():
+            if k not in cls.schema():
+                raise KeyError(f'BootstrapConfig.baseline: нет поля {k!r}')
+            setattr(cfg, k, v)
+        return cfg
+
+    @classmethod
+    def from_run(cls, meta: Optional[str] = None) -> 'BootstrapConfig':
+        """Стенды в контейнере/на хосте: сначала полный env BS_* (если все поля есть),
+        затем мета `meta`, затем профили из env PROFILES. Ничего нет — SystemExit."""
+        if all(cls.key(f) in os.environ for f in cls.schema()):
+            return cls.from_env()
+        if meta and os.path.isfile(meta):
+            return cls.from_env_file(meta)
+        profs = os.environ.get('PROFILES', '').split()
+        if profs:
+            return cls.from_profiles(profs)
+        raise SystemExit('BootstrapConfig.from_run: нет ни полного env BS_*, ни меты '
+                         f'{meta!r}, ни PROFILES — откуда брать лётный конфиг?')
+
+
+# ───────────────────────── вспомогательное ─────────────────────────
+# Допустимые значения строковых полей (были choices в argparse).
+CHOICES = {
+    'control_mode': ('shuttle', 'assisted', 'manual', 'flow_assist'),
+    'pilot': ('scripted', 'joy', 'ros'),
+    'ipm_model': ('legacy', 'rsign', 'exact'),
+    'vision_pose_src': ('integral', 'extern'),
+    'alt_src': ('global', 'baro'),
+    'perc_alt_src': ('global', 'local', 'baro'),
+    'station_frame': ('body', 'yaw'),
+    'station_heading': ('fcu',),
+    'vins_vel_src': ('diff', 'twist'),
+    'vins_stab': ('dpvins', 'vinshold'),
+}
+# Ключи, которые ЖИВУТ В ПРОФИЛЯХ / env, но нодой не читаются: кто их ест.
+EXTRA_KEYS = {
+    'BS_EKF_DRAG': 'SITL eeprom (sitl_lv_profile.py: EK3_DRAG_BCOEF_*)',
+    'BS_JOY_DEV': 'bootstrap_arch2.sh: устройство пульта для joy_linux_node',
+    'BS_REPLAY_SCENARIO': 'bootstrap_arch2.sh → joy_replay.py (аргумент прогона)',
+    'BS_REPLAY_RAW': 'bootstrap_arch2.sh → joy_replay.py (аргумент прогона)',
+    'BS_REPLAY_FENCE': 'bootstrap_arch2.sh → joy_replay.py (аргумент прогона)',
+    'WIND_SPD': 'compose/sim_up.sh (плагин ветра Gazebo), профиль world/',
+    'WIND_DIR_DEG': 'compose/sim_up.sh, профиль world/',
+    'WIND_FACTOR': 'compose/sim_up.sh, профиль world/',
+    'WIND_GUST': 'capture_scene.sh → wind_gust.py, профиль world/',
+}
+_TRUE = ('1', 'true', 'True', 'yes', 'on')
+_FALSE = ('0', 'false', 'False', 'no', 'off', '')
+
+
+def _coerce(name: str, ann: str, raw: str):
+    raw = raw.strip()
+    if 'Optional' in ann:                 # 'typing.Optional[float]' (объект типа) или строка
+        return None if raw == '' else float(raw)
+    if ann == 'bool':
+        if raw in _TRUE:
+            return True
+        if raw in _FALSE:
+            return False
+        raise ValueError('ожидаю 0/1')
+    if ann == 'int':
+        try:
+            return int(raw)
+        except ValueError:
+            f = float(raw)
+            if f != int(f):
+                raise ValueError('ожидаю целое')
+            return int(f)
+    if ann == 'float':
+        return float(raw)
+    if ann == 'str':
+        if name in CHOICES and raw not in CHOICES[name]:
+            raise ValueError(f'ожидаю одно из {CHOICES[name]}')
+        return raw
+    raise ValueError(f'неизвестный тип поля {ann}')
+
+
+def _profiles_loader():
+    """src/control/profiles/load.py как модуль (рядом по дереву репы: и на хосте,
+    и в контейнере /root/sim_ws/src/{mission,control})."""
+    here = Path(__file__).resolve()
+    cands = [here.parents[2] / 'control' / 'profiles' / 'load.py',            # src/mission/mission_pkg → src/control
+             Path('/root/sim_ws/src/control/profiles/load.py')]
+    for c in cands:
+        if c.is_file():
+            spec = importlib.util.spec_from_file_location('profiles_load', c)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    raise SystemExit('BootstrapConfig: не нашёл src/control/profiles/load.py '
+                     f'(искал {[str(c) for c in cands]})')

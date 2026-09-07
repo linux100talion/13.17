@@ -13,6 +13,16 @@ BS_VINS_KD_ERR=1
 BS_VINS_PIN_STOP=1
 BS_VINS_PREDICT=1
 BS_VINS_VSMOOTH=0
+
+# слой: нода (2026-09-07 — до этого без проводки BS_): потолок команды осей, PWM, и
+# гейты уверенности сигнала (conf_min → 0, conf_full → полный вес); читают VinsHold
+# (recipes._vins) и легаси DpRollHold/DpPitchHold (legacy/)
+BS_ROLL_MAX=150
+BS_ROLL_CONF_MIN=0.05
+BS_ROLL_CONF_FULL=0.2
+BS_PITCH_MAX=150
+BS_PITCH_CONF_MIN=0.05
+BS_PITCH_CONF_FULL=0.2
 # слой: env — kd 120→80 (шум VINS-скорости ∝ высоте; ab_kd80: σθ на 30 м 2.2–2.8→1.29°),
 # cmd_gain 4 м/с при полном стике. ⚠️ ручки BS_GZ_* общие с gz-hold (сим-оракул на истине)
 BS_GZ_KD=80

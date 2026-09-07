@@ -174,17 +174,9 @@ def env_from_archive(bag):
 
 def flight_cfg():
     """Лётный конфиг канала: дефолты `BootstrapConfig` + `BS_*` (лесенка ipm_video)."""
-    base = BootstrapConfig()
-    cfg, defaulted = {}, []
-    for k in IPM_KNOBS:
-        d = getattr(base, k)
-        v = os.environ.get('BS_' + k.upper())
-        if v is None or v == '':
-            cfg[k] = d
-            defaulted.append(k)
-        else:
-            cfg[k] = str(v) if isinstance(d, str) else float(v)
-    return cfg, defaulted
+    # 2026-09-07: дефолтов в коде нет — полный env BS_* (мета прогона) или PROFILES.
+    base = BootstrapConfig.from_run()
+    return {k: getattr(base, k) for k in IPM_KNOBS}, []
 
 
 class CV2Proxy:

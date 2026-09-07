@@ -28,10 +28,12 @@ BS_PITCH_KD=1500
 BS_PITCH_CMD_GAIN=0
 BS_PITCH_SMOOTH=9
 
-# слой: нода — старый flow-путь: наблюдатель потока без управления (BS_FLOW_OBS=1 →
-# --flow-observe) и KF-высота кейфреймов (пусто = None = выкл; flow_estimator keyframe)
-BS_FLOW_OBS=0
+# слой: нода — старый flow-путь: наблюдатель потока без управления (flow_observe=1:
+# сигнал в /flow_dbg*, управление не трогает) и KF-высота кейфреймов (пусто = None = выкл; flow_estimator keyframe)
+BS_FLOW_OBSERVE=0
+# длительность удержания flow_assist, с (легаси-ярлык; автотриггер land ScriptedPilot)
+BS_FLOW_HOLD_SEC=30
 BS_KF_ALT_HOLD=
 BS_KF_ALT_MAX=
 BS_KF_SEG_FRAC=
-BS_KF_SEG_MIN=
+BS_KF_SEG_MIN_SEC=

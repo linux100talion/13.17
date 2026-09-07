@@ -10,19 +10,9 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"   # cmd/history/<кампания>/<n>/ → корень репы
 cd "$REPO"
 
-P=()
-P+=(dphold/baseline)
-P+=(dpvins/brake5_stop)
-P+=(vins/scale25)
-P+=(loiter/guard)
-# профили собирает load.py (с 2026-09-07: include + дельта, дубль = ошибка); mission/ и legacy/ —
-# поля ноды вне стабилизаторов теми же значениями, что летали (дефолты ноды/env) — поведение то же
-set -a
-eval "$(python3 src/control/profiles/load.py "${P[@]}" vinshold/baseline mission/baseline legacy/baseline)"
-set +a
-
-export WIND_SPD="${WIND_SPD:-2}"
-export WIND_GUST="${WIND_GUST:-spd=5 at=30 rise=2 hold=5 fall=4 every=20}"
-echo ">>> cmd/10/10.sh: профили dphold/baseline + dpvins/brake5_stop + vins/scale25 + loiter/guard;" \
-     "SCALE_ALT_MAX=$BS_VINS_SCALE_ALT_MAX SCALE_IPM_MIN=$BS_VINS_SCALE_IPM_MIN VEL_SRC=$BS_VINS_VEL_SRC LOITER_GUARD=$BS_LOITER_GUARD WIND_SPD=$WIND_SPD WIND_GUST=\"$WIND_GUST\""
+# 2026-09-07: ручки — только профили; список едет в freefly_lv/контейнер как PROFILES
+# (mission/ legacy/ vinshold/ — поля ноды вне стека, теми же значениями, что летали;
+# ветер — world/wind2_gust5). Архив: экспорты BS_/WIND_ и eval загрузчика удалены.
+export PROFILES="dphold/baseline dpvins/brake5_stop vins/scale25 loiter/guard vinshold/baseline mission/baseline legacy/baseline world/wind2_gust5"
+echo ">>> $0: профили [$PROFILES]"
 exec bash src/lab/freefly_lv.sh "$@"

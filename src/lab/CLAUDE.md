@@ -389,46 +389,34 @@ Drive), как требует дисциплина прогона — пошаг
 - мало параллакса / VINS не сходится → поднять `BS_EXCITE` или `BS_EXCITE_PERIOD`;
 - скорость разворота головы → `BS_YAW` (0 = совсем без yaw).
 
-### `freefly_lv.sh` — единая обёртка пилотных freefly-прогонов (флаг `LV=0/1`)
+### `freefly_lv.sh` — единая обёртка пилотных freefly-прогонов (запуск через `cmd/`)
 
-Один скрипт вместо двух эталонных env-блоков (см. `docker/sim/doc/tmp/Q.txt`).
-Дефолты берёт лесенкой: **env снаружи > `docker/sim/.env` (локальный профиль
-бокса, gitignore — тот же файл, что читает compose) > дефолт скрипта (LV=1)** —
-шпаргалка по `.env` (ключи, правила разбора, грабли): `docker/sim/env.md`.
-Эталон `.env` — **`docker/sim/env.default` (в git)**: при отсутствии `.env`
-сеется его копией автоматически (make/сам скрипт), так что `LV=2` и
-`BS_SF_MASTER=1` — дефолт и на свежем клоне: голый `bash src/lab/freefly_lv.sh`
-летит боевым профилем (⚠️ реплей СТАРЫХ сценариев без "sf" запускать с
-`BS_SF_MASTER=0`):
+**Ручки ноды и ветер — ТОЛЬКО профили `src/control/profiles`** (с 2026-09-07): скрипт
+требует env `PROFILES="dphold/baseline … world/wind2_gust5"`, собирает список
+загрузчиком `profiles/load.py` строго по схеме `BootstrapConfig` (дубль/незнакомый/
+отсутствующий ключ = ошибка) и передаёт В КОНТЕЙНЕР ТОЛЬКО СПИСОК — `bootstrap_arch2.sh`
+собирает его заново в env ноды, нода читает `BootstrapConfig.from_env()` (argparse и
+проводка удалены). BS_*/WIND_* из env и `docker/sim/.env` не читаются (BS_* в `.env`
+игнорируются с предупреждением). Список держит `cmd/<имя>/<имя>.sh` — запускать через
+него, не напрямую:
 
 ```bash
-bash src/lab/freefly_lv.sh          # профиль бокса из docker/sim/.env
-                                    #   (без строк в .env — LV=1: freefly-LV,
-                                    #   центр CH6 = LOITER-на-VINS, GPS глушится
-                                    #   в полёте)
-LV=0 bash src/lab/freefly_lv.sh     # базовый freefly: только наш стек, GPS жив
-LV=2 bash src/lab/freefly_lv.sh     # GPS ОТСУТСТВУЕТ С БУТА: eeprom глушит приёмник
-                                    #   до старта, origin руками (BS_SET_ORIGIN=1),
-                                    #   высота — сырой баро (BS_ALT_SRC=baro), aiding
-                                    #   EKF с земли от нулевой vision_pose (мост
-                                    #   gps_denied), с init VINS топик у ray_tracer;
-                                    #   LOITER-на-VINS без секунды GPS
-WIND_SPD=5 bash src/lab/freefly_lv.sh   # любой env поверх дефолтов
-BS_LAND_JOY=b1 bash src/lab/freefly_lv.sh   # кнопка SA (мягкая посадка) — на buttons[1]
-                                    #   (так измерено на пульте проекта 2026-08-30 →
-                                    #   уже в docker/sim/.env; дефолт ноды b0; CH8
-                                    #   делит ось с SF — не годится; где кнопка —
-                                    #   src/lab/joystick/js_probe.py на хосте);
-                                    #   BS_FF_LAND=0 — выкл (шапка скрипта)
-BS_SF_MASTER=1 bash src/lab/freefly_lv.sh   # схема «SF-мастер»: SF (CH7)
-                                    #   не-вверх = СЫРЫЕ СТИКИ при любом SC;
-                                    #   SF вверх → SC (CH6) = потолок лесенки
-                                    #   зрелости (вверх = демпфер, центр =
-                                    #   +VinsHold, вниз = +LOITER; борт на
-                                    #   лучшей ДОСТУПНОЙ ступени). Нужен микс
-                                    #   SF→CH7 в EdgeTX; НЕ под старые реплеи
-                                    #   (сценарии без "sf" = всё сырые стики)
+bash cmd/bl/bl.sh                    # текущий baseline (см. cmd/README.txt)
+WT=0 bash cmd/bl/bl.sh               # плечо A того же скрипта (переключатель профиля wind/)
+BS_PILOT=replay BS_REPLAY_SCENARIO=/lab/joystick/scenarios/<имя>.json bash cmd/bl/bl.sh
+                                     #   реплей: профиль mission/replay, сценарий — аргумент
+PROFILES="dphold/baseline dpvins/ki30 vinshold/baseline vins/baseline loiter/baseline \
+  wind/baseline mission/baseline legacy/baseline world/wind1_gust8" bash src/lab/freefly_lv.sh
+                                     #   руками — тот же список, что держал бы cmd/<имя>
 ```
+
+Служебное (не ручки ноды) — по-прежнему env снаружи > `docker/sim/.env` > дефолт
+скрипта: `LV` (профиль eeprom SITL, шаг 1; ручки ноды под LV=2 запечены в
+`loiter/baseline.txt`), `RES`, `NAME`, `KEEP_BAG`, `MP4`/`HUD_MP4`/`IPM_MP4`,
+`GDRIVE_UP`, `TOPICS_EXTRA`, `SPAWN_POSE`/`SPAWN_FROM`. Шпаргалки: `docker/sim/env.md`,
+`src/control/profiles/README.md`. Мета `<RUN>.env` прогона — ПОЛНЫЙ снимок всех ключей
+схемы (211 полей + ветер + `PROFILES`), сверка — `bash src/control/profiles/check.sh <RUN>.env`.
+
 
 Перед атомарным прогоном (`capture_scene.sh 960x540 bootstrap_arch2`) сама
 готовит **eeprom SITL** под профиль (`docker/sim/scripts/sitl_lv_profile.py`,

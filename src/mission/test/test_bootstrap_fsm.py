@@ -65,7 +65,8 @@ def main():
     clock = FakeClock(w)
     mode = FakeMode(w)
     log = FakeLog()
-    cfg = BootstrapConfig()   # shuttle по умолчанию
+    # эталон профилей + ЛЕГАСИ-путь shuttle (mission='' → control_mode)
+    cfg = BootstrapConfig.baseline(control_mode='shuttle', mission='', stab='', pilot='scripted')
     stack = build_control_stack(cfg)
     runner = PlanRunner(build_bootstrap_plan(cfg, stack), clock, mode, log)
 

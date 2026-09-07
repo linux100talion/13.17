@@ -1,0 +1,11 @@
+# МИР — ветер Gazebo: эталон 2026-09-07 (= прежний дефолт freefly_lv.sh WIND_SPD=5, без
+# порывов). Не ручки ноды: WIND_SPD/DIR/FACTOR ест compose → sim_up.sh (плагин WindEffects,
+# применяется на fresh-start), WIND_GUST — capture_scene.sh → src/lab/wind_gust.py
+# (порывы поверх постоянного ветра в абсолютном sim-времени, спека в шапке wind_gust.py:
+# spd = ПИК м/с, at = sim-с первого порыва, every=0 = один порыв). Собирается тем же
+# load.py (ключи в EXTRA_KEYS), экспортирует freefly_lv.sh. Формат — README.md.
+# ⚠️ Земля в симе без трения: при WIND_SPD=0 борт уезжает вечно (sim-ground-no-friction).
+WIND_SPD=5
+WIND_DIR_DEG=98
+WIND_FACTOR=0.4
+WIND_GUST=

@@ -1,0 +1,5 @@
+# Ветер 1 м/с + порывы 8 м/с каждые 20 с (cmd/history/wind/1…9): серия dphold_vs_dpvins
+# 2026-09-05 и кампания BRAKE/latch_axis/twist (dphold-vs-dpvins-gusts).
+include baseline.txt
+WIND_SPD=1
+WIND_GUST=spd=8 at=30 rise=2 hold=5 fall=4 every=20

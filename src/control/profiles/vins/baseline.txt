@@ -16,6 +16,9 @@ BS_VINS_I_LATCH=1
 BS_HANDOVER_VINS=1
 BS_VINS_MIN=300
 BS_VINS_RESTART_ARM=1
+# свежесть одометрии VINS для гейтов (ярус 1 / LOITER: 3×fresh = протух), с
+# (2026-09-07 — до этого без проводки BS_, только дефолт в коде)
+BS_VINS_FRESH_SEC=2
 # слой: нода — зрелость очереди extnav для EKF (ярус 2): 30 с потока + детектор
 # residual/ratio (ripeness.py)
 BS_RIPE_SEC=30

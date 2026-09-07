@@ -26,13 +26,13 @@ RUN=lv2_joy_20260831_074358 bash src/lab/joystick/analyze.sh
 git stash push -m "fix (A/B: временно убран для базового прогона)"
 NAME=ab_loiteryaw_base BS_PILOT=replay \
   BS_REPLAY_SCENARIO=/lab/joystick/scenarios/ab_loiteryaw.json \
-  MP4=0 HUD_MP4=0 IPM_MP4=0 bash src/lab/freefly_lv.sh > /tmp/run_a.log 2>&1
+  MP4=0 HUD_MP4=0 IPM_MP4=0 bash cmd/bl/bl.sh > /tmp/run_a.log 2>&1
 
 # 4. Прогон B (фикс): вернуть дерево и повторить ТОТ ЖЕ сценарий
 git stash pop
 NAME=ab_loiteryaw_fix BS_PILOT=replay \
   BS_REPLAY_SCENARIO=/lab/joystick/scenarios/ab_loiteryaw.json \
-  MP4=0 HUD_MP4=0 IPM_MP4=0 bash src/lab/freefly_lv.sh > /tmp/run_b.log 2>&1
+  MP4=0 HUD_MP4=0 IPM_MP4=0 bash cmd/bl/bl.sh > /tmp/run_b.log 2>&1
 
 # 5. Метрики по bag обоих прогонов (скрипт лежит РЯДОМ: memory/ab_metrics.py):
 #    эпизоды |yaw-стика|>0.2 (кластеризация с паузой 0.8 с) × режим FCU ×

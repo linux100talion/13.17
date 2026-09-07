@@ -67,7 +67,9 @@ def run(mode, script, switch=None):
     clock = FakeClock(w)
     mode_port = FakeMode(w)
     log = FakeLog()
-    cfg = BootstrapConfig(control_mode=mode, excite_max_sec=(script[-1][0] + 1.0))
+    # эталон профилей + ЛЕГАСИ-путь (mission='' → control_mode), скриптовый пилот
+    cfg = BootstrapConfig.baseline(control_mode=mode, excite_max_sec=(script[-1][0] + 1.0),
+                                   mission='', stab='', pilot='scripted')
     stack = build_control_stack(cfg)
     runner = PlanRunner(build_bootstrap_plan(cfg, stack), clock, mode_port, log)
     pilot = ScriptedPilot(clock, script, switch_segments=switch)

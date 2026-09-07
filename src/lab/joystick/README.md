@@ -10,7 +10,7 @@
 
 ```
 1. РУЧНОЙ ПОЛЁТ (как обычно; /joy уже пишется в bag через TOPICS_EXTRA):
-     bash src/lab/freefly_lv.sh
+     bash cmd/bl/bl.sh          # ручки — профили (PROFILES), см. cmd/README.txt
    Каждый прогон freefly_lv АРХИВИРУЕТСЯ: docker/sim/output/joystick/<NAME>/
    (scene.mp4, <NAME>.env — вся мета BS_*/ветер/commit, bag/, joy.log;
    для реплея — ещё joy_replay.log и копия сценария). JPEG-кадры не делаются
@@ -40,10 +40,10 @@
 
 4. РЕПЛЕЙ (тот же атомарный прогон, что ручной, только пилот виртуальный):
      BS_PILOT=replay BS_REPLAY_SCENARIO=/lab/joystick/scenarios/<имя>.json \
-       bash src/lab/freefly_lv.sh
+       bash cmd/bl/bl.sh          # профиль mission/replay; сценарий — аргумент прогона
    Валидация канала (сырой повтор, траекторию НЕ повторяет — разомкнут):
      BS_PILOT=replay BS_REPLAY_RAW=/root/sim_ws/output/joystick/<RUN>/raw.jsonl \
-       bash src/lab/freefly_lv.sh
+       bash cmd/bl/bl.sh
 ```
 
 Сравнение ручного и реплейного прогонов — по их архивам: в bag обоих есть
