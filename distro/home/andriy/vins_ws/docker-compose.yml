@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  vins_core:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: vins_project_13_7
+    restart: unless-stopped
+    
+    # КРИТИЧНО ДЛЯ ROS 2:
+    # network_mode: host убирает изоляцию сети. 
+    # Контейнер получает прямой доступ к Wi-Fi адаптеру дрона и DDS мультикасту.
+    network_mode: host
+    ipc: host
+    pid: host
+    
+    # Проброс камеры ArduCam
+    devices:
+      - /dev/video0:/dev/video0
+    
+    # Даем права для работы с видеоустройствами
+    privileged: true
+    
+    # Монтируем только исходники и папку для логов.
+    # Мы НЕ монтируем build/ и install/ с хоста, чтобы они собрались 
+    # заново внутри чистой Ubuntu контейнера.
+    volumes:
+      - ./src:/root/vins_ws/src
+      - ./output:/root/vins_ws/output

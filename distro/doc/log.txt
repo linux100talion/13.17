@@ -1,0 +1,209 @@
+Запись DataFlash логов ArduPilot (.bin) через MAVLink
+
+
+Настройка параметров в ArduPilot:
+
+LOG_BACKEND_TYPE = 3. 
+    Это отключает запись на SD-карту (1) 
+    и включает потоковую передачу через MAVLink (3).
+
+LOG_BITMASK = 
+    Убедись, что включены IMU и Compass (дефолтного значения обычно достаточно).
+
+SERIALx_BAUD = 921 (или 1500 / 2000). 
+    Высокий битрейт критичен. Если канал забьется, логи будут обрываться.
+
+
+Настройка пакетной выборки (Batch Sampling)
+Эти параметры заставят ArduPilot собирать высокочастотные данные IMU 
+и упаковывать их в лог (который улетает на Jetson):
+
+
+INS_LOG_BAT_MASK = 1 
+    (Включаем сбор данных только с первого IMU. 
+    Запись двух IMU одновременно по UART без SD-карты почти гарантированно приведет к потере пакетов).
+
+INS_LOG_BAT_OPT = 2 
+    (Самый важный параметр для твоего запроса. 
+    Значение 2 указывает полетнику писать и сырые данные до фильтрации, и отфильтрованные данные).
+
+INS_LOG_BAT_CNT = 1024
+    (Размер окна выборки. 
+    1024 достаточно для хорошего разрешения FFT).
+    (можно и 2048 попробовать)
+
+LOG_BITMASK = Убедись, что включен сбор дефолтных данных
+    (обычно значение по умолчанию около 176126 подойдет, главное не отключать основные логи).
+
+
+Включение бортового FFT (Опционально, но полезно)
+
+
+FFT_ENABLE = 1 (Включает движок FFT).
+
+FFT_MINHZ = 20 
+    (Нижний порог. Ниже 20 Гц шум от пропеллеров не опускается).
+
+FFT_MAXHZ = 250 
+    (С твоими моторами 4115 490KV и 8S батареей максимальные обороты дадут около 240 Гц, так что 250 — отличный верхний предел).
+
+
+
+Как правильно записать лог
+Тебе не нужно летать всю миссию с включенным Batch Sampling.
+
+Заарми дрон.
+
+Взлети в режиме ALT_HOLD или LOITER 
+    (поскольку VINS-Mono дает позицию).
+
+Повиси ровно 30–40 секунд. 
+    Можешь сделать пару резких прогазовок вверх (throttle punch),
+    чтобы увидеть резонанс на разных оборотах.
+
+Посади дрон и дизарми.
+
+После этого сразу отключи INS_LOG_BAT_MASK = 0,
+    чтобы освободить UART для нормальных полетов.
+
+Забери .bin файл с Jetson, открой в Mission Planner,
+    нажми Ctrl+F -> кнопка FFT. 
+    В появившемся окне ты сможешь выбрать отображение
+        Pre-filter (сырые) и Post-filter (отфильтрованные) данных по осям X, Y, Z.
+
+
+
+
+
+
+
+
+
+--------------
+
+sudo apt update && sudo apt install mavlink-router
+
+[UartEndpoint fc]
+Device = /dev/ttyTHS0
+Baud = 921600
+
+[UartEndpoint fcu]
+Device = /dev/ttyACM0
+Baud = 2000000
+
+
+[Log]
+LogDir = /home/andriy/mavlogs
+
+--------------
+
+
+ros2 bag record /mavros/imu/data_raw /mavros/imu/mag
+ros2 bag record \
+    /fmu/out/sensor_combined \
+    /fmu/out/vehicle_magnetometer
+
+ros2 bag record -o "$BAG_NAME" \
+    /mavros/imu/data_raw \
+    /mavros/imu/data \
+    /image_mono \
+    /camera_info \
+    /odometry \
+    /path \
+    /feature &
+
+
+
+=====================================================
+=====================================================
+
+
+rviz2
+
+$ source /opt/ros/jazzy/setup.bash
+$ rviz2 --ros-args -p use_sim_time:=true
+
+$ ros2 bag play ./ --clock
+
+    В RViz2 раскрываете настройки дисплея 
+        Image -> Topic и меняете Reliability Policy на Best Effort.
+
+После этого вместо белого экрана должны пойти кадры с вашей ArduCam.
+
+Инфо про бэг
+ros2 bag info bag_20260523_091806/
+
+
+https://gemini.google.com/app/3a6660b8f1a9c078
+
+
+sudo apt update
+sudo apt install ros-jazzy-plotjuggler-ros
+
+ros2 run plotjuggler plotjuggler
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

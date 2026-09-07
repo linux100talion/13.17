@@ -1,0 +1,301 @@
+usb
+$ ssh -L 0.0.0.0:5760:127.0.0.1:5760 andriy@192.168.55.1
+Starlilnk
+$ ssh -L 0.0.0.0:5760:127.0.0.1:5760 andriy@192.168.1.202
+Home34
+$ ssh -L 0.0.0.0:5760:127.0.0.1:5760 andriy@192.168.0.133
+
+
+-------
+sudo openvpn --config ~/Downloads/at-123.ovpn --daemon
+-------
+
+
+--------------------------------------------------------
+
+---
+Главный старт (Включение «компьютера»)
+---
+
+sudo openvpn --config ~/Downloads/at-123.ovpn --daemon
+cd ~/workspaces/isaac_ros-dev/src/isaac_ros_common/scripts
+ISAAC_ROS_WS=~/workspaces/isaac_ros-dev ./run_dev.sh
+
+Скрипт
+run_dev.sh
+от NVIDIA по умолчанию генерирует 
+фиксированное имя для контейнера, 
+основанное на архитектуре твоей платы (в случае с Orin Nano это aarch64).
+
+Судя по твоим предыдущим логам запуска, 
+этот скрипт стабильно называет контейнер так: 
+isaac_ros_dev-aarch64-container
+
+
+---
+Заходим в контейнер
+---
+docker exec -it isaac_ros_dev-aarch64-container bash
+docker exec -it -w /workspaces/isaac_ros-dev isaac_ros_dev-aarch64-container bash
+
+---
+Запускаем наш launch.py
+---
+
+cd /workspaces/isaac_ros-dev
+source install/setup.bash
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ros2 launch camera_split.launch.py
+
+---
+чтобы не писать cd каждый раз
+---
+
+docker exec -it -w /workspaces/isaac_ros-dev isaac_ros_dev-aarch64-container bash
+
+--------------------------------------------------------
+
+
+sudo systemctl start vins_m.service
+sudo journalctl -u vins_m.service -f
+sudo systemctl stop vins_m.service
+
+
+sudo systemctl start auto-bag-m.service
+sudo journalctl -u auto-bag-m.service -f
+sudo systemctl stop auto-bag-m.service
+
+
+
+sudo systemctl enable vins.service
+sudo systemctl start vins.service
+sudo systemctl stop vins.service
+sudo systemctl disable vins.service
+sudo journalctl -u vins.service -f
+
+andriy@jetson:~/simple_cam$ sudo systemctl start vins.service
+andriy@jetson:~/simple_cam$ sudo systemctl status vins
+● vins.service - VINS-Mono Docker Service
+     Loaded: loaded (/etc/systemd/system/vins.service; disabled; vendor preset: enabled)
+     Active: active (running) since Sat 2026-05-30 17:11:27 UTC; 10s ago
+   Main PID: 13750 (bash)
+      Tasks: 18 (limit: 8795)
+     Memory: 39.2M
+        CPU: 2.411s
+     CGroup: /system.slice/vins.service
+             ├─13750 /bin/bash /home/andriy/vins_ws/vins_service.sh
+             ├─13874 /bin/bash /home/andriy/vins_ws/vins_service.sh
+             ├─13875 /usr/bin/python3 /opt/ros/humble/bin/ros2 topic echo /mavros/state mavros_msgs/msg/State
+             └─13876 grep --line-buffered armed:
+
+May 30 17:11:27 jetson systemd[1]: Started VINS-Mono Docker Service.
+May 30 17:11:27 jetson bash[13750]: Перезапуск контейнера vins_project_13_7...
+May 30 17:11:27 jetson bash[13758]: vins_project_13_7
+May 30 17:11:30 jetson bash[13750]: Ожидание запуска MAVROS...
+May 30 17:11:32 jetson bash[13750]: Ожидание арминга в топике /mavros/state...
+May 30 17:11:32 jetson bash[13875]: 1780161092.823182 [0]       ros2: selected interface "lo" is not multicast-capa>
+lines 1-19/19 (END)
+
+
+
+
+
+sudo systemctl enable auto-bag.service
+sudo systemctl start auto-bag.service
+sudo systemctl stop auto-bag.service
+sudo systemctl disable auto-bag.service
+sudo journalctl -u auto-bag.service -f
+
+
+andriy@jetson:~/simple_cam/cam_profiles$ sudo systemctl start auto-bag.service
+andriy@jetson:~/simple_cam/cam_profiles$ sudo systemctl status auto-bag.service
+● auto-bag.service - Auto ROS2 Bag Recorder on Arming
+     Loaded: loaded (/etc/systemd/system/auto-bag.service; enabled; vendor preset: enabled)
+     Active: active (running) since Fri 2026-05-29 23:18:25 UTC; 17h ago
+   Main PID: 789 (bash)
+      Tasks: 33 (limit: 8795)
+     Memory: 117.9M
+        CPU: 52.393s
+     CGroup: /system.slice/auto-bag.service
+             ├─ 789 /bin/bash /home/andriy/mavlogs/auto_bag.sh
+             ├─1681 /usr/bin/python3 -c "from ros2cli.daemon.daemonize import main; main()" --name ros2-daemon --ro>
+             ├─1789 /bin/bash /home/andriy/mavlogs/auto_bag.sh
+             ├─1790 /usr/bin/python3 /opt/ros/humble/bin/ros2 topic echo /mavros/state mavros_msgs/msg/State
+             └─1791 grep --line-buffered armed:
+
+May 29 23:18:28 jetson bash[1441]:     rc = extension.main(parser=parser, args=args)
+May 29 23:18:28 jetson bash[1441]:   File "/opt/ros/humble/lib/python3.10/site-packages/ros2topic/command/topic.py">
+May 29 23:18:28 jetson bash[1441]:     return extension.main(args=args)
+May 29 23:18:28 jetson bash[1441]:   File "/opt/ros/humble/lib/python3.10/site-packages/ros2topic/verb/list.py", li>
+May 29 23:18:28 jetson bash[1441]:     print(msg.format_map(locals()))
+May 29 23:18:28 jetson bash[1441]: BrokenPipeError: [Errno 32] Broken pipe
+May 29 23:18:28 jetson bash[1441]: Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf->
+May 29 23:18:28 jetson bash[1441]: BrokenPipeError: [Errno 32] Broken pipe
+May 29 23:18:28 jetson bash[789]: Ожидание арминга в топике /mavros/state...
+May 29 23:18:28 jetson bash[1790]: 1780096708.966742 [0]       ros2: selected interface "lo" is not multicast-capab>
+lines 1-24
+
+
+
+
+------------
+sudo systemctl deamon-reload
+------------
+
+
+---------
+
+На ноуте (Это нужно только если по проводу! Если по wifi - то это не нужно.)
+ssh -L 0.0.0.0:5760:127.0.0.1:5760 andriy@192.168.55.1
+
+Mission Planner в VirtualBox
+TCP
+10.0.2.2 (потому, что MP находится в VB)
+5760
+
+
+Mission Planner в VirtualBox
+TCP
+192.168.1.164
+5760
+
+
+
+
+
+---------
+v4l2-ctl --list-devices
+v4l2-ctl -d /dev/video0 --all
+v4l2-ctl -d /dev/video0 -l
+v4l2-ctl -d /dev/video0 --list-formats-ext
+
+
+andriy@jetson:~/simple_cam/cam_profiles$ v4l2-ctl -d /dev/video0 -l | grep gain
+                  analogue_gain 0x009e0903 (int)    : min=100 max=1200 step=1 default=100 value=1200
+
+
+andriy@jetson:~/simple_cam/cam_profiles$ v4l2-ctl -d /dev/video0 -l | grep exposure
+                       exposure 0x00980911 (int)    : min=2 max=65535 step=1 default=700 value=5250
+
+
+---------
+
+====================================================
+
+rviz2
+
+$ source /opt/ros/jazzy/setup.bash
+$ rviz2 --ros-args -p use_sim_time:=true
+
+$ ros2 bag play ./ --clock
+
+    В RViz2 раскрываете настройки дисплея 
+        Image -> Topic и меняете Reliability Policy на Best Effort.
+
+После этого вместо белого экрана должны пойти кадры с вашей ArduCam.
+
+Инфо про бэг
+ros2 bag info bag_20260523_091806/
+
+---
+
+
+Маленький нюанс:
+Я вижу, что ниже у вас добавлен еще один дисплей — Image, 
+и он тоже смотрит в топик /image_mono. 
+Если вы пытаетесь вывести картинку именно через него 
+(что правильнее, так как дисплей Camera обычно требует еще и топик camera_info), 
+вам нужно раскрыть стрелочку > Topic под дисплеем Image 
+и там тоже изменить Reliability Policy на Best Effort.
+
+В RViz есть два совершенно разных способа смотреть видео, и они работают по-разному:
+
+    Дисплей "Camera" — это сложный инструмент. 
+        Он предназначен для того, чтобы накладывать 3D-объекты 
+        (например, облака точек или карту) прямо поверх видео.
+        Чтобы он работал, ему жизненно необходим топик /camera_info 
+        (с параметрами линзы, искажениями и фокусным расстоянием). 
+        Так как в твоем бэге этого топика нет, дисплей просто сдается и рисует 
+        серый прямоугольник.
+
+    Дисплей "Image" — это простая «глупая» рисовалка. 
+        Она просто берет поток пикселей и выводит их на экран.
+        Ей плевать на 3D, матрицы камеры и калибровки.
+
+
+---
+Куда пропала галочка Use Sim Time
+Вы абсолютно правы, ее там нет. 
+В новых версиях ROS2 (начиная с Humble) разработчики убрали Use Sim Time 
+из графического интерфейса панели Global Options, 
+так как теперь это строго параметр самой ноды (самого приложения RViz2).
+
+Что нужно сделать: Этот параметр теперь нужно передавать в момент запуска программы 
+из терминала.
+
+Закройте RViz2 и запустите его заново вот такой командой:
+
+Bash
+
+
+rviz2 --ros-args -p use_sim_time:=true
+
+
+---
+
+Где спрятан QoS (Best Effort)
+
+Посмотрите на вашем скриншоте на раскрытый раздел Camera. Внутри него раскрыт подраздел Topic.
+Там есть строчка Reliability Policy, и сейчас напротив неё стоит значение Reliable.
+Это и есть настройка QoS!
+
+Что нужно сделать: 
+    Кликните левой кнопкой мыши прямо на слово Reliable — появится выпадающий список.
+    Выберите в нем Best Effort.
+
+Маленький нюанс: Я вижу, что ниже у вас добавлен еще один дисплей — Image, 
+и он тоже смотрит в топик /image_mono.
+Если вы пытаетесь вывести картинку именно через него
+(что правильнее, так как дисплей Camera обычно требует еще и топик camera_info),
+вам нужно раскрыть стрелочку > Topic под дисплеем Image и там тоже изменить 
+Reliability Policy на Best Effort.
+
+
+---
+
+RViz рассуждает так: "Я нахожусь в системе координат map. 
+Мне пришла картинка из camera_frame. 
+Как они расположены друг относительно друга?". 
+Чтобы это понять, RViz нужен топик с трансформациями (/tf). 
+Он кладет приходящие кадры в очередь и ждет, когда прилетят координаты. Очередь забивается, и старые кадры выбрасываются с ошибкой queue is full.
+
+Но если мы посмотрим на вывод твоего ros2 bag info, 
+в записанном файле нет топиков /tf и /tf_static. 
+RViz ждет чуда, которого нет в записи.
+
+
+Как починить прямо сейчас (чтобы увидеть видео):
+
+Тебе нужно сделать саму камеру "центром вселенной" для RViz, 
+чтобы ему вообще не пришлось вычислять ее позицию в пространстве.
+В RViz на панели слева разверни Global Options.
+Кликни на значение напротив Fixed Frame (там сейчас написано map).
+Прямо с клавиатуры впиши туда camera_frame и нажми Enter.
+Как только Fixed Frame совпадет с фреймом приходящей картинки, 
+RViz перестанет ждать трансформации, очередь разблокируется, 
+и ты сразу увидишь видео в окошке Image.
+
+У каждого кадра с твоей ArduCam внутри зашит идентификатор системы координат
+ — frame_id: camera_frame.
+Если ты посмотришь на свой предыдущий скриншот, 
+в самом верху 
+в Global Options параметр Fixed Frame установлен в map.
+
+
+Как делать на будущее:
+Для нормальной работы VINS-Mono и корректного отображения 3D-сцены, 
+пути (/path) и одометрии, геометрия дрона критически важна. 
+В следующие разы обязательно добавляй топики 
+tf в команду записи бэга:
+
+ros2 bag record -o "$BAG_NAME" /mavros/imu/data_raw /mavros/imu/data /image_mono /tf /tf_static

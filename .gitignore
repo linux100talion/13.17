@@ -25,3 +25,7 @@ docker/sim/worlds/preview/*.bag
 docker/sim/bags/
 # Машинно-зависимые пути compose (VINS_SRC и т.п.) — у каждого бокса свои
 docker/sim/.env
+
+# Секреты деплоя на Jetson — НЕ коммитить (репозиторий публичный)
+distro/doc/ssh-keys/jetson
+distro/doc/wifi.txt

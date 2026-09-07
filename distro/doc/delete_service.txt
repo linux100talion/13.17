@@ -1,0 +1,41 @@
+Правильный алгоритм удаления службы вручную на Jetson:
+1. Остановить службу (если она работает): 
+sudo systemctl stop auto-bag-m.service
+
+
+2. Отключить автозагрузку:
+sudo systemctl disable auto-bag-m.service
+
+
+3. Удалить сам файл:
+sudo rm /etc/systemd/system/auto-bag-m.service
+
+
+4. Перезагрузить конфигурацию systemd:
+sudo systemctl daemon-reload
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

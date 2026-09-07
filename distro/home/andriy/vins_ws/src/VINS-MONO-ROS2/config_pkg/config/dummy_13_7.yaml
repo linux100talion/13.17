@@ -1,0 +1,71 @@
+%YAML:1.0
+
+# Основные пути и топики
+imu_topic: "/mavros/imu/data_raw"
+image_topic: "/image_mono"
+output_path: "/root/vins_ws/output/"
+vins_folder: "/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/"
+
+# Камера
+model_type: "PINHOLE"
+camera_name: "camera"
+image_width: 1280
+image_height: 720
+num_of_cam: 1
+
+distortion_parameters:
+   k1: 0.0
+   k2: 0.0
+   p1: 0.0
+   p2: 0.0
+
+projection_parameters:
+   fx: 640.0
+   fy: 640.0
+   cx: 640.0
+   cy: 360.0
+
+
+# Онлайн-оценка задержки времени между камерой и IMU
+estimate_td: 1      # 1 - включить автоматическую подстройку, 0 - выключить
+td: 0.0             # Начальное предположение о задержке (в секундах)
+
+# Экстринсики (смещение IMU <-> Камера)
+estimate_extrinsic: 1
+ex_calib_result_path: "/home/andriy/vins_ws/extrinsic.yaml"
+
+extrinsicRotation: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+# В метрах
+# Допустим, камера закреплена на 
+# 12 см впереди полетника, смещена на 
+# 2 см вправо и находится на 
+# 4 см ниже его центра.
+# data: [0.12, -0.02, -0.04] # [X, Y, Z] в метрах
+
+extrinsicTranslation: !!opencv-matrix
+   rows: 3
+   cols: 1
+   dt: d
+   data: [0.14, 0.0, -0.06]
+
+# Настройки трекера фич
+max_cnt: 150
+min_dist: 30
+freq: 15
+F_threshold: 1.0
+show_track: 1
+equalize: 1
+fisheye: 0
+flow_back: 1
+
+# Параметры шума IMU
+acc_n: 0.08        # Увеличен в 10 (0.8) раза для компенсации вибраций рамы
+gyr_n: 0.004       # Увеличен в 10 (0.04) раза
+acc_w: 0.00004    # Оставляем (зависит от чипа)
+gyr_w: 2.0e-6     # Оставляем (зависит от чипа)
+g_norm: 9.81
