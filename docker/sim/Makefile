@@ -43,7 +43,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help ensure-env host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm rth fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
+.PHONY: help ensure-env host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm rth smart-rth fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
 
 # .env (локальный профиль бокса, в .gitignore) сеется из эталона env.default
 # (в git): свежий клон получает боевые дефолты (WORLD/LV/BS_SF_MASTER) без
@@ -168,6 +168,9 @@ sa-land:         ## freefly: «кнопка SA» с хоста (мягкая п�
 
 rth:             ## freefly: ВОЗВРАТ ДОМОЙ — RTL полётника к home (шаг rth); повторный вызов ОТМЕНЯЕТ
 	docker exec $(NAV) bash -lc 'source /opt/ros/humble/setup.bash; ros2 topic pub --once /mission/rth std_msgs/msg/Empty "{}"'
+
+smart-rth:       ## freefly: ВОЗВРАТ ПО СЛЕДУ — SMART_RTL (крошки пути); повторный вызов ОТМЕНЯЕТ
+	docker exec $(NAV) bash -lc 'source /opt/ros/humble/setup.bash; ros2 topic pub --once /mission/smart_rth std_msgs/msg/Empty "{}"'
 
 disarm:          ## дизарм
 	docker exec $(NAV) bash /lab/disarm.sh

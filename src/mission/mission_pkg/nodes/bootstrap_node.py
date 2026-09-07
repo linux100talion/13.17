@@ -417,9 +417,15 @@ class BootstrapArch2Node(Node):
         self._land_req = False
         self.create_subscription(Empty, '/mission/land',
                                  lambda _m: setattr(self, '_land_req', True), 1)
+        # ВОЗВРАТ ДОМОЙ, два топика = два режима FCU (make rth / make smart-rth):
+        # RTL — прямая на home, SMART_RTL — по крошкам пройденного пути. Импульс
+        # one-shot, режим липкий (шаг rth читает его в enter, уже после гашения).
         self._rth_req = False
+        self._rth_mode = ''
         self.create_subscription(Empty, '/mission/rth',
-                                 lambda _m: setattr(self, '_rth_req', True), 1)
+                                 lambda _m: self._on_rth('RTL'), 1)
+        self.create_subscription(Empty, '/mission/smart_rth',
+                                 lambda _m: self._on_rth('SMART_RTL'), 1)
         self._hud_st = ''      # последний st= в /mission/status (лог переходов)
         self._armed_prev = False   # фронт armed → латч нуля высоты перцепции, сброс VINS
         # ФРОНТ ARMED → сброс VINS (/restart → restart_callback эстиматора). Пока
@@ -583,8 +589,10 @@ class BootstrapArch2Node(Node):
         # кнопка посадки: пульт (уровень) ИЛИ one-shot /mission/land
         s.pilot_land = bool(self.pilot.land_switch()) or self._land_req
         self._land_req = False
-        # возврат домой: one-shot /mission/rth (make rth) — кнопки на пульте нет
+        # возврат домой: one-shot /mission/rth|smart_rth (кнопки на пульте нет),
+        # режим — липкий (см. _on_rth)
         s.pilot_rth, self._rth_req = self._rth_req, False
+        s.pilot_rth_mode = self._rth_mode
         s.extnav_ready = self._extnav_ready()    # гейт штатного LOITER-на-VINS
 
         self._send_origin()              # безжпсный бут: origin до подтверждения
@@ -724,6 +732,12 @@ class BootstrapArch2Node(Node):
         if self._vision_pub is None:
             return False
         return not any(n.startswith('EK3_SRC1_') for n, _v, _r in self._ekf_pending)
+
+    def _on_rth(self, mode):
+        """Импульс возврата домой: /mission/rth → RTL, /mission/smart_rth → SMART_RTL."""
+        self._rth_req = True
+        self._rth_mode = mode
+        self.logger.info(f"RTH: запрос возврата ({mode})")
 
     def _on_gp_origin(self, _m):
         if not self._origin_ok:

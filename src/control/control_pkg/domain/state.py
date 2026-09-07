@@ -201,6 +201,11 @@ class DroneState:
     # кнопки на пульте нет. Узел выставляет на ОДИН тик; шаг Freefly прыгает на шаг
     # rth, повторный импульс там ОТМЕНЯЕТ возврат. Вне freefly игнорируется.
     pilot_rth: bool = False
+    # КАКОЙ возврат просили: 'RTL' (прямая на home, /mission/rth) | 'SMART_RTL'
+    # (по хлебным крошкам пройденного пути, /mission/smart_rth). ЛИПКОЕ поле, не
+    # one-shot: шаг rth входит на СЛЕДУЮЩЕМ тике, когда импульс уже погашен, и
+    # читает режим в enter(). Пусто — дефолт шага (RTL).
+    pilot_rth_mode: str = ""
 
     # --- Детектор посадки FCU (/mavros/extended_state ← EXTENDED_SYS_STATE) ---
     # MAV_LANDED_STATE: 1 ON_GROUND, 2 IN_AIR, 3 TAKEOFF, 4 LANDING; -1 = данных

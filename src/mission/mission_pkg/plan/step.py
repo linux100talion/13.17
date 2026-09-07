@@ -1232,7 +1232,16 @@ class SoftLand(Step):
 
 
 class Rth(Step):
-    """ВОЗВРАТ ДОМОЙ ШТАТНЫМ RTL ПОЛЁТНИКА — эпилог freefly по /mission/rth (make rth).
+    """ВОЗВРАТ ДОМОЙ ШТАТНЫМ РЕЖИМОМ ПОЛЁТНИКА — эпилог freefly по импульсу оператора.
+
+    ДВА РЕЖИМА, выбор — топиком (какой дёрнули, тот и шлём; поле pilot_rth_mode):
+      /mission/rth       (make rth)       → RTL: прямая на home, набор до RTL_ALT_M;
+      /mission/smart_rth (make smart-rth) → SMART_RTL: назад ПО КРОШКАМ пройденного
+                          пути (SRTL_POINTS точек, прореживание SRTL_ACCURACY) — то
+                          самое «вернуться по своему следу», нужное там, где по
+                          прямой домой нельзя (деревья, стены). Буфер крошек копится
+                          с арма; кончился/не копился — FCU режим не даст, и это
+                          штатный RTH_REFUSED ниже.
 
     Мы НЕ ведём борт домой сами: точка `home` живёт в FCU (ставится при арме от
     EKF-origin — в LV=2 это SET_GPS_GLOBAL_ORIGIN ноды, без единой секунды GPS), и
@@ -1253,23 +1262,25 @@ class Rth(Step):
     набор до RTL_ALT_M, прямая на home, RTL_LOIT_TIME над точкой, снижение и LAND со
     своим самодизармом. Эти ручки — В EEPROM ПОЛЁТНИКА, не у нас: прогон cmd/rth ставит
     их через BS_FCU_PARAMS (loiter/rth.txt — 7 м / 1 с / мягкие последние 3 м на
-    LAND_SPD_MS 0.15), стоковые 15 м / 5 с / 10 м возвращает loiter/baseline.txt.
+    LAND_SPD_MS 0.15; cmd/smart_rth — то же плюс SRTL_ACCURACY), стоковые значения
+    возвращает loiter/baseline.txt.
     Бюджет шага — бэкстоп на самый долгий (стоковый) вариант. Дизарм → RTH_DONE.
 
     ВЫХОДЫ ОБРАТНО В ПОЛЁТ (все — goto freefly, борт заармлен, стек и опора берутся
     от текущей точки):
       RTH_CANCEL   — повторный импульс /mission/rth (передумали): keep сразу;
       RTH_MANUAL   — пилот забрал борт в MANUAL (SF не вверх) — сознательный жест;
-      RTH_REFUSED  — RTL не залатчился за LATCH_SEC: у EKF нет позиции («requires
-                     position») либо home не задан. Возврат невозможен — отдаём
-                     борт пилоту, а не молчим в чужом режиме;
-      RTH_EJECT    — FCU сам вышел из RTL (failsafe/пилот с пульта FCU): уважаем.
+      RTH_REFUSED  — режим не залатчился за LATCH_SEC: у EKF нет позиции («requires
+                     position»), home не задан, а для SMART_RTL — ещё и пустой/
+                     переполненный буфер крошек. Возврат невозможен — отдаём борт
+                     пилоту, а не молчим в чужом режиме;
+      RTH_EJECT    — FCU сам вышел из режима (failsafe/пилот с пульта FCU): уважаем.
     Не сели за budget → RTH_TIMEOUT (error, борт в воздухе — сажает пилот).
     ⚠️ Здоровье моста VINS→EKF шаг НЕ судит: RTL летит к точке в раме EKF, и если
     мост закрылся или якорь перелатчился, борт честно вернётся «в старые цифры».
     Это известная цена первой версии (см. cmd/rth/README.txt)."""
 
-    LATCH_SEC = 3.0          # столько ждём латча RTL, дальше — отказ пилоту
+    LATCH_SEC = 3.0          # столько ждём латча режима, дальше — отказ пилоту
     BUDGET_SEC = 180.0       # бэкстоп на стоковый RTL (15 м + LAND 0.15 м/с с 10 м) ≈ 90–120 с
 
     def __init__(self, name, stack, budget=BUDGET_SEC, keep="ALT_HOLD",
@@ -1280,17 +1291,23 @@ class Rth(Step):
         self.keep = keep
         self.throttle_hold = throttle_hold
         self.resume = resume
-        self.mode = mode
+        self.mode = mode          # дефолт, если режим не пришёл со снапшотом
+        self._mode = mode         # что реально шлём (выбирается на входе в шаг)
         self._latched = False
         self._eject_warned = False
 
     def enter(self, ctx, s) -> None:
         self._latched = False
         self._eject_warned = False
+        # КАКОЙ возврат просили — из снапшота (какой топик дёрнули): RTL (прямая на
+        # home) или SMART_RTL (по крошкам пути). Поле липкое, поэтому доживает до
+        # входа в шаг — импульс к этому тику уже погашен.
+        self._mode = (getattr(s, 'pilot_rth_mode', '') or self.mode) if s is not None \
+            else self.mode
         self.stack.switch_stabilization([])      # позицию ведёт FCU
         if ctx is not None:
-            ctx.log.info(f"    {self.name}: RTL полётника — домой по EKF (стек пуст, "
-                         f"стики в центре); повторный /mission/rth отменит")
+            ctx.log.info(f"    {self.name}: {self._mode} полётника — домой по EKF "
+                         f"(стек пуст, стики в центре); повторный импульс отменит")
 
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=self.throttle_hold)
@@ -1307,21 +1324,21 @@ class Rth(Step):
             ctx.log.warn(f"    {self.name}: пилот забрал борт (MANUAL) → {self.resume}")
             ctx.mode.set_mode(self.keep)
             return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_MANUAL")
-        if s.mode == self.mode:
+        if s.mode == self._mode:
             if not self._latched:
                 self._latched = True
-                ctx.log.info(f"    {self.name}: {self.mode} залатчен — борт ведёт FCU")
+                ctx.log.info(f"    {self.name}: {self._mode} залатчен — борт ведёт FCU")
         elif self._latched:
-            ctx.log.warn(f"    {self.name}: FCU вышел из {self.mode} (mode={s.mode}) "
+            ctx.log.warn(f"    {self.name}: FCU вышел из {self._mode} (mode={s.mode}) "
                          f"— уважаем → {self.resume}")
             return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_EJECT")
         elif ctx.elapsed() > self.LATCH_SEC:
-            ctx.log.error(f"    {self.name}: {self.mode} не залатчился за "
+            ctx.log.error(f"    {self.name}: {self._mode} не залатчился за "
                           f"{self.LATCH_SEC:g} с (mode={s.mode}) — нет позиции EKF "
                           f"(requires position?) или home не задан → {self.resume}")
             return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_REFUSED")
         else:
-            ctx.try_cmd(lambda: ctx.mode.set_mode(self.mode))
+            ctx.try_cmd(lambda: ctx.mode.set_mode(self._mode))
         if ctx.elapsed() > self.budget:
             ctx.log.error(f"    {self.name}: не сели за {self.budget:g} с "
                           f"(rel_alt={s.rel_alt}, mode={s.mode}) — завершаю, борт в "

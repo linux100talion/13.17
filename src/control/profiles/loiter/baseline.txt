@@ -36,10 +36,11 @@ BS_EKF_DRAG=32
 
 # слой: env (sitl_lv_profile) — ПАРАМЕТРЫ FCU ПРОГОНА в eeprom SITL, «NAME=VALUE» через
 # пробел (пусто = не трогать). Нужны там, где поведением командует не нода, а полётник:
-# возврат домой RTL (cmd/rth). Здесь стоят СТОКОВЫЕ значения нарочно — eeprom переживает
+# возврат домой RTL (cmd/rth) и по следу SMART_RTL (cmd/smart_rth). Здесь стоят СТОКОВЫЕ
+# значения нарочно — eeprom переживает
 # прогоны, и без явного восстановления кандидат отравлял бы всех соседей (LAND_ALT_LOW_M
 # правит ещё и ветку pos мягкой посадки SoftLand). Дельта — loiter/rth.txt.
-BS_FCU_PARAMS=RTL_ALT_M=15 RTL_LOIT_TIME=5000 LAND_ALT_LOW_M=10
+BS_FCU_PARAMS=RTL_ALT_M=15 RTL_LOIT_TIME=5000 LAND_ALT_LOW_M=10 SRTL_ACCURACY=2 SRTL_POINTS=300
 
 # слой: SITL — справочно, применяется НЕ через env (docker/sim/config/sitl-extra.parm,
 # docker/sim/scripts/sitl_lv_profile.py для LV=2):

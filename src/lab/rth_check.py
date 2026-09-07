@@ -75,6 +75,31 @@ def read(bag):
     return ekf, truth, modes
 
 
+def decimate(pts, step):
+    """Проредить трек по пути: точки не ближе step метров друг к другу."""
+    out = []
+    for x in pts:
+        if not out or math.hypot(x[1] - out[-1][1], x[2] - out[-1][2]) >= step:
+            out.append(x)
+    return out
+
+
+def track_repeat(truth, t_off, t_split, t_land):
+    """НАСКОЛЬКО ВОЗВРАТ ПОВТОРИЛ СЛЕД: для каждой точки обратного плеча — расстояние
+    до ближайшей точки плеча «туда». Медиана/90-й перцентиль/максимум. У RTL это
+    просто «насколько прямая домой совпала с траекторией ухода» (обычно метры), у
+    SMART_RTL — мера того, что борт реально размотал свой путь."""
+    out = decimate([x for x in truth if t_off <= x[0] <= t_split], 0.1)
+    ret = decimate([x for x in truth if t_split < x[0] <= t_land], 0.2)
+    if len(out) < 3 or len(ret) < 3:
+        return None
+    ds = []
+    for r in ret:
+        ds.append(min(math.hypot(r[1] - o[1], r[2] - o[2]) for o in out))
+    ds.sort()
+    return ds[len(ds) // 2], ds[int(0.9 * (len(ds) - 1))], ds[-1], len(ret)
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -127,6 +152,23 @@ def main():
     if flying_at_end:
         print('⚠️ bag кончился, а борт ещё в воздухе — посадка не записана '
               '(RTH_TIMEOUT? запись остановили раньше?)')
+    # СЛЕД: сравниваем обратное плечо с плечом «туда». Границу берём по фронту
+    # RTL/SMART_RTL, если режимы разобраны (в контейнере), иначе — по самой дальней
+    # точке (для сортии «ушёл — вернулся» это тот же момент).
+    t_split = None
+    for t, m, _a in modes:
+        if m in ('RTL', 'SMART_RTL'):
+            t_split = t
+            break
+    if t_split is None:
+        t_split = t_off + far[1]
+    rep = track_repeat(truth, t_off, t_split, t_land)
+    if rep:
+        med, p90, mx, n = rep
+        print(f'СЛЕД (возврат против пути «туда», {n} точек обратного плеча):')
+        print(f'    медиана {med:.2f} м, 90% {p90:.2f} м, максимум {mx:.2f} м')
+        print('    у SMART_RTL это мера «размотал свой путь», у RTL — насколько '
+              'прямая домой совпала с уходом')
     if modes:
         print('\nрежимы FCU (из /mavros/state):')
         for t, m, armed in modes:

@@ -12,7 +12,9 @@
 - RTL не залатчился за 3 с → RTH_REFUSED + error, борт обратно пилоту (freefly);
 - повторный импульс → RTH_CANCEL (keep послан), MANUAL → RTH_MANUAL, выход FCU
   из RTL после латча → RTH_EJECT — все три возвращают в freefly;
-- бюджет шага → RTH_TIMEOUT.
+- бюджет шага → RTH_TIMEOUT;
+- SMART_RTL: режим берётся из снапшота (какой топик дёрнули) — шлём SMART_RTL,
+  латч/дизарм → RTH_DONE, отказ латча → RTH_REFUSED; пустое поле = дефолт RTL.
 Чистый python, без ROS.
 
 Запуск:  python3 src/mission/test/test_freefly_rth.py
@@ -122,9 +124,13 @@ def make(budget=180.0):
     return runner, clock, mode, log, stack, ff, rth
 
 
-def snap(t, alt=4.0, mode="ALT_HOLD", armed=True, sw=-1, lvl=0, rth=False, sa=False):
+def snap(t, alt=4.0, mode="ALT_HOLD", armed=True, sw=-1, lvl=0, rth=False, sa=False,
+         rth_mode=""):
+    """rth_mode — ЛИПКОЕ поле снапшота (нода держит его после импульса), поэтому в
+    сценариях SMART_RTL его передают и на тиках после pulse."""
     return DroneState(mode=mode, armed=armed, rel_alt=alt, now_sim=t,
                       pilot_switch=sw, pilot_level=lvl, pilot_land=sa, pilot_rth=rth,
+                      pilot_rth_mode=rth_mode,
                       pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER,
                       pilot_throttle=RC_CENTER, pilot_yaw=RC_CENTER)
 
@@ -139,7 +145,8 @@ def tick_until(runner, clock, dur, dt=0.05, **kw):
 
 
 def pulse(runner, clock, **kw):
-    """Один тик с импульсом /mission/rth (one-shot, как выставляет нода)."""
+    """Один тик с импульсом /mission/rth|smart_rth (one-shot, как выставляет нода);
+    kw прокидывается в snap — в т.ч. rth_mode для SMART_RTL."""
     clock.t += 0.05
     return runner.tick(snap(clock.t, rth=True, **kw))
 
@@ -230,6 +237,36 @@ pulse(r, clock)
 tick_until(r, clock, 25.0, mode="RTL")
 check("не сели за бюджет → RTH_TIMEOUT (борт в воздухе, сажает пилот)",
       r.finished and r.result == "RTH_TIMEOUT")
+
+# --- 9. SMART_RTL: режим приходит со снапшотом (топик /mission/smart_rth) ---
+r, clock, mode, log, stack, ff, rth = make()
+tick_until(r, clock, 1.0)
+pulse(r, clock, rth_mode="SMART_RTL")
+check("импульс smart_rth → шаг rth (тот же)", cur(r) == "rth")
+tick_until(r, clock, 0.5, mode="ALT_HOLD", rth_mode="SMART_RTL")
+check("шлём SMART_RTL, а не RTL",
+      "SMART_RTL" in mode.modes and "RTL" not in mode.modes)
+check("лог называет режим", log.count("SMART_RTL полётника") == 1)
+tick_until(r, clock, 2.0, mode="SMART_RTL", rth_mode="SMART_RTL")
+check("латч SMART_RTL", log.count("SMART_RTL залатчен") == 1)
+tick_until(r, clock, 0.2, mode="SMART_RTL", armed=False, rth_mode="SMART_RTL")
+check("дизарм после SmartRTL → RTH_DONE", r.finished and r.result == "RTH_DONE")
+
+# --- 10. SMART_RTL не залатчился (пустой буфер крошек) → борт пилоту ---
+r, clock, mode, log, stack, ff, rth = make()
+tick_until(r, clock, 1.0)
+pulse(r, clock, rth_mode="SMART_RTL")
+tick_until(r, clock, 4.0, mode="ALT_HOLD", rth_mode="SMART_RTL")
+check("SMART_RTL не залатчился за 3 с → RTH_REFUSED, шаг freefly",
+      cur(r) == "freefly" and r.result == "RTH_REFUSED")
+
+# --- 11. пустой режим в снапшоте = дефолт шага (RTL) ---
+r, clock, mode, log, stack, ff, rth = make()
+tick_until(r, clock, 1.0)
+pulse(r, clock)
+tick_until(r, clock, 0.5)
+check("без режима в снапшоте шлём дефолтный RTL",
+      "RTL" in mode.modes and "SMART_RTL" not in mode.modes)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FREEFLY RTH OK" if ok_all else "❌ СБОЙ")
