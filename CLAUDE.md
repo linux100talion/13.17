@@ -249,6 +249,8 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 > x264enc (боевой код — `src/camera/`, едет в контейнер bind mount'ом);
 > заглушка `usr/local/bin/orin_shutdown__bin` удалена. Секреты
 > (`doc/ssh-keys/jetson`, `doc/wifi.txt`) — в `.gitignore`, репо публичный.
+> Раскладка каталога и сравнение бортовой записи bag (auto-bag) с симуляционной
+> (freefly_lv → capture_scene) — `distro/CLAUDE.md`.
 
 ---
 
