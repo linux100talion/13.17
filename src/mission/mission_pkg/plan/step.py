@@ -13,6 +13,7 @@ import math
 from control_pkg.application.hud import LadderState
 from control_pkg.domain.control.bank_limit import YawBankLimit
 from control_pkg.domain.control.throttle_latch import ThrottleLatch
+from control_pkg.domain.modes import matches as mode_matches
 from control_pkg.domain.rc import RC_CENTER, RC_MIN_THR, RcCommand
 
 # статусы результата шага
@@ -1324,7 +1325,10 @@ class Rth(Step):
             ctx.log.warn(f"    {self.name}: пилот забрал борт (MANUAL) → {self.resume}")
             ctx.mode.set_mode(self.keep)
             return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_MANUAL")
-        if s.mode == self._mode:
+        # MAVROS не знает имени SMART_RTL и отдаёт его как 'CMODE(21)' —
+        # сравниваем через domain/modes (иначе латч не наступает никогда и
+        # шаг честно отказывает: разбор полёта 200909)
+        if mode_matches(s.mode, self._mode):
             if not self._latched:
                 self._latched = True
                 ctx.log.info(f"    {self.name}: {self._mode} залатчен — борт ведёт FCU")

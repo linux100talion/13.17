@@ -14,7 +14,9 @@
   из RTL после латча → RTH_EJECT — все три возвращают в freefly;
 - бюджет шага → RTH_TIMEOUT;
 - SMART_RTL: режим берётся из снапшота (какой топик дёрнули) — шлём SMART_RTL,
-  латч/дизарм → RTH_DONE, отказ латча → RTH_REFUSED; пустое поле = дефолт RTL.
+  латч/дизарм → RTH_DONE, отказ латча → RTH_REFUSED; пустое поле = дефолт RTL;
+- режимы, которых не знает MAVROS (domain/modes.py, разбор полёта 200909): имя
+  уходит номером ('21'), а латч ловится по безымянному 'CMODE(21)' из /mavros/state.
 Чистый python, без ROS.
 
 Запуск:  python3 src/mission/test/test_freefly_rth.py
@@ -31,6 +33,7 @@ from control_pkg.application.handover import VinsHandover              # noqa: E
 from control_pkg.domain.rc import RC_CENTER, RcCommand                 # noqa: E402
 from control_pkg.domain.state import DroneState                        # noqa: E402
 from mission_pkg.plan.runner import PlanRunner                         # noqa: E402
+from control_pkg.domain import modes as fcu_modes                      # noqa: E402
 from mission_pkg.plan.step import Freefly, Rth, SoftLand               # noqa: E402
 
 results = []
@@ -267,6 +270,27 @@ pulse(r, clock)
 tick_until(r, clock, 0.5)
 check("без режима в снапшоте шлём дефолтный RTL",
       "RTL" in mode.modes and "SMART_RTL" not in mode.modes)
+
+# --- 12. режимы, которых не знает MAVROS (разбор полёта 200909) ---
+check("modes.to_fcu: SMART_RTL уходит номером '21' (иначе MAVROS съедает запрос)",
+      fcu_modes.to_fcu('SMART_RTL') == '21')
+check("modes.to_fcu: известные имена не трогаем",
+      (fcu_modes.to_fcu('RTL'), fcu_modes.to_fcu('LOITER')) == ('RTL', 'LOITER'))
+check("modes.matches: 'CMODE(21)' из /mavros/state = SMART_RTL",
+      fcu_modes.matches('CMODE(21)', 'SMART_RTL')
+      and fcu_modes.matches('SMART_RTL', 'SMART_RTL')
+      and not fcu_modes.matches('CMODE(21)', 'RTL'))
+
+# --- 13. латч SMART_RTL по безымянному CMODE(21) (как отдаёт MAVROS) ---
+r, clock, mode, log, stack, ff, rth = make()
+tick_until(r, clock, 1.0)
+pulse(r, clock, rth_mode="SMART_RTL")
+tick_until(r, clock, 2.5, mode="CMODE(21)", rth_mode="SMART_RTL")
+check("MAVROS отдаёт CMODE(21) — шаг считает режим залатченным, а не отказывает",
+      cur(r) == "rth" and r.result != "RTH_REFUSED"
+      and log.count("SMART_RTL залатчен") == 1)
+tick_until(r, clock, 0.2, mode="CMODE(21)", armed=False, rth_mode="SMART_RTL")
+check("дизарм в CMODE(21) → RTH_DONE", r.finished and r.result == "RTH_DONE")
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FREEFLY RTH OK" if ok_all else "❌ СБОЙ")

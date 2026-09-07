@@ -8,6 +8,8 @@ call_async — как в монолите). Один адаптер держит
 from mavros_msgs.msg import OverrideRCIn
 from mavros_msgs.srv import CommandBool, CommandLong, SetMode
 
+from ..domain.modes import to_fcu
+
 from ..domain.rc import RC_NOCHANGE, RcCommand
 
 
@@ -33,7 +35,9 @@ class MavrosActuator:
     def set_mode(self, mode: str) -> None:
         if self._mode_cli.service_is_ready():
             req = SetMode.Request()
-            req.custom_mode = mode
+            # имя, которого MAVROS не знает (SMART_RTL), уходит НОМЕРОМ —
+            # иначе запрос умирает в его таблице режимов (domain/modes.py)
+            req.custom_mode = to_fcu(mode)
             self._mode_cli.call_async(req)
 
     def arm(self, value: bool = True) -> None:

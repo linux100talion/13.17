@@ -155,9 +155,12 @@ def main():
     # СЛЕД: сравниваем обратное плечо с плечом «туда». Границу берём по фронту
     # RTL/SMART_RTL, если режимы разобраны (в контейнере), иначе — по самой дальней
     # точке (для сортии «ушёл — вернулся» это тот же момент).
+    # 'CMODE(21)' — это SMART_RTL: имени MAVROS не знает и отдаёт номер
+    # (см. control_pkg/domain/modes.py, разбор полёта 200909)
+    RTH_MODES = ('RTL', 'SMART_RTL', 'CMODE(21)')
     t_split = None
     for t, m, _a in modes:
-        if m in ('RTL', 'SMART_RTL'):
+        if m in RTH_MODES:
             t_split = t
             break
     if t_split is None:
@@ -173,12 +176,13 @@ def main():
         print('\nрежимы FCU (из /mavros/state):')
         for t, m, armed in modes:
             print(f'  t={t - truth[0][0]:7.1f} с  {m:<10} armed={int(armed)}')
-        rtl = [t for t, m, _a in modes if m == 'RTL']
+        rtl = [(t, m) for t, m, _a in modes if m in RTH_MODES]
         if rtl:
-            print(f'RTL включился через {rtl[0] - t_off:.1f} с после отрыва, '
-                  f'вернул и посадил за {t_land - rtl[0]:.1f} с')
+            print(f'{rtl[0][1]} включился через {rtl[0][0] - t_off:.1f} с после отрыва, '
+                  f'вернул и посадил за {t_land - rtl[0][0]:.1f} с')
         else:
-            print('RTL в прогоне НЕ ВКЛЮЧАЛСЯ — смотри лог ноды: RTH_REFUSED?')
+            print('РЕЖИМ ВОЗВРАТА НЕ ВКЛЮЧАЛСЯ — смотри лог ноды (RTH_REFUSED?) и '
+                  'mavros.log («Unknown mode»?)')
     else:
         print('\n(режимы FCU не разобраны: mavros_msgs нет — запусти в контейнере nav)')
 
