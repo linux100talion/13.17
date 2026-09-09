@@ -31,3 +31,5 @@ sitl-extra.parm не переименованы — применяются.
 `ros2 param get /mavros/param <имя>` (в p1317_nav; ParamGet-сервиса нет —
 параметры FCU видны как ROS-параметры узла /mavros/param). Новые значения в
 единицах СИ (м/с, м), не см/с.
+
+**Дополнение 2026-09-07:** темпы стримов `SR0_*` → `MAV1_*` (группа `MAV`, нумерация с ЕДИНИЦЫ: MAV1 = SERIAL0 = tcp 5760 роутера); `SR0_RAW_SENS` прошивка не знает (нет эха PARAM_VALUE, `sitl_lv_profile.py` тратил 50 с на ретраи и валил прогон). `REQUEST_DATA_STREAM` прошивка сама сохраняет в eeprom (`persist_streamrates`): MAV1_RAW_SENS 200 / POSITION 25 / EXTRA1 50 / EXT_STAT 2 / EXTRA2 5 уже стояли. Связано: [[fcu-telemetry-streams-race]].
