@@ -42,6 +42,7 @@ from vision_msgs.msg import Detection2DArray
 from nav_pkg.nn1 import geo
 from nav_pkg.nn1.bridge_gate import BridgeGate
 from nav_pkg.nn1.frame_anchor import FrameAnchor, _wrap as _wrap_pi, quat_yaw
+from nav_pkg.nn1.pose_buffer import PoseBuffer
 
 
 class RayTracer(Node):
@@ -107,6 +108,24 @@ class RayTracer(Node):
         # VINS встал на 1.96 с, борт крутился 10 °/с, и пара разъехалась на 20°
         # и на метры. Пока сообщение старое — якорь стоит; поза в EKF идёт как шла.
         self.declare_parameter("anchor_stale_sec", 0.3)
+        # СПАРИВАНИЕ ПОЗ ПО ШТАМПУ (2026-09-09). Одометрия VINS считается на кадре и
+        # приходит позже позы EKF; замер 181233/181936 — задержка гуляет на 0.14–0.22 с
+        # (медиана/90 %), хвост 0.33 с. Брать «последнюю пришедшую» позу EKF значит
+        # спаривать её с кадром, снятым на 0.15 с раньше: на 3–5 м/с это 0.45–0.75 м
+        # мнимого расхода. Буфер отдаёт позу EKF НА МОМЕНТ ШТАМПА кадра.
+        #
+        # ⚠️ ПО ЗАМЕРУ ВЫКЛЮЧЕНО (src/lab/anchor_replay.py по 181233/181936/173415).
+        # Спаривание по штампу оказалось ХУЖЕ спаривания по приходу: медианный расход
+        # 0.083 → 0.107 и 0.114 → 0.264 м, подтяжек 1 → 3. Причина в том, что поза
+        # EKF — НЕ независимый наблюдатель того же момента, а ОТКЛИК на нашу же
+        # публикацию: vision_pose уходит в полётник со штампом time.time() («сейчас»),
+        # хотя описывает борт 0.15 с назад. То есть EKF уже сдвинут на тот же лаг, и
+        # пара «по приходу» с ним СОГЛАСОВАНА, а «по штампу» — рассогласована.
+        # Включать имеет смысл вместе с честным штампом vision_pose (тогда лаг должен
+        # компенсировать сам AP_VisualOdom своим параметром задержки) — и только
+        # перемерив тем же стендом. Разъезд пары как таковой реален: медиана 0.16 м.
+        self.declare_parameter("anchor_pair_by_stamp", False)
+        self.declare_parameter("anchor_buf_sec", 3.0)
         # ПЕРВОЕ ОТКРЫТИЕ МОСТА: сколько секунд отдавать СЫРОЙ VINS, не латча
         # якорь. За это время полётник успевает сбросить позицию на нашу раму
         # (иначе латч подтвердил бы его дрейф — разбор 114844 vs 120819).
@@ -160,6 +179,9 @@ class RayTracer(Node):
         self._open_reset_sec = float(self.get_parameter("anchor_open_reset_sec").value)
         self._stale_sec = float(self.get_parameter("anchor_stale_sec").value)
         self._stale_logged = 0.0
+        self._pair_stamp = bool(self.get_parameter("anchor_pair_by_stamp").value)
+        self.ekf_buf = PoseBuffer(float(self.get_parameter("anchor_buf_sec").value))
+        self._pair_logged = 0.0
         self._open_reset_until = -1e9   # до этого времени якорь не латчим
 
         # I/O
@@ -284,17 +306,24 @@ class RayTracer(Node):
         # курс — из той же позы, что и позиция: пара согласована по времени
         self.ekf_yaw = quat_yaw(q.x, q.y, q.z, q.w)
         self.ekf_pos_wall = time.time()
+        # и в кольцо — по ШТАМПУ, чтобы потом выбрать позу на момент кадра VINS
+        # (MAVROS с timesync_mode:=NONE штампует rclcpp::now() — та же шкала, что у
+        # одометрии VINS: sim-время в симуляции, wall на борту)
+        self.ekf_buf.push(msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                          p.x, p.y, p.z, self.ekf_yaw)
 
     def _on_vins(self, msg):
         p = msg.pose.pose.position
         q = msg.pose.pose.orientation
         self.vins_pos = np.array([p.x, p.y, p.z])
         vins_yaw = quat_yaw(q.x, q.y, q.z, q.w)
-        # ГЕЙТ ЗДОРОВЬЯ МОСТА (bridge_gate.py): по штампу одометрии (одна шкала
-        # с потоком), |twist|, вердикту лётной ноды (свежий < 1 с)
+        # ШТАМП КАДРА — одна шкала с потоком; им судит гейт и по нему же выбирается
+        # пара из кольца поз EKF (нужен и без гейта, поэтому считаем здесь)
+        th = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        # ГЕЙТ ЗДОРОВЬЯ МОСТА (bridge_gate.py): по штампу одометрии, |twist|,
+        # вердикту лётной ноды (свежий < 1 с)
         gate_open = True
         if self.gate is not None:
-            th = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             tv = msg.twist.twist.linear
             ext = (self._ext_sane if time.time() - self._ext_wall < 1.0 else None)
             rdy = (self._ready
@@ -384,8 +413,7 @@ class RayTracer(Node):
         # живёт с use_sim_time, на борту ROS-время = wall). Старое сообщение
         # спаривать со СВЕЖЕЙ позой EKF нельзя: на развороте разница пойдёт
         # целиком в угол и трансляцию якоря (173415: подвис 1.96 с → 20°).
-        age = (self.get_clock().now().nanoseconds * 1e-9
-               - (msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9))
+        age = self.get_clock().now().nanoseconds * 1e-9 - th
         stale = self._stale_sec > 0.0 and age > self._stale_sec
         if stale and time.time() - self._stale_logged > 5.0:
             self._stale_logged = time.time()
@@ -393,13 +421,31 @@ class RayTracer(Node):
                 f"одометрия VINS отстала на {age:.2f} с (порог "
                 f"{self._stale_sec:g}) — якорь НЕ двигаем: пара с позой EKF "
                 f"разъехалась бы по времени, а не по дрейфу")
+        # ПАРА К ЭТОМУ КАДРУ: поза EKF не «последняя пришедшая», а НА МОМЕНТ ШТАМПА
+        # одометрии (интерполяция в кольце). Кольцо не накрывает момент — держим
+        # прежнее поведение (последняя поза): так бывает на первых кадрах и когда
+        # EKF сам отстал; страховкой от грубого случая остаётся age выше.
+        pair_pos, pair_yaw, pair_how = self.ekf_pos, self.ekf_yaw, 'последняя'
+        if self._pair_stamp and self.ekf_buf.ready(th):
+            got = self.ekf_buf.at(th)
+            if got is not None:
+                pair_pos = np.array([got[0], got[1], got[2]])
+                pair_yaw = got[3]
+                pair_how = 'по штампу'
+        if (self._pair_stamp and pair_how == 'последняя'
+                and self.ekf_buf.newest() is not None
+                and time.time() - self._pair_logged > 10.0):
+            self._pair_logged = time.time()
+            self.get_logger().warn(
+                f"пара к кадру взята ПО ПРИХОДУ, не по штампу: штамп кадра {th:.2f}, "
+                f"кольцо поз EKF {self.ekf_buf.oldest():.2f}..{self.ekf_buf.newest():.2f}"
+                " — разъехались шкалы времени или EKF отстал")
         if (gate_open and not stale and time.time() >= self._open_reset_until
                 and not self.have_fix and self.ekf_pos is not None
                 and time.time() - self.ekf_pos_wall < 2.0):
             ev = self.anchor.update(self.vins_pos, vins_yaw,
-                                    self.ekf_pos, self.ekf_yaw, time.time())
-            if ev == 'relatch' and self.gate is not None and self.gate.on_relatch(
-                    msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9):
+                                    pair_pos, pair_yaw, time.time())
+            if ev == 'relatch' and self.gate is not None and self.gate.on_relatch(th):
                 # шторм подтяжек = разнос: мост закрыт, якорь заново
                 self.anchor.reset()
                 gate_open = False
