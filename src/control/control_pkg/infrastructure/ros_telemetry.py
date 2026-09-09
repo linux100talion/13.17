@@ -157,6 +157,11 @@ class RosTelemetry:
                 self._s.bridge_dyaw = float(w[5])
             except ValueError:
                 self._s.bridge_dyaw = None      # '-' — якорь ещё не латчен
+        if len(w) >= 7:
+            try:
+                self._s.dyaw_now = float(w[6])
+            except ValueError:
+                self._s.dyaw_now = None         # нет курса AHRS
 
     def reset_vins_stream(self) -> None:
         """Нода послала /restart VINS: поток объявлен оборванным ЗДЕСЬ И СЕЙЧАС,

@@ -26,12 +26,12 @@ def check(name, ok):
 
 
 def snap(t, fwd=0.0, lat=0.0, seq=0, yaw=0.0, odom=300, age=0.0, armed=True,
-         reb=0, brg_seen=False, brg_open=True, x=0.0, y=0.0, z=2.0):
+         reb=0, brg_seen=False, brg_open=True, x=0.0, y=0.0, z=2.0, dyaw=0.0):
     return DroneState(now_sim=t, armed=armed, ipm_fwd=fwd, ipm_lat=lat,
                       flow_seq=seq, att_yaw=yaw, vins_odom_count=odom,
                       vins_last_sim=t - age, vins_rebirths=reb,
                       bridge_seen=brg_seen, bridge_open=brg_open,
-                      ekf_x=x, ekf_y=y, ekf_z=z)
+                      ekf_x=x, ekf_y=y, ekf_z=z, dyaw_now=dyaw)
 
 
 def mk(**kw):
@@ -189,6 +189,27 @@ check("2 с после скачка — всё ещё ждём", r2.state == 'he
 st, t, seq = run(r2, t, 1.2, seq0=seq, x=9.0, y=0.0)
 check("прошло 3 с спокойной рамы → латч в НОВЫХ координатах",
       r2.state == 'ready' and r2.home == (9.0, 0.0, 2.0))
+
+# --- 10д. ЗРЕЛОСТЬ ПО УСТОЙЧИВОСТИ Δyaw (dyaw_tol): пока разность курсов
+# «AHRS − VINS» гуляет, кадр VINS не сошёлся — латча нет ---
+r = mk(dyaw_tol=2.0)
+t, seq = 1600.0, 0
+for i in range(200):                       # 10 с, Δyaw пляшет на ±5°
+    t += 0.05
+    seq += 1
+    r.update(snap(t, seq=seq, dyaw=5.0 * (1 if i % 2 else -1)), sane=True)
+check("Δyaw гуляет: зрелости нет, латча нет", not r.ripe and r.state == 'heal')
+st, t, seq = run(r, t, 9.0, seq0=seq, dyaw=12.0)   # успокоился (значение любое)
+check("Δyaw встал: зрелость набралась и дом залатчен", r.ripe and r.state == 'ready')
+# чек выключен (dyaw_tol=0) — как было до 2026-09-09
+r2 = mk(dyaw_tol=0.0)
+st, t, seq = run(r2, 1700.0, 9.0, dyaw=5.0 * 1.0)
+check("dyaw_tol=0: чек выключен, латч по прежним условиям", r2.state == 'ready')
+# разность курсов через ±180 не «прыгает» (обёртка)
+r3 = mk(dyaw_tol=2.0)
+st, t, seq = run(r3, 1800.0, 9.0, dyaw=179.5)
+st, t, seq = run(r3, t, 0.2, seq0=seq, dyaw=-179.5)   # это уход на 1°, не на 359°
+check("Δyaw через ±180: обёртка, не ложный уход", r3.state == 'ready')
 
 # --- 11. LOST терминален, но ripe (мост) живёт своей жизнью ---
 r = mk()

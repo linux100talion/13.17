@@ -43,6 +43,11 @@ ipm_fwd/ipm_lat поворачиваются по курсу AHRS. Свой эк
 import math
 
 
+def _wrap_deg(a):
+    """Разность курсов в градусах в диапазон ±180 (через ноль не «прыгает»)."""
+    return (a + 180.0) % 360.0 - 180.0
+
+
 class RthReadiness:
     HEAL, READY, LOST = 'heal', 'ready', 'lost'
 
@@ -50,7 +55,8 @@ class RthReadiness:
                  ripe_sec: float = 5.0, min_count: int = 300,
                  fresh_sec: float = 2.0, track_m: float = 3.0,
                  track_max: int = 4000, relatch: bool = False,
-                 jump_m: float = 2.0, home_settle: float = 3.0):
+                 jump_m: float = 2.0, home_settle: float = 3.0,
+                 dyaw_tol: float = 0.0):
         self.radius = float(radius)
         self.heal_sec = float(heal_sec)
         self.ripe_sec = float(ripe_sec)
@@ -69,6 +75,12 @@ class RthReadiness:
         # скачком меняется. Дом, поставленный до скачка, тут же устареет — так в
         # полёте 103244 баннер показал «до дома 10 м» на неподвижном борте.
         self.home_settle = float(home_settle)
+        # УСТОЙЧИВОСТЬ Δyaw как признак зрелости, градусы (0 = чек выкл). Разность
+        # курсов «AHRS − VINS» (dyaw_now снапшота) вычисляется с первой одометрии и
+        # у СОШЕДШЕГОСЯ кадра СТОИТ: борт крутится — растут оба курса одинаково.
+        # Пока она гуляет больше tol за ripe_sec, кадр VINS ещё не устоялся, и
+        # сажать на него курс полётника (EK3_SRC1_YAW=6) нельзя.
+        self.dyaw_tol = float(dyaw_tol)
         self.reset()
 
     # --- состояние -----------------------------------------------------------
@@ -76,6 +88,7 @@ class RthReadiness:
         self.state = self.HEAL
         self.why = ''
         self.ripe = False           # зрелость для моста (без привязки к кругу)
+        self._dyaw_ref = None
         self.home = None            # (x, y, z) поза EKF в момент латча
         self.track = []             # [(x, y, z)] от дома, шаг track_m
         self.track_full = False
@@ -90,6 +103,7 @@ class RthReadiness:
         self._reb = None            # снимок счётчика перерождений на латче
         self._pose = None           # прошлая поза EKF (детект скачка кадра)
         self._settle_since = None   # с какого момента рама спокойна (ждём home_settle)
+        self._dyaw_ref = None       # опорная разность курсов (для чека устойчивости)
 
     # --- ядро ----------------------------------------------------------------
     def _advance_ipm(self, s) -> None:
@@ -109,10 +123,23 @@ class RthReadiness:
             self.dist = math.hypot(self._x, self._y)
         self._prev = cur
 
+    def _dyaw_steady(self, s) -> bool:
+        """Разность курсов «AHRS − VINS» стоит на месте? Ушла больше tol —
+        опора переставляется, и отсчёт зрелости начинается заново."""
+        if self.dyaw_tol <= 0.0:
+            return True
+        d = getattr(s, 'dyaw_now', None)
+        if d is None:
+            return False            # курса ещё нет — зрелости тоже
+        if self._dyaw_ref is None or abs(_wrap_deg(d - self._dyaw_ref)) > self.dyaw_tol:
+            self._dyaw_ref = d
+            return False
+        return True
+
     def _healthy(self, s, sane: bool) -> bool:
         fresh = (s.now_sim - getattr(s, 'vins_last_sim', -1e9)) <= self.fresh_sec
         mature = int(getattr(s, 'vins_odom_count', 0)) >= self.min_count
-        return bool(sane and fresh and mature)
+        return bool(sane and fresh and mature and self._dyaw_steady(s))
 
     def _bridge_dead(self, s) -> bool:
         """Мост точно не кормит EKF. «Сообщений моста не было» (bridge_seen=False)

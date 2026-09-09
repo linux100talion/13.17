@@ -40,7 +40,7 @@ from vision_msgs.msg import Detection2DArray
 
 from nav_pkg.nn1 import geo
 from nav_pkg.nn1.bridge_gate import BridgeGate
-from nav_pkg.nn1.frame_anchor import FrameAnchor, quat_yaw
+from nav_pkg.nn1.frame_anchor import FrameAnchor, _wrap as _wrap_pi, quat_yaw
 
 
 class RayTracer(Node):

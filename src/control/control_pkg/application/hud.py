@@ -274,9 +274,12 @@ def _bridge_fields(s) -> str:
     if not getattr(s, 'bridge_seen', False):
         return ""
     d = getattr(s, 'bridge_dyaw', None)
+    dn = getattr(s, 'dyaw_now', None)
     return (f" brg={int(s.bridge_open)} brw={s.bridge_why} "
             f"brl={s.bridge_relatch} brc={s.bridge_closes} "
-            f"brd={'--' if d is None else f'{d:+.1f}'}")
+            f"brd={'--' if d is None else f'{d:+.1f}'} "
+            f"brdn={'--' if dn is None else f'{dn:+.1f}'} "
+            f"yawsrc={getattr(s, 'ekf_yaw_src', 'compass')}")
 
 
 def _station_fields(s) -> str:

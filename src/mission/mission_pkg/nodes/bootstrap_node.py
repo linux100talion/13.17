@@ -463,7 +463,14 @@ class BootstrapArch2Node(Node):
                                  ripe_sec=cfg.rth_ripe_sec, min_count=int(cfg.rth_ripe_n),
                                  fresh_sec=cfg.vins_fresh_sec, track_m=cfg.rth_track_m,
                                  jump_m=cfg.rth_jump_m,
-                                 home_settle=cfg.rth_home_settle)
+                                 home_settle=cfg.rth_home_settle,
+                                 dyaw_tol=cfg.rth_dyaw_tol)
+        # ЧЕЙ КУРС ДЕРЖИТ EKF (src/nav/frames.md): 'compass' всегда, 'vins' —
+        # переключаем EK3_SRC1_YAW 1 → 6 в момент латча возврата (рама уже спокойна,
+        # борт висит в круге на демпфере). _yaw_want — чего мы хотим, _yaw_src — что
+        # реально подтвердил FCU (в статус уходит второе).
+        self._yaw_want = 'compass'
+        self._yaw_src = 'compass'
         self._bridge_ok_pub = self.create_publisher(Bool, '/vins/bridge_ok', 10)
         # переставить дом полётника в точку латча (фолбэк RTL полетит туда же)
         from mavros_msgs.srv import CommandHome
@@ -518,6 +525,7 @@ class BootstrapArch2Node(Node):
         s.rth_track = self._rth.track
         s.rth_home = self._rth.home
         self._bridge_ok_pub.publish(Bool(data=bool(self._rth.ripe)))
+        self._yaw_source_tick(s)
         if s.rth_state != prev:
             if s.rth_state == RthReadiness.READY:
                 h = self._rth.home
@@ -530,6 +538,48 @@ class BootstrapArch2Node(Node):
                     f"ВОЗВРАТ ЗАПРЕЩЁН на этот полёт: {s.rth_why} "
                     f"(круг {self.cfg.rth_radius:g} м, лечение "
                     f"{self.cfg.rth_heal_sec:g} с) — домой ведёт пилот")
+
+    def _yaw_source_tick(self, s) -> None:
+        """Переключение источника курса EKF (BS_EKF_YAW_SRC=vins).
+
+        ВПЕРЁД: в момент латча возврата — рама к этому мгновению зрелая, спокойная
+        (home_settle) и с устойчивым Δyaw, борт висит в круге на демпфере, позиционного
+        контура в петле нет. Скачка курса при переключении НЕ будет: мы публикуем
+        ориентацию, уже повёрнутую якорем (yaw_VINS + Δyaw = yaw_AHRS), то есть отдаём
+        полётнику его же текущий курс.
+        НАЗАД: как только опора пропала — перерождение / не sane / закрытый мост /
+        протухший поток. Иначе EKF остался бы без источника курса (голый гироскоп).
+        ⚠️ Откат сегодня ЖЁСТКИЙ: EKF доберёт накопленное расхождение с компасом разом.
+        Мягкий доворот перед переключением — следующий шаг (см. src/nav/frames.md)."""
+        s.ekf_yaw_src = self._yaw_src
+        if self.cfg.ekf_yaw_src != 'vins':
+            return
+        fresh = (s.now_sim - s.vins_last_sim) <= self.cfg.vins_fresh_sec
+        bridge_ok = not (getattr(s, 'bridge_seen', False)
+                         and not getattr(s, 'bridge_open', True))
+        opora = (s.rth_state == RthReadiness.READY and fresh and bridge_ok
+                 and (self._handover is None or self._handover.vins_sane(s)))
+        want = 'vins' if opora else 'compass'
+        if want == 'compass' and self.cfg.ekf_yaw_fallback <= 0:
+            return                      # откат выключен ручкой — остаёмся как есть
+        if want == self._yaw_want:
+            # подтверждение: очередь параметров опустела от нашего запроса
+            if self._yaw_src != want and not any(
+                    n == 'EK3_SRC1_YAW' for n, _v, _r in self._ekf_pending):
+                self._yaw_src = want
+                self.logger.info(f"курс EKF: источник = {want} (EK3_SRC1_YAW "
+                                 f"{'6' if want == 'vins' else '1'})")
+            return
+        self._yaw_want = want
+        self._ekf_pending = [q for q in self._ekf_pending if q[0] != 'EK3_SRC1_YAW']
+        self._ekf_pending.insert(0, ('EK3_SRC1_YAW', 6.0 if want == 'vins' else 1.0,
+                                     None))
+        self._ekf_src_last_try = 0.0    # не ждать 2 с — просим сейчас
+        (self.logger.info if want == 'vins' else self.logger.warn)(
+            f"курс EKF → {want}: " + ("рама зрелая и спокойная, сажаем полётник на "
+                                      "курс VINS" if want == 'vins' else
+                                      "опора пропала (мост/здоровье/поток) — "
+                                      "возвращаем компас"))
 
     def _set_home(self) -> None:
         """Дом полётника = текущая точка (в момент латча мы ещё у места взлёта, но
