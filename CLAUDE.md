@@ -22,6 +22,13 @@ src/
                  максимальная скорость), windspeed.md (стрелка ветра HUD),
                  tune.md (настройка демпфера заново), low-rider.md (полёты
                  ниже 1 м), yawbanklimit.md (потолок крена виража в LOITER)
+  mission/     — пакет mission_pkg: ЛЁТНАЯ НОДА (bootstrap_arch2) и план полёта —
+                 шаги freefly/SoftLand/Rth, лесенка ярусов, строгая схема ручек
+                 BS_* (config.py), офлайн-тесты плана в test/
+  lab/         — скрипты прогонов (freefly_lv.sh, capture_scene.sh, cmd/* зовут их)
+                 и ОФЛАЙН-СТЕНДЫ по bag: vins_sane_replay, ipm_alt_replay,
+                 rth_check, hud_video/ipm_video, joystick/ (реплей пульта,
+                 js_probe, joy_timeline). Таблица инструментов — src/lab/CLAUDE.md
   nav/         — пакет nav_pkg: нейросети навигации (NN1/NN2, пока болванки)
                  + openhd_streamer (даунлинк в OpenHD с оверлеем детекций)
   orin_shutdown/ — Go-утилита graceful shutdown через MAVLink
