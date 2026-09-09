@@ -8,6 +8,7 @@
 #
 #   /model/iris_cam/odometry (истина Gazebo)  → /truth/path
 #   /odometry                (VINS)           → /vins/path
+#   /mavros/vision_pose/pose (VINS в кадре EKF) → /vins/path_fcu
 #   /mavros/local_position/pose (EKF)         → /ekf/path
 #
 # Path публикуется не чаще 5 Гц (иначе 20k поз × 45 Гц = десятки МБ/с), точки
@@ -34,7 +35,13 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 DEFAULT_ODOM = ['/model/iris_cam/odometry:/truth/path', '/odometry:/vins/path']
-DEFAULT_POSE = ['/mavros/local_position/pose:/ekf/path']
+DEFAULT_POSE = ['/mavros/local_position/pose:/ekf/path',
+                # ЧТО РЕАЛЬНО ЕДЕТ В EKF: поза VINS, УЖЕ повёрнутая якорем
+                # (Rz(Δyaw)·p_vins + t). Красная /vins/path нарисована в кадре
+                # VINS — на спавне не на восток она развёрнута на Δyaw, и синяя
+                # ложится НЕ на неё, а на эту. Разбор 181936: |EKF − сырой VINS|
+                # медиана 44 м, |EKF − эта| 0.19 м.
+                '/mavros/vision_pose/pose:/vins/path_fcu']
 
 
 class Track:
