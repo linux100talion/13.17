@@ -1,0 +1,5 @@
+# То же, что mission/yaw_vins, но поверх реплея пульта (BS_PILOT=replay).
+# Отдельный файл нужен потому, что дельта кладётся ПОВЕРХ включаемого профиля, а
+# baseline и replay — разные (см. mission/replay.txt).
+include replay.txt
+BS_EKF_YAW_SRC=vins
