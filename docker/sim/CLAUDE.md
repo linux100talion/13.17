@@ -44,8 +44,12 @@ LV1_loiter.md               — путь до LOITER-на-VINS в профиле
 LV2_loiter.md               — то же для LV=2 «GPS отсутствует с бута» (боевой
                               дефолт: мост нулевой позы, origin руками,
                               лесенка SF-мастера)
-doc/tmp/                    — архив (FAQ*, todo*, README, laptop_move.md,
-                              concept.txt, спеки flow/yaw, tune_results)
+laptop_move.md              — переезд стенда на GPU-ноут + ЖИВОЙ ПУЛЬТ: петля
+                              override→rc/in, путь joy МИМО FCU, серия LV (§3);
+                              §5 — план переезда на боевой борт (RX в FCU + отвод
+                              CRSF на Orin, release-seize, грабли карты каналов)
+doc/tmp/                    — архив (FAQ*, todo*, README, concept.txt,
+                              спеки flow/yaw, tune_results)
 ```
 
 ## Рабочий цикл (всё через Makefile)
@@ -63,12 +67,16 @@ make fresh-start    # полный сброс (down→up, ephemeral state тер
 Лётные команды (после `wait`): `make arm takeoff hover land disarm`,
 `make fly` (облёт квадрата для инициализации VINS), `make vins-watch`.
 
-## Переезд на GPU-ноутбук — `doc/tmp/laptop_move.md`
+## Переезд на GPU-ноутбук и на борт — `laptop_move.md`
 
 Стенд жил на GPU-less боксе (`CPU=1`, llvmpipe, RTF ≈ 0.07). Чек-лист подъёма на
 машине с NVIDIA, что ломается при переходе к реальному времени (разрешение камеры,
-окна в КАДРАХ, wall-таймауты) и план проброса живого пульта —
-`docker/sim/doc/tmp/laptop_move.md` (архив; итоги серии LV — там же, §3).
+окна в КАДРАХ, wall-таймауты) и путь живого пульта (петля `override → rc/in`, joy
+МИМО FCU; итоги серии LV — §3) — `docker/sim/laptop_move.md`. Там же **§5 — план
+переезда на боевой борт**: RX штатно в FCU + пассивный отвод CRSF-линии на Orin,
+release-seize (`0` = «отпустить канал») вместо passthrough в MANUAL, сторож свежести
+пульта и грабли карты каналов (`RC7_OPTION=31` = motor estop против нашего SF).
+Файл поднят из `doc/tmp/` 2026-09-09 — он не архив, а живой план.
 
 ## CPU-режим (ветка nn2_c3_cpu)
 
