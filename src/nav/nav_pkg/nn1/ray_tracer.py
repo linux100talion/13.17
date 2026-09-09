@@ -31,6 +31,7 @@ from ament_index_python.packages import get_package_share_directory
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
@@ -156,15 +157,21 @@ class RayTracer(Node):
         # I/O
         self.create_subscription(CameraInfo, self.get_parameter("camera_info_topic").value,
                                  self._on_caminfo, 10)
+        # ⚠️ ВСЕ ТОПИКИ MAVROS — qos_profile_sensor_data (BEST_EFFORT). Подписка
+        # с дефолтным RELIABLE к BEST_EFFORT-публикатору НЕ СОГЛАСУЕТСЯ: сообщения
+        # не приходят вовсе, и молча — ни ошибки, ни варна. Разбор 164742: att_yaw
+        # был None весь полёт → седьмое поле '-' (brdn=--, критерий зрелости слеп),
+        # latch_yaw на первом открытии моста не вызывался НИКОГДА (откат к сырому
+        # VINS — ровно тот дефект, что чинил 5c1d562), а засечка NN1 выходила по
+        # `R_enu_body is None`. Для позы EKF это уже было учтено — теперь везде.
         self.create_subscription(Imu, self.get_parameter("attitude_topic").value,
-                                 self._on_attitude, 50)
+                                 self._on_attitude, qos_profile_sensor_data)
         self.create_subscription(Float64, self.get_parameter("rel_alt_topic").value,
-                                 self._on_rel_alt, 10)
+                                 self._on_rel_alt, qos_profile_sensor_data)
         self.create_subscription(Odometry, self.get_parameter("vins_odom_topic").value,
                                  self._on_vins, 50)
         self.create_subscription(Detection2DArray, self.get_parameter("detections_topic").value,
                                  self._on_detections, 10)
-        from rclpy.qos import qos_profile_sensor_data
         self.create_subscription(PoseStamped, self.get_parameter("ekf_pose_topic").value,
                                  self._on_ekf_pose, qos_profile_sensor_data)
 
@@ -192,6 +199,27 @@ class RayTracer(Node):
         self.get_logger().info(
             "ray_tracer запущен (Инкремент 2/3: засечка -> сброс дрейфа -> "
             + ("vision_pose" if self.publish_vp else "vision_pose ВЫКЛ") + ")")
+
+        # СТОРОЖ МОЛЧАЩИХ ВХОДОВ: несогласованный QoS не даёт ни ошибки, ни варна —
+        # подписка просто никогда не срабатывает (разбор 164742: att_yaw был None
+        # весь полёт, latch_yaw не вызывался, засечка выходила по R_enu_body=None).
+        # Один выстрел через 30 с после старта. Спрашиваем ТОЛЬКО про потоки, что
+        # идут от бута FCU: позу EKF (прогрев 43-44 с) и одометрию VINS (init уже
+        # в воздухе) ждать в этот момент рано — их молчание законно.
+        self._watch = self.create_timer(30.0, self._check_inputs)
+
+    def _check_inputs(self):
+        self._watch.cancel()
+        dead = [n for n, v in (("/mavros/imu/data (курс AHRS)", self.att_yaw),
+                               ("/mavros/global_position/rel_alt", self.rel_alt))
+                if v is None]
+        if dead:
+            self.get_logger().error(
+                "ВХОДЫ МОЛЧАТ 30 с: " + ", ".join(dead) + ". Две причины: "
+                "НЕСОГЛАСОВАННЫЙ QoS (топики MAVROS публикуются BEST_EFFORT, "
+                "подписка RELIABLE молча не получает НИЧЕГО — ни ошибки, ни варна; "
+                "ros2 topic info -v <топик>) или молчащие потоки телеметрии FCU "
+                "(см. tel= в /mission/status)")
 
     # --- база (origin + landmarks) -------------------------------------------
     def _load_db(self):
