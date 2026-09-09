@@ -295,7 +295,7 @@ class HudRenderer:
 
     _RTH_LOST = {'reborn': 'VINS REBORN', 'insane': 'VINS SICK',
                  'bridge': 'BRIDGE CLOSED', 'circle': 'LEFT CIRCLE',
-                 'timeout': 'HEAL TIMEOUT'}
+                 'timeout': 'HEAL TIMEOUT', 'jump': 'FRAME JUMP'}
 
     def _rth_banner(self):
         """rth= статуса → (текст, цвет) или None (поля нет — латч выключен/

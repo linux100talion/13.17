@@ -85,6 +85,7 @@ def main():
     ap.add_argument('--ripe-sec', type=float, default=5.0)
     ap.add_argument('--min-count', type=int, default=100)
     ap.add_argument('--track-m', type=float, default=3.0)
+    ap.add_argument('--jump-m', type=float, default=2.0)
     a = ap.parse_args()
 
     d = load(a.bag)
@@ -101,12 +102,12 @@ def main():
         return arr[i][1] if i >= 0 else default
 
     rth = RthReadiness(radius=a.radius, heal_sec=a.heal_sec, ripe_sec=a.ripe_sec,
-                       min_count=a.min_count, track_m=a.track_m)
+                       min_count=a.min_count, track_m=a.track_m, jump_m=a.jump_m)
     t0 = st[0][0]
     fwd = lat = 0.0                 # интеграл скоростей IPM (тело) = путь
     prev_t = None
     prev_state, prev_ripe = rth.state, rth.ripe
-    last = (rth.state, '', 0, 0.0, 0.0)
+    last = (rth.state, '', 0, 0.0, 0.0, None)
     print(f"bag: {a.bag}")
     print(f"  ручки: круг {a.radius:g} м, лечение {a.heal_sec:g} с, зрелость "
           f"{a.ripe_sec:g} с при odom ≥ {a.min_count}")
@@ -136,7 +137,7 @@ def main():
             ekf_z=pos[2] if pos else None)
         state = rth.update(s, sane=bool(near('/vins/sane', t, True)))
         if s.armed:                       # итог берём с ПОСЛЕДНЕГО тика в воздухе:
-            last = (state, rth.why, len(rth.track), rth.path_m, rth.dist)
+            last = (state, rth.why, len(rth.track), rth.path_m, rth.dist, rth.home)
         if rth.ripe != prev_ripe:
             prev_ripe = rth.ripe
             print(f"  {t - t0:6.1f}  зрелость VINS → {'ДА (мост можно открывать)' if rth.ripe else 'нет'}")
@@ -150,9 +151,10 @@ def main():
                 print(f"  {t - t0:6.1f}  ЗАПРЕТ: {rth.why} → RTH нет на весь полёт")
             else:
                 print(f"  {t - t0:6.1f}  дизарм — латч сброшен (следующий полёт чистый)")
-    st_, why_, ntr, pm, dist = last
+    st_, why_, ntr, pm, dist, home = last
+    hm = f"({home[0]:+.1f},{home[1]:+.1f})" if home else "--"
     print(f"  ИТОГ (последний тик в воздухе): {st_}{(':' + why_) if why_ else ''}; "
-          f"трек {ntr} точек / {pm:.0f} м; смещение по IPM {dist:.1f} м")
+          f"дом {hm} EKF; трек {ntr} точек / {pm:.0f} м; смещение по IPM {dist:.1f} м")
 
 
 if __name__ == '__main__':

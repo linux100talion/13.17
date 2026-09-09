@@ -460,7 +460,8 @@ class BootstrapArch2Node(Node):
         # EKF уехал на 200 м и «возврат» сел в 52 м от старта.
         self._rth = RthReadiness(radius=cfg.rth_radius, heal_sec=cfg.rth_heal_sec,
                                  ripe_sec=cfg.rth_ripe_sec, min_count=int(cfg.rth_ripe_n),
-                                 fresh_sec=cfg.vins_fresh_sec, track_m=cfg.rth_track_m)
+                                 fresh_sec=cfg.vins_fresh_sec, track_m=cfg.rth_track_m,
+                                 jump_m=cfg.rth_jump_m)
         self._bridge_ok_pub = self.create_publisher(Bool, '/vins/bridge_ok', 10)
         # переставить дом полётника в точку латча (фолбэк RTL полетит туда же)
         from mavros_msgs.srv import CommandHome

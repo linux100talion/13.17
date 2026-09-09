@@ -121,18 +121,48 @@ check("мост закрыт: латча нет, ждём (why=bridge-wait)",
 st, t, seq = run(r, t, 0.2, seq0=seq, brg_seen=True, brg_open=True)
 check("мост открылся → латч сразу (зрелость уже набрана)", r.state == 'ready')
 
-# --- 10. трек пишется шагом track_m, дом остаётся точкой 0 ---
+# --- 10. в круге дом ИДЁТ ЗА ПОЗОЙ (кадр ещё прыгает), за кругом пишется трек ---
 r = mk()
 st, t, seq = run(r, 1000.0, 6.0, x=0.0, y=0.0)
-for i in range(1, 11):                       # уезжаем на 10 м по x
+for i in range(1, 13):                       # 12 м по x: и IPM-путь, и поза EKF
     t += 0.05
     seq += 1
-    r.update(snap(t, seq=seq, x=float(i), y=0.0), sane=True)
-check("трек: шаг 3 м → 4 точки (дом + 3, 9 м)", len(r.track) == 4)
-check("дом — точка 0 трека", r.track[0] == (0.0, 0.0, 2.0))
-check("длина пути считается", abs(r.path_m - 9.0) < 1e-6)
+    r.update(snap(t, seq=seq, fwd=float(i), x=float(i), y=0.0), sane=True)
+check("дом = последняя точка ВНУТРИ круга (5 м), не точка латча",
+      r.home == (5.0, 0.0, 2.0))
+check("за кругом трек пишется шагом 3 м", r.track == [(5.0, 0.0, 2.0),
+                                                      (8.0, 0.0, 2.0),
+                                                      (11.0, 0.0, 2.0)])
+check("длина пути считается", abs(r.path_m - 6.0) < 1e-6)
 check("расстояние до дома по прямой",
-      abs(r.home_dist(snap(t, x=10.0, y=0.0)) - 10.0) < 1e-6)
+      abs(r.home_dist(snap(t, x=12.0, y=0.0)) - 7.0) < 1e-6)
+
+# --- 10в. вернулись в круг: дом и трек НЕ сбрасываются (полёт «туда и обратно») ---
+for i in range(11, 0, -1):                   # летим обратно к дому
+    t += 0.05
+    seq += 1
+    r.update(snap(t, seq=seq, fwd=float(i), x=float(i), y=0.0), sane=True)
+check("возврат в круг: дом остался на границе круга", r.home == (5.0, 0.0, 2.0))
+check("возврат в круг: трек не стёрт", len(r.track) >= 3)
+
+# --- 10б. СКАЧОК КАДРА EKF (сброс к vision_pose / перелатч якоря) ---
+# в круге — норма: дом идёт следом (полёт 103244: мост открылся, EKF прыгнул 10 м)
+r = mk()
+st, t, seq = run(r, 1050.0, 6.0, x=0.0, y=0.0)
+t += 0.05; seq += 1
+r.update(snap(t, seq=seq, x=10.0, y=0.0), sane=True)   # прыжок кадра в круге
+check("скачок кадра ВНУТРИ круга: не дисквалификация, дом переехал",
+      r.state == 'ready' and r.home == (10.0, 0.0, 2.0))
+# за кругом — дом и трек оказались в раме, которой больше нет
+r = mk()
+st, t, seq = run(r, 1060.0, 6.0, x=0.0, y=0.0)
+for i in range(1, 9):                        # выходим из круга (8 м)
+    t += 0.05; seq += 1
+    r.update(snap(t, seq=seq, fwd=float(i), x=float(i), y=0.0), sane=True)
+check("за кругом ещё READY", r.state == 'ready')
+t += 0.05; seq += 1
+r.update(snap(t, seq=seq, fwd=8.0, x=18.0, y=0.0), sane=True)   # скачок 10 м
+check("скачок кадра ЗА кругом → LOST:jump", r.state == 'lost' and r.why == 'jump')
 
 # --- 11. LOST терминален, но ripe (мост) живёт своей жизнью ---
 r = mk()

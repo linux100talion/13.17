@@ -19,7 +19,10 @@
              в этой фазе может врать) И время от отрыва ≤ heal_sec (таймаут не
              зависит от гейна канала и ловит «висим и не лечимся»).
       ↓ латч: VINS зрел (odom ≥ min_count) и здоров непрерывно ripe_sec
-    READY  — дом ЗАПИСАН (поза EKF на момент латча) + пишется трек пути.
+    READY  — дом ЗАПИСАН (поза EKF) + пишется трек пути. Пока борт НЕ ВЫШЕЛ из
+             круга, дом идёт за текущей позой: кадр в эти секунды ещё прыгает
+             (первая vision_pose сбрасывает уехавший за лечение EKF — 10 м в
+             полёте 103244), а физически мы всё равно у точки взлёта.
              Отсюда возврат разрешён.
       ↓ разрыв рамы
     LOST   — терминально (relatch=False): перерождение VINS, вердикт «болен»,
@@ -44,7 +47,8 @@ class RthReadiness:
     def __init__(self, radius: float = 5.0, heal_sec: float = 30.0,
                  ripe_sec: float = 5.0, min_count: int = 300,
                  fresh_sec: float = 2.0, track_m: float = 3.0,
-                 track_max: int = 4000, relatch: bool = False):
+                 track_max: int = 4000, relatch: bool = False,
+                 jump_m: float = 2.0):
         self.radius = float(radius)
         self.heal_sec = float(heal_sec)
         self.ripe_sec = float(ripe_sec)
@@ -53,6 +57,10 @@ class RthReadiness:
         self.track_m = float(track_m)
         self.track_max = int(track_max)
         self.relatch = bool(relatch)
+        # СКАЧОК КАДРА EKF за тик, м: больше — это не полёт, а сброс/перелатч рамы
+        # (борт и на 5 м/с проходит 0.25 м за тик 20 Гц). Внутри круга скачок
+        # поглощается (дом идёт за позой), снаружи — дом и трек становятся ложью.
+        self.jump_m = float(jump_m)
         self.reset()
 
     # --- состояние -----------------------------------------------------------
@@ -72,6 +80,8 @@ class RthReadiness:
         self._t_arm = None
         self._ripe_since = None
         self._reb = None            # снимок счётчика перерождений на латче
+        self._pose = None           # прошлая поза EKF (детект скачка кадра)
+        self._left = False          # круг уже покидали (дом больше не следует)
 
     # --- ядро ----------------------------------------------------------------
     def _advance_ipm(self, s) -> None:
@@ -112,11 +122,36 @@ class RthReadiness:
             return 'bridge'
         return None
 
+    def _jumped(self, s) -> bool:
+        """Кадр EKF прыгнул (сброс к vision_pose / перелатч якоря)? Полёт 103244:
+        мост открылся на 45.9 с — и поза EKF, уехавшая за лечение на 10 м без
+        подтяжки, скачком вернулась к нашей раме. Внутри круга это норма (дом
+        идёт следом), снаружи — дом и трек записаны в раме, которой больше нет."""
+        x, y = getattr(s, 'ekf_x', None), getattr(s, 'ekf_y', None)
+        prev, self._pose = self._pose, (x, y) if x is not None else None
+        if prev is None or x is None or y is None:
+            return False
+        return math.hypot(x - prev[0], y - prev[1]) > self.jump_m
+
     def _record(self, s) -> None:
         x, y = getattr(s, 'ekf_x', None), getattr(s, 'ekf_y', None)
         if x is None or y is None or self.track_full:
             return
         z = getattr(s, 'ekf_z', None) or 0.0
+        # ДО ПЕРВОГО ВЫХОДА ИЗ КРУГА дом = «здесь и сейчас, в свежем кадре»:
+        # физически мы всё равно у точки взлёта, а кадр в эти секунды ещё может
+        # прыгнуть (первая vision_pose сбрасывает уехавший за лечение EKF — 10 м
+        # в полёте 103244). Иначе дом остаётся в старых координатах и баннер сразу
+        # показывает «до дома 10 м» на неподвижном борте.
+        # ⚠️ ТОЛЬКО ДО ПЕРВОГО ВЫХОДА: вернулись домой — трек уже записан, и
+        # обнулять его нельзя (иначе полёт «туда и обратно» стирает сам себя).
+        if not self._left and self.dist > self.radius:
+            self._left = True
+        if not self._left:
+            self.home = (float(x), float(y), z)
+            self.track = [self.home]
+            self.path_m = 0.0
+            return
         px, py, _pz = self.track[-1]
         if math.hypot(x - px, y - py) < self.track_m:
             return
@@ -137,6 +172,8 @@ class RthReadiness:
         if self._t_arm is None:
             self._t_arm = s.now_sim
         self._advance_ipm(s)
+        if self.state != self.READY:
+            self._jumped(s)         # держим прошлую позу свежей и до латча
 
         healthy = self._healthy(s, sane)
         if healthy:
@@ -150,7 +187,10 @@ class RthReadiness:
         if self.state == self.LOST:
             return self.state
         if self.state == self.READY:
+            jumped = self._jumped(s)
             broke = self._broke(s, sane)
+            if broke is None and jumped and self.dist > self.radius:
+                broke = 'jump'      # рама сместилась, а дом с треком остались в старой
             if broke is not None:
                 self.state, self.why = self.LOST, broke
             else:

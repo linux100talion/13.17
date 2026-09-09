@@ -37,6 +37,7 @@ BS_RTH_HEAL_SEC=60
 BS_RTH_RIPE_SEC=5
 BS_RTH_RIPE_N=100
 BS_RTH_TRACK_M=3
+BS_RTH_JUMP_M=2
 BS_RTH_SET_HOME=1
 
 # guard возврата: шаг rth сам отменяет возврат, если мост VINS→EKF закрыт или гейт
