@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""MavrosActuator — адаптер портов RcOutput + FlightMode.
+"""MavrosActuator — адаптер портов RcOutput + FlightMode + SetpointOutput.
 
 RcOutput → /mavros/rc/override (каналы 1..4 = roll/pitch/throttle/yaw, 5..18 =
 RC_NOCHANGE «игнор»). FlightMode → сервисы set_mode/cmd/arming (fire-and-forget,
-call_async — как в монолите). Один адаптер держит оба порта: у обоих одна шина MAVROS.
+call_async — как в монолите). SetpointOutput → /mavros/setpoint_raw/local
+(PositionTarget: позиция + курс в локальной раме EKF) — им шаг RthTrack ведёт борт
+домой по своему треку в GUIDED. Один адаптер держит все три порта: у них одна шина
+MAVROS.
 """
-from mavros_msgs.msg import OverrideRCIn
+from mavros_msgs.msg import OverrideRCIn, PositionTarget
 from mavros_msgs.srv import CommandBool, CommandLong, SetMode
 
 from ..domain.modes import to_fcu
@@ -19,6 +22,7 @@ class MavrosActuator:
         self._mode_cli = node.create_client(SetMode, '/mavros/set_mode')
         self._arm_cli = node.create_client(CommandBool, '/mavros/cmd/arming')
         self._cmd_cli = node.create_client(CommandLong, '/mavros/cmd/command')
+        self._sp_pub = node.create_publisher(PositionTarget, '/mavros/setpoint_raw/local', 10)
 
     # --- RcOutput ---
     def publish(self, cmd: RcCommand) -> None:
@@ -30,6 +34,24 @@ class MavrosActuator:
         ch[3] = int(cmd.yaw)
         msg.channels = ch
         self._rc_pub.publish(msg)
+
+    # --- SetpointOutput ---
+    # Маска: командуем ТОЛЬКО позицию (и курс, если дан) — скорости/ускорения и
+    # темп курса игнорируются полётником. Значения в ENU: плагин setpoint_raw
+    # переводит их в NED сам, поэтому x/y/z берутся прямо из нашей рамы EKF.
+    _MASK_POS = (PositionTarget.IGNORE_VX | PositionTarget.IGNORE_VY
+                 | PositionTarget.IGNORE_VZ | PositionTarget.IGNORE_AFX
+                 | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ
+                 | PositionTarget.IGNORE_YAW_RATE)
+
+    def publish_pos(self, x: float, y: float, z: float, yaw=None) -> None:
+        msg = PositionTarget()
+        msg.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+        msg.type_mask = self._MASK_POS | (PositionTarget.IGNORE_YAW if yaw is None else 0)
+        msg.position.x, msg.position.y, msg.position.z = float(x), float(y), float(z)
+        if yaw is not None:
+            msg.yaw = float(yaw)
+        self._sp_pub.publish(msg)
 
     # --- FlightMode ---
     def set_mode(self, mode: str) -> None:

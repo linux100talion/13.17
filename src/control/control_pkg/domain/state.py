@@ -216,6 +216,11 @@ class DroneState:
     rth_state: str = "heal"
     rth_why: str = ""
     rth_status: str = ""             # поле rth= статуса (heal/3.2, ready/128, lost:reborn)
+    # Трек возврата (от дома, шаг track_m) и сам дом — в координатах EKF (кадр map,
+    # тот же, в котором идут уставки GUIDED). Отдаются ССЫЛКОЙ на список
+    # RthReadiness: шаг RthTrack только читает. () = латча ещё не было.
+    rth_track: tuple = ()
+    rth_home: tuple = ()
     # КАКОЙ возврат просили: 'RTL' (прямая на home, /mission/rth) | 'SMART_RTL'
     # (по хлебным крошкам пройденного пути, /mission/smart_rth). ЛИПКОЕ поле, не
     # one-shot: шаг rth входит на СЛЕДУЮЩЕМ тике, когда импульс уже погашен, и

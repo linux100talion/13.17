@@ -1,0 +1,14 @@
+# КАНДИДАТ — ВОЗВРАТ ПО СВОЕМУ ТРЕКУ (cmd/rth_track, 2026-09-09). Всё остальное =
+# loiter/guard.txt (гейты яруса 2) → loiter/baseline.txt.
+# Возврат ведём САМИ (BS_RTH_MODE=guided, шаг RthTrack): GUIDED + поток уставок по
+# треку, записанному от латча. Ручки FCU здесь нужны для двух вещей:
+#   WPNAV_SPEED 300  — скорость, с которой полётник идёт к нашей уставке, см/с (3 м/с):
+#                      стоковые 5 м/с на сортии 20–30 м = борт всё время в разгоне/
+#                      торможении, а нам нужен ровный проход по точкам трека
+#   WPNAV_ACCEL 100  — ускорение, см/с² (мягче стоковых 250: меньше клевков на точках)
+#   RTL_ALT_M 7 / RTL_LOIT_TIME 1000 / LAND_ALT_LOW_M 3 — как в loiter/rth: они нужны
+#                      ФОЛБЭКУ (BS_RTH_MODE=fcu / кнопка при отказе GUIDED)
+# ⚠️ WPNAV_* правят и штатный LOITER (ярус 2) этого прогона — соседние прогоны
+# восстанавливает loiter/baseline.txt.
+include guard.txt
+BS_FCU_PARAMS=WPNAV_SPEED=300 WPNAV_ACCEL=100 RTL_ALT_M=7 RTL_LOIT_TIME=1000 LAND_ALT_LOW_M=3

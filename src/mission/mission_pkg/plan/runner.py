@@ -15,12 +15,14 @@ from .step import FINISH, GOTO, NEXT
 
 
 class PlanRunner:
-    def __init__(self, steps, clock, flight_mode, log, perception=None):
+    def __init__(self, steps, clock, flight_mode, log, perception=None,
+                 setpoints=None):
         self.steps = steps
         self.clock = clock
         self.mode = flight_mode
         self.log = log
         self.perception = perception    # опц. порт зрения: нужен только для reset_keyframe
+        self.sp = setpoints             # опц. порт уставок GUIDED (шаг RthTrack)
         self._by_name = {st.name: i for i, st in enumerate(steps)}
         self.i = 0
         self.finished = False

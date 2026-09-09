@@ -32,6 +32,7 @@ BINDINGS = {
     'Telemetry':  [('ros_telemetry.py', 'RosTelemetry')],
     'RcOutput':   [('mavros_actuator.py', 'MavrosActuator')],
     'FlightMode': [('mavros_actuator.py', 'MavrosActuator')],
+    'SetpointOutput': [('mavros_actuator.py', 'MavrosActuator')],
     'PilotInput': [('ros_pilot.py', 'JoyPilot'), ('ros_pilot.py', 'RosPilot'),
                    ('ros_pilot.py', 'ScriptedPilot')],
     'Logger':     [('ros_io.py', 'RosLogger')],

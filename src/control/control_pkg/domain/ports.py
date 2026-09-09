@@ -44,6 +44,16 @@ class FlightMode(Protocol):
 
 
 @runtime_checkable
+class SetpointOutput(Protocol):
+    # ПОТОК УСТАВОК GUIDED (возврат домой по своему треку, шаг RthTrack):
+    # позиция в ЛОКАЛЬНОЙ раме EKF (ENU, та же, что /mavros/local_position/pose —
+    # в ней записан наш трек), курс — ENU-радианы или None («не командовать»).
+    # Поток обязан идти непрерывно: GUID_TIMEOUT полётника 3 с, пауза дольше =
+    # борт тормозит и висит.
+    def publish_pos(self, x: float, y: float, z: float, yaw=None) -> None: ...
+
+
+@runtime_checkable
 class PilotInput(Protocol):
     def sticks(self) -> RcCommand: ...   # сырой PWM с /mavros/rc/in (радио ИЛИ SITL)
     def mode_switch(self) -> int: ...    # тумблер авто/ручной — для арбитража

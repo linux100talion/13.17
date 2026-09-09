@@ -111,7 +111,7 @@
 |---|---|---|---|---|
 | ярус LOITER | `Freefly._mode_target` | не sane / незрелый поток (`odom < min_count`) / **мост закрыт** / extnav протух | выход из LOITER → ярус ниже, удержание 5 с | `BS_LOITER_GUARD=1` |
 | **латч возврата** | `RthReadiness` (`application/rth_ready.py`) | вне круга лечения рама рвётся: перерождение VINS / `insane` / закрытый мост / **скачок кадра EKF > `BS_RTH_JUMP_M`**; либо не залатчились в круге за `BS_RTH_HEAL_SEC` | `rth=lost` — кнопка SD отвергается, красный баннер FPV; возврата в этом полёте нет | `BS_RTH_RADIUS`, `_HEAL_SEC`, `_RIPE_SEC`, `_RIPE_N` |
-| **возврат домой** | `Rth._nav_sick` | **мост закрыт** ИЛИ вердикт гейта — дольше **1 с** подряд (`Rth.GUARD_SEC`) | `RTH_GUARD`: `set_mode(ALT_HOLD)`, `goto freefly` — борт пилоту на демпфере | `BS_RTH_GUARD=1` |
+| **возврат домой** | `Rth._nav_sick` / `RthTrack._nav_sick` | **мост закрыт** ИЛИ вердикт гейта — дольше **1 с** подряд (`Rth.GUARD_SEC`) | `RTH_GUARD`: `set_mode(ALT_HOLD)`, `goto freefly` — борт пилоту на демпфере | `BS_RTH_GUARD=1` |
 
 Смысл guard'а возврата: возврат ведёт FCU по позиции EKF, а EKF в LV=2 держится только
 нашей подтяжкой. Нет подтяжки — лучше висеть, чем лететь домой по цифрам, которых

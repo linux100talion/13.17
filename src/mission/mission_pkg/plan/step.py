@@ -525,6 +525,7 @@ class Freefly(Step):
                  handover=None, loiter_center=False, vins_fresh=2.0,
                  sf_master=False, loiter_alt=1.5, land_gate=None,
                  loiter_track=None, loiter_bank_max=0.0, loiter_guard=False,
+                 rth_ready_only=False,
                  land_in_loiter=False, rth=False):
         self.name = name
         self.stack = stack
@@ -547,6 +548,9 @@ class Freefly(Step):
         # тик, иначе EKF слепнет и FCU сам уходит в LAND по EKF-failsafe (мы его
         # уважаем — борт садится вместо перехода на демпфер). False = старое.
         self.loiter_guard = loiter_guard
+        # возврат ПО ТРЕКУ (rth_mode=guided) без латча бессмыслен: ни дома, ни трека.
+        # Режимом полётника (fcu) — можно и в фазе лечения: home у FCU свой.
+        self.rth_ready_only = rth_ready_only
         self._loiter_hold_until = -1e9
         self._pilot_stabs = pilot_stabs
         self.loiter_alt = loiter_alt   # гейт «в воздухе» (см. config.loiter_alt)
@@ -941,12 +945,18 @@ class Freefly(Step):
         if self.rth and getattr(s, 'pilot_rth', False):
             if s.pilot_switch == 1:
                 ctx.log.warn("    RTH: отказ — MANUAL (SF не вверх); верни стек и повтори")
-            elif getattr(s, 'rth_state', '') == 'lost':
+            elif (getattr(s, 'rth_state', '') != 'ready' if self.rth_ready_only
+                  else getattr(s, 'rth_state', '') == 'lost'):
                 # рама, в которой записан дом, рвалась (или не успела залатчиться):
                 # возвращаться некуда — цифры EKF уже не те. Честный отказ вместо
                 # полёта «домой» по чужим координатам (разбор 073004 в gates.md)
-                ctx.log.warn(f"    RTH: ОТКАЗ — возврат запрещён на этот полёт "
-                             f"({getattr(s, 'rth_why', '-')}); домой ведёт пилот")
+                st_ = getattr(s, 'rth_state', '-')
+                ctx.log.warn(f"    RTH: ОТКАЗ — rth={st_}"
+                             + (f":{s.rth_why}" if getattr(s, 'rth_why', '') else "")
+                             + ("; дом ещё не залатчен (лечимся в круге)"
+                                if st_ == 'heal' else
+                                "; возврат запрещён на этот полёт")
+                             + " — домой ведёт пилот")
             else:
                 ctx.log.info("    RTH: ВОЗВРАТ ДОМОЙ (rel_alt={}) → шаг rth".format(
                     s.rel_alt))
@@ -1403,6 +1413,175 @@ class Rth(Step):
         if self.handover is not None and not self.handover.vins_sane(s):
             return "VINS РАЗНЁССЯ (гейт здоровья)"
         return None
+
+
+class RthTrack(Step):
+    """ВОЗВРАТ ДОМОЙ ПО СВОЕМУ ТРЕКУ — GUIDED + поток уставок (часть 3, 2026-09-09).
+
+    ПОЧЕМУ НЕ RTL/SMART_RTL полётника. Крошки SmartRTL живут в FCU и их всего
+    SRTL_POINTS (300, максимум прошивки 500 ≈ 1 км непрощаемого пути) — на сортию
+    хватает, на 10 км нет; очистить их в полёте нельзя, а записаны они с АРМА, то
+    есть включая фазу лечения, когда кадр EKF ещё уезжал. Свой трек лежит у нас
+    (3 м шаг = 64 КБ на 12 км), пишется ОТ ЛАТЧА — только в раме, которой мы
+    доверяем, — и разматывается назад нашими же уставками.
+
+    Как ведём: `set_mode GUIDED` (латч ждём LATCH_SEC, иначе отказ), дальше КАЖДЫЙ
+    тик публикуем `PositionTarget` — позиция очередной точки трека в той же локальной
+    раме EKF, в которой трек записан, плюс КУРС ПО ТРЕКУ (нос по направлению на точку:
+    задел под автономные полёты, где картинка вперёд нужна нейросетям). Поток обязан
+    быть непрерывным: `GUID_TIMEOUT` полётника 3 с, пауза дольше — борт тормозит.
+    Точка считается пройденной в радиусе `wp_r`, дальше берём следующую ПО НАПРАВЛЕНИЮ
+    К ДОМУ (индекс 0 трека). Скорость держит FCU (`WPNAV_SPEED`), стек пуст.
+
+    ДОМА (дошли до точки 0) — СРАЗУ МЯГКАЯ ПОСАДКА (`_goto` на шаг land): решение
+    пилота 2026-09-09 «антенна может быть выключена, ждать команду не от кого».
+    SoftLand из GUIDED берёт ветку alt (ALT_HOLD + демпфер) — семантика стиков там
+    известна.
+
+    ВЫХОДЫ ОБРАТНО В ПОЛЁТ (все — goto freefly, борт заармлен, стек и опора от
+    текущей точки): RTH_CANCEL (повторный импульс кнопки), RTH_MANUAL (SF вниз),
+    RTH_REFUSED (нет трека / rth≠ready / GUIDED не залатчился), RTH_GUARD (мост
+    закрыт или гейт объявил VINS больным дольше GUARD_SEC — возвращаться некуда).
+    Не дошли за бюджет → RTH_TIMEOUT (борт в воздухе, сажает пилот).
+    Бюджет считается от длины остатка трека и ожидаемой скорости, не константой."""
+
+    LATCH_SEC = 3.0
+    GUARD_SEC = 1.0
+    YAW_MIN_M = 0.5          # ближе к точке курс не командуем (дрожал бы)
+
+    def __init__(self, name, stack, wp_r=1.5, keep="ALT_HOLD",
+                 throttle_hold=RC_CENTER, resume="freefly", land_step="land",
+                 handover=None, guard=False, budget_min=60.0, speed=2.0,
+                 land_home=True):
+        self.name = name
+        self.stack = stack
+        self.wp_r = float(wp_r)
+        self.keep = keep
+        self.throttle_hold = throttle_hold
+        self.resume = resume
+        self.land_step = land_step
+        self.handover = handover
+        self.guard = guard
+        self.budget_min = float(budget_min)
+        self.speed = max(float(speed), 0.2)
+        self.land_home = land_home
+        self._track = []
+        self._i = 0
+        self._latched = False
+        self._sick_since = None
+        self._budget = budget_min
+
+    # --- вход -----------------------------------------------------------------
+    def enter(self, ctx, s) -> None:
+        self._latched = False
+        self._sick_since = None
+        self._track = list(getattr(s, 'rth_track', ()) or ())
+        self.stack.switch_stabilization([])      # ведёт FCU, стики в центре
+        self._i = self._nearest(s)
+        rest = self._path_left()
+        # бюджет: путь остатка на ожидаемой скорости, с двойным запасом
+        self._budget = max(self.budget_min, 2.5 * rest / self.speed)
+        if ctx is not None:
+            ctx.log.info(f"    {self.name}: домой ПО ТРЕКУ (GUIDED) — {len(self._track)} "
+                         f"точек, остаток {rest:.0f} м, бюджет {self._budget:.0f} с; "
+                         f"по прибытии {'мягкая посадка' if self.land_home else 'висим'}")
+
+    def _nearest(self, s) -> int:
+        """С какой точки трека начинать разматывать: ближайшая к текущей позе."""
+        x, y = getattr(s, 'ekf_x', None), getattr(s, 'ekf_y', None)
+        if not self._track or x is None or y is None:
+            return 0
+        d = [(px - x) ** 2 + (py - y) ** 2 for px, py, _pz in self._track]
+        return d.index(min(d))
+
+    def _path_left(self) -> float:
+        return sum(math.hypot(self._track[i][0] - self._track[i - 1][0],
+                              self._track[i][1] - self._track[i - 1][1])
+                   for i in range(1, self._i + 1))
+
+    def _nav_sick(self, s):
+        """Та же проверка, что у шага Rth: живость подтяжки EKF (см. gates.md)."""
+        if not self.guard:
+            return None
+        if getattr(s, 'bridge_seen', False) and not getattr(s, 'bridge_open', True):
+            return f"МОСТ VINS→EKF ЗАКРЫТ (bridge_gate: {getattr(s, 'bridge_why', '-')})"
+        if self.handover is not None and not self.handover.vins_sane(s):
+            return "VINS РАЗНЁССЯ (гейт здоровья)"
+        return None
+
+    # --- тик ------------------------------------------------------------------
+    def tick(self, ctx, s) -> StepResult:
+        rc = RcCommand(throttle=self.throttle_hold)
+        if not s.armed:
+            ctx.log.info(f"    {self.name}: дизарм — возврат завершён")
+            return _finish(RcCommand(throttle=RC_MIN_THR), "RTH_DONE")
+        if getattr(s, 'pilot_rth', False):
+            ctx.log.warn(f"    {self.name}: повторный импульс — ВОЗВРАТ ОТМЕНЁН → "
+                         f"{self.resume}")
+            ctx.mode.set_mode(self.keep)
+            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_CANCEL")
+        if s.pilot_switch == 1:
+            ctx.log.warn(f"    {self.name}: пилот забрал борт (MANUAL) → {self.resume}")
+            ctx.mode.set_mode(self.keep)
+            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_MANUAL")
+        if not self._track or getattr(s, 'rth_state', '') != 'ready':
+            ctx.log.error(f"    {self.name}: ОТКАЗ — "
+                          f"{'трека нет' if not self._track else 'rth=' + str(getattr(s, 'rth_state', '?'))}"
+                          f" (возвращаться некуда) → {self.resume}")
+            ctx.mode.set_mode(self.keep)
+            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_REFUSED")
+        sick = self._nav_sick(s)
+        if sick is not None:
+            if self._sick_since is None:
+                self._sick_since = s.now_sim
+            elif s.now_sim - self._sick_since >= self.GUARD_SEC:
+                ctx.log.warn(f"    {self.name}: {sick} — ВОЗВРАТ ОТМЕНЁН (цифры EKF "
+                             f"больше нечем подтягивать) → {self.resume}")
+                ctx.mode.set_mode(self.keep)
+                return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_GUARD")
+        else:
+            self._sick_since = None
+        # --- режим ---
+        if s.mode == "GUIDED":
+            if not self._latched:
+                self._latched = True
+                ctx.log.info(f"    {self.name}: GUIDED залатчен — ведём по треку")
+        elif self._latched:
+            ctx.log.warn(f"    {self.name}: FCU вышел из GUIDED (mode={s.mode}) — "
+                         f"уважаем → {self.resume}")
+            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_EJECT")
+        elif ctx.elapsed() > self.LATCH_SEC:
+            ctx.log.error(f"    {self.name}: GUIDED не залатчился за {self.LATCH_SEC:g} с "
+                          f"(mode={s.mode}) — нет позиции EKF? → {self.resume}")
+            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_REFUSED")
+        else:
+            ctx.try_cmd(lambda: ctx.mode.set_mode("GUIDED"))
+        # --- уставка (шлём ВСЕГДА, в т.ч. до латча: GUIDED без цели висит) ---
+        tx, ty, tz = self._track[self._i]
+        x, y = getattr(s, 'ekf_x', None), getattr(s, 'ekf_y', None)
+        if x is not None and y is not None:
+            d = math.hypot(tx - x, ty - y)
+            if d <= self.wp_r and self._i > 0:
+                self._i -= 1                       # следующая точка — ближе к дому
+                tx, ty, tz = self._track[self._i]
+                d = math.hypot(tx - x, ty - y)
+            if d <= self.wp_r and self._i == 0:
+                ctx.log.info(f"    {self.name}: ДОМА (точка 0 трека) — "
+                             + ("мягкая посадка" if self.land_home else "висим"))
+                if self.land_home:
+                    return _goto(rc, self.land_step, "RTH_HOME")
+                return _run(rc)
+            # КУРС ПО ТРЕКУ: нос по направлению на точку (вблизи не крутим)
+            yaw = math.atan2(ty - y, tx - x) if d > self.YAW_MIN_M else None
+        else:
+            yaw = None
+        if getattr(ctx, 'sp', None) is not None:
+            ctx.sp.publish_pos(tx, ty, tz, yaw)
+        if ctx.elapsed() > self._budget:
+            ctx.log.error(f"    {self.name}: не дошли за {self._budget:.0f} с "
+                          f"(осталось {self._i} точек) — завершаю, борт в воздухе")
+            return _finish(rc, "RTH_TIMEOUT")
+        return _run(rc)
 
 
 class Hover(Step):

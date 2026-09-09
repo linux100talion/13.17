@@ -64,7 +64,7 @@ from control_pkg.domain.rc import RC_MIN_THR
 
 from ..recipes import build_stabilizers
 from .step import (Arm, AwaitMode, Climb, Control, Freefly, Land, LoiterHold,
-                   Rth, SoftLand, WaitEkfPos)
+                   Rth, RthTrack, SoftLand, WaitEkfPos)
 
 _TOKEN = re.compile(r'^([a-z_]+?)(-?\d+(?:\.\d+)?)?$')
 
@@ -175,7 +175,7 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                         loiter_bank_max=cfg.loiter_bank_max,
                         loiter_guard=cfg.loiter_guard > 0,
                         land_in_loiter=cfg.land_in_loiter > 0,
-                        rth=True)]
+                        rth=True, rth_ready_only=cfg.rth_mode == 'guided')]
         if soft_land:
             # кнопка SA → Freefly отдаёт NEXT (FREEFLY_LAND) → сюда; дизарм
             # руками по-прежнему завершает миссию из самого Freefly (FINISH)
@@ -197,8 +197,19 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
         # индекс» после freefly обязан остаться посадкой по кнопке SA. Ручек у шага
         # нет: точку home, высоту и скорость возврата держит FCU (RTL_ALT_M,
         # RTL_SPEED_MS, LAND_SPD_MS) — нода лишь просит режим и отдаёт борт.
-        plan.append(Rth("rth", stack, keep=keep, throttle_hold=cfg.throttle_hold,
-                        handover=handover, guard=cfg.rth_guard > 0))
+        if cfg.rth_mode == 'guided':
+            # ВОЗВРАТ ПО СВОЕМУ ТРЕКУ: GUIDED + поток уставок, курс по треку, дома —
+            # сразу мягкая посадка (шаг land того же плана). Трек и дом приходят в
+            # снапшоте от RthReadiness лётной ноды (латч, src/mission/rth.md)
+            plan.append(RthTrack("rth", stack, wp_r=cfg.rth_wp_r, keep=keep,
+                                 throttle_hold=cfg.throttle_hold,
+                                 land_step="land" if soft_land else "freefly",
+                                 handover=handover, guard=cfg.rth_guard > 0,
+                                 speed=cfg.rth_speed,
+                                 land_home=cfg.rth_land_home > 0 and soft_land))
+        else:
+            plan.append(Rth("rth", stack, keep=keep, throttle_hold=cfg.throttle_hold,
+                            handover=handover, guard=cfg.rth_guard > 0))
         return plan
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold

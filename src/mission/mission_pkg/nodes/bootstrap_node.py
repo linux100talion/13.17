@@ -105,7 +105,7 @@ class BootstrapArch2Node(Node):
         self.clock = RosClock(self)
         self.telemetry = RosTelemetry(self, self.clock, alt_src=cfg.alt_src,
                                       vel_src=cfg.vins_vel_src)
-        self.actuator = MavrosActuator(self)     # RcOutput + FlightMode
+        self.actuator = MavrosActuator(self)     # RcOutput + FlightMode + SetpointOutput
         self.logger = RosLogger(self)
         self.debug = RosDebugSink(self)
         self.pilot = self._make_pilot(cfg, pilot_kind)
@@ -209,7 +209,8 @@ class BootstrapArch2Node(Node):
             plan = build_bootstrap_plan(cfg, build_control_stack(cfg), handover,
                                         live_pilot=live_pilot)
         self.runner = PlanRunner(plan, self.clock, self.actuator, self.logger,
-                                 perception=self.perception)
+                                 perception=self.perception,
+                                 setpoints=self.actuator)
 
         # --- отдача скорости+позиции IPM в EKF (vision_vel, см. config) ---
         self._vision_pub = None
@@ -511,6 +512,10 @@ class BootstrapArch2Node(Node):
         s.rth_state = self._rth.update(s, sane=sane)
         s.rth_why = self._rth.why
         s.rth_status = self._rth.status(s)
+        # трек и дом — в снапшот (шаг RthTrack разматывает их уставками GUIDED);
+        # список отдаётся ССЫЛКОЙ, копий на тик не делаем
+        s.rth_track = self._rth.track
+        s.rth_home = self._rth.home
         self._bridge_ok_pub.publish(Bool(data=bool(self._rth.ripe)))
         if s.rth_state != prev:
             if s.rth_state == RthReadiness.READY:

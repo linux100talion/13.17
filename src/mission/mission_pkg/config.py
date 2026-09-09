@@ -1283,6 +1283,20 @@ class BootstrapConfig:
                                      # текущую точку (/mavros/cmd/set_home current_gps):
                                      # дом FCU совпадёт с нашим, и фолбэк RTL полетит
                                      # туда же. 0 = не трогать. BS_RTH_SET_HOME
+    rth_mode: str             # КАК возвращаемся: 'guided' — САМИ, по своему треку
+                                     # (GUIDED + поток уставок, шаг RthTrack: крошек FCU
+                                     # всего 300-500 ≈ 1 км, и записаны они с арма, когда
+                                     # кадр ещё уезжал); 'fcu' — режимом полётника
+                                     # (RTL/SMART_RTL, шаг Rth, режим выбирает
+                                     # rth_joy_mode). BS_RTH_MODE
+    rth_wp_r: float           # радиус приёмки точки трека, м: ближе — берём следующую
+                                     # (по направлению к дому). BS_RTH_WP_R
+    rth_speed: float          # ожидаемая скорость возврата, м/с — ТОЛЬКО для бюджета
+                                     # шага (реальную держит WPNAV_SPEED полётника).
+                                     # BS_RTH_SPEED
+    rth_land_home: float      # 1 = дойдя до дома, СРАЗУ мягкая посадка (решение пилота:
+                                     # антенна может быть выключена, ждать команду не от
+                                     # кого); 0 = висим и отдаём борт. BS_RTH_LAND_HOME
     rth_guard: float          # 1 = ШАГ RTH САМ ОТМЕНЯЕТ ВОЗВРАТ, когда навигация под
                                      # ним сгнила: мост VINS→EKF закрыт (brg=0) или гейт
                                      # здоровья объявил VINS больным дольше Rth.GUARD_SEC.
@@ -1417,6 +1431,7 @@ CHOICES = {
     'station_heading': ('fcu',),
     'vins_vel_src': ('diff', 'twist'),
     'vins_stab': ('dpvins', 'vinshold'),
+    'rth_mode': ('guided', 'fcu'),
     'rth_joy_mode': ('RTL', 'SMART_RTL'),
 }
 # Ключи, которые ЖИВУТ В ПРОФИЛЯХ / env, но нодой не читаются: кто их ест.

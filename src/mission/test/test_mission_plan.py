@@ -249,12 +249,18 @@ def main():
     ff_names = [st.name for st in ff]
     # ff_land (дефолт ВКЛ): эпилог SoftLand — кнопка SA → Freefly NEXT → 'land';
     # Arm'а нет (руддер-арм руками), дизарм руками завершает из самого Freefly
-    # rth (RTL полётника, /mission/rth) — ПОСЛЕДНИМ: достижим только goto по имени,
-    # «следующий индекс» после freefly обязан остаться посадкой по кнопке SA
-    checks.append(("freefly: план = prearm + freefly + land (SoftLand) + rth (Rth), БЕЗ Arm",
+    # rth — ПОСЛЕДНИМ: достижим только goto по имени, «следующий индекс» после
+    # freefly обязан остаться посадкой по кнопке SA. Класс шага выбирает BS_RTH_MODE:
+    # guided (дефолт) = наш трек через уставки, fcu = RTL/SMART_RTL полётника
+    checks.append(("freefly: план = prearm + freefly + land (SoftLand) + rth (RthTrack), БЕЗ Arm",
                    ff_names == ["prearm", "freefly", "land", "rth"]
                    and type(ff[2]).__name__ == "SoftLand"
-                   and type(ff[3]).__name__ == "Rth"))
+                   and type(ff[3]).__name__ == "RthTrack"))
+    ff_fcu = compile_mission(BootstrapConfig.baseline(mv_level=0.3, ff_loiter=0.0,
+                                                      rth_mode='fcu'),
+                             "freefly", "DpRollHold+DpYawHold", live_pilot=True)
+    checks.append(("BS_RTH_MODE=fcu → шаг Rth (режим полётника)",
+                   type(ff_fcu[3]).__name__ == "Rth"))
     ffs = ff[1]
     checks.append(("freefly: Freefly знает про шаг rth, стек у Rth общий",
                    ffs.rth is True and ff[3].stack is ffs.stack))
