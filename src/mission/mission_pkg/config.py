@@ -1228,6 +1228,21 @@ class BootstrapConfig:
                                      # миксере пока ни к чему не привязан — привязать
                                      # к CH8 и сверить фронт в ленте joy_timeline.
                                      # BS_LAND_JOY / --land-joy
+    rth_joy: str              # где кнопка ВОЗВРАТА ДОМОЙ в /joy (SD на TX12):
+                                     # 'b<i>' — buttons[i], 'a<i>' — axes[i] > 0.5;
+                                     # '' — кнопки нет (возврат только с хоста:
+                                     # /mission/rth, /mission/smart_rth). Фронт
+                                     # «нажали» узел превращает в импульс pilot_rth
+                                     # (тот же, что от топика) — в freefly это прыжок
+                                     # на шаг rth, повторное нажатие ОТМЕНЯЕТ возврат.
+                                     # ⚠️ Индекс зависит от микшера пульта: мерить
+                                     # src/lab/joystick/js_probe.py.
+                                     # BS_RTH_JOY / --rth-joy
+    rth_joy_mode: str         # КАКОЙ возврат шлёт кнопка: 'SMART_RTL' (по
+                                     # крошкам пройденного пути — дефолт, cmd/smart_rth)
+                                     # или 'RTL' (прямая на home, cmd/rth). Топики с
+                                     # хоста от этого не зависят: там режим выбирает
+                                     # сам топик. BS_RTH_JOY_MODE / --rth-joy-mode
     loiter_gate_budget: float # токен loiter<t>: сколько ждать готовности
                                      # extnav+VINS (sim-сек) в стабилизированном hover;
                                      # вышел — шаг пропускается (LOITER_SKIP, миссия
@@ -1353,6 +1368,7 @@ CHOICES = {
     'station_heading': ('fcu',),
     'vins_vel_src': ('diff', 'twist'),
     'vins_stab': ('dpvins', 'vinshold'),
+    'rth_joy_mode': ('RTL', 'SMART_RTL'),
 }
 # Ключи, которые ЖИВУТ В ПРОФИЛЯХ / env, но нодой не читаются: кто их ест.
 EXTRA_KEYS = {

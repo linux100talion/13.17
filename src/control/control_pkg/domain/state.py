@@ -197,8 +197,9 @@ class DroneState:
     # мягкую посадку (SoftLand) через гейт «низко и почти стоим»
     # (config.land_alt_max / land_v_max). Вне freefly игнорируется.
     pilot_land: bool = False
-    # ВОЗВРАТ ДОМОЙ (RTL полётника): one-shot от оператора (/mission/rth, make rth) —
-    # кнопки на пульте нет. Узел выставляет на ОДИН тик; шаг Freefly прыгает на шаг
+    # ВОЗВРАТ ДОМОЙ (RTL/SMART_RTL полётника): one-shot от оператора — кнопка пульта
+    # (SD; config.rth_joy, фронт нажатия) ИЛИ топик с хоста (/mission/rth,
+    # /mission/smart_rth). Узел выставляет на ОДИН тик; шаг Freefly прыгает на шаг
     # rth, повторный импульс там ОТМЕНЯЕТ возврат. Вне freefly игнорируется.
     pilot_rth: bool = False
     # КАКОЙ возврат просили: 'RTL' (прямая на home, /mission/rth) | 'SMART_RTL'

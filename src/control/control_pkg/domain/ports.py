@@ -51,6 +51,8 @@ class PilotInput(Protocol):
                                          # вне схемы адаптеры отдают 0
     def land_switch(self) -> bool: ...   # кнопка посадки (SA): уровень «нажата»;
                                          # адаптеры без источника отдают False
+    def rth_switch(self) -> bool: ...    # кнопка возврата домой (SD): тоже УРОВЕНЬ —
+                                         # в импульс его превращает узел (PressEdge)
 
 
 @runtime_checkable

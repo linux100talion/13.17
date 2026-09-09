@@ -51,8 +51,10 @@ EXTRA_KEYS — это НЕ поле BootstrapConfig, поэтому меты п�
      точки): RTH_CANCEL (повторный импульс), RTH_MANUAL (SF не вверх), RTH_REFUSED
      (RTL не залатчился за 3 с — нет позиции EKF), RTH_EJECT (FCU сам вышел из RTL).
      Не сели за 180 с → RTH_TIMEOUT (error, сажает пилот).
-  2. Триггер — топик /mission/rth (std_msgs/Empty, one-shot), как /mission/land у SA;
-     кнопки на пульте нет. `make rth` в docker/sim/Makefile.
+  2. Триггер — топик /mission/rth (std_msgs/Empty, one-shot), как /mission/land у SA:
+     `make rth` в docker/sim/Makefile. С 2026-09-09 тот же импульс даёт КНОПКА SD
+     пульта (BS_RTH_JOY=b2), но режимом кнопки — BS_RTH_JOY_MODE, дефолт SMART_RTL:
+     чтобы SD звала прямой RTL этой кампании, ставить BS_RTH_JOY_MODE=RTL.
   ⚠️ ПОЧЕМУ ЭТО ШАГ ПЛАНА, А НЕ set_mode С ХОСТА: Freefly ре-ассертит свой режим
      каждый тик (runner.keep_mode, порог 2 с) — внешний RTL снимался бы через ≤2 с и
      выглядел бы как «FCU не принял». Владелец режима один, и это план.
@@ -100,7 +102,8 @@ SF вниз (MANUAL). Кнопка SA во время возврата не ра
   - нет поля rth= в /mission/status и баннера в HUD (ярусы/посадка свои имеют);
   - SMART_RTL (mode 21, разматывает пройденный трек по SRTL_POINTS) — СДЕЛАН
     отдельным прогоном cmd/smart_rth (тот же шаг Rth, топик /mission/smart_rth);
-  - кнопки на пульте нет (все свободные каналы TX12 заняты; SA — посадка).
+  - кнопка на пульте ЕСТЬ с 2026-09-09 (SD, docker/sim/rx.md), но полётом не
+    проверена и по умолчанию зовёт SMART_RTL, а не RTL этой кампании.
 
 Результат
 ---------

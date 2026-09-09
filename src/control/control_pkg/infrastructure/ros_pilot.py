@@ -50,6 +50,12 @@ JOY_AXIS_MASTER = 6
 # (CH8 при 7 осях). Проверка на земле: щёлкнуть SA и посмотреть, что меняется
 # (joy_timeline пишет фронты кнопок в ленту; ros2 topic echo /joy). '' = выкл.
 JOY_LAND_SRC_DEFAULT = 'b0'
+# --- Кнопка ВОЗВРАТА ДОМОЙ (SD на TX12): источник задаёт config.rth_joy / --rth-joy ---
+# Тот же механизм, что у SA: канал микшера → buttons[i] ('b<i>') или axes[i] ('a<i>').
+# Наружу — УРОВЕНЬ; в импульс возврата (s.pilot_rth) фронт превращает узел
+# (PressEdge ниже), режим шлёт config.rth_joy_mode (дефолт SMART_RTL — возврат по
+# следу). '' = кнопки нет, возврат только с хоста (/mission/rth, /mission/smart_rth).
+JOY_RTH_SRC_DEFAULT = ''
 _JOY_SPAN = 400          # ось ±1 → PWM 1500±400 (конвенция pilot_full)
 # Знаки осей TX12 (roll,pitch,throttle,yaw) — выверены ЖИВЫМИ ПОЛЁТАМИ
 # (assisted/MANUAL, 2026-08-16): в EdgeTX-HID зеркальны нашей RC-конвенции
@@ -94,7 +100,8 @@ def joy_master(axes):
 
 
 def parse_land_src(spec):
-    """'b0' → ('b', 0), 'a7' → ('a', 7); ''/None/'0'/'off' → None (кнопки нет).
+    """Источник кнопки пульта (SA посадки, SD возврата): 'b0' → ('b', 0),
+    'a7' → ('a', 7); ''/None/'0'/'off' → None (кнопки нет).
     Кривой spec — ValueError (лучше упасть на старте, чем лететь без посадки)."""
     spec = (spec or '').strip().lower()
     if spec in ('', '0', 'off', 'none'):
@@ -104,15 +111,32 @@ def parse_land_src(spec):
     raise ValueError(f"land_joy: ожидал 'b<i>' (кнопка) или 'a<i>' (ось), получил {spec!r}")
 
 
-def joy_land(axes, buttons, src) -> bool:
-    """Чистое ядро кнопки посадки: нажата ли по /joy. src — parse_land_src();
-    отсутствующий индекс (короткий массив, старые записи) → False."""
+def joy_button(axes, buttons, src) -> bool:
+    """Чистое ядро кнопки пульта (SA посадки, SD возврата): нажата ли по /joy.
+    src — parse_land_src(); отсутствующий индекс (короткий массив, старые
+    записи) → False."""
     if src is None:
         return False
     kind, i = src
     if kind == 'b':
         return i < len(buttons) and int(buttons[i]) != 0
     return i < len(axes) and float(axes[i]) > JOY_SWITCH_THRESHOLD
+
+
+class PressEdge:
+    """Уровень кнопки → ОДИН импульс на фронт «отпущена → нажата».
+
+    Нужен там, где потребитель ждёт импульс, а не уровень (возврат домой:
+    s.pilot_rth гасится за тик, повторный импульс = отмена). ПЕРВЫЙ семпл
+    только запоминается: кнопка/тумблер, уже стоящий в «нажато» на старте ноды
+    (или квирк default_trig_val), не должен выглядеть нажатием."""
+
+    def __init__(self):
+        self._prev = None
+
+    def pressed(self, now) -> bool:
+        prev, self._prev = self._prev, bool(now)
+        return bool(now) and prev is False
 
 
 class JoyPilot:
@@ -131,12 +155,13 @@ class JoyPilot:
     """
 
     def __init__(self, node, signs=JOY_SIGNS_DEFAULT, sf_master=False,
-                 land_src=JOY_LAND_SRC_DEFAULT):
+                 land_src=JOY_LAND_SRC_DEFAULT, rth_src=JOY_RTH_SRC_DEFAULT):
         from rclpy.qos import qos_profile_sensor_data
         from sensor_msgs.msg import Joy
         self._signs = signs
         self._sf_master = sf_master
         self._land_src = parse_land_src(land_src)
+        self._rth_src = parse_land_src(rth_src)
         self._r = self._p = self._t = self._y = RC_CENTER
         # дефолты до первого /joy: MANUAL в схеме SF-мастер (руки пилота —
         # безопасный старт), потолок 0 (только демпфер) — эскалация лишь по
@@ -144,6 +169,7 @@ class JoyPilot:
         self._sw = 1 if sf_master else 0
         self._lvl = 0
         self._land = False
+        self._rth = False
         node.create_subscription(Joy, '/joy', self._on, qos_profile_sensor_data)
 
     def _on(self, m):
@@ -152,7 +178,8 @@ class JoyPilot:
             self._sw, self._lvl = joy_master(m.axes)
         else:
             self._sw = sw
-        self._land = joy_land(m.axes, m.buttons, self._land_src)
+        self._land = joy_button(m.axes, m.buttons, self._land_src)
+        self._rth = joy_button(m.axes, m.buttons, self._rth_src)
 
     def sticks(self) -> RcCommand:
         return RcCommand(self._r, self._p, self._t, self._y)
@@ -165,6 +192,9 @@ class JoyPilot:
 
     def land_switch(self) -> bool:
         return self._land
+
+    def rth_switch(self) -> bool:
+        return self._rth
 
 
 class RosPilot:
@@ -210,6 +240,11 @@ class RosPilot:
     def land_switch(self) -> bool:
         return self._land
 
+    def rth_switch(self) -> bool:
+        # канал возврата легаси-адаптеру не назначен: живой пульт читает JoyPilot,
+        # а тут остаётся хост (/mission/rth, /mission/smart_rth)
+        return False
+
 
 class ScriptedPilot:
     """Профиль стиков по sim-времени. segments: список (t_until, roll, pitch, yaw) —
@@ -250,6 +285,9 @@ class ScriptedPilot:
 
     def land_switch(self) -> bool:
         return self._land_at is not None and self._t() >= self._land_at
+
+    def rth_switch(self) -> bool:
+        return False        # скриптовый пилот возврат не жмёт (это жест оператора)
 
     def total(self) -> float:
         """Длительность профиля (для триггера land в пилот-режимах)."""

@@ -19,6 +19,14 @@ BS_SF_MASTER=1
 # ПУЛЬТА — другой пульт/прошивка → перемерить src/lab/joystick/js_probe.py
 BS_LAND_JOY=b1
 
+# кнопка SD (ВОЗВРАТ ДОМОЙ) в /joy пульта: b<i>/a<i>, '' = кнопки нет (возврат только
+# `make rth` / `make smart-rth`). Фронт нажатия = тот же импульс, что от топика: в freefly
+# прыжок на шаг rth, повторное нажатие ОТМЕНЯЕТ возврат. Режим — BS_RTH_JOY_MODE.
+# ⚠️ ЗАВИСИТ ОТ МИКШЕРА: SD должен быть назначен на канал ПОСЛЕ осей (CH11 = b2 по коду
+# EdgeTX classic, CH9..CH32 = b0..b23); перемерить src/lab/joystick/js_probe.py
+BS_RTH_JOY=b2
+BS_RTH_JOY_MODE=SMART_RTL
+
 # слой: нода — пульт: устройство (bootstrap_arch2.sh, ⚠️ машинно-зависимо) и знаки осей
 # "r,p,t,y" (пусто = JOY_SIGNS_DEFAULT из control_pkg, выверены полётом TX12)
 BS_JOY_DEV=/dev/input/js0

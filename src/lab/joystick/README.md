@@ -64,14 +64,15 @@
 `bootstrap_arch2.sh` при `BS_PILOT=replay` поднимает `joy_replay.py` вместо
 `joy_linux_node` и отдаёт ноде `--pilot joy`. Лог реплея — `output/joy_replay.log`.
 
-## Где в `/joy` лежит кнопка SA (пробник на хосте, без стека)
+## Где в `/joy` лежат кнопки SA и SD (пробник на хосте, без стека)
 
 ```
 python3 src/lab/joystick/js_probe.py            # /dev/input/js0, 30 с
 ```
 Читает тот же joydev, что `joy_linux_node` в контейнере: печатает число
 осей/кнопок и каждое изменение (`axis[i]` = `/joy axes[i]`, `button[i]` =
-`/joy buttons[i]` = `BS_LAND_JOY=b<i>`). Нажал SA — увидел индекс.
+`/joy buttons[i]` = `BS_LAND_JOY=b<i>`). Нажал SA — увидел индекс; то же для SD
+(возврат домой, `BS_RTH_JOY`, дефолт `b2` = CH11).
 
 ⚠️ Квирк TX12 (EdgeTX, классический USB-joystick), снят с HID-дескриптора
 2026-08-30: осей в дескрипторе 8, но две последние — обе `Slider` (CH7 и CH8)
@@ -141,6 +142,7 @@ JOY_SIGNS накладывает сам реплей (те же, что у но�
 | `{"sw": -1\|0\|1}` | положение CH6 |
 | `{"sf": 0\|1}` | SF-мастер CH7 (схема `BS_SF_MASTER`): 1 = вверх (стабилизация) |
 | `{"land": 0\|1}` | кнопка посадки SA (`/joy.buttons[--land-btn]`, дефолт 0 = `BS_LAND_JOY=b0` ноды): 1 = нажата → при `rel_alt ≤ 5 м` и `|v| ≤ 1 м/с` freefly уходит в `SoftLand` (мягкая посадка). Уровень: держится до `{"land": 0}` |
+| `{"rth": 0\|1}` | кнопка ВОЗВРАТА ДОМОЙ SD (`/joy.buttons[--rth-btn]`, дефолт 2 = `BS_RTH_JOY=b2`; индекс реплею отдаёт `bootstrap_arch2.sh` из того же ключа): нода ловит ФРОНТ 0→1 → freefly уходит на шаг `rth` (`SMART_RTL` по умолчанию), второй фронт ОТМЕНЯЕТ. Уровень: жать двумя шагами `{"rth": 1}` … `{"rth": 0}` |
 | `{"hold": сек}` | держать состояние N sim-секунд |
 | `{"ramp": {"sticks": {...}, "dur": с}}` | линейный ход осей за dur |
 | `{"arm": {"timeout": с}}` | жест thr=−1,yaw=+1 до `armed` (/mavros/state), потом yaw=0 |

@@ -87,6 +87,12 @@ if [ "${BS_PILOT:-}" = "replay" ]; then
         fi
     done
     [ -n "${BS_JOY_SIGNS:-}" ]    && RARGS+=("--signs=$BS_JOY_SIGNS")
+    # кнопка возврата (SD) реплею — из того же ключа, что читает нода: сценарий
+    # {"rth": 1} обязан жать ТОТ индекс, который слушает JoyPilot (у --land-btn
+    # такой синхронизации нет исторически, см. scenarios/memory/CLAUDE.md)
+    case "${BS_RTH_JOY:-}" in
+        b[0-9]*) RARGS+=(--rth-btn "${BS_RTH_JOY#b}") ;;
+    esac
     [ -n "${BS_REPLAY_FENCE:-}" ] && RARGS+=(--fence "$BS_REPLAY_FENCE")
     python3 /lab/joystick/joy_replay.py "${RARGS[@]}" \
         > /root/sim_ws/output/joy_replay.log 2>&1 &

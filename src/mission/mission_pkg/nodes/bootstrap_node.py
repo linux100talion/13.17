@@ -35,7 +35,8 @@ from control_pkg.infrastructure.mavros_actuator import MavrosActuator
 from control_pkg.infrastructure.ros_clock import RosClock
 from control_pkg.infrastructure.ros_io import RosDebugSink, RosLogger
 from control_pkg.infrastructure.ros_perception import RosPerception
-from control_pkg.infrastructure.ros_pilot import JoyPilot, RosPilot, ScriptedPilot
+from control_pkg.infrastructure.ros_pilot import (JoyPilot, PressEdge, RosPilot,
+                                                  ScriptedPilot)
 from control_pkg.infrastructure.ros_telemetry import RosTelemetry
 
 from ..config import BootstrapConfig
@@ -426,6 +427,13 @@ class BootstrapArch2Node(Node):
                                  lambda _m: self._on_rth('RTL'), 1)
         self.create_subscription(Empty, '/mission/smart_rth',
                                  lambda _m: self._on_rth('SMART_RTL'), 1)
+        # ТА ЖЕ КНОПКА НА ПУЛЬТЕ (SD на TX12, cfg.rth_joy): пилот читает УРОВЕНЬ,
+        # импульс делает фронт (PressEdge: зажатая на старте кнопка — не нажатие).
+        # Режим — cfg.rth_joy_mode (дефолт SMART_RTL, возврат по следу).
+        self._rth_edge = PressEdge()
+        if cfg.rth_joy:
+            self.logger.info(f"кнопка ВОЗВРАТА пульта: /joy {cfg.rth_joy} → "
+                             f"{cfg.rth_joy_mode} (повторное нажатие отменяет)")
         self._hud_st = ''      # последний st= в /mission/status (лог переходов)
         self._armed_prev = False   # фронт armed → латч нуля высоты перцепции, сброс VINS
         # ФРОНТ ARMED → сброс VINS (/restart → restart_callback эстиматора). Пока
@@ -465,9 +473,11 @@ class BootstrapArch2Node(Node):
         if kind == 'joy':
             if cfg.joy_signs:
                 return JoyPilot(self, signs=tuple(float(x) for x in cfg.joy_signs.split(',')),
-                                sf_master=sf, land_src=cfg.land_joy)
+                                sf_master=sf, land_src=cfg.land_joy,
+                                rth_src=cfg.rth_joy)
             # знаки — JOY_SIGNS_DEFAULT (выверены полётом TX12)
-            return JoyPilot(self, sf_master=sf, land_src=cfg.land_joy)
+            return JoyPilot(self, sf_master=sf, land_src=cfg.land_joy,
+                            rth_src=cfg.rth_joy)
         if kind == 'ros':
             return RosPilot(self, sf_master=sf)
         # flow_assist — НЕЙТРАЛЬНЫЙ пилот (центр): флоу-демпфер держит снос сам;
@@ -589,8 +599,11 @@ class BootstrapArch2Node(Node):
         # кнопка посадки: пульт (уровень) ИЛИ one-shot /mission/land
         s.pilot_land = bool(self.pilot.land_switch()) or self._land_req
         self._land_req = False
-        # возврат домой: one-shot /mission/rth|smart_rth (кнопки на пульте нет),
+        # возврат домой: кнопка пульта (фронт) ИЛИ one-shot /mission/rth|smart_rth;
         # режим — липкий (см. _on_rth)
+        if self._rth_edge.pressed(self.pilot.rth_switch()):
+            self.logger.info(f"кнопка ВОЗВРАТА нажата → {self.cfg.rth_joy_mode}")
+            self._on_rth(self.cfg.rth_joy_mode)
         s.pilot_rth, self._rth_req = self._rth_req, False
         s.pilot_rth_mode = self._rth_mode
         s.extnav_ready = self._extnav_ready()    # гейт штатного LOITER-на-VINS

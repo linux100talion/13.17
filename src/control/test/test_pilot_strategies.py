@@ -4,6 +4,8 @@
 - PilotPassthrough: сырые стики → RC 1:1.
 - Arbiter: тумблер MANUAL → сырые стики (incl throttle); AUTO → автономная команда без изменений.
 - joy_sticks (ядро JoyPilot): оси /joy [-1..1] → PWM 1500±400 + тумблер по порогу.
+- joy_button / PressEdge: кнопки пульта (SA посадки, SD возврата) — уровень по
+  'b<i>'/'a<i>' и фронт «отпущена → нажата» (импульс возврата домой).
 
 Запуск:  python3 src/control/test/test_pilot_strategies.py
 """
@@ -153,6 +155,46 @@ check("joy_master SF-вверх + SC-центр → потолок 1 (VinsHold)"
       joy_master([0.0] * 5 + [0.0, 1.0]) == (-1, 1))
 check("joy_master SF-вверх + SC-вниз → потолок 2 (LOITER)",
       joy_master([0.0] * 5 + [1.0, 1.0]) == (-1, 2))
+
+# --- кнопки пульта: joy_button (уровень) + PressEdge (фронт) ---
+from control_pkg.infrastructure.ros_pilot import (PressEdge,          # noqa: E402
+                                                  joy_button, parse_land_src)
+
+check("parse_land_src 'b2' → кнопка 2", parse_land_src('b2') == ('b', 2))
+check("parse_land_src 'a7' → ось 7", parse_land_src('a7') == ('a', 7))
+check("parse_land_src '' → кнопки нет", parse_land_src('') is None)
+check("parse_land_src 'off' → кнопки нет", parse_land_src('off') is None)
+try:
+    parse_land_src('SD')
+    bad_spec = False
+except ValueError:
+    bad_spec = True
+check("parse_land_src кривой spec → ValueError (падаем на старте)", bad_spec)
+
+sd = parse_land_src('b2')          # SD возврата: дефолт профиля mission/baseline
+check("joy_button кнопка нажата", joy_button([], [0, 0, 1], sd) is True)
+check("joy_button кнопка отпущена", joy_button([], [0, 0, 0], sd) is False)
+check("joy_button короткий buttons (старые записи) → False",
+      joy_button([], [0], sd) is False)
+check("joy_button без источника ('') → False", joy_button([], [1, 1, 1], None) is False)
+check("joy_button ось 'a6' > порога → нажата",
+      joy_button([0.0] * 6 + [1.0], [], parse_land_src('a6')) is True)
+check("joy_button ось на пороге 0.5 → не нажата",
+      joy_button([0.0] * 6 + [0.5], [], parse_land_src('a6')) is False)
+
+# фронт: импульс ровно один на нажатие, зажатая на старте кнопка — не нажатие
+e = PressEdge()
+check("PressEdge первый семпл «нажата» → НЕ импульс (кнопка зажата на старте)",
+      e.pressed(True) is False)
+check("PressEdge удержание → импульсов нет", e.pressed(True) is False)
+check("PressEdge отпустили → импульса нет", e.pressed(False) is False)
+check("PressEdge нажали → ИМПУЛЬС", e.pressed(True) is True)
+check("PressEdge держим дальше → импульса нет", e.pressed(True) is False)
+e2 = PressEdge()
+check("PressEdge старт с отпущенной", e2.pressed(False) is False)
+check("PressEdge первое нажатие → ИМПУЛЬС (возврат)", e2.pressed(True) is True)
+check("PressEdge отпустил", e2.pressed(False) is False)
+check("PressEdge второе нажатие → ИМПУЛЬС (отмена возврата)", e2.pressed(True) is True)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ ПИЛОТ-СТРАТЕГИИ OK" if ok_all else "❌ СБОЙ")

@@ -934,7 +934,7 @@ class Freefly(Step):
         # кнопка посадки (SA) — фронт через гейт → следующий шаг (SoftLand)
         if self.land_gate is not None and self._land_press(ctx, s):
             return _next(rc, "FREEFLY_LAND")
-        # ВОЗВРАТ ДОМОЙ (/mission/rth, make rth) — прыжок на шаг rth (эпилог плана,
+        # ВОЗВРАТ ДОМОЙ (кнопка SD пульта / make rth|smart-rth) — прыжок на шаг rth (эпилог плана,
         # НЕ следующий индекс: следующий — SoftLand кнопки SA). Импульс one-shot,
         # фронт ловить не надо. В MANUAL отказ: там Арбитр отдаёт пилоту все оси
         # сырыми, и «возврат» был бы виден только как смена режима FCU.
@@ -1235,7 +1235,9 @@ class SoftLand(Step):
 class Rth(Step):
     """ВОЗВРАТ ДОМОЙ ШТАТНЫМ РЕЖИМОМ ПОЛЁТНИКА — эпилог freefly по импульсу оператора.
 
-    ДВА РЕЖИМА, выбор — топиком (какой дёрнули, тот и шлём; поле pilot_rth_mode):
+    ДВА РЕЖИМА, выбор — источником импульса (что дёрнули, то и шлём; поле
+    pilot_rth_mode). ИСТОЧНИКА ДВА, импульс общий: КНОПКА ПУЛЬТА (SD, config.rth_joy —
+    режим берёт config.rth_joy_mode, дефолт SMART_RTL) и топик с хоста:
       /mission/rth       (make rth)       → RTL: прямая на home, набор до RTL_ALT_M;
       /mission/smart_rth (make smart-rth) → SMART_RTL: назад ПО КРОШКАМ пройденного
                           пути (SRTL_POINTS точек, прореживание SRTL_ACCURACY) — то
@@ -1269,7 +1271,7 @@ class Rth(Step):
 
     ВЫХОДЫ ОБРАТНО В ПОЛЁТ (все — goto freefly, борт заармлен, стек и опора берутся
     от текущей точки):
-      RTH_CANCEL   — повторный импульс /mission/rth (передумали): keep сразу;
+      RTH_CANCEL   — повторный импульс (кнопка SD ещё раз или /mission/rth): keep сразу;
       RTH_MANUAL   — пилот забрал борт в MANUAL (SF не вверх) — сознательный жест;
       RTH_REFUSED  — режим не залатчился за LATCH_SEC: у EKF нет позиции («requires
                      position»), home не задан, а для SMART_RTL — ещё и пустой/

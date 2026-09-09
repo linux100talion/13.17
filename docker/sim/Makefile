@@ -169,7 +169,7 @@ sa-land:         ## freefly: «кнопка SA» с хоста (мягкая п�
 rth:             ## freefly: ВОЗВРАТ ДОМОЙ — RTL полётника к home (шаг rth); повторный вызов ОТМЕНЯЕТ
 	docker exec $(NAV) bash -lc 'source /opt/ros/humble/setup.bash; ros2 topic pub --once /mission/rth std_msgs/msg/Empty "{}"'
 
-smart-rth:       ## freefly: ВОЗВРАТ ПО СЛЕДУ — SMART_RTL (крошки пути); повторный вызов ОТМЕНЯЕТ
+smart-rth:       ## freefly: ВОЗВРАТ ПО СЛЕДУ — SMART_RTL (крошки пути); то же делает кнопка SD пульта; повторный вызов ОТМЕНЯЕТ
 	docker exec $(NAV) bash -lc 'source /opt/ros/humble/setup.bash; ros2 topic pub --once /mission/smart_rth std_msgs/msg/Empty "{}"'
 
 disarm:          ## дизарм

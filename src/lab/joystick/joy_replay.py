@@ -50,7 +50,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Joy
 
 AXES = ('roll', 'pitch', 'thr', 'yaw')          # семантические оси = /joy 0..3
-STEP_KEYS = {'note', 'sticks', 'sw', 'sf', 'land', 'hold', 'arm', 'disarm',
+STEP_KEYS = {'note', 'sticks', 'sw', 'sf', 'land', 'rth', 'hold', 'arm', 'disarm',
              'wait_alt', 'wait_mode', 'ramp'}
 N_BUTTONS = 24           # столько кнопок отдаёт TX12 в /joy (bag 2026-08-30)
 ALT_BASELINE_N = 40      # сэмплов gt-z на базлайн «земли» (нода стартует до арма)
@@ -140,6 +140,10 @@ class JoyReplay(Node):
         # config.land_joy 'b<i>' лётной ноды (дефолт b0)
         self._land_btn = int(args.land_btn)
         self._land = 0
+        # кнопка возврата домой SD (шаг rth): индекс — зеркало config.rth_joy
+        # 'b<i>' лётной ноды (bootstrap_arch2.sh отдаёт из BS_RTH_JOY)
+        self._rth_btn = int(args.rth_btn)
+        self._rth = 0
         if args.raw:
             self._raw = load_raw(args.raw)
             self._raw_i = 0
@@ -244,7 +248,8 @@ class JoyReplay(Node):
             raw_axes = [sem[a] * self._signs[i] for i, a in enumerate(AXES)]
             # axes[4]=CH5 (не трогаем), [5]=CH6, [6]=CH7/SF-мастер
             raw_axes += [0.0, float(self._sw), float(self._sf)]
-            raw_btn = [self._land_btn] if self._land else []
+            raw_btn = ([self._land_btn] if self._land else []) \
+                + ([self._rth_btn] if self._rth else [])
         m = Joy()
         m.header.stamp = self.get_clock().now().to_msg()
         m.axes = [float(v) for v in (list(raw_axes) + [0.0] * 8)[:8]]
@@ -344,6 +349,10 @@ class JoyReplay(Node):
         if 'land' in step:              # кнопка посадки SA: 1 = нажата (уровень)
             self._land = int(step['land'])
             return True
+        if 'rth' in step:               # кнопка возврата SD: 1 = нажата (уровень).
+            # Нода ловит ФРОНТ — «нажал/отпустил» надо писать двумя шагами
+            self._rth = int(step['rth'])
+            return True
         if set(step) == {'note'}:
             return True
         if 'hold' in step:
@@ -415,6 +424,9 @@ def main():
     ap.add_argument('--land-btn', dest='land_btn', type=int, default=0,
                     help='индекс кнопки посадки SA в /joy.buttons для шага '
                          '{"land": 1} (зеркало BS_LAND_JOY=b<i> ноды, дефолт 0)')
+    ap.add_argument('--rth-btn', dest='rth_btn', type=int, default=2,
+                    help='индекс кнопки ВОЗВРАТА ДОМОЙ (SD) в /joy.buttons для шага '
+                         '{"rth": 1} (зеркало BS_RTH_JOY=b<i> ноды, дефолт 2)')
     ap.add_argument('--fence', type=float, default=0.0,
                     help='геозабор, м от точки старта по gt (0 = выкл; '
                          'перекрывает "fence" сценария). Уход дальше → '
