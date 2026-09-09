@@ -165,6 +165,15 @@ class HudRenderer:
         y = frame.shape[0] - base - round(4 * k * FONT_K) - round(14 * k)
         self._box(frame, k, x, y, text, color, scale, fill)
 
+    def _line_bottom_left(self, frame, k, text, color, scale=0.8, fill=None):
+        """Строка в ЛЕВОМ НИЖНЕМ углу (та же нижняя линия, что у ленты высоты,
+        отступ 10 px @1280). Высота идёт по центру, здесь — статус возврата:
+        два независимых якоря низа не сталкиваются (баннер короткий, лента
+        центрована)."""
+        _tw, _th, base, _thick = self._metrics(k, text, scale)
+        y = frame.shape[0] - base - round(4 * k * FONT_K) - round(14 * k)
+        self._box(frame, k, round(10 * k), y, text, color, scale, fill)
+
     # --- лесенка: гейты ярусов по полям /mission/status ---
     def _num(self, key, default=None):
         try:
@@ -441,14 +450,6 @@ class HudRenderer:
             # (нет tier=) — голый гейт LOITER под честным именем.
             text, col = self._tier_banner()
             y = self._line(frame, k, y, text, col, scale=1.0, fill=col)
-            # 1в) ВОЗВРАТ ДОМОЙ: можно ли им вообще пользоваться (rth= статуса,
-            # латч rth_ready.py). Пилоту это нужно ДО того, как он нажмёт SD:
-            # зелёный — рама цела с момента латча, дом записан; жёлтый — ещё
-            # лечимся в круге после отрыва; красный — рама рвалась (или не
-            # успели залатчиться), возврата в этом полёте нет, домой руками.
-            rth = self._rth_banner()
-            if rth is not None:
-                y = self._line(frame, k, y, rth[0], rth[1], fill=rth[1])
         # 2) лесенка — СРАЗУ под баннером яруса: баннер говорит «какой ярус»,
         # блок под ним — «почему не выше»; между ними ничего не вклинивается.
         y = self._draw_ladder_block(frame, k, y, now)
@@ -496,6 +497,16 @@ class HudRenderer:
                 if "palt" in self.status:
                     txt += f"  perc {_t(pa)}m"
                 self._line_bottom_center(frame, k, txt, col)
+            # 5б) ВОЗВРАТ ДОМОЙ — ЛЕВЫЙ НИЖНИЙ УГОЛ (rth= статуса, латч
+            # rth_ready.py). Пилоту это нужно ДО того, как он нажмёт SD:
+            # зелёный — рама цела с момента латча, дом записан; жёлтый — ещё
+            # лечимся в круге после отрыва; красный — рама рвалась (или не
+            # успели залатчиться), возврата в этом полёте нет, домой руками.
+            # Внизу, а не в стопке режимов: это не «чем держится борт сейчас»,
+            # а «есть ли у меня кнопка домой» — приборная строка, как высота.
+            rth = self._rth_banner()
+            if rth is not None:
+                self._line_bottom_left(frame, k, rth[0], rth[1], fill=rth[1])
         # ---------------- ПРАВАЯ стопка: датчики и каналы ----------------
         yr = round(34 * k * FONT_K)
         if st_ok:
