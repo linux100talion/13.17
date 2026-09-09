@@ -100,6 +100,10 @@ def main():
     ap.add_argument('--track-m', type=float, default=3.0)
     ap.add_argument('--jump-m', type=float, default=2.0)
     ap.add_argument('--home-settle', type=float, default=3.0)
+    ap.add_argument('--dyaw-tol', type=float, default=0.0,
+                    help='допуск устойчивости Δyaw, ° (0 = чек выкл; в полёте 3)')
+    ap.add_argument('--dyaw-wz', type=float, default=0.0,
+                    help='потолок |скорости разворота| для чека Δyaw, °/с (в полёте 15)')
     a = ap.parse_args()
 
     d = load(a.bag)
@@ -117,7 +121,8 @@ def main():
 
     rth = RthReadiness(radius=a.radius, heal_sec=a.heal_sec, ripe_sec=a.ripe_sec,
                        min_count=a.min_count, track_m=a.track_m, jump_m=a.jump_m,
-                       home_settle=a.home_settle)
+                       home_settle=a.home_settle,
+                       dyaw_tol=a.dyaw_tol, dyaw_wz=a.dyaw_wz)
     t0 = st[0][0]
     fwd = lat = 0.0                 # интеграл скоростей IPM (тело) = путь
     prev_t = None

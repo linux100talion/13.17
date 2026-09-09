@@ -56,7 +56,7 @@ class RthReadiness:
                  fresh_sec: float = 2.0, track_m: float = 3.0,
                  track_max: int = 4000, relatch: bool = False,
                  jump_m: float = 2.0, home_settle: float = 3.0,
-                 dyaw_tol: float = 0.0):
+                 dyaw_tol: float = 0.0, dyaw_wz: float = 0.0):
         self.radius = float(radius)
         self.heal_sec = float(heal_sec)
         self.ripe_sec = float(ripe_sec)
@@ -81,6 +81,12 @@ class RthReadiness:
         # Пока она гуляет больше tol за ripe_sec, кадр VINS ещё не устоялся, и
         # сажать на него курс полётника (EK3_SRC1_YAW=6) нельзя.
         self.dyaw_tol = float(dyaw_tol)
+        # ПОТОЛОК СКОРОСТИ РАЗВОРОТА для чека выше, °/с (0 = не гейтим). На вираже
+        # два курса берутся из разных трактов с разной задержкой (AHRS — от FCU,
+        # курс VINS — из одометрии 10 Гц), и Δyaw гуляет ЛАГОМ, а не уходом: замер
+        # 171337 — размах 5.1° при 41.6 °/с и 2.4° при 9.5 °/с на том же полёте.
+        # Пока крутимся быстрее — чек молчит (как гейт деротации ipm_wz_gate).
+        self.dyaw_wz = float(dyaw_wz)
         self.reset()
 
     # --- состояние -----------------------------------------------------------
@@ -88,7 +94,11 @@ class RthReadiness:
         self.state = self.HEAL
         self.why = ''
         self.ripe = False           # зрелость для моста (без привязки к кругу)
+        self._ripe_latched = False  # ЗАЩЁЛКА зрелости: доказал — доказал
+        self._ripe_reb = None       # счётчик перерождений, на котором доказал
         self._dyaw_ref = None
+        self._yaw_prev = None       # (t, курс AHRS) прошлого тика — для |ω|
+        self._wz = 0.0              # |скорость разворота| текущего тика, °/с
         self.home = None            # (x, y, z) поза EKF в момент латча
         self.track = []             # [(x, y, z)] от дома, шаг track_m
         self.track_full = False
@@ -128,6 +138,11 @@ class RthReadiness:
         опора переставляется, и отсчёт зрелости начинается заново."""
         if self.dyaw_tol <= 0.0:
             return True
+        if self.dyaw_wz > 0.0 and self._wz > self.dyaw_wz:
+            # ВИРАЖ: разность курсов сейчас меряет РАЗНИЦУ ЗАДЕРЖЕК двух трактов,
+            # а не уход кадра. Молчим и опору НЕ двигаем — иначе каждый разворот
+            # обнулял бы отсчёт зрелости (полёт 171337: мост закрылся на 20 °/с).
+            return True
         d = getattr(s, 'dyaw_now', None)
         if d is None:
             # ЧИСЛА НЕТ — не мешаем. Так бывает штатно: старый ray_tracer без
@@ -143,6 +158,15 @@ class RthReadiness:
             self._dyaw_ref = d
             return False
         return True
+
+    def _yaw_rate(self, s) -> float:
+        """|скорость разворота| по курсу AHRS, °/с (0 на первом тике)."""
+        y, t = float(getattr(s, 'att_yaw', 0.0)), float(s.now_sim)
+        prev, self._yaw_prev = self._yaw_prev, (t, y)
+        if prev is None or t - prev[0] <= 1e-3:
+            return 0.0
+        d = math.atan2(math.sin(y - prev[1]), math.cos(y - prev[1]))
+        return abs(math.degrees(d)) / (t - prev[0])
 
     def _healthy(self, s, sane: bool) -> bool:
         fresh = (s.now_sim - getattr(s, 'vins_last_sim', -1e9)) <= self.fresh_sec
@@ -214,15 +238,33 @@ class RthReadiness:
         if self._t_arm is None:
             self._t_arm = s.now_sim
         self._advance_ipm(s)
+        self._wz = self._yaw_rate(s)
 
-        healthy = self._healthy(s, sane)
-        if healthy:
-            if self._ripe_since is None:
-                self._ripe_since = s.now_sim
-        else:
+        # ЗРЕЛОСТЬ ЗАЩЁЛКИВАЕТСЯ. Вопрос «доказал ли VINS себя» — односторонний:
+        # доказал один раз, дальше за здоровьем потока следит BridgeGate (|v| > 12,
+        # перерождение, шторм подтяжек, /vins/sane), а не этот счётчик. Пока
+        # зрелость снималась на любом чихе, выходила ПЕТЛЯ: дрогнул Δyaw → не зрел
+        # → /vins/bridge_ok=False → мост закрыт → RthReadiness видит закрытый мост
+        # после латча → LOST терминально. Полёт 171337: возврат умер через 2 с
+        # после READY на развороте 20 °/с. Заново доказывать заставляет только
+        # ПЕРЕРОЖДЕНИЕ VINS — там рама действительно новая.
+        reb = int(getattr(s, 'vins_rebirths', 0))
+        if self._ripe_reb is None:
+            self._ripe_reb = reb
+        elif reb != self._ripe_reb:
+            self._ripe_reb = reb
+            self._ripe_latched = False
             self._ripe_since = None
-        self.ripe = (self._ripe_since is not None
-                     and s.now_sim - self._ripe_since >= self.ripe_sec)
+            self._dyaw_ref = None
+        if not self._ripe_latched:
+            if self._healthy(s, sane):
+                if self._ripe_since is None:
+                    self._ripe_since = s.now_sim
+                if s.now_sim - self._ripe_since >= self.ripe_sec:
+                    self._ripe_latched = True
+            else:
+                self._ripe_since = None
+        self.ripe = self._ripe_latched
 
         if self.state == self.LOST:
             return self.state

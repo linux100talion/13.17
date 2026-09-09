@@ -465,7 +465,8 @@ class BootstrapArch2Node(Node):
                                  fresh_sec=cfg.vins_fresh_sec, track_m=cfg.rth_track_m,
                                  jump_m=cfg.rth_jump_m,
                                  home_settle=cfg.rth_home_settle,
-                                 dyaw_tol=cfg.rth_dyaw_tol)
+                                 dyaw_tol=cfg.rth_dyaw_tol,
+                                 dyaw_wz=cfg.rth_dyaw_wz)
         # ЧЕЙ КУРС ДЕРЖИТ EKF (src/nav/frames.md): 'compass' всегда, 'vins' —
         # переключаем EK3_SRC1_YAW 1 → 6 в момент латча возврата (рама уже спокойна,
         # борт висит в круге на демпфере). _yaw_want — чего мы хотим, _yaw_src — что
