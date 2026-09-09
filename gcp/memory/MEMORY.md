@@ -1,6 +1,6 @@
 # Память проекта 13.17
 
-- [ArduPilot 4.8: SI-переименования параметров](ardupilot-48-param-renames.md) — LOIT_SPEED→LOIT_SPEED_MS, LAND_SPEED→LAND_SPD_MS, ARMING_CHECK→ARMING_SKIPCHK, SR0_*→MAV1_* (стримы, нумерация с 1); старые строки в .parm молча игнорируются, сверять через ros2 param list /mavros/param
+- [ArduPilot 4.8: SI-переименования параметров](ardupilot-48-param-renames.md) — LOIT_SPEED→LOIT_SPEED_MS, LAND_SPEED→LAND_SPD_MS, ARMING_CHECK→ARMING_SKIPCHK, SR0_*→MAV1_* (стримы, нумерация с 1), ВСЯ ГРУППА WPNAV_*→WP_* (WP_SPD м/с, WP_ACC м/с²); старые строки в .parm молча игнорируются, сверять через ros2 param list /mavros/param
 
 - [Репо: единственная ветка main с 2026-09-07](repo-branches-consolidated.md) — все nn2_* влиты ff и удалены (origin 17 + локальные 5), nn2-fusion-notes был перебазированным дублем; имена веток в памяти — исторические метки, коммиты в git log main
 - [Разбивка монолитов control_pkg 2026-09](control-refactor-split-2026-09.md) — stabilization→8 модулей + StationKeeper/порты, flow_estimator→миксины ipm/keyframe; доказано A/B бит-в-бит и полётом; рецепт A/B-доказательства рефакторингов; cv2-патч теперь в perception/ipm.py

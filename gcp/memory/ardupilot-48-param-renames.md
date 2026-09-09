@@ -1,6 +1,6 @@
 ---
 name: ardupilot-48-param-renames
-description: "ArduPilot 4.8 переименовал параметры в SI-имена (LOIT_SPEED→LOIT_SPEED_MS, LAND_SPEED→LAND_SPD_MS, ARMING_CHECK→ARMING_SKIPCHK) — старые строки в .parm МОЛЧА игнорируются; как проверять"
+description: "ArduPilot 4.8 переименовал параметры в SI-имена (LOIT_SPEED→LOIT_SPEED_MS, LAND_SPEED→LAND_SPD_MS, ARMING_CHECK→ARMING_SKIPCHK, вся группа WPNAV_*→WP_*) — старые строки в .parm МОЛЧА игнорируются; как проверять"
 metadata: 
   node_type: memory
   type: project
@@ -17,7 +17,13 @@ SI-единицы, старые имена в `--defaults`/parm-файлах **�
   12.5 м/с, пилот в LOITER разгонялся до 8.8 м/с (разбор eagle/4 2026-09-01,
   [[loiter-yaw-dive]]); соседи тоже SI: `LOIT_ACC_MAX_M`, `LOIT_BRK_ACC_M`;
 - `LAND_SPEED 15` → `LAND_SPD_MS` (м/с) — фактический спуск LAND 0.5 м/с
-  (дефолт), не 0.15, ломает расчёт мягкости [[sa-soft-land]].
+  (дефолт), не 0.15, ломает расчёт мягкости [[sa-soft-land]];
+- **ВСЯ ГРУППА `WPNAV_*` → `WP_*`** (2026-09-09, прогон cmd/rth_track): в прошивке
+  `GOBJECTPTR(wp_nav, "WP_", AC_WPNav)`, в ReleaseNotes — «Waypoint navigation params
+  converted to deg and meters and renamed from WPNAV to WP». То есть `WPNAV_SPEED`
+  (см/с) → `WP_SPD` (М/С, дефолт 10), `WPNAV_ACCEL` → `WP_ACC` (м/с², дефолт 2.5),
+  `WPNAV_SPEED_UP/DN` → `WP_SPD_UP/DN`, `WPNAV_RADIUS` → `WP_RADIUS_M`. Это правит
+  скорость возврата по треку (GUIDED) и LOITER.
 
 `PSC_ANGLE_MAX`, `PILOT_Y_RATE`, `SCHED_LOOP_RATE` и прочие из
 sitl-extra.parm не переименованы — применяются.
