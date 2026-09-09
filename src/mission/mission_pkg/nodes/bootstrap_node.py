@@ -28,6 +28,7 @@ from control_pkg.application.arbiter import Arbiter
 from control_pkg.domain.control.wind_trim import WindTrim
 from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
+from control_pkg.application.rth_ready import RthReadiness
 from control_pkg.domain.control.stabilization import VinsHold
 from control_pkg.domain.rc import RC_CENTER, RcCommand
 
@@ -451,6 +452,21 @@ class BootstrapArch2Node(Node):
         # полёт 142811: разнос VINS через мост отравил ориентацию EKF, DpHold унесло.
         self._sane_pub = (self.create_publisher(Bool, '/vins/sane', 10)
                           if handover is not None else None)
+        # ЛАТЧ ДОВЕРИЯ К ВОЗВРАТУ + ГЕЙТ ЗРЕЛОСТИ МОСТА (rth_ready.py). Один объект
+        # решает оба вопроса: «созрел ли VINS настолько, чтобы пускать его в EKF»
+        # (ripe → /vins/bridge_ok, мост открывается только по нему) и «цела ли рама
+        # с момента латча» (state → rth= в статусе, красный/зелёный баннер, отказ
+        # кнопки SD). Разбор 073004: 2-4 с мусора от незрелого VINS хватило, чтобы
+        # EKF уехал на 200 м и «возврат» сел в 52 м от старта.
+        self._rth = RthReadiness(radius=cfg.rth_radius, heal_sec=cfg.rth_heal_sec,
+                                 ripe_sec=cfg.rth_ripe_sec, min_count=int(cfg.rth_ripe_n),
+                                 fresh_sec=cfg.vins_fresh_sec, track_m=cfg.rth_track_m)
+        self._bridge_ok_pub = self.create_publisher(Bool, '/vins/bridge_ok', 10)
+        # переставить дом полётника в точку латча (фолбэк RTL полетит туда же)
+        from mavros_msgs.srv import CommandHome
+        self._home_cli = (self.create_client(CommandHome, '/mavros/cmd/set_home')
+                          if cfg.rth_set_home > 0 else None)
+        self._home_req = CommandHome.Request
         self._restart_diverge = cfg.vins_restart_diverge > 0
         self._restart_cd = cfg.vins_restart_cd
         self._last_restart_t = -1e9
@@ -484,6 +500,43 @@ class BootstrapArch2Node(Node):
         # изолирует боевой пре-VINS сценарий (аналог liftland --flow-hold монолита).
         script = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}.get(cfg.control_mode, [])
         return ScriptedPilot(self.clock, script)
+
+    def _rth_tick(self, s) -> None:
+        """Латч доверия к возврату + вердикт зрелости мосту. Вердикт гейта здоровья
+        берём ОДИН раз за тик (vins_sane идемпотентен по now_sim — счётчики не
+        двигаются дважды)."""
+        sane = bool(self._handover.vins_sane(s)) if self._handover is not None else True
+        prev = self._rth.state
+        s.rth_state = self._rth.update(s, sane=sane)
+        s.rth_why = self._rth.why
+        s.rth_status = self._rth.status(s)
+        self._bridge_ok_pub.publish(Bool(data=bool(self._rth.ripe)))
+        if s.rth_state != prev:
+            if s.rth_state == RthReadiness.READY:
+                h = self._rth.home
+                self.logger.info(
+                    f"ВОЗВРАТ: дом залатчен ({h[0]:+.1f},{h[1]:+.1f}) м EKF, "
+                    f"{self._rth.dist:.1f} м от арма по IPM — RTH разрешён")
+                self._set_home()
+            else:
+                self.logger.warn(
+                    f"ВОЗВРАТ ЗАПРЕЩЁН на этот полёт: {s.rth_why} "
+                    f"(круг {self.cfg.rth_radius:g} м, лечение "
+                    f"{self.cfg.rth_heal_sec:g} с) — домой ведёт пилот")
+
+    def _set_home(self) -> None:
+        """Дом полётника = текущая точка (в момент латча мы ещё у места взлёта, но
+        уже в свежей раме). Нужен только фолбэку RTL: наш возврат идёт по треку."""
+        if self._home_cli is None:
+            return
+        if not self._home_cli.service_is_ready():
+            self.logger.warn("set_home: сервис /mavros/cmd/set_home не готов — "
+                             "дом полётника остался на точке арма")
+            return
+        req = self._home_req()
+        req.current_gps = True
+        self._home_cli.call_async(req)
+        self.logger.info("set_home: дом полётника переставлен в точку латча")
 
     def _telemetry_watch(self, s):
         """Сторож потоков телеметрии FCU: пока /mavros/imu/data молчит дольше
@@ -607,6 +660,7 @@ class BootstrapArch2Node(Node):
         s.pilot_rth, self._rth_req = self._rth_req, False
         s.pilot_rth_mode = self._rth_mode
         s.extnav_ready = self._extnav_ready()    # гейт штатного LOITER-на-VINS
+        self._rth_tick(s)                        # латч возврата + зрелость моста
 
         self._send_origin()              # безжпсный бут: origin до подтверждения
         rc = self.runner.tick(s)

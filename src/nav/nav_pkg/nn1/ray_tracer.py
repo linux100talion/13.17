@@ -95,6 +95,11 @@ class RayTracer(Node):
         self.declare_parameter("bridge_relatch_n", 3)
         self.declare_parameter("bridge_relatch_win", 5.0)
         self.declare_parameter("bridge_hold_sec", 5.0)
+        # ГЕЙТ ЗРЕЛОСТИ: топик лётной ноды «VINS доказал себя» (rth_ready.ripe).
+        # Пока False — vision_pose не публикуется вовсе. Нет топика (голый Orin
+        # без лётной ноды) — гейт молчит, мост живёт своими проверками.
+        self.declare_parameter("bridge_ready_topic", "/vins/bridge_ok")
+        self.declare_parameter("bridge_ready_sec", 3.0)   # свежесть вердикта
         self.declare_parameter("vins_sane_topic", "/vins/sane")
         self.declare_parameter("vins_restart_topic", "/restart")
 
@@ -136,6 +141,9 @@ class RayTracer(Node):
         self._gate_open = True          # последнее состояние — для лога переходов
         self._ext_sane = None           # вердикт лётной ноды (/vins/sane)
         self._ext_wall = 0.0
+        self._ready = None              # «VINS зрел» (/vins/bridge_ok), гейт зрелости
+        self._ready_wall = 0.0
+        self._ready_sec = float(self.get_parameter("bridge_ready_sec").value)
 
         # I/O
         self.create_subscription(CameraInfo, self.get_parameter("camera_info_topic").value,
@@ -163,6 +171,8 @@ class RayTracer(Node):
                                      self._on_vins_sane, 10)
             self.create_subscription(Bool, self.get_parameter("vins_restart_topic").value,
                                      self._on_vins_restart, 1)
+            self.create_subscription(Bool, self.get_parameter("bridge_ready_topic").value,
+                                     self._on_bridge_ready, 10)
 
         self.publish_vp = bool(self.get_parameter("publish_vision_pose").value)
         self.vp_frame = self.get_parameter("vision_pose_frame").value
@@ -206,6 +216,12 @@ class RayTracer(Node):
         self._ext_sane = bool(msg.data)
         self._ext_wall = time.time()
 
+    def _on_bridge_ready(self, msg):
+        # «VINS доказал себя» от лётной ноды (rth_ready.ripe): до этого позу в EKF
+        # не пускаем вообще (гейт зрелости). Протухает так же, как вердикт sane.
+        self._ready = bool(msg.data)
+        self._ready_wall = time.time()
+
     def _on_vins_restart(self, msg):
         # наш /restart VINS: поток родится заново — якорь и гейт с чистого листа
         if self.gate is not None and msg.data:
@@ -233,7 +249,10 @@ class RayTracer(Node):
             th = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             tv = msg.twist.twist.linear
             ext = (self._ext_sane if time.time() - self._ext_wall < 1.0 else None)
-            gate_open = self.gate.on_odom(th, p.x, p.y, math.hypot(tv.x, tv.y), ext)
+            rdy = (self._ready
+                   if time.time() - self._ready_wall < self._ready_sec else None)
+            gate_open = self.gate.on_odom(th, p.x, p.y, math.hypot(tv.x, tv.y),
+                                          ext, ready=rdy)
             if self.gate.take_relatch():
                 self.anchor.reset()
             if gate_open != self._gate_open:

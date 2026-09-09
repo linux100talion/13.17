@@ -68,6 +68,12 @@ class DroneState:
     # вертикали — ровно та ошибка, что занижает масштаб IPM у земли (прогон
     # 174603: EKF z ниже истины на 0.27 м → гейт alt<0.5 душил демпфер).
     ekf_z: float | None = None
+    # x/y того же /mavros/local_position/pose — позиция глазами EKF3 в кадре map.
+    # Нужна RthReadiness: дом возврата латчится КАК ПОЗА EKF (в этих же
+    # координатах потом идут уставки GUIDED), и по ней же пишется трек пути.
+    # None = local_position ещё не приходил.
+    ekf_x: float | None = None
+    ekf_y: float | None = None
     # Высота ПЕРЦЕПЦИИ (RosPerception._alt, ручка perc_alt_src + латч нуля
     # perc_alt_zero) — ровно то число, по которому судит гейт земли IPM. Не
     # rel_alt и не ekf_z: у каждого свой источник и своё смещение, и весь
@@ -202,6 +208,14 @@ class DroneState:
     # /mission/smart_rth). Узел выставляет на ОДИН тик; шаг Freefly прыгает на шаг
     # rth, повторный импульс там ОТМЕНЯЕТ возврат. Вне freefly игнорируется.
     pilot_rth: bool = False
+    # ЛАТЧ ДОВЕРИЯ К ВОЗВРАТУ (RthReadiness, application/rth_ready.py): 'heal' —
+    # в круге лечения после отрыва (VINS может рождаться заново сколько угодно);
+    # 'ready' — рама цела с момента латча, дом записан, возврат разрешён;
+    # 'lost' — рама рвалась (перерождение/insane/закрытый мост) или не успели
+    # залатчиться в круге. Причина — в rth_why; строка для HUD — rth_status.
+    rth_state: str = "heal"
+    rth_why: str = ""
+    rth_status: str = ""             # поле rth= статуса (heal/3.2, ready/128, lost:reborn)
     # КАКОЙ возврат просили: 'RTL' (прямая на home, /mission/rth) | 'SMART_RTL'
     # (по хлебным крошкам пройденного пути, /mission/smart_rth). ЛИПКОЕ поле, не
     # one-shot: шаг rth входит на СЛЕДУЮЩЕМ тике, когда импульс уже погашен, и

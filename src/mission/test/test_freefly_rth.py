@@ -128,7 +128,8 @@ def make(budget=180.0, guard=False, ho=None):
 
 
 def snap(t, alt=4.0, mode="ALT_HOLD", armed=True, sw=-1, lvl=0, rth=False, sa=False,
-         rth_mode="", bridge_seen=False, bridge_open=True, vins_vx=0.0):
+         rth_mode="", bridge_seen=False, bridge_open=True, vins_vx=0.0,
+         rth_state="ready", rth_why=""):
     """rth_mode — ЛИПКОЕ поле снапшота (нода держит его после импульса), поэтому в
     сценариях SMART_RTL его передают и на тиках после pulse. bridge_* — состояние
     моста VINS→EKF из /nn1/bridge (guard шага rth)."""
@@ -137,6 +138,7 @@ def snap(t, alt=4.0, mode="ALT_HOLD", armed=True, sw=-1, lvl=0, rth=False, sa=Fa
                       pilot_rth_mode=rth_mode,
                       bridge_seen=bridge_seen, bridge_open=bridge_open,
                       bridge_why="ext" if not bridge_open else "-",
+                      rth_state=rth_state, rth_why=rth_why,
                       vins_valid=True, vins_odom_count=300, vins_last_sim=t,
                       vins_vx=vins_vx,
                       pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER,
@@ -340,6 +342,19 @@ tick_until(r, clock, 5.0, mode="CMODE(21)", rth_mode="SMART_RTL",
            bridge_seen=True, bridge_open=False)
 check("guard выкл: закрытый мост возврат не рвёт (как до 2026-09-09)",
       cur(r) == "rth" and r.result != "RTH_GUARD")
+
+# --- 17. ЛАТЧ ДОВЕРИЯ: rth=lost → кнопка/топик отвергаются (разбор 073004) ---
+r, clock, mode, log, stack, ff, rth = make()
+tick_until(r, clock, 1.0, rth_state="lost", rth_why="reborn")
+pulse(r, clock, rth_state="lost", rth_why="reborn")
+check("rth=lost: импульс отвергнут, остаёмся в freefly",
+      cur(r) == "freefly" and r.result != "FREEFLY_RTH")
+check("причина отказа в логе", log.count("возврат запрещён на этот полёт") == 1)
+# heal (ещё лечимся) не блокирует — блокирует только lost
+r, clock, mode, log, stack, ff, rth = make()
+tick_until(r, clock, 1.0, rth_state="heal")
+pulse(r, clock, rth_state="heal")
+check("rth=heal: возврат пускаем (латч — гейт кнопки, а не запрет)", cur(r) == "rth")
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FREEFLY RTH OK" if ok_all else "❌ СБОЙ")

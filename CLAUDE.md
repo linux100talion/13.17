@@ -24,7 +24,8 @@ src/
                  ниже 1 м), yawbanklimit.md (потолок крена виража в LOITER)
   mission/     — пакет mission_pkg: ЛЁТНАЯ НОДА (bootstrap_arch2) и план полёта —
                  шаги freefly/SoftLand/Rth, лесенка ярусов, строгая схема ручек
-                 BS_* (config.py), офлайн-тесты плана в test/
+                 BS_* (config.py), офлайн-тесты плана в test/; rth.md — ВОЗВРАТ
+                 ДОМОЙ: латч доверия, гейт зрелости моста, план возврата по треку
   lab/         — скрипты прогонов (freefly_lv.sh, capture_scene.sh, cmd/* зовут их)
                  и ОФЛАЙН-СТЕНДЫ по bag: vins_sane_replay, ipm_alt_replay,
                  rth_check, hud_video/ipm_video, joystick/ (реплей пульта,

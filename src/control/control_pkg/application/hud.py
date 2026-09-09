@@ -191,6 +191,12 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
             f"rct={s.pilot_throttle - RC_CENTER} rcy={s.pilot_yaw - RC_CENTER} "
             f"sw={s.pilot_switch} sa={int(bool(getattr(s, 'pilot_land', False)))}"
             + (f" land={land}" if land else "")
+            # rth — ЛАТЧ ДОВЕРИЯ К ВОЗВРАТУ (rth_ready.py): heal/<м от арма> —
+            # круг лечения; ready/<м до дома> — рама цела, дом записан, возврат
+            # разрешён; lost:<причина> — рама рвалась (reborn|insane|bridge) или
+            # не успели залатчиться (circle|timeout). Красный/зелёный баннер FPV.
+            + (f" rth={getattr(s, 'rth_status', '')}"
+               if getattr(s, 'rth_status', '') else "")
             + _gate_fields(s, loiter_alt, ripe_sec, ripe_min)
             + _ladder_fields(s, ladder, fresh_sec, vins_min)
             + _frame_fields(s)

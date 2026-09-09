@@ -941,6 +941,12 @@ class Freefly(Step):
         if self.rth and getattr(s, 'pilot_rth', False):
             if s.pilot_switch == 1:
                 ctx.log.warn("    RTH: отказ — MANUAL (SF не вверх); верни стек и повтори")
+            elif getattr(s, 'rth_state', '') == 'lost':
+                # рама, в которой записан дом, рвалась (или не успела залатчиться):
+                # возвращаться некуда — цифры EKF уже не те. Честный отказ вместо
+                # полёта «домой» по чужим координатам (разбор 073004 в gates.md)
+                ctx.log.warn(f"    RTH: ОТКАЗ — возврат запрещён на этот полёт "
+                             f"({getattr(s, 'rth_why', '-')}); домой ведёт пилот")
             else:
                 ctx.log.info("    RTH: ВОЗВРАТ ДОМОЙ (rel_alt={}) → шаг rth".format(
                     s.rel_alt))

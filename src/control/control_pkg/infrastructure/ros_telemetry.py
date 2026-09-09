@@ -174,6 +174,9 @@ class RosTelemetry:
     def _on_lpos(self, m):
         self._s.ekf_pos_last_sim = self._clock.now_sim()
         self._s.ekf_z = float(m.pose.position.z)   # высота глазами EKF3 → HUD
+        # x/y — дом и трек возврата латчатся в ЭТИХ координатах (RthReadiness)
+        self._s.ekf_x = float(m.pose.position.x)
+        self._s.ekf_y = float(m.pose.position.y)
 
     def _on_wind(self, m):
         # ветер EKF3 в мире ENU (скорость воздушной массы, куда дует); свежесть

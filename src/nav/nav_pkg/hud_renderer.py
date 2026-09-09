@@ -293,6 +293,25 @@ class HudRenderer:
         st, _ = self._tier_gate(nxt)
         return text, HUD_RED if st == "DEAD" else HUD_YELLOW
 
+    _RTH_LOST = {'reborn': 'VINS REBORN', 'insane': 'VINS SICK',
+                 'bridge': 'BRIDGE CLOSED', 'circle': 'LEFT CIRCLE',
+                 'timeout': 'HEAL TIMEOUT'}
+
+    def _rth_banner(self):
+        """rth= статуса → (текст, цвет) или None (поля нет — латч выключен/
+        старый bag). Формат поля: heal/<м от арма> | ready/<м до дома> |
+        lost:<причина>."""
+        v = self.status.get("rth")
+        if not v:
+            return None
+        head, _, tail = v.partition('/')
+        if head.startswith('lost'):
+            why = v.partition(':')[2]
+            return f"RTH LOST: {self._RTH_LOST.get(why, why or '-')}", HUD_RED
+        if head == 'ready':
+            return f"RTH READY {tail}m", HUD_GREEN
+        return f"RTH HEAL {tail}m", HUD_YELLOW
+
     def _draw_ladder_block(self, frame, k, y, now):
         """ЛЕСЕНКА: по строке на ярус (0 DAMPER / 1 VINSHOLD / 2 LOITER) с
         гейтом и прогрессом каждого. Активный ярус — заливка; закрытый —
@@ -422,6 +441,14 @@ class HudRenderer:
             # (нет tier=) — голый гейт LOITER под честным именем.
             text, col = self._tier_banner()
             y = self._line(frame, k, y, text, col, scale=1.0, fill=col)
+            # 1в) ВОЗВРАТ ДОМОЙ: можно ли им вообще пользоваться (rth= статуса,
+            # латч rth_ready.py). Пилоту это нужно ДО того, как он нажмёт SD:
+            # зелёный — рама цела с момента латча, дом записан; жёлтый — ещё
+            # лечимся в круге после отрыва; красный — рама рвалась (или не
+            # успели залатчиться), возврата в этом полёте нет, домой руками.
+            rth = self._rth_banner()
+            if rth is not None:
+                y = self._line(frame, k, y, rth[0], rth[1], fill=rth[1])
         # 2) лесенка — СРАЗУ под баннером яруса: баннер говорит «какой ярус»,
         # блок под ним — «почему не выше»; между ними ничего не вклинивается.
         y = self._draw_ladder_block(frame, k, y, now)

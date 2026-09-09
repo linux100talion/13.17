@@ -23,12 +23,12 @@ def check(name, ok):
     print(f"  [{'OK ' if ok else 'FAIL'}] {name}")
 
 
-def stream(g, t0, n, v=0.5, dt=0.1, x0=0.0, ext=None):
+def stream(g, t0, n, v=0.5, dt=0.1, x0=0.0, ext=None, ready=None):
     """n одометрий здорового потока: ход v м/с по x."""
     t, x = t0, x0
     op = None
     for i in range(n):
-        op = g.on_odom(t, x, 0.0, v, ext)
+        op = g.on_odom(t, x, 0.0, v, ext, ready=ready)
         t += dt; x += v * dt
     return op, t, x
 
@@ -78,6 +78,23 @@ g6.reset()
 op = g6.on_odom(t6, x6 + 100.0, 0.0, 0.3)
 check("reset(): скачок рамы после /restart — не перерождение, открыт, якорь заново",
       op and g6.rebirths == 0 and g6.take_relatch())
+# 7б. ГЕЙТ ЗРЕЛОСТИ (ready, 2026-09-09): пока VINS не доказал себя — закрыт,
+# сколько бы здоровым ни выглядел поток (полёт 073004: 2-4 с мусора хватило,
+# чтобы EKF уехал на 200 м)
+g8 = BridgeGate()
+op, t8, x8 = stream(g8, 200.0, 50, ready=False)
+check("ready=False: мост ЗАКРЫТ на здоровом потоке, причина ripe",
+      (not op) and g8.reason == 'ripe')
+op, t8, x8 = stream(g8, t8, 20, x0=x8, ready=True)      # 2 с < hold 5 с
+check("ready стал True: ещё закрыт (латч hold после последней причины)",
+      not g8.is_open(t8 - 0.1))
+op, t8, x8 = stream(g8, t8, 40, x0=x8, ready=True)
+check("через hold при ready=True — ОТКРЫТ", op)
+# без лётной ноды (ready=None) поведение прежнее
+g9 = BridgeGate()
+op, _, _ = stream(g9, 300.0, 30, ready=None)
+check("ready=None (голый Orin без лётной ноды): мост живёт своими проверками", op)
+
 # 8. state_line формат
 g7 = BridgeGate(); _, t7, _ = stream(g7, 60.0, 5)
 w = g7.state_line(t7).split()
