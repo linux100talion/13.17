@@ -10,6 +10,7 @@
 Запуск:  python3 src/nav/test/test_bridge_gate.py
 """
 import os
+import math
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -121,6 +122,26 @@ check("open_reset=False: флага нет (поведение до 2026-09-09)"
 g7 = BridgeGate(); _, t7, _ = stream(g7, 60.0, 5)
 w = g7.state_line(t7).split()
 check("state_line: 'open - 0 0 0'", w == ['open', '-', '0', '0', '0'])
+
+# 9. СБОРКА строки /nn1/bridge как её делает ray_tracer: 5 полей гейта +
+#    Δyaw якоря (снимок шва) + Δyaw СЕЙЧАС. Седьмое поле читает лётная нода
+#    (ros_telemetry._on_bridge → dyaw_now) и по его устойчивости судит зрелость
+#    (rth_ready._dyaw_steady). Полёты 154759/155443: поля не было вовсе —
+#    dyaw_now=None весь полёт, brdn= пустое.
+def bridge_line(gate, t, yaw_off=None, dnow=None):
+    d = f"{math.degrees(yaw_off):+.1f}" if yaw_off is not None else "-"
+    n = f"{math.degrees(dnow):+.1f}" if dnow is not None else "-"
+    return f"{gate.state_line(t)} {d} {n}"
+
+
+g12 = BridgeGate(); _, t12, _ = stream(g12, 60.0, 5)
+w = bridge_line(g12, t12, yaw_off=math.radians(12.0), dnow=math.radians(-3.5)).split()
+check("строка моста: 7 полей", len(w) == 7)
+check("шестое поле — Δyaw якоря", w[5] == '+12.0')
+check("седьмое поле — Δyaw сейчас", w[6] == '-3.5')
+w = bridge_line(g12, t12).split()
+check("без латча/курса — прочерки, поля на месте",
+      len(w) == 7 and w[5] == '-' and w[6] == '-')
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ BRIDGE GATE OK" if ok_all else "❌ СБОЙ")

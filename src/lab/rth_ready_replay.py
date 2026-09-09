@@ -46,6 +46,19 @@ def quat_yaw(q):
                       1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
 
+def _fld(line, i):
+    """Поле i строки /nn1/bridge как float ('-' и записи без поля → None)."""
+    if not line:
+        return None
+    w = line.split()
+    if len(w) <= i:
+        return None
+    try:
+        return float(w[i])
+    except ValueError:
+        return None
+
+
 def load(bag):
     r = SequentialReader()
     r.open(StorageOptions(uri=bag, storage_id='sqlite3'), ConverterOptions('cdr', 'cdr'))
@@ -135,6 +148,7 @@ def main():
             vins_rebirths=int(float(sd.get('reb', 0))),
             bridge_seen=brg is not None,
             bridge_open=(brg.split()[0] == 'open') if brg else True,
+            bridge_dyaw=_fld(brg, 5), dyaw_now=_fld(brg, 6),
             ekf_x=pos[0] if pos else None, ekf_y=pos[1] if pos else None,
             ekf_z=pos[2] if pos else None)
         state = rth.update(s, sane=bool(near('/vins/sane', t, True)))

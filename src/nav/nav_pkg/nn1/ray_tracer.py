@@ -306,8 +306,17 @@ class RayTracer(Node):
             # '-' у якоря без латча (кадр ещё тождественен).
             dyaw = (f"{math.degrees(self.anchor.yaw_off):+.1f}"
                     if self.anchor.latched else "-")
+            # седьмое поле — Δyaw СЕЙЧАС: та же разность «курс AHRS − курс VINS»,
+            # но мгновенная, считается КАЖДЫЙ кадр и до всякого латча. Шестое
+            # поле — её снимок, замороженный в момент шва; разность седьмого и
+            # шестого = уход курса с момента латча. По устойчивости седьмого
+            # лётная нода судит о зрелости VINS (rth_ready._dyaw_steady) —
+            # прежде чем пересаживать EKF на курс VINS (EK3_SRC1_YAW=6).
+            # '-' — курса AHRS ещё нет (телеметрия FCU молчит).
+            dnow = (f"{math.degrees(_wrap_pi(self.att_yaw - vins_yaw)):+.1f}"
+                    if self.att_yaw is not None else "-")
             self.pub_bridge.publish(
-                String(data=f"{self.gate.state_line(th)} {dyaw}"))
+                String(data=f"{self.gate.state_line(th)} {dyaw} {dnow}"))
         # Якорение КАДРА (полёт 2026-08-20 №4): мир VINS рождается в точке его
         # инициализации — в воздухе, куда борт уже улетел от точки арма, а кадр
         # EKF считается от арма. Офсет кадров (9.6 м в том полёте) выносит
