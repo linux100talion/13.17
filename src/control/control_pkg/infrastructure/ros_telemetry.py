@@ -143,7 +143,8 @@ class RosTelemetry:
         self._s.vins_valid = True
 
     def _on_bridge(self, m):
-        # 'open|closed <причина> <подтяжек в окне> <закрытий> <перерождений>'
+        # 'open|closed <причина> <подтяжек в окне> <закрытий> <перерождений>
+        #  [Δyaw якоря, град]' — шестое поле с 2026-09-09, старые записи без него
         w = m.data.split()
         if len(w) >= 5:
             self._s.bridge_open = (w[0] == 'open')
@@ -151,6 +152,11 @@ class RosTelemetry:
             self._s.bridge_relatch = int(w[2])
             self._s.bridge_closes = int(w[3])
             self._s.bridge_seen = True
+        if len(w) >= 6:
+            try:
+                self._s.bridge_dyaw = float(w[5])
+            except ValueError:
+                self._s.bridge_dyaw = None      # '-' — якорь ещё не латчен
 
     def reset_vins_stream(self) -> None:
         """Нода послала /restart VINS: поток объявлен оборванным ЗДЕСЬ И СЕЙЧАС,

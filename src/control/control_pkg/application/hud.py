@@ -265,12 +265,18 @@ def _bridge_fields(s) -> str:
     """Мост VINS→EKF (ray_tracer, гейт здоровья bridge_gate.py): `brg=1/0` —
     vision_pose идёт / мост закрыт, `brw=` — причина последнего закрытия
     (reborn | vNN | relatch | ext | -), `brl=` — жёстких подтяжек якоря в окне,
-    `brc=` — закрытий за полёт. Полёт 142811: 687 подтяжек и отравленная
-    ориентация EKF были видны только в sim_nav.log. Только при живом мосте."""
+    `brc=` — закрытий за полёт, `brd=` — Δyaw ЯКОРЯ в градусах (поворот кадра
+    VINS относительно кадра EKF, а тот выровнен компасом: это и есть «разность
+    VINS и компаса» — латчится при созревании, замирает, меняется только на
+    жёстких подтяжках; '--' = якорь не латчен). Полёт 142811: 687 подтяжек и
+    отравленная ориентация EKF были видны только в sim_nav.log. Только при
+    живом мосте."""
     if not getattr(s, 'bridge_seen', False):
         return ""
+    d = getattr(s, 'bridge_dyaw', None)
     return (f" brg={int(s.bridge_open)} brw={s.bridge_why} "
-            f"brl={s.bridge_relatch} brc={s.bridge_closes}")
+            f"brl={s.bridge_relatch} brc={s.bridge_closes} "
+            f"brd={'--' if d is None else f'{d:+.1f}'}")
 
 
 def _station_fields(s) -> str:
