@@ -164,6 +164,26 @@ fa_0.update(np.zeros(3), 0.0, np.zeros(3), 0.0, 0.0)
 ev = fa_0.update(np.zeros(3), 0.0, np.array([2.0, 0.0, 0.0]), 0.0, 0.1)
 check("grace_sec=0 — прежнее поведение (подтяжка сразу)", ev == 'relatch')
 
+# --- ЛАТЧ ТОЛЬКО ПОВОРОТА (первое открытие моста, bridge_gate.take_open_reset) ---
+# отдаём полётнику НАШУ свежую раму: поворот берём (кадр VINS повёрнут на курс
+# первого кадра — на спавне не-на-восток сырая поза разносила LOITER),
+# трансляцию обнуляем (начало = точка init VINS ≈ точка взлёта)
+import math as _m
+an9 = FrameAnchor(relatch_m=1.0, tau_sec=5.0, grace_sec=0.0)
+an9.latch_yaw(vins_yaw=_m.radians(-169.0), ekf_yaw=0.0, now=100.0)
+check("latch_yaw: якорь залатчен, трансляция НУЛЕВАЯ",
+      an9.latched and float(np.linalg.norm(an9.t)) == 0.0)
+check("latch_yaw: Δyaw = курс EKF − курс VINS",
+      abs(_m.degrees(an9.yaw_off) - 169.0) < 1e-6)
+p9 = an9.map(np.array([1.0, 0.0, 2.0]))
+check("latch_yaw: поза VINS разворачивается в кадр EKF (x вперёд → почти −x)",
+      abs(p9[0] + 0.982) < 1e-3 and abs(p9[1] - 0.191) < 1e-3 and abs(p9[2] - 2.0) < 1e-9)
+# после окна обычное слежение работает как всегда (расход > relatch_m → relatch)
+ev9 = an9.update(np.array([1.0, 0.0, 2.0]), _m.radians(-169.0),
+                 np.array([5.0, 5.0, 2.0]), 0.0, 101.0)
+check("после latch_yaw обычное слежение живо (жёсткая подтяжка на расходе)",
+      ev9 == 'relatch')
+
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FRAME ANCHOR OK" if ok_all else "❌ СБОЙ")
 sys.exit(0 if ok_all else 1)

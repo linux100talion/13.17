@@ -74,6 +74,23 @@ class FrameAnchor:
         self.t = np.zeros(3)
         self._latch_wall = -1e9
 
+    def latch_yaw(self, vins_yaw, ekf_yaw, now) -> None:
+        """Латч ТОЛЬКО ПОВОРОТА: Δyaw по паре курсов, трансляция НУЛЕВАЯ.
+
+        Нужен на первом открытии моста (bridge_gate.take_open_reset): дрейф,
+        накопленный EKF за время закрытия, усыновлять нельзя — надо отдать
+        полётнику нашу свежую раму, чтобы он сбросил позицию. Но сырую позу VINS
+        слать тоже нельзя: её кадр повёрнут на курс ПЕРВОГО КАДРА камеры, и на
+        спавне не-на-восток это ровно та перевёрнутая обратная связь, что
+        разносила LOITER (прогоны 212409/213830, −169°). Поэтому поворот берём
+        (курс наблюдаем компасом EKF), а трансляцию обнуляем: начало отсчёта =
+        точка init VINS ≈ точка взлёта."""
+        self.latched = True
+        self.yaw_off = _wrap(float(ekf_yaw) - float(vins_yaw))
+        self.t = np.zeros(3)
+        self._last_wall = now
+        self._latch_wall = now
+
     def rotate(self, p):
         """Rz(yaw_off) @ p — для позиций и world-скоростей VINS."""
         c, s = math.cos(self.yaw_off), math.sin(self.yaw_off)

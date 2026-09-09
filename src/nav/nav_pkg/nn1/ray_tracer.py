@@ -146,6 +146,7 @@ class RayTracer(Node):
         self._gate_open = True          # последнее состояние — для лога переходов
         self._ext_sane = None           # вердикт лётной ноды (/vins/sane)
         self._ext_wall = 0.0
+        self.att_yaw = None             # курс AHRS (/mavros/imu/data) — всегда свежий
         self._ready = None              # «VINS зрел» (/vins/bridge_ok), гейт зрелости
         self._ready_wall = 0.0
         self._ready_sec = float(self.get_parameter("bridge_ready_sec").value)
@@ -213,6 +214,10 @@ class RayTracer(Node):
     def _on_attitude(self, msg):
         q = msg.orientation
         self.R_enu_body = geo.quat_to_rotmat(q.x, q.y, q.z, q.w)
+        # курс AHRS: тот же, что у позы EKF, но приходит ВСЕГДА (IMU идёт, даже
+        # когда EKF объявил позицию потерянной и local_position замолк) — им
+        # разворачиваем кадр VINS на открытии моста, см. latch_yaw
+        self.att_yaw = quat_yaw(q.x, q.y, q.z, q.w)
 
     def _on_rel_alt(self, msg):
         self.rel_alt = float(msg.data)
@@ -266,12 +271,22 @@ class RayTracer(Node):
             # окно, в котором уходит сырой VINS и полётник пересаживается на
             # нашу раму (bridge_gate.take_open_reset, разбор 114844 vs 120819)
             if self._open_reset_sec > 0 and self.gate.take_open_reset():
-                self.anchor.reset()
+                # ПОВОРОТ берём (курс наблюдаем компасом — иначе на спавне
+                # не-на-восток отдали бы перевёрнутый кадр, тот самый, что
+                # разносил LOITER), ТРАНСЛЯЦИЮ обнуляем: полётник сбросит
+                # позицию на нашу свежую раму, а дрейф за время закрытия моста
+                # не усыновляется
+                if self.att_yaw is not None:
+                    self.anchor.latch_yaw(vins_yaw, self.att_yaw, time.time())
+                    how = f"Δyaw={math.degrees(self.anchor.yaw_off):+.1f}°, t=0"
+                else:
+                    self.anchor.reset()          # курса нет — только сырой VINS
+                    how = "якорь тождественен (курса AHRS нет)"
                 self._open_reset_until = time.time() + self._open_reset_sec
                 self.get_logger().warn(
-                    f"мост ОТКРЫТ впервые: отдаю СЫРОЙ VINS {self._open_reset_sec:g} с "
-                    f"— полётник пересядет на свежую раму (дрейф за время закрытия "
-                    f"не усыновляем)")
+                    f"мост ОТКРЫТ впервые: {self._open_reset_sec:g} с отдаю VINS от "
+                    f"своего начала ({how}) — полётник пересядет на свежую раму "
+                    f"(дрейф за время закрытия не усыновляем)")
             if gate_open != self._gate_open:
                 self._gate_open = gate_open
                 if gate_open:
