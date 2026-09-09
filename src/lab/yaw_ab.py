@@ -73,7 +73,8 @@ def load(path):
             d['st'].append((ts, deserialize_message(raw, String).data))
         elif top == '/model/iris_cam/odometry':
             p = deserialize_message(raw, Odometry).pose.pose
-            d['tr'].append((ts, p.position.x, p.position.y, quat_yaw(p.orientation)))
+            d['tr'].append((ts, p.position.x, p.position.y, quat_yaw(p.orientation),
+                            p.position.z))
         elif top == '/mavros/local_position/pose':
             p = deserialize_message(raw, PoseStamped).pose
             d['ek'].append((ts, p.position.x, p.position.y, quat_yaw(p.orientation)))
@@ -110,8 +111,17 @@ def stats(path, wz_max):
                 a[3] + k * wrap(b[3] - a[3]), w)
 
     # --- отрыв и касание: по armed (первый/последний) ---
-    up = next((ts for ts, a in d['arm'] if a), d['ek'][0][0])
-    down = next((ts for ts, a in reversed(d['arm']) if not a), d['ek'][-1][0])
+    # ОТРЫВ И КАСАНИЕ — по ВЫСОТЕ ИСТИНЫ, как в rth_check.py (порог 0.3 м над
+    # уровнем стоянки). По armed считать нельзя: между армом и отрывом борт стоит
+    # и ползёт, а после касания запись идёт ещё десятки секунд — и то и другое
+    # натекает в дрейф (192430: 3.65 м «по armed» против 1.09 м по высоте).
+    z0 = sorted(x[4] for x in d['tr'][:20])[10] if len(d['tr']) >= 20 else d['tr'][0][4]
+    air = [x[0] for x in d['tr'] if x[4] - z0 > 0.3]
+    if air:
+        up, down = air[0], air[-1]
+    else:
+        up = next((ts for ts, a in d['arm'] if a), d['ek'][0][0])
+        down = next((ts for ts, a in reversed(d['arm']) if a), d['ek'][-1][0])
     down = max(down, up + 1.0)
 
     base_e = next(p for p in d['ek'] if p[0] >= up)
