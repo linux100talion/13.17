@@ -885,6 +885,15 @@ class BootstrapConfig:
     origin_lat: float    # BS_ORIGIN_LAT / --origin-lat
     origin_lon: float    # BS_ORIGIN_LON / --origin-lon
     origin_alt: float        # м AMSL; BS_ORIGIN_ALT / --origin-alt
+    perc_alt_stale: float # СТРАХОВКА ОТ ЗАМЁРЗШЕЙ ВЫСОТЫ ПЕРЦЕПЦИИ, сек (0 = выкл):
+                                     # источники 'local'/'global' живут, пока EKF держит
+                                     # позицию — потерял, топик замолк, а высота осталась
+                                     # последним значением НАВСЕГДА. Прогоны 154759/155443:
+                                     # palt замёрзла на 0.6 м, борт летал на 1.3–2.9 м,
+                                     # канал считал себя годным (ipm=1) и врал масштабом —
+                                     # «демпфер не ставит гвозди». Протухла — отдаём None
+                                     # (гейт земли IPM честно закрывается, palt=-- и
+                                     # красный ALT GATE). BS_PERC_ALT_STALE
     perc_alt_src: str     # источник ВЫСОТЫ ПЕРЦЕПЦИИ (масштаб IPM +
                                      # гейты опоры; НЕ alt_src миссии!):
                                      # 'global' — rel_alt EKF (дефолт, GPS-

@@ -148,6 +148,7 @@ class BootstrapArch2Node(Node):
                                             ipm_scale_ref=cfg.ipm_scale_ref,
                                             ipm_acc_tau=cfg.ipm_acc_tau,
                                             alt_src=cfg.perc_alt_src,
+                alt_stale=cfg.perc_alt_stale,
                                             alt_zero=cfg.perc_alt_zero > 0)
             # ⚠️ Высота перцепции — СВОЯ ручка (perc_alt_src), НЕ cfg.alt_src:
             # 4 прогона 2026-08-19 с баро в перцепции (сырой И EMA) дали улёты

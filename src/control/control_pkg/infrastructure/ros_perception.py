@@ -10,6 +10,7 @@ FlowEstimator (control_pkg.perception), результат отдаёт доме
 R_cam_imu и rotflow_sign — из sim.yaml/монолита (подтверждены flow_derotation_check).
 """
 import math
+import time
 
 import numpy as np
 
@@ -67,6 +68,7 @@ class RosPerception:
                  ipm_model=None, ipm_derot=None, ipm_wz_tau=None, ipm_win=None,
                  ipm_adapt=None, ipm_vel_tau=None, ipm_alt_floor=None,
                  ipm_scale_ref=None, ipm_acc_tau=None, alt_src='global',
+                 alt_stale=2.0,
                  alt_zero=False, ipm_wz_gate=None, ipm_wz_bias_max=None,
                  att_interp=False, att_latency=0.0,
                  att_wait_max=0.15):
@@ -232,6 +234,17 @@ class RosPerception:
         else:
             node.create_subscription(Float64, '/mavros/global_position/rel_alt',
                                      self._on_alt, qos_profile_sensor_data)
+        # ⚠️ СТРАХОВКА ОТ ЗАМЁРЗШЕЙ ВЫСОТЫ (прогоны 154759/155443, 2026-09-09).
+        # Источники 'local' и 'global' живут ТОЛЬКО пока EKF держит позицию: теряет
+        # — топик замолкает, а `_alt` навсегда остаётся последним значением. В тех
+        # прогонах palt замерла на 0.6 м, борт летал на 1.3–2.9 м, канал считал себя
+        # годным (ipm=1) и врал масштабом — пилот увидел «демпфер не ставит гвозди».
+        # Поэтому: помним время последнего обновления и, если оно старше alt_stale,
+        # отдаём высоту как НЕИЗВЕСТНУЮ (perc_alt=None → гейт земли IPM честно
+        # закрывается, в HUD palt=-- и красный ALT GATE). Лучше слепой канал, чем
+        # врущий. 0 = страховка выключена (прежнее поведение).
+        self._alt_wall = 0.0
+        self._alt_stale = float(alt_stale)
         node.create_subscription(Image, image_topic, self._on_image, qos_profile_sensor_data)
 
     def _on_imu(self, m):
@@ -289,6 +302,7 @@ class RosPerception:
 
     def _on_alt(self, m):
         self._alt = float(m.data)
+        self._alt_wall = time.time()
 
     def _on_lpos_alt(self, m):
         # EKF local z ≈ высота над точкой арма (origin EKF); на ровной сцене
@@ -299,6 +313,13 @@ class RosPerception:
             self._alt_zero = z
             self._alt_zero_pending = False
         self._alt = max(0.0, z - self._alt_zero)
+        self._alt_wall = time.time()
+
+    def _alt_fresh(self) -> bool:
+        """Высота перцепции свежая? Источник замолчал (EKF потерял позицию) —
+        значение застыло и врёт масштабом IPM; лучше отдать None."""
+        return (self._alt_stale <= 0.0 or self._alt is None
+                or time.time() - self._alt_wall < self._alt_stale)
 
     def latch_alt_zero(self):
         """Запомнить текущую высоту как НОЛЬ земли (зовётся на фронте armed).
@@ -318,6 +339,7 @@ class RosPerception:
 
     def _set_alt(self, alt):
         self._alt = float(alt)
+        self._alt_wall = time.time()
 
     def _on_image(self, m):
         if m.encoding not in ('mono8', '8UC1'):
@@ -394,7 +416,8 @@ class RosPerception:
         s.ipm_noise_fwd, s.ipm_noise_lat = self._ipm_noise
         s.ipm_ok = self._ipm_ok
         s.ipm_fail = self._ipm_fail
-        s.perc_alt = self._alt        # по НЕЙ судит гейт земли IPM (не rel_alt)
+        # по НЕЙ судит гейт земли IPM (не rel_alt); протухшая = НЕИЗВЕСТНАЯ
+        s.perc_alt = self._alt if self._alt_fresh() else None
         s.att_yaw = self._att_yaw
         return s
 
