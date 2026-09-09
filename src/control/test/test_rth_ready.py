@@ -35,8 +35,10 @@ def snap(t, fwd=0.0, lat=0.0, seq=0, yaw=0.0, odom=300, age=0.0, armed=True,
 
 
 def mk(**kw):
+    # home_settle=1 — чтобы тесты были короткими; отдельный блок ниже проверяет
+    # саму выдержку (полётный дефолт 3 с ≥ anchor_open_reset_sec ray_tracer)
     args = dict(radius=5.0, heal_sec=30.0, ripe_sec=5.0, min_count=300,
-                fresh_sec=2.0, track_m=3.0)
+                fresh_sec=2.0, track_m=3.0, home_settle=1.0)
     args.update(kw)
     return RthReadiness(**args)
 
@@ -62,7 +64,10 @@ r = mk()
 st, t, seq = run(r, 100.0, 4.0, x=1.0, y=0.0)
 check("здоровый VINS < ripe_sec: ещё heal", st == 'heal' and not r.ripe)
 st, t, seq = run(r, t, 1.5, seq0=seq, x=1.0, y=0.0)
-check("здоровье ≥ ripe_sec в круге → READY", st == 'ready')
+check("зрелость есть, но рама ещё не устоялась (home_settle) — heal/settle",
+      st == 'heal' and r.ripe and r.why == 'settle')
+st, t, seq = run(r, t, 1.1, seq0=seq, x=1.0, y=0.0)
+check("рама спокойна home_settle → READY", st == 'ready')
 check("ripe взведён (гейт зрелости моста откроет мост)", r.ripe)
 check("дом записан позой EKF", r.home == (1.0, 0.0, 2.0))
 check("трек начат домом", r.track == [(1.0, 0.0, 2.0)])
@@ -101,12 +106,12 @@ check("курс 90°: ход вперёд 4 м → смещение по y (ми
 # --- 8. после латча рама рвётся: три причины ---
 for why, kw in (('reborn', dict(reb=1)), ('bridge', dict(brg_seen=True, brg_open=False))):
     r = mk()
-    st, t, seq = run(r, 700.0, 6.0)
+    st, t, seq = run(r, 700.0, 7.0)
     check(f"перед разрывом READY ({why})", st == 'ready')
     st, t, seq = run(r, t, 0.2, seq0=seq, **kw)
     check(f"после латча {why} → LOST:{why}", r.state == 'lost' and r.why == why)
 r = mk()
-st, t, seq = run(r, 800.0, 6.0)
+st, t, seq = run(r, 800.0, 7.0)
 st, t, seq = run(r, t, 0.2, seq0=seq, sane=False)
 check("после латча гейт объявил VINS больным → LOST:insane",
       r.state == 'lost' and r.why == 'insane')
@@ -118,44 +123,46 @@ r = mk()
 st, t, seq = run(r, 900.0, 6.0, brg_seen=True, brg_open=False)
 check("мост закрыт: латча нет, ждём (why=bridge-wait)",
       st == 'heal' and r.ripe and r.why == 'bridge-wait')
-st, t, seq = run(r, t, 0.2, seq0=seq, brg_seen=True, brg_open=True)
-check("мост открылся → латч сразу (зрелость уже набрана)", r.state == 'ready')
+st, t, seq = run(r, t, 1.2, seq0=seq, brg_seen=True, brg_open=True)
+check("мост открылся → латч после выдержки (зрелость уже набрана)",
+      r.state == 'ready')
 
-# --- 10. в круге дом ИДЁТ ЗА ПОЗОЙ (кадр ещё прыгает), за кругом пишется трек ---
+# --- 10. дом ФИКСИРУЕТСЯ в точке латча, дальше пишется трек ---
 r = mk()
-st, t, seq = run(r, 1000.0, 6.0, x=0.0, y=0.0)
+st, t, seq = run(r, 1000.0, 7.0, x=0.0, y=0.0)
+check("дом = точка латча (где созрела система)", r.home == (0.0, 0.0, 2.0))
 for i in range(1, 13):                       # 12 м по x: и IPM-путь, и поза EKF
     t += 0.05
     seq += 1
     r.update(snap(t, seq=seq, fwd=float(i), x=float(i), y=0.0), sane=True)
-check("дом = последняя точка ВНУТРИ круга (5 м), не точка латча",
-      r.home == (5.0, 0.0, 2.0))
-check("за кругом трек пишется шагом 3 м", r.track == [(5.0, 0.0, 2.0),
-                                                      (8.0, 0.0, 2.0),
-                                                      (11.0, 0.0, 2.0)])
-check("длина пути считается", abs(r.path_m - 6.0) < 1e-6)
+check("дом НЕ уехал за бортом", r.home == (0.0, 0.0, 2.0))
+check("трек пишется шагом 3 м от дома",
+      r.track == [(0.0, 0.0, 2.0), (3.0, 0.0, 2.0), (6.0, 0.0, 2.0),
+                  (9.0, 0.0, 2.0), (12.0, 0.0, 2.0)])
+check("длина пути считается", abs(r.path_m - 12.0) < 1e-6)
 check("расстояние до дома по прямой",
-      abs(r.home_dist(snap(t, x=12.0, y=0.0)) - 7.0) < 1e-6)
+      abs(r.home_dist(snap(t, x=12.0, y=0.0)) - 12.0) < 1e-6)
 
-# --- 10в. вернулись в круг: дом и трек НЕ сбрасываются (полёт «туда и обратно») ---
+# --- 10в. вернулись домой: дом и трек НЕ сбрасываются (полёт «туда и обратно») ---
+n_tr = len(r.track)
 for i in range(11, 0, -1):                   # летим обратно к дому
     t += 0.05
     seq += 1
     r.update(snap(t, seq=seq, fwd=float(i), x=float(i), y=0.0), sane=True)
-check("возврат в круг: дом остался на границе круга", r.home == (5.0, 0.0, 2.0))
-check("возврат в круг: трек не стёрт", len(r.track) >= 3)
+check("возврат домой: дом на месте", r.home == (0.0, 0.0, 2.0))
+check("возврат домой: трек не стёрт", len(r.track) >= n_tr)
 
 # --- 10б. СКАЧОК КАДРА EKF (сброс к vision_pose / перелатч якоря) ---
 # в круге — норма: дом идёт следом (полёт 103244: мост открылся, EKF прыгнул 10 м)
 r = mk()
-st, t, seq = run(r, 1050.0, 6.0, x=0.0, y=0.0)
+st, t, seq = run(r, 1050.0, 7.0, x=0.0, y=0.0)
 t += 0.05; seq += 1
 r.update(snap(t, seq=seq, x=10.0, y=0.0), sane=True)   # прыжок кадра в круге
-check("скачок кадра ВНУТРИ круга: не дисквалификация, дом переехал",
+check("скачок кадра ВНУТРИ круга: не дисквалификация, дом переставлен",
       r.state == 'ready' and r.home == (10.0, 0.0, 2.0))
 # за кругом — дом и трек оказались в раме, которой больше нет
 r = mk()
-st, t, seq = run(r, 1060.0, 6.0, x=0.0, y=0.0)
+st, t, seq = run(r, 1060.0, 7.0, x=0.0, y=0.0)
 for i in range(1, 9):                        # выходим из круга (8 м)
     t += 0.05; seq += 1
     r.update(snap(t, seq=seq, fwd=float(i), x=float(i), y=0.0), sane=True)
@@ -164,9 +171,28 @@ t += 0.05; seq += 1
 r.update(snap(t, seq=seq, fwd=8.0, x=18.0, y=0.0), sane=True)   # скачок 10 м
 check("скачок кадра ЗА кругом → LOST:jump", r.state == 'lost' and r.why == 'jump')
 
+# --- 10г. ВЫДЕРЖКА ПЕРЕД ЛАТЧОМ: скачок кадра перезапускает отсчёт ---
+# (ray_tracer на первом открытии моста нарочно отдаёт сырой VINS — полётник
+# пересаживается на свежую раму скачком; дом до этого ставить нельзя)
+r = mk(home_settle=3.0)
+st, t, seq = run(r, 1400.0, 7.0, x=0.0, y=0.0)
+check("зрелость (5 с) + выдержка ещё не вышла → heal", st == 'heal' and r.ripe)
+st, t, seq = run(r, t, 1.5, seq0=seq, x=0.0, y=0.0)
+check("зрелость 5 с + выдержка 3 с → READY", r.state == 'ready')
+r2 = mk(home_settle=3.0)
+st, t, seq = run(r2, 1500.0, 6.0, x=0.0, y=0.0)     # зрелость на 5-й с, идёт выдержка
+t += 0.05; seq += 1
+r2.update(snap(t, seq=seq, x=9.0, y=0.0), sane=True)   # скачок кадра
+check("скачок в выдержке: латча ещё нет, отсчёт заново", r2.state == 'heal')
+st, t, seq = run(r2, t, 2.0, seq0=seq, x=9.0, y=0.0)
+check("2 с после скачка — всё ещё ждём", r2.state == 'heal')
+st, t, seq = run(r2, t, 1.2, seq0=seq, x=9.0, y=0.0)
+check("прошло 3 с спокойной рамы → латч в НОВЫХ координатах",
+      r2.state == 'ready' and r2.home == (9.0, 0.0, 2.0))
+
 # --- 11. LOST терминален, но ripe (мост) живёт своей жизнью ---
 r = mk()
-st, t, seq = run(r, 1100.0, 6.0)
+st, t, seq = run(r, 1100.0, 7.0)
 st, t, seq = run(r, t, 0.2, seq0=seq, sane=False)
 check("LOST зафиксирован", r.state == 'lost')
 st, t, seq = run(r, t, 6.0, seq0=seq)         # VINS снова здоров
@@ -175,14 +201,14 @@ check("но ripe снова True — мост открыт, ярусы рабо�
 
 # --- 12. дизарм = чистый старт следующего полёта ---
 r = mk()
-st, t, seq = run(r, 1200.0, 6.0)
+st, t, seq = run(r, 1200.0, 7.0)
 r.update(snap(t + 0.05, armed=False))
 check("дизарм сбрасывает латч", r.state == 'heal' and r.home is None)
 
 # --- 13. статусная строка для HUD ---
 r = mk()
 check("status в HEAL: heal/<путь>", r.status(snap(1300.0)).startswith('heal/'))
-st, t, seq = run(r, 1300.0, 6.0)
+st, t, seq = run(r, 1300.0, 7.0)
 check("status в READY: ready/<до дома>", r.status(snap(t, x=7.0)) == 'ready/7')
 r.state, r.why = 'lost', 'reborn'
 check("status в LOST: причина видна", r.status(snap(t)) == 'lost:reborn')

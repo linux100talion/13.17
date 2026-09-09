@@ -462,7 +462,8 @@ class BootstrapArch2Node(Node):
         self._rth = RthReadiness(radius=cfg.rth_radius, heal_sec=cfg.rth_heal_sec,
                                  ripe_sec=cfg.rth_ripe_sec, min_count=int(cfg.rth_ripe_n),
                                  fresh_sec=cfg.vins_fresh_sec, track_m=cfg.rth_track_m,
-                                 jump_m=cfg.rth_jump_m)
+                                 jump_m=cfg.rth_jump_m,
+                                 home_settle=cfg.rth_home_settle)
         self._bridge_ok_pub = self.create_publisher(Bool, '/vins/bridge_ok', 10)
         # переставить дом полётника в точку латча (фолбэк RTL полетит туда же)
         from mavros_msgs.srv import CommandHome

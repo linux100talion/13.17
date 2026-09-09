@@ -86,6 +86,7 @@ def main():
     ap.add_argument('--min-count', type=int, default=100)
     ap.add_argument('--track-m', type=float, default=3.0)
     ap.add_argument('--jump-m', type=float, default=2.0)
+    ap.add_argument('--home-settle', type=float, default=3.0)
     a = ap.parse_args()
 
     d = load(a.bag)
@@ -102,7 +103,8 @@ def main():
         return arr[i][1] if i >= 0 else default
 
     rth = RthReadiness(radius=a.radius, heal_sec=a.heal_sec, ripe_sec=a.ripe_sec,
-                       min_count=a.min_count, track_m=a.track_m, jump_m=a.jump_m)
+                       min_count=a.min_count, track_m=a.track_m, jump_m=a.jump_m,
+                       home_settle=a.home_settle)
     t0 = st[0][0]
     fwd = lat = 0.0                 # интеграл скоростей IPM (тело) = путь
     prev_t = None
