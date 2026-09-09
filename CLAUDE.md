@@ -14,6 +14,14 @@ src/
   camera/      — C++ CUDA камера-нода (camera_pkg) + tuner
   vins/        — VINS-MONO-ROS2 (конфиги) + python cam-ноды (fallback)
   sim/         — симуляционная обвязка (байеризатор, launch)
+  control/     — пакет control_pkg: стабилизаторы, арбитр, гейты + ручки прогона
+                 (profiles/). Доки рядом: architecture.md (слои, порты),
+                 control.md (впрыск команд), gates.md (ГЕЙТЫ И СТРАХОВКИ:
+                 VINS Gate, мост VINS→EKF, guard'ы яруса и возврата — что
+                 проверяется и когда срабатывает), speed.md (чем ограничена
+                 максимальная скорость), windspeed.md (стрелка ветра HUD),
+                 tune.md (настройка демпфера заново), low-rider.md (полёты
+                 ниже 1 м), yawbanklimit.md (потолок крена виража в LOITER)
   nav/         — пакет nav_pkg: нейросети навигации (NN1/NN2, пока болванки)
                  + openhd_streamer (даунлинк в OpenHD с оверлеем детекций)
   orin_shutdown/ — Go-утилита graceful shutdown через MAVLink
