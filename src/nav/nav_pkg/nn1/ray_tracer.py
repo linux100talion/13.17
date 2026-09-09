@@ -101,6 +101,12 @@ class RayTracer(Node):
         # без лётной ноды) — гейт молчит, мост живёт своими проверками.
         self.declare_parameter("bridge_ready_topic", "/vins/bridge_ok")
         self.declare_parameter("bridge_ready_sec", 3.0)   # свежесть вердикта
+        # ВОЗРАСТ ОДОМЕТРИИ, при котором якорь НЕ ДВИГАЕМ, с. Пара «поза EKF /
+        # поза VINS» спаривается по ПРИХОДУ: EKF свежий, а VINS может отстать —
+        # не дырой в данных (штампы непрерывны), а подвисом счёта. Разбор 173415:
+        # VINS встал на 1.96 с, борт крутился 10 °/с, и пара разъехалась на 20°
+        # и на метры. Пока сообщение старое — якорь стоит; поза в EKF идёт как шла.
+        self.declare_parameter("anchor_stale_sec", 0.3)
         # ПЕРВОЕ ОТКРЫТИЕ МОСТА: сколько секунд отдавать СЫРОЙ VINS, не латча
         # якорь. За это время полётник успевает сбросить позицию на нашу раму
         # (иначе латч подтвердил бы его дрейф — разбор 114844 vs 120819).
@@ -152,6 +158,8 @@ class RayTracer(Node):
         self._ready_wall = 0.0
         self._ready_sec = float(self.get_parameter("bridge_ready_sec").value)
         self._open_reset_sec = float(self.get_parameter("anchor_open_reset_sec").value)
+        self._stale_sec = float(self.get_parameter("anchor_stale_sec").value)
+        self._stale_logged = 0.0
         self._open_reset_until = -1e9   # до этого времени якорь не латчим
 
         # I/O
@@ -363,15 +371,29 @@ class RayTracer(Node):
         # (VISP−XKF1: 0.11 м → 4.0 м), своп POSXY→6 через минуту получил
         # vision за гейтом → position lost при живом GPS. Поэтому пока EKF
         # свеж и засечки NN1 нет:
-        #   расход > anchor_relatch_m — жёсткая подтяжка (заново Δyaw + t:
-        #   расход мог накопиться именно из-за ошибки курса);
+        #   расход > anchor_relatch_m — жёсткая подтяжка ТРАНСЛЯЦИИ (угол с
+        #   2026-09-09 не пересчитывается: расход измерен в метрах, а ошибка угла
+        #   поворачивает всю карту — см. frame_anchor.update и разбор 173415);
         #   меньше — мягкий дожим t с τ=anchor_tau_sec (Δyaw не трогаем).
         # После свапа на extnav EKF сам следует vision → расход ≈ инновация
         # (дециметры) → жёсткая подтяжка не срабатывает, дожим ≈ 0 — обратная
         # связь стабильна. Если EKF умер в const_pos, его поза замирает и
         # слежение поведёт якорь к ней — фьюжн к тому моменту уже потерян
         # (in-flight aiding не рестартует, LV4), хуже не делает.
-        if (gate_open and time.time() >= self._open_reset_until
+        # ВОЗРАСТ ЭТОГО СООБЩЕНИЯ (наши часы минус его штамп — одна шкала: нода
+        # живёт с use_sim_time, на борту ROS-время = wall). Старое сообщение
+        # спаривать со СВЕЖЕЙ позой EKF нельзя: на развороте разница пойдёт
+        # целиком в угол и трансляцию якоря (173415: подвис 1.96 с → 20°).
+        age = (self.get_clock().now().nanoseconds * 1e-9
+               - (msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9))
+        stale = self._stale_sec > 0.0 and age > self._stale_sec
+        if stale and time.time() - self._stale_logged > 5.0:
+            self._stale_logged = time.time()
+            self.get_logger().warn(
+                f"одометрия VINS отстала на {age:.2f} с (порог "
+                f"{self._stale_sec:g}) — якорь НЕ двигаем: пара с позой EKF "
+                f"разъехалась бы по времени, а не по дрейфу")
+        if (gate_open and not stale and time.time() >= self._open_reset_until
                 and not self.have_fix and self.ekf_pos is not None
                 and time.time() - self.ekf_pos_wall < 2.0):
             ev = self.anchor.update(self.vins_pos, vins_yaw,
@@ -394,7 +416,7 @@ class RayTracer(Node):
                     f"{self.anchor.t[2]:+.2f}) м")
             elif ev == 'relatch':
                 self.get_logger().info(
-                    f"якорь кадра подтянут (№{self.anchor.relatch_n}): Δyaw="
+                    f"якорь кадра подтянут ТРАНСЛЯЦИЕЙ (№{self.anchor.relatch_n}), Δyaw="
                     f"{math.degrees(self.anchor.yaw_off):+.1f}°, t="
                     f"({self.anchor.t[0]:+.2f},{self.anchor.t[1]:+.2f},"
                     f"{self.anchor.t[2]:+.2f}) м")
