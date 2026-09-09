@@ -95,6 +95,28 @@ g9 = BridgeGate()
 op, _, _ = stream(g9, 300.0, 30, ready=None)
 check("ready=None (голый Orin без лётной ноды): мост живёт своими проверками", op)
 
+# 7в. ПЕРВОЕ ОТКРЫТИЕ: гейт просит не усыновлять уехавший EKF (take_open_reset).
+# Разбор 114844 (якорь залатчился к уехавшей позе → 16.2 м дрейфа на весь полёт)
+# против 120819 (EKF успел сдаться сам, латчиться было не к чему → сброс, 2.25 м)
+g10 = BridgeGate()
+op, t10, x10 = stream(g10, 400.0, 30, ready=False)
+check("пока мост ни разу не открывался — флага нет", not g10.take_open_reset())
+op, t10, x10 = stream(g10, t10, 80, x0=x10, ready=True)   # закрытие отпустило
+check("после первого открытия флаг ВЗВЕДЁН", op and g10.take_open_reset())
+check("флаг одноразовый", not g10.take_open_reset())
+# второе закрытие/открытие в том же полёте флага НЕ даёт: там борт уже летит,
+# сброс позы полётника в воздухе опаснее усыновлённого дрейфа
+op = g10.on_odom(t10, x10, 0.0, 15.0); t10 += 0.1          # закрыли потолком
+op, t10, x10 = stream(g10, t10, 80, x0=x10)
+check("повторное открытие флага не даёт (в полёте не сбрасываем раму)",
+      op and not g10.take_open_reset())
+# выключатель
+g11 = BridgeGate(open_reset=False)
+_, t11, x11 = stream(g11, 500.0, 30, ready=False)
+op, t11, x11 = stream(g11, t11, 80, x0=x11, ready=True)
+check("open_reset=False: флага нет (поведение до 2026-09-09)",
+      op and not g11.take_open_reset())
+
 # 8. state_line формат
 g7 = BridgeGate(); _, t7, _ = stream(g7, 60.0, 5)
 w = g7.state_line(t7).split()

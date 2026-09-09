@@ -32,7 +32,10 @@
 #     пускаем ВООБЩЕ. Полёт 073004: 2-4 с мусора незрелого VINS накренили AHRS,
 #     и EKF уехал на 200 м уже при закрытом мосте; «возврат» сел в 52 м от старта.
 # Закрытие держится hold_sec после последней причины (латч гейта); открытие —
-# только при здоровом потоке. Счётчики closes/rebirths — в /nn1/bridge и
+# только при здоровом потоке. НА ПЕРВОМ ОТКРЫТИИ за полёт гейт просит якорь не
+# латчиться (take_open_reset): за время закрытия EKF уехал, и латч к его позе
+# означал бы «подтверждаю твой дрейф» — вместо этого отдаём сырой VINS, и
+# полётник пересаживается на свежую раму (разбор 114844 vs 120819). Счётчики closes/rebirths — в /nn1/bridge и
 # статус (brg=/brw=/brl=/brc=).
 #
 # ⚠️ ШТОРМ ПОДТЯЖЕК — сигнал СМЕШАННЫЙ (полёт 173102, 2026-09-06): подтяжка
@@ -51,7 +54,7 @@ import math
 
 class BridgeGate:
     def __init__(self, v_max=12.0, v_jump=12.0, gap_sec=1.0, relatch_n=3,
-                 relatch_win=5.0, hold_sec=5.0):
+                 relatch_win=5.0, hold_sec=5.0, open_reset=True):
         self.v_max = float(v_max)
         self.v_jump = float(v_jump)
         self.gap_sec = float(gap_sec)
@@ -66,6 +69,11 @@ class BridgeGate:
         self.closes = 0                 # закрытий за полёт
         self.rebirths = 0               # перерождений потока
         self.relatch_pending = False    # якорь надо латчить заново
+        # ПЕРВОЕ ОТКРЫТИЕ МОСТА В ПОЛЁТЕ — не усыновлять уехавший EKF (см. ниже)
+        self.open_reset = bool(open_reset)
+        self._was_open = None           # прошлое состояние (детект фронта)
+        self._open_reset_pending = False
+        self._first_open_done = False
 
     # --- события ------------------------------------------------------------
     def on_odom(self, t, x, y, speed, ext_sane=None, ready=None) -> bool:
@@ -96,7 +104,23 @@ class BridgeGate:
             # первые 2-4 с разноса после отрыва — этого хватило, чтобы AHRS
             # накренился, а EKF уехал на 200 м уже при закрытом мосте.
             self._close(t, 'ripe')
-        return self.is_open(t)
+        # ФРОНТ «закрыт → открыт», ПЕРВЫЙ за полёт: пока мост был закрыт (обычно
+        # гейтом зрелости после отрыва), EKF без позиционной подтяжки уезжал —
+        # 17 м за 22 с в полёте 114844. Если в этот момент якорь залатчится к его
+        # текущей позе, мы СВОЕЙ РУКОЙ подтвердим дрейф: vision_pose совпадёт с
+        # тем, что полётник и так думает, и он останется в уехавшей раме на весь
+        # полёт. Если же якоря нет (тождественный), уходит СЫРОЙ VINS, полётник
+        # видит расхождение и СБРАСЫВАЕТ позицию на нашу свежую раму — дрейф
+        # схлопывается (114844: 16.2 м остались; 120819, где EKF успел сдаться
+        # сам и якорь латчиться было не к чему: 2.25 м). Раньше это решала
+        # случайность (успел ли EKF объявить позицию потерянной) — теперь решаем мы.
+        open_now = self.is_open(t)
+        if (self.open_reset and self._was_open is False and open_now
+                and not self._first_open_done):
+            self._first_open_done = True
+            self._open_reset_pending = True
+        self._was_open = open_now
+        return open_now
 
     def on_relatch(self, t) -> bool:
         """Жёсткая подтяжка якоря. Возвращает: мост ЗАКРЫЛСЯ штормом подтяжек."""
@@ -108,6 +132,14 @@ class BridgeGate:
             self._close(t, 'relatch')
             return True
         return False
+
+    def take_open_reset(self) -> bool:
+        """Снять флаг «первое открытие: отдать сырой VINS, не усыновлять EKF»
+        (один раз за полёт). ray_tracer по нему сбрасывает якорь и на время окна
+        не латчит его заново — чтобы полётник успел пересесть на нашу раму."""
+        p = self._open_reset_pending
+        self._open_reset_pending = False
+        return p
 
     def take_relatch(self) -> bool:
         """Снять флаг «латчить заново» (один раз)."""

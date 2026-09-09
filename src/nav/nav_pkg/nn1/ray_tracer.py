@@ -100,6 +100,11 @@ class RayTracer(Node):
         # без лётной ноды) — гейт молчит, мост живёт своими проверками.
         self.declare_parameter("bridge_ready_topic", "/vins/bridge_ok")
         self.declare_parameter("bridge_ready_sec", 3.0)   # свежесть вердикта
+        # ПЕРВОЕ ОТКРЫТИЕ МОСТА: сколько секунд отдавать СЫРОЙ VINS, не латча
+        # якорь. За это время полётник успевает сбросить позицию на нашу раму
+        # (иначе латч подтвердил бы его дрейф — разбор 114844 vs 120819).
+        # 0 = выключить (латчиться сразу, как было до 2026-09-09).
+        self.declare_parameter("anchor_open_reset_sec", 2.0)
         self.declare_parameter("vins_sane_topic", "/vins/sane")
         self.declare_parameter("vins_restart_topic", "/restart")
 
@@ -144,6 +149,8 @@ class RayTracer(Node):
         self._ready = None              # «VINS зрел» (/vins/bridge_ok), гейт зрелости
         self._ready_wall = 0.0
         self._ready_sec = float(self.get_parameter("bridge_ready_sec").value)
+        self._open_reset_sec = float(self.get_parameter("anchor_open_reset_sec").value)
+        self._open_reset_until = -1e9   # до этого времени якорь не латчим
 
         # I/O
         self.create_subscription(CameraInfo, self.get_parameter("camera_info_topic").value,
@@ -255,6 +262,16 @@ class RayTracer(Node):
                                           ext, ready=rdy)
             if self.gate.take_relatch():
                 self.anchor.reset()
+            # первое открытие моста за полёт: НЕ усыновляем уехавший EKF —
+            # окно, в котором уходит сырой VINS и полётник пересаживается на
+            # нашу раму (bridge_gate.take_open_reset, разбор 114844 vs 120819)
+            if self._open_reset_sec > 0 and self.gate.take_open_reset():
+                self.anchor.reset()
+                self._open_reset_until = time.time() + self._open_reset_sec
+                self.get_logger().warn(
+                    f"мост ОТКРЫТ впервые: отдаю СЫРОЙ VINS {self._open_reset_sec:g} с "
+                    f"— полётник пересядет на свежую раму (дрейф за время закрытия "
+                    f"не усыновляем)")
             if gate_open != self._gate_open:
                 self._gate_open = gate_open
                 if gate_open:
@@ -293,7 +310,8 @@ class RayTracer(Node):
         # связь стабильна. Если EKF умер в const_pos, его поза замирает и
         # слежение поведёт якорь к ней — фьюжн к тому моменту уже потерян
         # (in-flight aiding не рестартует, LV4), хуже не делает.
-        if (gate_open and not self.have_fix and self.ekf_pos is not None
+        if (gate_open and time.time() >= self._open_reset_until
+                and not self.have_fix and self.ekf_pos is not None
                 and time.time() - self.ekf_pos_wall < 2.0):
             ev = self.anchor.update(self.vins_pos, vins_yaw,
                                     self.ekf_pos, self.ekf_yaw, time.time())
