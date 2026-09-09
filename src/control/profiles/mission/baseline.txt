@@ -27,6 +27,11 @@ BS_LAND_JOY=b1
 BS_RTH_JOY=b2
 BS_RTH_JOY_MODE=SMART_RTL
 
+# guard возврата: шаг rth сам отменяет возврат, если мост VINS→EKF закрыт или гейт
+# здоровья объявил VINS больным (в LV=2 EKF держится только нашей подтяжкой — закрылся
+# мост, и борт летит домой по цифрам, которых больше нет; разбор 044105 в cmd/smart_rth)
+BS_RTH_GUARD=1
+
 # слой: нода — пульт: устройство (bootstrap_arch2.sh, ⚠️ машинно-зависимо) и знаки осей
 # "r,p,t,y" (пусто = JOY_SIGNS_DEFAULT из control_pkg, выверены полётом TX12)
 BS_JOY_DEV=/dev/input/js0

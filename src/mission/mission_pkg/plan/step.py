@@ -1277,17 +1277,31 @@ class Rth(Step):
                      position»), home не задан, а для SMART_RTL — ещё и пустой/
                      переполненный буфер крошек. Возврат невозможен — отдаём борт
                      пилоту, а не молчим в чужом режиме;
-      RTH_EJECT    — FCU сам вышел из режима (failsafe/пилот с пульта FCU): уважаем.
+      RTH_EJECT    — FCU сам вышел из режима (failsafe/пилот с пульта FCU): уважаем;
+      RTH_GUARD    — ЗДОРОВЬЕ НАВИГАЦИИ (guard, см. ниже): мост VINS→EKF закрыт или
+                     гейт объявил VINS больным — возврат отменяем САМИ.
     Не сели за budget → RTH_TIMEOUT (error, борт в воздухе — сажает пилот).
-    ⚠️ Здоровье моста VINS→EKF шаг НЕ судит: RTL летит к точке в раме EKF, и если
-    мост закрылся или якорь перелатчился, борт честно вернётся «в старые цифры».
-    Это известная цена первой версии (см. cmd/rth/README.txt)."""
+
+    GUARD ЗДОРОВЬЯ (cfg.rth_guard, 2026-09-09, зеркало loiter_guard яруса 2). Возврат
+    ведёт FCU по позиции EKF, а в LV=2 (GPS нет) EKF держится ТОЛЬКО подтяжкой
+    vision_pose от нашего моста. Закрылся мост — EKF остаётся без единственного
+    источника и уезжает: полёт lv2_joy_20260909_044105 — brg=1→0 на 96.7 с и 149.6 с,
+    дрейф 1.4 → 99 м, полётник сначала сбросил SMART_RTL в RTL («bad position»),
+    на втором заходе ушёл в LAND по EKF-failsafe, борт сел в 40.9 м от старта. Ждать
+    этого молча нельзя: как только навигация под возвратом сгнила, ОТМЕНЯЕМ возврат и
+    отдаём борт пилоту на демпфере (goto freefly, стек и опора от текущей точки) —
+    лучше висеть, чем лететь домой по цифрам, которых больше нет. Условие держим
+    GUARD_SEC подряд (мгновенный мигок вердикта возврат не рвёт).
+    ⚠️ Guard судит ЖИВОСТЬ подтяжки, а не правду: если мост открыт, а якорь в полёте
+    перелатчился, борт честно вернётся «в старые цифры» (см. cmd/rth/README.txt)."""
 
     LATCH_SEC = 3.0          # столько ждём латча режима, дальше — отказ пилоту
     BUDGET_SEC = 180.0       # бэкстоп на стоковый RTL (15 м + LAND 0.15 м/с с 10 м) ≈ 90–120 с
+    GUARD_SEC = 1.0          # столько подряд держится «навигация больна» до отмены
 
     def __init__(self, name, stack, budget=BUDGET_SEC, keep="ALT_HOLD",
-                 throttle_hold=RC_CENTER, resume="freefly", mode="RTL"):
+                 throttle_hold=RC_CENTER, resume="freefly", mode="RTL",
+                 handover=None, guard=False):
         self.name = name
         self.stack = stack
         self.budget = budget
@@ -1296,12 +1310,16 @@ class Rth(Step):
         self.resume = resume
         self.mode = mode          # дефолт, если режим не пришёл со снапшотом
         self._mode = mode         # что реально шлём (выбирается на входе в шаг)
+        self.handover = handover  # гейт здоровья VINS (для guard); None = только мост
+        self.guard = guard        # cfg.rth_guard
         self._latched = False
         self._eject_warned = False
+        self._sick_since = None   # sim-старт непрерывного «навигация больна»
 
     def enter(self, ctx, s) -> None:
         self._latched = False
         self._eject_warned = False
+        self._sick_since = None
         # КАКОЙ возврат просили — из снапшота (какой топик дёрнули): RTL (прямая на
         # home) или SMART_RTL (по крошкам пути). Поле липкое, поэтому доживает до
         # входа в шаг — импульс к этому тику уже погашен.
@@ -1327,6 +1345,19 @@ class Rth(Step):
             ctx.log.warn(f"    {self.name}: пилот забрал борт (MANUAL) → {self.resume}")
             ctx.mode.set_mode(self.keep)
             return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_MANUAL")
+        sick = self._nav_sick(s)
+        if sick is not None:
+            if self._sick_since is None:
+                self._sick_since = s.now_sim
+            elif s.now_sim - self._sick_since >= self.GUARD_SEC:
+                ctx.log.warn(f"    {self.name}: {sick} — ВОЗВРАТ ОТМЕНЁН (борт летит по "
+                             f"цифрам EKF, которые больше нечем подтягивать) → "
+                             f"{self.resume}")
+                ctx.mode.set_mode(self.keep)
+                return _goto(RcCommand(throttle=s.pilot_throttle), self.resume,
+                             "RTH_GUARD")
+        else:
+            self._sick_since = None
         # MAVROS не знает имени SMART_RTL и отдаёт его как 'CMODE(21)' —
         # сравниваем через domain/modes (иначе латч не наступает никогда и
         # шаг честно отказывает: разбор полёта 200909)
@@ -1351,6 +1382,21 @@ class Rth(Step):
                           f"воздухе, сажает пилот")
             return _finish(rc, "RTH_TIMEOUT")
         return _run(rc)
+
+    def _nav_sick(self, s):
+        """Навигация под возвратом сгнила? Возвращает ПРИЧИНУ (строка) или None.
+        Два независимых признака: (1) МОСТ ЗАКРЫТ — подтяжки vision_pose нет, EKF в
+        GPS-denied поедет (это и случилось 044105); (2) ГЕЙТ ЗДОРОВЬЯ VINS — то же
+        суждение, что двигает лесенку, но раньше моста (мост закрывается по нему же).
+        Гейт зовём тем же снапшотом, что и нода: счётчики двигаются раз на sim-тик."""
+        if not self.guard:
+            return None
+        if getattr(s, 'bridge_seen', False) and not getattr(s, 'bridge_open', True):
+            why = getattr(s, 'bridge_why', '-')
+            return f"МОСТ VINS→EKF ЗАКРЫТ (bridge_gate: {why})"
+        if self.handover is not None and not self.handover.vins_sane(s):
+            return "VINS РАЗНЁССЯ (гейт здоровья)"
+        return None
 
 
 class Hover(Step):

@@ -192,12 +192,13 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                                  fresh_sec=cfg.vins_fresh_sec, keep=keep,
                                  throttle_hold=cfg.throttle_hold,
                                  cancel=cfg.ff_land_cancel > 0))
-        # ВОЗВРАТ ДОМОЙ (/mission/rth, make rth) — ПОСЛЕДНИМ в списке нарочно:
+        # ВОЗВРАТ ДОМОЙ (кнопка SD / make rth|smart-rth) — ПОСЛЕДНИМ в списке нарочно:
         # шаг достижим только прыжком по имени (Freefly → goto "rth"), а «следующий
         # индекс» после freefly обязан остаться посадкой по кнопке SA. Ручек у шага
         # нет: точку home, высоту и скорость возврата держит FCU (RTL_ALT_M,
         # RTL_SPEED_MS, LAND_SPD_MS) — нода лишь просит режим и отдаёт борт.
-        plan.append(Rth("rth", stack, keep=keep, throttle_hold=cfg.throttle_hold))
+        plan.append(Rth("rth", stack, keep=keep, throttle_hold=cfg.throttle_hold,
+                        handover=handover, guard=cfg.rth_guard > 0))
         return plan
     wait_gt = "Gz" in str(stab_spec)     # gz-семейство держит позицию по gt (sim-оракул)
     hold = cfg.throttle_hold

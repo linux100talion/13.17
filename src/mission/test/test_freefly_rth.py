@@ -112,28 +112,33 @@ YAWD = FakeStab('yawd', ('yaw',))
 VINS = FakeStab('vins', ('roll', 'pitch'))
 
 
-def make(budget=180.0):
+def make(budget=180.0, guard=False, ho=None):
     """План freefly как в mission_plan: [freefly, land, rth] — rth ПОСЛЕДНИМ."""
     clock, mode, log = FakeClock(), FakeMode(), FakeLog()
     stack = FakeStack([DAMPER, YAWD])
     pilot_stabs = [DAMPER, YAWD]
-    ho = VinsHandover(VINS, min_count=40, fresh_sec=2.0)
+    ho = ho or VinsHandover(VINS, min_count=40, fresh_sec=2.0)
     ff = Freefly("freefly", stack, pilot_stabs=pilot_stabs, handover=ho,
                  loiter_center=True, vins_fresh=2.0, sf_master=True,
                  land_gate=(1.0, 0.3), rth=True)
     land = SoftLand("land", stack, 0.3, 45.0, pilot_stabs=pilot_stabs, handover=ho)
-    rth = Rth("rth", stack, budget=budget)
+    rth = Rth("rth", stack, budget=budget, handover=ho, guard=guard)
     runner = PlanRunner([ff, land, rth], clock, mode, log)
     return runner, clock, mode, log, stack, ff, rth
 
 
 def snap(t, alt=4.0, mode="ALT_HOLD", armed=True, sw=-1, lvl=0, rth=False, sa=False,
-         rth_mode=""):
+         rth_mode="", bridge_seen=False, bridge_open=True, vins_vx=0.0):
     """rth_mode — ЛИПКОЕ поле снапшота (нода держит его после импульса), поэтому в
-    сценариях SMART_RTL его передают и на тиках после pulse."""
+    сценариях SMART_RTL его передают и на тиках после pulse. bridge_* — состояние
+    моста VINS→EKF из /nn1/bridge (guard шага rth)."""
     return DroneState(mode=mode, armed=armed, rel_alt=alt, now_sim=t,
                       pilot_switch=sw, pilot_level=lvl, pilot_land=sa, pilot_rth=rth,
                       pilot_rth_mode=rth_mode,
+                      bridge_seen=bridge_seen, bridge_open=bridge_open,
+                      bridge_why="ext" if not bridge_open else "-",
+                      vins_valid=True, vins_odom_count=300, vins_last_sim=t,
+                      vins_vx=vins_vx,
                       pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER,
                       pilot_throttle=RC_CENTER, pilot_yaw=RC_CENTER)
 
@@ -291,6 +296,50 @@ check("MAVROS отдаёт CMODE(21) — шаг считает режим зал
       and log.count("SMART_RTL залатчен") == 1)
 tick_until(r, clock, 0.2, mode="CMODE(21)", armed=False, rth_mode="SMART_RTL")
 check("дизарм в CMODE(21) → RTH_DONE", r.finished and r.result == "RTH_DONE")
+
+# --- 14. GUARD ЗДОРОВЬЯ: мост VINS→EKF закрылся посреди возврата (разбор 044105) ---
+r, clock, mode, log, stack, ff, rth = make(guard=True)
+tick_until(r, clock, 1.0)
+pulse(r, clock, rth_mode="SMART_RTL")
+tick_until(r, clock, 3.0, mode="CMODE(21)", rth_mode="SMART_RTL")
+check("guard: возврат идёт, мост открыт — шаг rth", cur(r) == "rth")
+# мигок вердикта короче GUARD_SEC возврат НЕ рвёт
+tick_until(r, clock, 0.5, mode="CMODE(21)", rth_mode="SMART_RTL",
+           bridge_seen=True, bridge_open=False)
+check("guard: мост закрыт 0.5 с (< GUARD_SEC 1 с) — возврат продолжается",
+      cur(r) == "rth" and r.result != "RTH_GUARD")
+tick_until(r, clock, 1.0, mode="CMODE(21)", rth_mode="SMART_RTL", bridge_seen=True)
+check("guard: мост открылся обратно — таймер сброшен, возврат идёт", cur(r) == "rth")
+# закрыт дольше GUARD_SEC → отмена
+tick_until(r, clock, 1.2, mode="CMODE(21)", rth_mode="SMART_RTL",
+           bridge_seen=True, bridge_open=False)
+check("guard: мост закрыт > GUARD_SEC → RTH_GUARD, борт пилоту в freefly",
+      cur(r) == "freefly" and r.result == "RTH_GUARD")
+check("guard: послан keep (ALT_HOLD), а не оставлен режим FCU",
+      mode.modes[-1] == "ALT_HOLD")
+check("guard: причина в логе — закрытый мост",
+      log.count("МОСТ VINS→EKF ЗАКРЫТ") == 1)
+
+# --- 15. guard по вердикту гейта здоровья (разнос VINS) ---
+ho = VinsHandover(VINS, min_count=40, fresh_sec=2.0, v_max=12.0)
+r, clock, mode, log, stack, ff, rth = make(guard=True, ho=ho)
+tick_until(r, clock, 1.0)
+pulse(r, clock)
+tick_until(r, clock, 2.0, mode="RTL")
+check("guard: здоровый VINS — возврат идёт", cur(r) == "rth")
+tick_until(r, clock, 1.2, mode="RTL", vins_vx=20.0)     # |v| 20 > потолок 12
+check("guard: гейт здоровья (|v|=20) → RTH_GUARD",
+      cur(r) == "freefly" and r.result == "RTH_GUARD"
+      and log.count("VINS РАЗНЁССЯ") == 1)
+
+# --- 16. guard выключен (BS_RTH_GUARD=0) — старое поведение ---
+r, clock, mode, log, stack, ff, rth = make(guard=False)
+tick_until(r, clock, 1.0)
+pulse(r, clock, rth_mode="SMART_RTL")
+tick_until(r, clock, 5.0, mode="CMODE(21)", rth_mode="SMART_RTL",
+           bridge_seen=True, bridge_open=False)
+check("guard выкл: закрытый мост возврат не рвёт (как до 2026-09-09)",
+      cur(r) == "rth" and r.result != "RTH_GUARD")
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ FREEFLY RTH OK" if ok_all else "❌ СБОЙ")

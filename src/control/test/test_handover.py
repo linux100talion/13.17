@@ -96,11 +96,11 @@ check("композит: на форвард-дрейфе vins команда т
 
 # ============ ГЕЙТ ЗДОРОВЬЯ VINS (авто-демоут яруса 1 при разносе) ============
 def sh(now, vx=0.0, vy=0.0, ipm_ok=False, ipm_vfwd=0.0, ipm_vlat=0.0,
-       roll=RC_CENTER, pitch=RC_CENTER):
+       roll=RC_CENTER, pitch=RC_CENTER, mode="ALT_HOLD"):
     return DroneState(vins_valid=True, vins_odom_count=100,
                       vins_last_sim=now, now_sim=now, vins_vx=vx, vins_vy=vy,
                       ipm_ok=ipm_ok, ipm_vfwd=ipm_vfwd, ipm_vlat=ipm_vlat,
-                      pilot_roll=roll, pilot_pitch=pitch)
+                      pilot_roll=roll, pilot_pitch=pitch, mode=mode)
 
 
 hg = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
@@ -170,6 +170,31 @@ for i in range(60):                                  # 3с висения, сн�
     ok_wind = hgh3.vins_sane(sh(400.0 + i * 0.05, vx=1.2))
 check("висение, ветровой снос 1.2 < hover_v 3: sane", ok_wind)
 
+# 6в. ВОЗВРАТ ДОМОЙ: борт ведёт САМ ПОЛЁТНИК (RTL/SMART_RTL) — стек пуст и стики в
+# центре ПО ПОСТРОЕНИЮ (шаг Rth), а борт честно летит домой 3-5 м/с. Полёт
+# lv2_joy_20260909_044105: гейт принял это за разнос и ДВАЖДЫ закрыл мост vision_pose
+# (brg=0 brw=ext), EKF без единственной подтяжки уехал на 99 м, SMART_RTL слетел в RTL
+# («bad position»), второй заход — в LAND по EKF-failsafe. Промах возврата 40.9 м.
+for md in ('RTL', 'CMODE(21)', 'GUIDED', 'AUTO'):
+    hgr = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
+                       hover_v=3.0, hover_sec=2.0, sane_n=3)
+    for i in range(80):                              # 4 с возврата на 5 м/с
+        ok_rth = hgr.vins_sane(sh(500.0 + i * 0.05, vx=5.0, mode=md))
+    check(f"{md}: борт ведёт FCU, v=5 при центре стиков — sane (чек висения молчит)",
+          ok_rth)
+# но физический потолок работает и там: 20 м/с — мусор в любом режиме
+hgr2 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0, v_max=12.0,
+                    hover_v=3.0, hover_sec=2.0, sane_n=3)
+check("RTL: |v|=20 > потолок 12 — НЕ sane (физику режим не отменяет)",
+      not hgr2.vins_sane(sh(510.0, vx=20.0, mode='RTL')))
+# LOITER — НАШ ярус (стик = наша команда скорости): чек висения обязан работать
+hgr3 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0,
+                    hover_v=3.0, hover_sec=2.0, sane_n=3)
+for i in range(80):
+    ok_loi = hgr3.vins_sane(sh(520.0 + i * 0.05, vx=5.0, mode='LOITER'))
+check("LOITER (наш ярус, стик = команда): v=5 при центре — НЕ sane (чек жив)",
+      not ok_loi)
+
 # 7. ЗАПРОС /restart на фронте sane→insane (восстановление после разноса)
 hg6 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0, v_max=12.0)
 hg6.vins_sane(sh(100.0, vx=1.0))                     # sane
@@ -184,11 +209,12 @@ check("insane продолжается (не фронт): рестарт НЕ п
 # ============ ЧЕК ЗАНИЖЕНИЯ |vins_v| против IPM (коллапс масштаба) ============
 # lv2_joy_20260905_114248: реборн-VINS с масштабом 0.14 видел 0.4–0.9 при истинных
 # 3–5.5, IPM годен и видел 5.0 — потолок и физика висения такое не ловят.
-def ssc(now, vx=0.0, ipm_v=0.0, ipm_ok=True, alt=1.5, roll=RC_CENTER, pitch=RC_CENTER):
+def ssc(now, vx=0.0, ipm_v=0.0, ipm_ok=True, alt=1.5, roll=RC_CENTER, pitch=RC_CENTER,
+        mode="ALT_HOLD"):
     return DroneState(vins_valid=True, vins_odom_count=300, vins_last_sim=now,
                       now_sim=now, vins_vx=vx, vins_vy=0.0, ipm_ok=ipm_ok,
                       ipm_vfwd=0.0, ipm_vlat=ipm_v, perc_alt=alt, rel_alt=alt,
-                      pilot_roll=roll, pilot_pitch=pitch)
+                      pilot_roll=roll, pilot_pitch=pitch, mode=mode)
 
 
 def mk_scale(**kw):
@@ -222,6 +248,13 @@ ok, t = run(hs, t, 5.0, vx=0.0, ipm_v=0.0)               # демпфер ост
 check("латч: борт встал, IPM 0 — всё ещё НЕ sane (масштаб сам не починится)", not ok)
 ok, t = run(hs, t, 26.0, vx=0.0, ipm_v=0.0)              # > scale_hold 30 с
 check("латч истёк (30 с): снова sane, срабатывание одно", ok and hs.scale_trips == 1)
+
+# 1б. тот же занижающий расклад, но борт ведёт полётник (возврат домой): чек молчит —
+# «центр стика» там не висение (lv2_joy_20260909_044105: scl=1 сработал уже ПОСЛЕ
+# закрытия моста, на убежавшем EKF)
+hs_rth = mk_scale()
+ok, _ = run(hs_rth, 550.0, 12.0, vx=0.7, ipm_v=5.0, mode='CMODE(21)')
+check("занижение под SMART_RTL: чек молчит (ведёт FCU)", ok and hs_rth.scale_trips == 0)
 
 # 2. на высоте IPM не опорник: те же скорости на 15 м → sane
 hs2 = mk_scale()

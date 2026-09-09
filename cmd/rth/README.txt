@@ -49,7 +49,9 @@ EXTRA_KEYS — это НЕ поле BootstrapConfig, поэтому меты п�
      в центре, set_mode RTL раз в sim-секунду до латча, дальше борт ведёт FCU до
      самодизарма. Выходы обратно в полёт (все — goto freefly, стек и опора от текущей
      точки): RTH_CANCEL (повторный импульс), RTH_MANUAL (SF не вверх), RTH_REFUSED
-     (RTL не залатчился за 3 с — нет позиции EKF), RTH_EJECT (FCU сам вышел из RTL).
+     (RTL не залатчился за 3 с — нет позиции EKF), RTH_EJECT (FCU сам вышел из RTL),
+     RTH_GUARD (с 2026-09-09, BS_RTH_GUARD=1: мост VINS→EKF закрыт или гейт здоровья
+     объявил VINS больным дольше 1 с — возврат отменяем сами, разбор в cmd/smart_rth).
      Не сели за 180 с → RTH_TIMEOUT (error, сажает пилот).
   2. Триггер — топик /mission/rth (std_msgs/Empty, one-shot), как /mission/land у SA:
      `make rth` в docker/sim/Makefile. С 2026-09-09 тот же импульс даёт КНОПКА SD
@@ -100,6 +102,7 @@ SF вниз (MANUAL). Кнопка SA во время возврата не ра
     RTL честно вернётся «в старые цифры». Гейт (brg/vins_sane → отмена возврата в
     LOITER, как loiter_guard) — следующий шаг, после первого замера;
   - нет поля rth= в /mission/status и баннера в HUD (ярусы/посадка свои имеют);
+  - guard возврата (RTH_GUARD) полётом не проверен — нужен прогон, где мост закроется;
   - SMART_RTL (mode 21, разматывает пройденный трек по SRTL_POINTS) — СДЕЛАН
     отдельным прогоном cmd/smart_rth (тот же шаг Rth, топик /mission/smart_rth);
   - кнопка на пульте ЕСТЬ с 2026-09-09 (SD, docker/sim/rx.md), но полётом не

@@ -31,6 +31,7 @@ from geometry_msgs.msg import Vector3Stamped
 from nav_msgs.msg import Odometry
 from rclpy.serialization import deserialize_message
 from rosbag2_py import ConverterOptions, SequentialReader, StorageFilter, StorageOptions
+from mavros_msgs.msg import State
 from std_msgs.msg import String
 
 sys.path.insert(0, '/root/sim_ws/src/control')
@@ -47,10 +48,11 @@ def load(bag):
     r = SequentialReader()
     r.open(StorageOptions(uri=bag, storage_id='sqlite3'), ConverterOptions('cdr', 'cdr'))
     r.set_filter(StorageFilter(topics=['/odometry', '/flow_dbg8', '/flow_dbg9',
-                                       '/mission/status', '/model/iris_cam/odometry']))
-    od, d8, d9, stat, gt = [], [], [], [], []
+                                       '/mission/status', '/model/iris_cam/odometry',
+                                       '/mavros/state']))
+    od, d8, d9, stat, gt, md = [], [], [], [], [], []
     while r.has_next():
-        t, raw, _ = r.read_next()
+        t, raw, _t = r.read_next()
         if t == '/odometry':
             m = deserialize_message(raw, Odometry)
             od.append((st(m), m.pose.pose.position.x, m.pose.pose.position.y))
@@ -64,14 +66,21 @@ def load(bag):
             d = dict(kv.partition('=')[::2] for kv in
                      deserialize_message(raw, String).data.split())
             if 't' in d:
-                stat.append((float(d['t']), d))
+                # (sim-время статуса, поля, время ЗАПИСИ) — второе нужно, чтобы
+                # привязать к этой шкале топики без sim-штампа (/mavros/state)
+                stat.append((float(d['t']), d, _t * 1e-9))
         elif t == '/model/iris_cam/odometry':
             m = deserialize_message(raw, Odometry)
             v = m.twist.twist.linear
             gt.append((st(m), math.hypot(v.x, v.y), m.pose.pose.position.z))
-    for a in (od, d8, d9, stat, gt):
+        elif t == '/mavros/state':
+            # РЕЖИМ FCU: в нём чеки «по центру стика» молчат, когда борт ведёт сам
+            # полётник (RTL/SMART_RTL/AUTO/GUIDED — modes.navigates). У State нет
+            # штампа sim-времени в header (MAVROS шлёт wall) — берём время записи.
+            md.append((_t * 1e-9, deserialize_message(raw, State).mode))
+    for a in (od, d8, d9, stat, gt, md):
         a.sort(key=lambda x: x[0])
-    return od, d8, d9, stat, gt
+    return od, d8, d9, stat, gt, md
 
 
 def latest(times, arr, t):
@@ -92,11 +101,14 @@ def main():
     ap.add_argument('--scale-alt-max', type=float, default=4.0)
     ap.add_argument('--scale-hold', type=float, default=30.0)
     ap.add_argument('--dt', type=float, default=0.05)
+    ap.add_argument('--no-fcu-mode', action='store_true',
+                    help='НЕ отдавать гейту режим FCU — как он судил ДО фикса 2026-09-09 '
+                         '(центр стиков считался висением и в RTL/SMART_RTL). Для A/B')
     ap.add_argument('--vins-scale', type=float, default=1.0,
                     help='ЭМУЛЯЦИЯ коллапса масштаба: скорость VINS × k (0.2 = реборн с масштабом 0.2)')
     a = ap.parse_args()
 
-    od, d8, d9, stat, gt = load(a.bag)
+    od, d8, d9, stat, gt, md = load(a.bag)
     if not od or not stat:
         sys.exit("в bag нет /odometry или /mission/status")
     # скорость VINS по штампам — тем же VinsTrack, что в RosTelemetry
@@ -109,6 +121,28 @@ def main():
     T9 = [x[0] for x in d9]
     T_st = [x[0] for x in stat]
     T_gt = [x[0] for x in gt]
+    # /mavros/state идёт во ВРЕМЕНИ ЗАПИСИ bag, а сетка реплея — в sim-времени поля
+    # t= статуса. Постоянного сдвига мало: за прогон шкалы расходятся на ~1-2 с
+    # (запись и sim тикают чуть по-разному), а границы режимов нужны точно — иначе
+    # событие у самой смены режима ляжет не в тот режим. Поэтому линейная
+    # интерполяция по парам (запись, sim) самого статуса.
+    T_rec = [x[2] for x in stat]
+    T_sim = [x[0] for x in stat]
+
+    def rec_to_sim(tr):
+        i = bisect.bisect_left(T_rec, tr)
+        if i <= 0:
+            return T_sim[0] + (tr - T_rec[0])
+        if i >= len(T_rec):
+            return T_sim[-1] + (tr - T_rec[-1])
+        f = (tr - T_rec[i - 1]) / max(T_rec[i] - T_rec[i - 1], 1e-9)
+        return T_sim[i - 1] + f * (T_sim[i] - T_sim[i - 1])
+
+    T_md = [rec_to_sim(x[0]) for x in md]
+
+    def fcu_mode(t):
+        m = latest(T_md, md, t)
+        return m[1] if m else ''
 
     ho = VinsHandover(None, min_count=300, fresh_sec=2.0, v_max=a.v_max,
                       sane_n=a.sane_n, hover_v=a.hover_v, hover_sec=a.hover_sec,
@@ -138,7 +172,8 @@ def main():
                        ipm_vfwd=r8[1] if r8 else 0.0, ipm_vlat=r9[1] if r9 else 0.0,
                        perc_alt=perc_alt, rel_alt=float(sd.get('alt', 0.0)),
                        pilot_roll=RC_CENTER + int(float(sd.get('rcr', 0))),
-                       pilot_pitch=RC_CENTER + int(float(sd.get('rcp', 0))))
+                       pilot_pitch=RC_CENTER + int(float(sd.get('rcp', 0))),
+                       mode=('' if a.no_fcu_mode else fcu_mode(t)))
         if sd.get('tier') in ('1', '2') and perc_alt is not None:
             alt_min = perc_alt if alt_min is None else min(alt_min, perc_alt)
             alt_max = perc_alt if alt_max is None else max(alt_max, perc_alt)
@@ -165,6 +200,7 @@ def main():
     print(f"  ручки: v_max {a.v_max} sane_n {a.sane_n} hover_v {a.hover_v} "
           f"scale ratio {a.scale_ratio} ipm_min {a.scale_ipm_min} sec {a.scale_sec} "
           f"alt_max {a.scale_alt_max} hold {a.scale_hold}"
+          + (" | БЕЗ режима FCU (до-фиксное поведение)" if a.no_fcu_mode else "")
           + (f" | ЭМУЛЯЦИЯ: VINS × {a.vins_scale}" if a.vins_scale != 1.0 else ""))
     print(f"  фронты sane→insane: {len(events)}; тиков insane {insane_ticks} "
           f"({insane_ticks * a.dt:.1f} с); тиков с условием занижения "

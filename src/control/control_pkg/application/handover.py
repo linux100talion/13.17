@@ -20,6 +20,7 @@ VINSHANDOVER: hover_1 держал 0.9 м, hover_4/7 болтало 4-7 м де�
 Живёт в application (не в домене): это policy оркестрации стратегий, а не закон.
 Тестируется оффлайн — синтетический рост vins_odom_count → switch срабатывает 1 раз.
 """
+from ..domain.modes import navigates as fcu_navigates
 from ..domain.rc import RC_CENTER
 
 
@@ -81,7 +82,10 @@ class VinsHandover:
         проваливает оба. Модуль скорости инвариантен к системе координат, так
         что vins (мир) и ipm (тело) сравнимы напрямую. На ФРОНТЕ sane→insane
         заказывает /restart VINS (нода опрашивает pop_restart_request).
-        Третий чек — ЗАНИЖЕНИЕ против IPM (коллапс масштаба), см. __init__."""
+        Третий чек — ЗАНИЖЕНИЕ против IPM (коллапс масштаба), см. __init__.
+        Оба чека, опирающиеся на «стик в центре» (висение и занижение), МОЛЧАТ, пока
+        борт ведёт полётник своей навигацией (modes.navigates): там центр стиков —
+        не висение. Физический потолок |v| > v_max и кросс-чек IPM работают всегда."""
         import math
         vh = math.hypot(s.vins_vx, s.vins_vy)
         # Счётчик двигаем раз на новый sim-тик — метод зовут оба пути лесенки.
@@ -91,9 +95,14 @@ class VinsHandover:
         if self.ipm_tol > 0.0 and s.ipm_ok:
             iv = math.hypot(s.ipm_vfwd, s.ipm_vlat)
             bad = bad or abs(vh - iv) > self.ipm_tol
-        # ФИЗИКА ВИСЕНИЯ: стик в центре дольше hover_sec + |vins_v| > hover_v
+        # ФИЗИКА ВИСЕНИЯ: стик в центре дольше hover_sec + |vins_v| > hover_v.
+        # ⚠️ Пока борт ведёт САМ ПОЛЁТНИК (RTL/SMART_RTL/AUTO/GUIDED — шаг Rth), центр
+        # стиков означает «стек пуст», а не «висим»: борт в это время честно летит
+        # домой 3-5 м/с. Полёт lv2_joy_20260909_044105 — гейт принял это за разнос,
+        # закрыл мост, EKF без подтяжки уехал на 99 м, возврат развалился (modes.py).
         centered = (abs(s.pilot_roll - RC_CENTER) < self._STICK_DZ
-                    and abs(s.pilot_pitch - RC_CENTER) < self._STICK_DZ)
+                    and abs(s.pilot_pitch - RC_CENTER) < self._STICK_DZ
+                    and not fcu_navigates(getattr(s, 'mode', '')))
         if new_tick:
             self._center_since = (self._center_since or s.now_sim) if centered else None
         centered_long = (self._center_since is not None

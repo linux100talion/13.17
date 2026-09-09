@@ -43,3 +43,21 @@ def names(mode: str) -> tuple:
 def matches(state_mode, mode) -> bool:
     """Тот ли это режим — с учётом безымянного 'CMODE(n)' от MAVROS."""
     return state_mode in names(mode)
+
+
+# Режимы, в которых ПОЛОЖЕНИЕ ВЕДЁТ САМ ПОЛЁТНИК по своей навигации, а не пилот
+# стиками: наш стек в них ПУСТ и стики стоят в центре ПО ПОСТРОЕНИЮ (шаг Rth), да и
+# FCU их всё равно игнорирует. Значит «стик в центре» здесь НЕ признак висения.
+# Урок полёта lv2_joy_20260909_044105: гейт здоровья VINS принял центр стиков за
+# висение, честные 3-4 м/с возврата — за разнос VINS, закрыл мост vision_pose (brg=0
+# дважды, brw=ext), EKF без единственного источника подтяжки уехал на 99 м, и
+# полётник сначала сбросил SMART_RTL в RTL («bad position»), а на втором заходе ушёл
+# в LAND по EKF-failsafe. LOITER/ALT_HOLD сюда НЕ входят: там стик — наша команда,
+# и центр действительно означает «стоим».
+NAVIGATED = ('RTL', 'SMART_RTL', 'AUTO', 'GUIDED')
+
+
+def navigates(state_mode) -> bool:
+    """Полётник ведёт борт сам (RTL/SMART_RTL/AUTO/GUIDED)? Имя — из /mavros/state,
+    в т.ч. безымянное 'CMODE(n)'. Пустая строка/None = нет (не знаем — считаем наш)."""
+    return bool(state_mode) and any(matches(state_mode, m) for m in NAVIGATED)

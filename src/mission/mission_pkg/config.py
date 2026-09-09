@@ -1243,6 +1243,15 @@ class BootstrapConfig:
                                      # или 'RTL' (прямая на home, cmd/rth). Топики с
                                      # хоста от этого не зависят: там режим выбирает
                                      # сам топик. BS_RTH_JOY_MODE / --rth-joy-mode
+    rth_guard: float          # 1 = ШАГ RTH САМ ОТМЕНЯЕТ ВОЗВРАТ, когда навигация под
+                                     # ним сгнила: мост VINS→EKF закрыт (brg=0) или гейт
+                                     # здоровья объявил VINS больным дольше Rth.GUARD_SEC.
+                                     # Возврат ведёт FCU по позиции EKF, а в LV=2 EKF
+                                     # держится ТОЛЬКО нашей подтяжкой: закрылся мост —
+                                     # EKF уезжает (полёт 044105: дрейф 1.4 → 99 м,
+                                     # SMART_RTL сброшен в RTL, потом LAND по failsafe).
+                                     # 0 = как раньше (ждём решения полётника).
+                                     # BS_RTH_GUARD / --rth-guard
     loiter_gate_budget: float # токен loiter<t>: сколько ждать готовности
                                      # extnav+VINS (sim-сек) в стабилизированном hover;
                                      # вышел — шаг пропускается (LOITER_SKIP, миссия
