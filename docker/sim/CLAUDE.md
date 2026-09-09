@@ -22,9 +22,6 @@ simulator/  nav/  mavlink_router/  — Dockerfile'ы образов
 worlds/                     — SDF-миры и модель дрона (iris_cam)
 output/                     — логи нод (make logs читает отсюда)
 spawn.md                    — шпаргалка: точка старта «где сел — там и стартуем»
-speed.md                    — шпаргалка: чем ограничена максимальная скорость
-                              (лобовое только от плагина ветра; ANGLE_MAX/
-                              PSC_ANGLE_MAX/LOIT_SPEED_MS; терминальные v)
 env.default                 — ЭТАЛОН .env (коммитится): .env при отсутствии сеется
                               его копией автоматически (make ensure-env / freefly_lv)
 env.md                      — шпаргалка: слои ручек прогона (профили cmd/ + profiles/ >
@@ -51,6 +48,11 @@ laptop_move.md              — переезд стенда на GPU-ноут + 
 doc/tmp/                    — архив (FAQ*, todo*, README, concept.txt,
                               спеки flow/yaw, tune_results)
 ```
+
+> Максимальная скорость борта (лобовое только от плагина ветра, ANGLE_MAX/
+> PSC_ANGLE_MAX/LOIT_SPEED_MS, терминальные v) переехала к стабилизаторам —
+> **`src/control/speed.md`**, рядом с `windspeed.md` (ветер глазами EKF) и
+> `gates.md` (гейты, где эти скорости и упираются в пороги доверия).
 
 ## Рабочий цикл (всё через Makefile)
 
