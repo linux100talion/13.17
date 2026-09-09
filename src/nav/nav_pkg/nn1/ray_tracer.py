@@ -40,7 +40,7 @@ from std_msgs.msg import Bool, Float64, String
 from vision_msgs.msg import Detection2DArray
 
 from nav_pkg.nn1 import geo
-from nav_pkg.nn1.bridge_gate import BridgeGate
+from nav_pkg.nn1.bridge_gate import BridgeGate, ready_verdict
 from nav_pkg.nn1.frame_anchor import FrameAnchor, _wrap as _wrap_pi, quat_yaw
 from nav_pkg.nn1.pose_buffer import PoseBuffer
 
@@ -102,6 +102,11 @@ class RayTracer(Node):
         # без лётной ноды) — гейт молчит, мост живёт своими проверками.
         self.declare_parameter("bridge_ready_topic", "/vins/bridge_ok")
         self.declare_parameter("bridge_ready_sec", 3.0)   # свежесть вердикта
+        # СКОЛЬКО ЖДЁМ ПЕРВЫЙ вердикт зрелости, с. Пока не дождались — мост ЗАКРЫТ
+        # (а не «живу своими проверками»): это две разные вещи — «нода ещё не
+        # заговорила» и «ноды нет». Разбор 192430 — см. bridge_gate.ready_verdict.
+        # 0 = не ждать (поведение до 2026-09-09).
+        self.declare_parameter("bridge_ready_wait", 10.0)
         # ВОЗРАСТ ОДОМЕТРИИ, при котором якорь НЕ ДВИГАЕМ, с. Пара «поза EKF /
         # поза VINS» спаривается по ПРИХОДУ: EKF свежий, а VINS может отстать —
         # не дырой в данных (штампы непрерывны), а подвисом счёта. Разбор 173415:
@@ -176,6 +181,10 @@ class RayTracer(Node):
         self._ready = None              # «VINS зрел» (/vins/bridge_ok), гейт зрелости
         self._ready_wall = 0.0
         self._ready_sec = float(self.get_parameter("bridge_ready_sec").value)
+        self._ready_wait = float(self.get_parameter("bridge_ready_wait").value)
+        self._ready_seen = False        # вердикт приходил хоть раз?
+        self._start_wall = time.time()
+        self._nonode_logged = False
         self._open_reset_sec = float(self.get_parameter("anchor_open_reset_sec").value)
         self._stale_sec = float(self.get_parameter("anchor_stale_sec").value)
         self._stale_logged = 0.0
@@ -291,6 +300,11 @@ class RayTracer(Node):
         # не пускаем вообще (гейт зрелости). Протухает так же, как вердикт sane.
         self._ready = bool(msg.data)
         self._ready_wall = time.time()
+        if not self._ready_seen:
+            self._ready_seen = True
+            self.get_logger().info(
+                f"вердикт зрелости получен через {self._ready_wall - self._start_wall:.1f} с "
+                f"после старта (первый: {'зрел' if self._ready else 'не зрел'})")
 
     def _on_vins_restart(self, msg):
         # наш /restart VINS: поток родится заново — якорь и гейт с чистого листа
@@ -326,8 +340,16 @@ class RayTracer(Node):
         if self.gate is not None:
             tv = msg.twist.twist.linear
             ext = (self._ext_sane if time.time() - self._ext_wall < 1.0 else None)
-            rdy = (self._ready
-                   if time.time() - self._ready_wall < self._ready_sec else None)
+            now_w = time.time()
+            rdy = ready_verdict(self._ready, now_w - self._ready_wall, self._ready_seen,
+                                now_w - self._start_wall, self._ready_sec,
+                                self._ready_wait)
+            if (rdy is None and not self._ready_seen and not self._nonode_logged
+                    and self._ready_wait > 0):
+                self._nonode_logged = True
+                self.get_logger().warn(
+                    f"вердикта зрелости нет {self._ready_wait:g} с — считаю, что лётной "
+                    "ноды нет (голый стример): мост дальше живёт своими проверками")
             gate_open = self.gate.on_odom(th, p.x, p.y, math.hypot(tv.x, tv.y),
                                           ext, ready=rdy)
             if self.gate.take_relatch():
