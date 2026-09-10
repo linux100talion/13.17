@@ -477,6 +477,17 @@ class BootstrapArch2Node(Node):
         self._yaw_want = 'compass'
         self._yaw_src = 'compass'
         self._bridge_ok_pub = self.create_publisher(Bool, '/vins/bridge_ok', 10)
+        # «ДОМ ЗАЛАТЧЕН» → ray_tracer. ДО латча поза EKF НЕ СВИДЕТЕЛЬ: она ещё не
+        # пересела на нашу раму, её кормили нулями моста позы бута, и уехать она может
+        # куда угодно. Якорь в этой фазе обязан ОТДАВАТЬ раму, а не подстраиваться под
+        # неё — иначе учится у сломанного учителя. Разбор yawab_check4: EKF уехал на
+        # 50 м сам (мы в это время слали ВЕРНУЮ позу), якорь впитал их подтяжкой,
+        # после чего мы стали слать 57 м, EKF уехал дальше, следующая подтяжка впитала
+        # больше — трансляция удваивалась каждые 10 с и дошла до 2 км.
+        # Флаг ЗАЩЁЛКИВАЕТСЯ: залатчились один раз — EKF стал свидетелем и остаётся им
+        # до конца полёта, даже если возврат потом запретили (рама-то уже наша).
+        self._latched_pub = self.create_publisher(Bool, '/mission/rth_latched', 10)
+        self._ever_latched = False
         # переставить дом полётника в точку латча (фолбэк RTL полетит туда же)
         from mavros_msgs.srv import CommandHome
         self._home_cli = (self.create_client(CommandHome, '/mavros/cmd/set_home')
@@ -530,6 +541,11 @@ class BootstrapArch2Node(Node):
         s.rth_track = self._rth.track
         s.rth_home = self._rth.home
         self._bridge_ok_pub.publish(Bool(data=bool(self._rth.ripe)))
+        if self._rth.state == RthReadiness.READY:
+            self._ever_latched = True
+        elif not s.armed:
+            self._ever_latched = False          # дизарм — следующий полёт с чистого листа
+        self._latched_pub.publish(Bool(data=self._ever_latched))
         self._yaw_source_tick(s)
         if s.rth_state != prev:
             if s.rth_state == RthReadiness.READY:

@@ -109,6 +109,16 @@ class RayTracer(Node):
         self.declare_parameter("bridge_ready_required", True)
         # через сколько секунд молчания сказать об этом в лог (одним варном)
         self.declare_parameter("bridge_ready_gripe", 20.0)
+        # ЯКОРЬ НЕ УЧИТСЯ У EKF, ПОКА ДОМ НЕ ЗАЛАТЧЕН. До латча поза EKF не свидетель:
+        # она ещё не пересела на нашу раму и уехать может куда угодно. Наша задача в
+        # этой фазе — ОТДАТЬ раму, а не подстраиваться под неё. Разбор yawab_check4:
+        # EKF уехал на 50 м сам (мы слали ВЕРНУЮ позу), подтяжка впитала эти 50 м,
+        # после чего мы стали слать 57, EKF уехал дальше, следующая подтяжка впитала
+        # больше — трансляция удваивалась каждые 10 с и дошла до 2 км, кадр прыгал,
+        # возврат снялся по jump. Следование включается ПОСЛЕ латча.
+        # False — старое поведение (следовать всегда), для голого стримера без ноды.
+        self.declare_parameter("anchor_follow_latched", True)
+        self.declare_parameter("anchor_latched_topic", "/mission/rth_latched")
         # ВОЗРАСТ ОДОМЕТРИИ, при котором якорь НЕ ДВИГАЕМ, с. Пара «поза EKF /
         # поза VINS» спаривается по ПРИХОДУ: EKF свежий, а VINS может отстать —
         # не дырой в данных (штампы непрерывны), а подвисом счёта. Разбор 173415:
@@ -188,6 +198,10 @@ class RayTracer(Node):
         self._ready_seen = False        # вердикт приходил хоть раз?
         self._start_wall = time.time()
         self._nonode_logged = False
+        self._follow_req = bool(self.get_parameter("anchor_follow_latched").value)
+        self._latched = False           # «дом залатчен» от лётной ноды
+        self._latched_wall = 0.0
+        self._follow_logged = False
         self._open_reset_sec = float(self.get_parameter("anchor_open_reset_sec").value)
         self._stale_sec = float(self.get_parameter("anchor_stale_sec").value)
         self._stale_logged = 0.0
@@ -230,6 +244,8 @@ class RayTracer(Node):
                                      self._on_vins_restart, 1)
             self.create_subscription(Bool, self.get_parameter("bridge_ready_topic").value,
                                      self._on_bridge_ready, 10)
+            self.create_subscription(Bool, self.get_parameter("anchor_latched_topic").value,
+                                     self._on_latched, 10)
 
         self.publish_vp = bool(self.get_parameter("publish_vision_pose").value)
         self.vp_frame = self.get_parameter("vision_pose_frame").value
@@ -297,6 +313,17 @@ class RayTracer(Node):
         # протухает за 1 с (см. _on_vins) — без ноды мост живёт своими проверками
         self._ext_sane = bool(msg.data)
         self._ext_wall = time.time()
+
+    def _on_latched(self, msg):
+        """«Дом залатчен» от лётной ноды: с этого момента поза EKF — свидетель,
+        якорю можно за ней следовать (см. anchor_follow_latched)."""
+        was, self._latched = self._latched, bool(msg.data)
+        self._latched_wall = time.time()
+        if self._latched and not was:
+            self.get_logger().info(
+                "дом залатчен — якорь снова следует за позой EKF "
+                f"(t=({self.anchor.t[0]:+.2f},{self.anchor.t[1]:+.2f}) м)"
+                if self.anchor.latched else "дом залатчен — якорь следует за позой EKF")
 
     def _on_bridge_ready(self, msg):
         # «VINS доказал себя» от лётной ноды (rth_ready.ripe): до этого позу в EKF
@@ -470,7 +497,18 @@ class RayTracer(Node):
                 f"пара к кадру взята ПО ПРИХОДУ, не по штампу: штамп кадра {th:.2f}, "
                 f"кольцо поз EKF {self.ekf_buf.oldest():.2f}..{self.ekf_buf.newest():.2f}"
                 " — разъехались шкалы времени или EKF отстал")
-        if (gate_open and not stale and time.time() >= self._open_reset_until
+        # ДО ЛАТЧА ДОМА ЗА EKF НЕ ХОДИМ (см. anchor_follow_latched): в этой фазе он
+        # не свидетель — его кормили нулями моста позы бута, на нашу раму он ещё не
+        # пересел, и уехать может куда угодно. Отдаём раму и держим её.
+        follow = (not self._follow_req) or self._latched
+        if self._follow_req and not follow and not self._follow_logged \
+                and gate_open and self.anchor.latched:
+            self._follow_logged = True
+            self.get_logger().info(
+                "якорь ОТДАЁТ раму и не следует за EKF: дом ещё не залатчен, "
+                "поза полётника в этой фазе не свидетель")
+        if (gate_open and follow and not stale
+                and time.time() >= self._open_reset_until
                 and not self.have_fix and self.ekf_pos is not None
                 and time.time() - self.ekf_pos_wall < 2.0):
             ev = self.anchor.update(self.vins_pos, vins_yaw,
