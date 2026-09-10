@@ -43,7 +43,6 @@ from nav_pkg.nn1 import geo
 from nav_pkg.nn1.bridge_gate import BridgeGate, ready_verdict
 from nav_pkg.nn1.frame_anchor import FrameAnchor, _wrap as _wrap_pi, quat_yaw
 from nav_pkg.nn1.pose_buffer import PoseBuffer
-from nav_pkg.nn1.yaw_calm import YawCalm
 
 
 class RayTracer(Node):
@@ -120,17 +119,6 @@ class RayTracer(Node):
         # False — старое поведение (следовать всегда), для голого стримера без ноды.
         self.declare_parameter("anchor_follow_latched", True)
         self.declare_parameter("anchor_latched_topic", "/mission/rth_latched")
-        # УГОЛ РАМЫ ЗАХВАТЫВАЕМ ТОЛЬКО НА СПОКОЙНОМ КУРСЕ (yaw_calm.py). latch_yaw
-        # берёт ОДНУ мгновенную пару курсов, у которых разная задержка: на вираже их
-        # разность = ω·лаг, а не поворот кадра, и с 2026-09-10 исправить её нечем —
-        # жёсткая подтяжка угол не трогает. Замер: пилот латчился на курсе 90° и дал
-        # ошибку 5.6° (дрейф 0.08 м), реплей схватил раму в размахе рыскания — 29.4°
-        # и EKF на 1959 м. Мешает ВРАЩЕНИЕ, а не развёрнутость.
-        self.declare_parameter("latch_yaw_wz", 15.0)      # потолок |ω|, °/с
-        self.declare_parameter("latch_yaw_still", 0.5)    # сколько держаться, с
-        # ...но ЖДЁМ НЕ ВЕЧНО: чек имеет право ОТЛОЖИТЬ захват, а не запретить полёт.
-        # Не дождались спокойствия за это время — берём как есть и говорим в лог.
-        self.declare_parameter("latch_yaw_wait", 10.0)
         # ВОЗРАСТ ОДОМЕТРИИ, при котором якорь НЕ ДВИГАЕМ, с. Пара «поза EKF /
         # поза VINS» спаривается по ПРИХОДУ: EKF свежий, а VINS может отстать —
         # не дырой в данных (штампы непрерывны), а подвисом счёта. Разбор 173415:
@@ -214,12 +202,6 @@ class RayTracer(Node):
         self._latched = False           # «дом залатчен» от лётной ноды
         self._latched_wall = 0.0
         self._follow_logged = False
-        self._calm = YawCalm(float(self.get_parameter("latch_yaw_wz").value),
-                             float(self.get_parameter("latch_yaw_still").value))
-        self._calm_ok = False
-        self._calm_wait = float(self.get_parameter("latch_yaw_wait").value)
-        self._calm_since = None         # когда начали ждать спокойного курса
-        self._calm_logged = False
         self._open_reset_sec = float(self.get_parameter("anchor_open_reset_sec").value)
         self._stale_sec = float(self.get_parameter("anchor_stale_sec").value)
         self._stale_logged = 0.0
@@ -322,7 +304,6 @@ class RayTracer(Node):
         # когда EKF объявил позицию потерянной и local_position замолк) — им
         # разворачиваем кадр VINS на открытии моста, см. latch_yaw
         self.att_yaw = quat_yaw(q.x, q.y, q.z, q.w)
-        self._calm_ok = self._calm.update(time.time(), self.att_yaw)
 
     def _on_rel_alt(self, msg):
         self.rel_alt = float(msg.data)
@@ -411,28 +392,7 @@ class RayTracer(Node):
             # первое открытие моста за полёт: НЕ усыновляем уехавший EKF —
             # окно, в котором уходит сырой VINS и полётник пересаживается на
             # нашу раму (bridge_gate.take_open_reset, разбор 114844 vs 120819)
-            # ЗАХВАТ РАМЫ ЖДЁТ СПОКОЙНОГО КУРСА. Пока ждём — мост держим ЗАКРЫТЫМ:
-            # так поза в EKF идёт по-прежнему от моста позы бута (дыры нет), а мы не
-            # отдаём полётнику раму, которую сами же ещё не умеем повернуть верно.
-            if (self._open_reset_sec > 0 and self.gate.open_reset_pending()
-                    and not self._calm_ok):
-                if self._calm_since is None:
-                    self._calm_since = time.time()
-                if time.time() - self._calm_since < self._calm_wait:
-                    gate_open = False
-                    if not self._calm_logged:
-                        self._calm_logged = True
-                        self.get_logger().info(
-                            f"захват рамы ЖДЁТ спокойного курса (|ω|={self._calm.wz:.0f} "
-                            f"°/с при потолке {self._calm.wz_max:g}): на вираже разность "
-                            "курсов — это лаг трактов, а не поворот кадра")
-                elif not self._calm_ok:
-                    self.get_logger().warn(
-                        f"спокойного курса не дождались за {self._calm_wait:g} с "
-                        f"(|ω|={self._calm.wz:.0f} °/с) — берём раму как есть: чек имеет "
-                        "право ОТЛОЖИТЬ захват, но не запретить полёт")
-                    self._calm_ok = True        # один раз пропускаем вперёд
-            if self._open_reset_sec > 0 and self._calm_ok and self.gate.take_open_reset():
+            if self._open_reset_sec > 0 and self.gate.take_open_reset():
                 # ПОВОРОТ берём (курс наблюдаем компасом — иначе на спавне
                 # не-на-восток отдали бы перевёрнутый кадр, тот самый, что
                 # разносил LOITER), ТРАНСЛЯЦИЮ обнуляем: полётник сбросит

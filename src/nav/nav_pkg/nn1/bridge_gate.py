@@ -133,11 +133,6 @@ class BridgeGate:
             return True
         return False
 
-    def open_reset_pending(self) -> bool:
-        """Первое открытие ЖДЁТ обработки (флаг ещё не забрали). Нужно, чтобы
-        отложить захват рамы до спокойного курса, не потратив флаг впустую."""
-        return self._open_reset_pending
-
     def take_open_reset(self) -> bool:
         """Снять флаг «первое открытие: отдать сырой VINS, не усыновлять EKF»
         (один раз за полёт). ray_tracer по нему сбрасывает якорь и на время окна
