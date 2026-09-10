@@ -34,5 +34,12 @@ rviz2 -d src/lab/bag_view.rviz
 
 
 
+bash cmd/yaw_ab/yaw_ab.sh compass east
+bash cmd/yaw_ab/yaw_ab.sh vins    east
+bash cmd/yaw_ab/yaw_ab.sh compass diagonal
+bash cmd/yaw_ab/yaw_ab.sh vins    diagonal
+
+
+
 
 

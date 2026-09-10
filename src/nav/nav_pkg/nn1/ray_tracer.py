@@ -102,11 +102,13 @@ class RayTracer(Node):
         # без лётной ноды) — гейт молчит, мост живёт своими проверками.
         self.declare_parameter("bridge_ready_topic", "/vins/bridge_ok")
         self.declare_parameter("bridge_ready_sec", 3.0)   # свежесть вердикта
-        # СКОЛЬКО ЖДЁМ ПЕРВЫЙ вердикт зрелости, с. Пока не дождались — мост ЗАКРЫТ
-        # (а не «живу своими проверками»): это две разные вещи — «нода ещё не
-        # заговорила» и «ноды нет». Разбор 192430 — см. bridge_gate.ready_verdict.
-        # 0 = не ждать (поведение до 2026-09-09).
-        self.declare_parameter("bridge_ready_wait", 10.0)
+        # ВЕРДИКТ ЗРЕЛОСТИ ОБЯЗАТЕЛЕН. Нет свежего — мост ЗАКРЫТ: нет доказательства
+        # зрелости, нет и позы в EKF. False ставить ТОЛЬКО там, где лётной ноды нет
+        # намеренно (голый стример). Угадывать её отсутствие по таймауту нельзя —
+        # см. bridge_gate.ready_verdict, разбор 170043.
+        self.declare_parameter("bridge_ready_required", True)
+        # через сколько секунд молчания сказать об этом в лог (одним варном)
+        self.declare_parameter("bridge_ready_gripe", 20.0)
         # ВОЗРАСТ ОДОМЕТРИИ, при котором якорь НЕ ДВИГАЕМ, с. Пара «поза EKF /
         # поза VINS» спаривается по ПРИХОДУ: EKF свежий, а VINS может отстать —
         # не дырой в данных (штампы непрерывны), а подвисом счёта. Разбор 173415:
@@ -181,7 +183,8 @@ class RayTracer(Node):
         self._ready = None              # «VINS зрел» (/vins/bridge_ok), гейт зрелости
         self._ready_wall = 0.0
         self._ready_sec = float(self.get_parameter("bridge_ready_sec").value)
-        self._ready_wait = float(self.get_parameter("bridge_ready_wait").value)
+        self._ready_req = bool(self.get_parameter("bridge_ready_required").value)
+        self._ready_gripe = float(self.get_parameter("bridge_ready_gripe").value)
         self._ready_seen = False        # вердикт приходил хоть раз?
         self._start_wall = time.time()
         self._nonode_logged = False
@@ -341,15 +344,20 @@ class RayTracer(Node):
             tv = msg.twist.twist.linear
             ext = (self._ext_sane if time.time() - self._ext_wall < 1.0 else None)
             now_w = time.time()
-            rdy = ready_verdict(self._ready, now_w - self._ready_wall, self._ready_seen,
-                                now_w - self._start_wall, self._ready_sec,
-                                self._ready_wait)
-            if (rdy is None and not self._ready_seen and not self._nonode_logged
-                    and self._ready_wait > 0):
+            rdy = ready_verdict(self._ready, now_w - self._ready_wall,
+                                self._ready_sec, self._ready_req)
+            if (not self._ready_seen and not self._nonode_logged
+                    and now_w - self._start_wall > self._ready_gripe):
                 self._nonode_logged = True
-                self.get_logger().warn(
-                    f"вердикта зрелости нет {self._ready_wait:g} с — считаю, что лётной "
-                    "ноды нет (голый стример): мост дальше живёт своими проверками")
+                if self._ready_req:
+                    self.get_logger().warn(
+                        f"вердикта зрелости нет {self._ready_gripe:g} с — мост ЗАКРЫТ и "
+                        "останется закрытым, пока лётная нода не скажет своё. Если её "
+                        "нет НАМЕРЕННО (голый стример) — bridge_ready_required:=false")
+                else:
+                    self.get_logger().warn(
+                        f"вердикта зрелости нет {self._ready_gripe:g} с, "
+                        "bridge_ready_required=false — гейт зрелости не применяется")
             gate_open = self.gate.on_odom(th, p.x, p.y, math.hypot(tv.x, tv.y),
                                           ext, ready=rdy)
             if self.gate.take_relatch():

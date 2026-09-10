@@ -143,25 +143,30 @@ w = bridge_line(g12, t12).split()
 check("без латча/курса — прочерки, поля на месте",
       len(w) == 7 and w[5] == '-' and w[6] == '-')
 
-# 10. ВЕРДИКТ ЗРЕЛОСТИ: «нода ещё не заговорила» ≠ «ноды нет» (ready_verdict).
-# Разбор 192430: до первого /vins/bridge_ok мост был ОТКРЫТ, и 35 поз ушли в EKF за
-# 3.4 с — рама, залатченная от позы КРУТЯЩЕГОСЯ НА ЗЕМЛЕ борта (спавн diagonal, в мире
-# нет трения), утащила курс EKF, а latch_yaw потом наследовал ошибку из него
-check("вердикта не было, живём 1 с из 10 → ЗАКРЫТО (ждём ноду)",
-      ready_verdict(None, 999.0, False, 1.0, 3.0, 10.0) is False)
-check("вердикта не было, живём 30 с → None (ноды нет, прежнее поведение)",
-      ready_verdict(None, 999.0, False, 30.0, 3.0, 10.0) is None)
-check("свежий вердикт «зрел» → True", ready_verdict(True, 0.5, True, 30.0, 3.0, 10.0) is True)
-check("свежий вердикт «не зрел» → False", ready_verdict(False, 0.5, True, 30.0, 3.0, 10.0) is False)
-check("вердикт был, но протух → None (нода замолчала в полёте)",
-      ready_verdict(True, 5.0, True, 60.0, 3.0, 10.0) is None)
-check("wait=0 — поведение до 2026-09-09 (сразу None)",
-      ready_verdict(None, 999.0, False, 0.1, 3.0, 0.0) is None)
-# и то же через сам гейт: на старте здоровый поток НЕ открывает мост
+# 10. ВЕРДИКТ ЗРЕЛОСТИ ОБЯЗАТЕЛЕН (ready_verdict). Разбор 192430: до первого
+# /vins/bridge_ok мост был ОТКРЫТ, и в EKF ушли позы в раме, залатченной от позы
+# КРУТЯЩЕГОСЯ НА ЗЕМЛЕ борта (спавн diagonal, в мире нет трения) — курс EKF утащило,
+# а latch_yaw потом наследовал ошибку из него. Попытка «подождать вердикт N секунд»
+# ПРОВАЛИЛАСЬ в полёте 170043: ray_tracer живёт со стеком, а лётная нода поднимается
+# на каждый прогон и заговорила через 22.6 с — таймаут истёк раньше и открыл мост.
+check("свежий вердикт «зрел» → True", ready_verdict(True, 0.5, 3.0, True) is True)
+check("свежий вердикт «не зрел» → False", ready_verdict(False, 0.5, 3.0, True) is False)
+check("вердикта нет и он ОБЯЗАТЕЛЕН → False (мост закрыт)",
+      ready_verdict(None, 999.0, 3.0, True) is False)
+check("вердикт протух и он обязателен → False (нода замолчала — не доверяем)",
+      ready_verdict(True, 5.0, 3.0, True) is False)
+check("required=False (голый стример) → None, гейт зрелости не применяется",
+      ready_verdict(None, 999.0, 3.0, False) is None)
+check("required=False, но вердикт свежий → он и есть ответ",
+      ready_verdict(True, 0.5, 3.0, False) is True)
+# и то же через сам гейт: без вердикта здоровый поток НЕ открывает мост
 g13 = BridgeGate()
-op13, t13, _ = stream(g13, 700.0, 30, ready=ready_verdict(None, 999.0, False, 1.0, 3.0, 10.0))
-check("гейт на старте без вердикта: мост ЗАКРЫТ, причина ripe",
+op13, t13, _ = stream(g13, 700.0, 30, ready=ready_verdict(None, 999.0, 3.0, True))
+check("гейт без вердикта: мост ЗАКРЫТ, причина ripe",
       (not op13) and g13.reason == 'ripe')
+g14 = BridgeGate()
+op14, _, _ = stream(g14, 800.0, 30, ready=ready_verdict(None, 999.0, 3.0, False))
+check("гейт без вердикта при required=False: мост живёт своими проверками", op14)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ BRIDGE GATE OK" if ok_all else "❌ СБОЙ")
