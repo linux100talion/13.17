@@ -33,9 +33,17 @@ class BootstrapConfig:
     # Пусто → идём легаси-путём по control_mode. Заданный mission → игнор control_mode.
     stab: str
     mission: str
-    # источник стиков: scripted (скриптовые миссии) | joy (живой TX12 или реплей
-    # joy_replay.py через /joy) | ros (ЛЕГАСИ /mavros/rc/in). Было аргументом --pilot
-    # мимо конфига; с 2026-09-07 — поле, как всё остальное (BS_PILOT).
+    # источник стиков: scripted (скриптовые миссии) | joy (живой TX12) | replay
+    # (виртуальный пилот joy_replay.py — тот же /joy, профиль mission/replay) |
+    # ros (ЛЕГАСИ /mavros/rc/in). Было аргументом --pilot мимо конфига; с 2026-09-07
+    # — поле, как всё остальное (BS_PILOT).
+    # ⚠️ 'replay' ДОЛЖЕН быть в схеме: он стоит в профиле mission/replay, а профили
+    # валидируются и на хосте (freefly_lv → load.py), не только в контейнере. Без
+    # него реплей не запускался вовсе — «BS_PILOT='replay': ожидаю одно из …»
+    # (сломано с перехода на строгую схему 2026-09-07, вскрыто 2026-09-10).
+    # Для НОДЫ replay ≡ joy: стики те же, приходят тем же /joy (bootstrap_arch2.sh
+    # поднимает joy_replay.py и подменяет BS_PILOT на joy перед запуском ноды —
+    # нормализация в _parse() страхует прямой запуск ноды с профилем replay).
     pilot: str
     mv_level: float            # глобальный уровень стика для профиль-миссий (mv_*), [-1..1]
     slew: float                # ПРЕДЕЛ СКОРОСТИ ИЗМЕНЕНИЯ выхода, PWM/сек (0 = выкл).
@@ -1469,7 +1477,7 @@ class BootstrapConfig:
 # Допустимые значения строковых полей (были choices в argparse).
 CHOICES = {
     'control_mode': ('shuttle', 'assisted', 'manual', 'flow_assist'),
-    'pilot': ('scripted', 'joy', 'ros'),
+    'pilot': ('scripted', 'joy', 'ros', 'replay'),
     'ipm_model': ('legacy', 'rsign', 'exact'),
     'vision_pose_src': ('integral', 'extern'),
     'alt_src': ('global', 'baro'),

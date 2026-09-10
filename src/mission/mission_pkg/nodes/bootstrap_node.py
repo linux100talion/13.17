@@ -1087,6 +1087,11 @@ def _parse() -> tuple:
     с именем, незнакомый BS_* → SystemExit, значение не того типа → SystemExit."""
     cfg = BootstrapConfig.from_env()
     pilot_kind = cfg.pilot
+    if pilot_kind == 'replay':
+        # виртуальный пилот отдаёт те же стики тем же /joy — для ноды это joy.
+        # Обычно подмену делает bootstrap_arch2.sh; здесь страховка на случай
+        # прямого запуска ноды с профилем mission/replay
+        pilot_kind = 'joy'
     # Автотриггер land для пилот-режимов: садимся после демо-профиля (+2с успокоение).
     # Профиль-миссия (mission) сама секвенсит land — автотриггер не нужен.
     if not cfg.mission and cfg.excite_max_sec <= 0 and pilot_kind == 'scripted':

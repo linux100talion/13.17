@@ -140,7 +140,14 @@ fi
 LOADER="$SCRIPT_DIR/../control/profiles/load.py"
 set -a
 # shellcheck disable=SC2086
-eval "$(python3 "$LOADER" $PROFILES)"
+# ⚠️ Присваивание съедает код возврата подстановки, поэтому сборку профилей делаем
+# ОТДЕЛЬНЫМ шагом: иначе при отказе схемы дальше летел каскад «WIND_SPD: unbound
+# variable» (set -u) и настоящая причина терялась в хвосте вывода
+if ! PROFILE_ENV="$(python3 "$LOADER" $PROFILES)"; then
+    echo "ОШИБКА: профили не собрались (см. выше) — прогон не начат" >&2
+    exit 2
+fi
+eval "$PROFILE_ENV"
 set +a
 echo "freefly_lv: профили [$PROFILES] → $(env | grep -cE '^BS_') ключей BS_, ветер WIND_SPD=$WIND_SPD${WIND_GUST:+ + порывы «$WIND_GUST»}"
 
