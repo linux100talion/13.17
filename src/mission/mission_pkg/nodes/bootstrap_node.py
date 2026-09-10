@@ -381,11 +381,13 @@ class BootstrapArch2Node(Node):
                 self._vis_pose_pub = self.create_publisher(
                     PoseStamped, '/mavros/vision_pose/pose', 10)
             elif cfg.gps_denied > 0:
-                # Мост безжпсного бута: до первой одометрии VINS позу extern-
-                # издателя (ray_tracer) взять неоткуда, а EK3 обязан начать
-                # aiding НА ЗЕМЛЕ (в воздухе не стартует — LV4). Издаём
-                # (0,0,баро) сами (см. _pose_bridge) и замолкаем НАВСЕГДА с
-                # первым /odometry — правило «два издателя позы недопустимы»
+                # Мост безжпсного бута: пока extern-издатель (ray_tracer) молчит,
+                # позу взять неоткуда, а EK3 обязан начать aiding НА ЗЕМЛЕ (в
+                # воздухе не стартует — LV4). Издаём (0,0,баро) сами (см.
+                # _pose_bridge) и замолкаем НАВСЕГДА, когда МОСТ VINS→EKF
+                # ОТКРОЕТСЯ (не «с первой одометрией»: с гейтом зрелости между
+                # ними десятки секунд, и в эту дыру EKF оставался без позиции
+                # вовсе — прогон 173941). Правило «два издателя позы недопустимы»
                 # соблюдено во времени: перекрытия нет, стык гладкий (кадр
                 # ray_tracer якорится на EKF, обе стороны ≈ (0,0,alt)).
                 self._vis_pose_pub = self.create_publisher(
@@ -424,6 +426,7 @@ class BootstrapArch2Node(Node):
         # ВОЗВРАТ ДОМОЙ, два топика = два режима FCU (make rth / make smart-rth):
         # RTL — прямая на home, SMART_RTL — по крошкам пройденного пути. Импульс
         # one-shot, режим липкий (шаг rth читает его в enter, уже после гашения).
+        self._pose_bridge_done = False   # мост позы бута замолчал навсегда (вышли из круга)
         self._rth_req = False
         self._rth_mode = ''
         self.create_subscription(Empty, '/mission/rth',
@@ -986,10 +989,37 @@ class BootstrapArch2Node(Node):
         профиля LV=2). С ПЕРВОЙ одометрией VINS замолкаем навсегда: топик
         переходит к ray_tracer, его кадр якорится на EKF (стык гладкий).
         Штамп wall-временем — как у всего vision-фида (FCU в SITL живёт по
-        wall, см. _vision_feed)."""
+        wall, см. _vision_feed).
+
+        ⚠️ ПЕРЕДАЁМ ЭСТАФЕТУ НЕ ПО ПЕРВОЙ ОДОМЕТРИИ, А ПО ОТКРЫТИЮ МОСТА (2026-09-10).
+        Раньше мы замолкали, едва VINS подал голос, — считалось, что топик тут же
+        подхватит ray_tracer. С гейтом зрелости это перестало быть правдой: между
+        первой одометрией и зрелостью проходят десятки секунд, и мост всё это время
+        ЗАКРЫТ. Пока дыру в гейте затыкал случайный «open» на старте, стык держался
+        сам собой; как только дыру закрыли (bridge_ready_required), EKF остался БЕЗ
+        ЕДИНОГО источника позиции и не прогревался вовсе — прогон 173941.
+        Условия молчания: мост ОТКРЫТ (публикует ray_tracer — двух издателей быть не
+        должно) ИЛИ борт ушёл дальше круга лечения по счислению IPM (там (0,0) уже не
+        «честное приближение», а ложь, и лучше не иметь позиции, чем иметь неверную).
+        Эстафета ОДНОСТОРОННЯЯ: замолчав по любой из причин, больше не начинаем."""
         if self._vis_pose_pub is None or self.cfg.vision_pose_src != 'extern':
             return
-        if s.vins_odom_count > 0:
+        if self._pose_bridge_done:
+            return
+        if getattr(s, 'bridge_seen', False) and getattr(s, 'bridge_open', False):
+            # мост открылся — топик ведёт ray_tracer. Эстафета ОДНОСТОРОННЯЯ: если
+            # мост потом закроется, нулевую позу возобновлять нельзя (борт уже не
+            # там, где был на взлёте), а двух издателей vision_pose быть не должно
+            self._pose_bridge_done = True
+            self.get_logger().info(
+                "мост позы бута передал эстафету ray_tracer (мост VINS→EKF открыт)")
+            return
+        if self._rth.dist > self._rth.radius:
+            self._pose_bridge_done = True
+            self.get_logger().warn(
+                f"мост позы бута ЗАМОЛК: ушли на {self._rth.dist:.1f} м по счислению "
+                f"IPM (круг {self._rth.radius:g} м), а мост VINS→EKF так и не открылся — "
+                "нулевая поза стала бы ложью")
             return
         from geometry_msgs.msg import PoseStamped
         wall = time.time()
