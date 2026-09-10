@@ -34,6 +34,9 @@ esac
 P="dphold/baseline dpvins/brake5_stop vinshold/baseline vins/scale25 loiter/rth_track wind/trim"
 if [ "${BS_PILOT:-}" = "replay" ]; then
     [ "$SIDE" = "vins" ] && P="$P mission/yaw_vins_replay" || P="$P mission/replay"
+    # МАРШРУТ ОДИН НА ВСЕ ЧЕТЫРЕ КЛЕТКИ — иначе сравнивать нечего: разброс ручного
+    # пилотирования (1.75° по двум дням) больше измеряемой разницы (~1.1°)
+    export BS_REPLAY_SCENARIO="${BS_REPLAY_SCENARIO:-/lab/joystick/scenarios/yaw_ab.json}"
 else
     [ "$SIDE" = "vins" ] && P="$P mission/yaw_vins" || P="$P mission/baseline"
 fi
@@ -42,7 +45,13 @@ export PROFILES="$P legacy/baseline world/wind2_gust5"
 echo ">>> cmd/yaw_ab: сторона $SIDE, точка спавна $SPOT"
 echo ">>> профили [$PROFILES]"
 [ "$SPOT" = "diagonal" ] && echo ">>> SPAWN_POSE=diagonal (курс 117.7° — Δyaw якоря будет ≈ +100°)"
-echo ">>> схема полёта ОДНА для всех четырёх: висеть в круге до зелёного RTH READY,"
-echo ">>>   уйти ломаной на 50-70 м с разворотами, вернуться кнопкой SD, дать сесть."
+if [ "${BS_PILOT:-}" = "replay" ]; then
+    echo ">>> РЕПЛЕЙ ПУЛЬТА, сценарий $BS_REPLAY_SCENARIO — маршрут покомандно одинаков"
+else
+    echo ">>> схема полёта ОДНА для всех четырёх: висеть в круге до зелёного RTH READY,"
+    echo ">>>   уйти ломаной на 50-70 м с разворотами, вернуться кнопкой SD, дать сесть."
+    echo ">>> ⚠️ ЖИВЫМ ПИЛОТОМ РАЗНИЦУ В ГРАДУС НЕ ИЗМЕРИТЬ — см. README.txt. Для замера:"
+    echo ">>>   BS_PILOT=replay bash cmd/yaw_ab/yaw_ab.sh $SIDE $SPOT"
+fi
 echo ">>> смотреть в статусе: yawsrc= (compass или vins), brd= (должен СТОЯТЬ), brdn="
 exec bash src/lab/freefly_lv.sh "$@"

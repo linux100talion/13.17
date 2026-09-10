@@ -26,10 +26,34 @@ cmd/yaw_ab — A/B «ЧЕЙ КУРС ДЕРЖИТ EKF»: КОМПАС ПРОТИ
 
 Как летать
 ----------
-    bash cmd/yaw_ab/yaw_ab.sh compass east
-    bash cmd/yaw_ab/yaw_ab.sh vins    east
-    bash cmd/yaw_ab/yaw_ab.sh compass diagonal
-    bash cmd/yaw_ab/yaw_ab.sh vins    diagonal
+ТОЛЬКО РЕПЛЕЕМ ПУЛЬТА. Живым пилотом эта кампания не измеряется: разброс
+пилотирования (1.75° по двум дням) больше измеряемой разницы (~1.1°) — см. «Результат».
+
+    BS_PILOT=replay bash cmd/yaw_ab/yaw_ab.sh compass east
+    BS_PILOT=replay bash cmd/yaw_ab/yaw_ab.sh vins    east
+    BS_PILOT=replay bash cmd/yaw_ab/yaw_ab.sh compass diagonal
+    BS_PILOT=replay bash cmd/yaw_ab/yaw_ab.sh vins    diagonal
+
+Сценарий подставляется сам — src/lab/joystick/scenarios/yaw_ab.json (переопределить:
+BS_REPLAY_SCENARIO=...). Пульт не нужен, человек не нужен, маршрут покомандно один и
+тот же во всех четырёх клетках. Фазы закрыты ПО СОСТОЯНИЮ, а не по секундомеру:
+
+    arm            → по /mavros/state
+    набор 4 м      → wait_alt по истине Gazebo
+    висение в круге→ wait_status "rth=ready" (момент зрелости VINS каждый раз разный —
+                     фиксированный hold сделал бы стороны несравнимыми)
+    три плеча      → wait_dist 25 / 45 / 65 м (по УДАЛЕНИЮ, не по времени: скорость
+                     зависит от ветра и яруса)
+    два разворота  → курс нагружаем нарочно, ради этого кампания и есть
+    возврат        → кнопка SD, дальше wait_mode GUIDED и wait_alt до касания
+    дизарм         → руддер-жест
+
+Ярус как в ручной серии: sf=1 (стабилизация), sw=-1 (потолок — демпфер). Любой
+таймаут якоря → аварийная посадка, стенд без человека в воздухе не зависает;
+геозабор 110 м.
+
+РУЧНОЙ РЕЖИМ (без BS_PILOT) остаётся для «работает / не работает»:
+    bash cmd/yaw_ab/yaw_ab.sh compass east        и т.д.
 
 ⚠️ ГЛАВНОЕ УСЛОВИЕ — ОДНА И ТА ЖЕ СХЕМА ПОЛЁТА во всех четырёх. Ошибка курса зависит
 от того, сколько борт крутился и как далеко ушёл, поэтому:

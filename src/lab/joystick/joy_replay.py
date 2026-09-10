@@ -48,10 +48,11 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Joy
+from std_msgs.msg import String
 
 AXES = ('roll', 'pitch', 'thr', 'yaw')          # семантические оси = /joy 0..3
 STEP_KEYS = {'note', 'sticks', 'sw', 'sf', 'land', 'rth', 'hold', 'arm', 'disarm',
-             'wait_alt', 'wait_mode', 'ramp'}
+             'wait_alt', 'wait_mode', 'wait_status', 'wait_dist', 'ramp'}
 N_BUTTONS = 24           # столько кнопок отдаёт TX12 в /joy (bag 2026-08-30)
 ALT_BASELINE_N = 40      # сэмплов gt-z на базлайн «земли» (нода стартует до арма)
 SK_ALT_MIN = 1.0         # станция-кипинг только в воздухе (ниже — руки прочь:
@@ -121,6 +122,9 @@ class JoyReplay(Node):
         self.create_subscription(State, '/mavros/state', self._on_state, 10)
         self.create_subscription(Odometry, args.alt_topic, self._on_odom,
                                  qos_profile_sensor_data)
+        # статус лётной ноды — для шага wait_status (ждём фазу стека, а не высоту)
+        self.create_subscription(String, '/mission/status', self._on_status, 10)
+        self._status = None         # последняя строка /mission/status
         self._armed = None          # None = /mavros/state ещё не видели
         self._mode = ''
         self._alt = None            # м над точкой старта (gt)
@@ -193,6 +197,9 @@ class JoyReplay(Node):
     # ---------- подписки ----------
     def _on_state(self, m):
         self._armed, self._mode = bool(m.armed), m.mode
+
+    def _on_status(self, m):
+        self._status = m.data
 
     def _on_odom(self, m):
         p = m.pose.pose.position
@@ -398,6 +405,34 @@ class JoyReplay(Node):
                     return True
             return (self._abort(f"wait_alt {w} (alt={self._alt})")
                     if self._timeout(now, step, 60) else False)
+        if 'wait_dist' in step:
+            # ЖДЁМ УДАЛЕНИЯ ОТ ТОЧКИ СТАРТА (истина Gazebo, м). Плечо, закрытое ПО
+            # РАССТОЯНИЮ, а не по времени: скорость зависит от ветра, яруса и
+            # настроек, и одинаковый hold дал бы РАЗНЫЕ маршруты — а сравнивать
+            # прогоны можно только на одинаковом. Пример:
+            # {"wait_dist": {"gte": 55, "timeout": 90}}
+            w = step['wait_dist']
+            if self._dist is not None:
+                if 'gte' in w and self._dist >= float(w['gte']):
+                    self.get_logger().info(f"    dist={self._dist:.1f}м ≥ {w['gte']}")
+                    return True
+                if 'lte' in w and self._dist <= float(w['lte']):
+                    self.get_logger().info(f"    dist={self._dist:.1f}м ≤ {w['lte']}")
+                    return True
+            return (self._abort(f"wait_dist {w} (dist={self._dist})")
+                    if self._timeout(now, step, 90) else False)
+        if 'wait_status' in step:
+            # ЖДЁМ СОСТОЯНИЯ ЛЁТНОЙ НОДЫ (подстрока в /mission/status). Нужен там,
+            # где фаза полёта определяется не высотой и не режимом FCU, а вердиктом
+            # стека: «висим в круге, пока не позеленел RTH» — момент зрелости VINS
+            # плавает от прогона к прогону, и фиксированный hold сделал бы стороны
+            # A/B несравнимыми. Пример: {"wait_status": {"has": "rth=ready"}}
+            want = step['wait_status']['has']
+            if self._status is not None and want in self._status:
+                self.get_logger().info(f"    статус: есть «{want}»")
+                return True
+            return (self._abort(f"wait_status {want!r} (статус={self._status!r})")
+                    if self._timeout(now, step, 120) else False)
         if 'wait_mode' in step:
             want = step['wait_mode']['is']
             if self._mode == want:
