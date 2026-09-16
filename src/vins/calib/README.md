@@ -12,7 +12,7 @@
 |---|---|---|
 | Kalibr (исходники) | `/home/andriy/kalibr` (клон на хосте, вне репо — как форк VINS) | `ethz-asl/kalibr` @ **`1f60227`** (master, 2024-03-08) |
 | Kalibr (образ) | `docker images kalibr:1f60227` | собран из того же клона, `Dockerfile_ros1_20_04` (ROS1 noetic) |
-| Мишень | `aprilgrid_a4.pdf` + `aprilgrid_a4.yaml` (этот каталог) | сгенерирована `kalibr_create_target_pdf` того же коммита |
+| Мишень | `aprilgrid_a1.pdf` + `aprilgrid_a1.yaml` — основная; `aprilgrid_a4.*` — настольная (этот каталог) | сгенерированы `kalibr_create_target_pdf` того же коммита |
 | Потребитель | `src/vins/VINS-MONO-ROS2/config_pkg/config/dummy_13_7.yaml` | форк `1317_debug` |
 
 Пересборка образа / регенерация мишени:
@@ -21,25 +21,37 @@ cd /home/andriy/kalibr && git checkout 1f60227
 docker build -t kalibr:1f60227 -f Dockerfile_ros1_20_04 .
 docker run --rm -v $PWD:/out --entrypoint bash kalibr:1f60227 -c \
   "source /catkin_ws/devel/setup.bash && cd /out && \
-   rosrun kalibr kalibr_create_target_pdf --type apriltag --nx 6 --ny 8 --tsize 0.023 --tspace 0.3 aprilgrid"
+   rosrun kalibr kalibr_create_target_pdf --type apriltag --nx 6 --ny 8 --tsize 0.068 --tspace 0.3 aprilgrid"   # A1; A4 — tsize 0.023
 ```
 (ENTRYPOINT образа — shell-форма, аргументы глотает → всегда `--entrypoint bash`;
 утилиты лежат в `devel/lib/kalibr/`, зовутся через `rosrun kalibr …`. PDF генератора —
-размером с сетку, 191×251 мм; в репо он положен на настоящий лист A4 через
-ghostscript `PageOffset [26.5 65]`, геометрия тегов не меняется. Сверено 2026-09-16:
-растр 150 dpi из образа и из локального pyx — 0 отличных пикселей.)
+размером с сетку; в репо он положен по центру настоящего листа через ghostscript
+`-dFIXEDMEDIA` + `PageOffset` (A1: `[42.1 141.6]`, A4: `[26.5 65]`), геометрия тегов
+не меняется. Сверено 2026-09-16: растр 150 dpi из образа и из локального pyx — 0
+отличных пикселей.)
 
 ## Мишень: печать
 
-- `aprilgrid_a4.pdf` — AprilGrid **6×8**, тег 23 мм, промежуток 6.9 мм (0.3 стороны),
-  семейство t36h11, на листе A4 портрет.
+Две мишени одной сетки **6×8** (t36h11, промежуток 0.3 стороны) — отличаются только
+размером тега, поэтому yaml различаются одним числом `tagSize`:
+
+| | `aprilgrid_a1.pdf` — **основная** | `aprilgrid_a4.pdf` — настольная |
+|---|---|---|
+| лист | A1 594×841 портрет (плоттер) | A4 |
+| тег / промежуток | **68 мм** / 20.4 мм | 23 мм / 6.9 мм |
+| сетка | 564×741 мм (поля 15/50 мм) | 191×251 мм |
+| зачем | камера–IMU и интринсики: Kalibr просит мишень «как можно больше» (их эталон A0) — с A1 держим 1–2 м и покрываем кадр при движениях | пробы на столе, проверка пайплайна |
+
 - Печатать **в масштабе 100 % / «фактический размер»**, НЕ «вписать в страницу».
-- Наклеить на жёсткое ровное (стекло, МДФ, пенокартон) — прогиб листа = ошибка.
-- **Измерить линейкой** сторону чёрного квадрата тега (номинал 23.0 мм) и вписать в
-  `aprilgrid_a4.yaml` → `tagSize` (в метрах). `tagSpacing` — отношение, от масштаба
-  печати не зависит.
-- A4 хватает для интринсиков и для связки камера–IMU на дистанции 0.4–1 м. Если
-  есть A3/плоттер — та же команда с `--tsize` побольше, всё остальное без изменений.
+  Файл уже на листе нужного формата. Матовая бумага (блики убивают детекцию).
+- Наклеить на **жёсткое ровное** — для A1 пенокартон 5–10 мм или фанера/МДФ; клеить
+  без пузырей, прогиб листа = ошибка калибровки.
+- **Измерить после печати** и вписать в yaml → `tagSize` (в метрах): для A1 точнее
+  мерить рулеткой всю ширину сетки (6 тегов + 5 промежутков = 510 мм номинал,
+  `tagSize` = измеренное / 7.5), для A4 — линейкой сторону тега (номинал 23.0 мм).
+  `tagSpacing` — отношение, от масштаба печати не зависит.
+- В подписи внизу A1 напечатано `size=6.800000000000001cm` — артефакт float в
+  скрипте Kalibr, на геометрию не влияет.
 
 ## Пайплайн (по шагам, ниже — по мере прохождения)
 
@@ -51,13 +63,13 @@ ghostscript `PageOffset [26.5 65]`, геометрия тегов не меня�
 2. **ROS2 → ROS1 bag**: `pip install rosbags` → `rosbags-convert --src <bag_dir> --dst
    <file>.bag` (Kalibr — ROS1).
 3. **Интринсики**: `kalibr_calibrate_cameras --bag cam.bag --topics /image_mono
-   --models pinhole-radtan --target aprilgrid_a4.yaml` → `camchain-*.yaml`:
+   --models pinhole-radtan --target aprilgrid_a1.yaml` → `camchain-*.yaml`:
    `intrinsics [fu fv pu pv]` → `fx fy cx cy`, `distortion_coeffs [k1 k2 p1 p2]`.
 4. **Шумы IMU** (Аллан): статичный bag IMU 2–3 ч → `allan_variance_ros` →
    `acc_n gyr_n acc_w gyr_w` (в `imu.yaml` Kalibr — те же, ×5–10 по их рекомендации
    для шага 5; в `dummy_13_7.yaml` — измеренные).
 5. **Камера–IMU**: `kalibr_calibrate_imu_camera --bag imucam.bag --cam camchain.yaml
-   --imu imu.yaml --target aprilgrid_a4.yaml` → `T_cam_imu` и `timeshift_cam_imu`.
+   --imu imu.yaml --target aprilgrid_a1.yaml` → `T_cam_imu` и `timeshift_cam_imu`.
 6. **Перенос в `dummy_13_7.yaml`**: Kalibr даёт `T_cam_imu` (точки IMU → камера), VINS
    ждёт обратное — `extrinsicRotation/Translation` = **`inv(T_cam_imu)`** (камера →
    IMU/body). `td` = `timeshift_cam_imu` (обе стороны: `t_imu = t_cam + shift`).
