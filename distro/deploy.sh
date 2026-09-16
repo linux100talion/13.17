@@ -1,83 +1,125 @@
 #!/bin/bash
+# deploy.sh — деплой каталога distro/ на Jetson по rsync.
+#
+#   ./deploy.sh [-H host] [-n] [-r] [-x 'cmd'] [-X 'cmd'] [секция ...]
+#
+#   секции   home | etc | usr        по умолчанию — все три
+#   -H host  адрес Jetson            умолч. $JETSON_HOST, иначе 192.168.55.1 (USB)
+#   -n       dry-run: показать, что изменится, ничего не писать
+#   -r       после деплоя: `nmcli connection reload` + `systemctl daemon-reload`
+#            на борту (root)
+#   -x cmd   выполнить cmd на борту после деплоя от andriy (можно несколько)
+#   -X cmd   то же от root (sudo с паролем $JETSON_SUDO, умолч. см. CLAUDE.md)
+#   Опции — ДО секций (getopts).
+#
+# Что едет куда (без --delete: лишнее на борту НЕ трогается, удаление — руками):
+#   home/andriy/ → /home/andriy/   от пользователя (права/владелец andriy)
+#   etc/         → /etc/           через `sudo rsync`, root:root
+#   usr/         → /usr/           через `sudo rsync`, root:root
+# doc/ (заметки, ssh-ключ, wifi.txt) — НЕ деплоится.
+#
+# Вывод rsync — itemize (-i): печатаются ТОЛЬКО изменённые файлы
+# (`>f.st...` — содержимое/время, `>f+++++++` — новый, `cd+++++++` — новый каталог).
+#
+# ---- Однократная подготовка Jetson --------------------------------------
+# 1. ssh-ключ: пара doc/ssh-keys/jetson{,.pub}; на ноуте в ~/.ssh/config
+#      Host 192.168.55.1
+#          User andriy
+#          IdentityFile /usr/local/DATA/Calude/13.17/distro/doc/ssh-keys/jetson
+#    на борту: ssh-copy-id -i doc/ssh-keys/jetson.pub andriy@<host>,
+#    chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys
+# 2. sudo без пароля на rsync (уже стоит в /etc/sudoers борта):
+#      andriy ALL=(ALL) NOPASSWD: /usr/bin/rsync
+#    — нужен секциям etc/usr (`--rsync-path="sudo rsync"`). Остальное root'ом
+#    (-r, -X) идёт через `sudo -S`, пароль подаётся в stdin ssh (в ps не светится).
+# --------------------------------------------------------------------------
 
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")"
 
-#-------------------------------------------------------------------
+HOST="${JETSON_HOST:-192.168.55.1}"
+USER_="andriy"
+SUDOPW="${JETSON_SUDO:-ok}"
+DRY=""
+RELOAD=0
+POST=()      # элементы "u:cmd" (andriy) / "r:cmd" (root)
 
+usage() { sed -n '2,17p' "$0"; exit "${1:-0}"; }
 
-# Выполнение конкретных команд, требующих прав администратора 
-# (например, rsync или перезапуск определенных сервисов systemd), 
-# разрешить без пароля.
-# Для этого на Jetson нужно выполнить sudo visudo и добавить исключения, например:
+while getopts "H:nrx:X:h" o; do
+    case $o in
+        H) HOST="$OPTARG" ;;
+        n) DRY="-n" ;;
+        r) RELOAD=1 ;;
+        x) POST+=("u:$OPTARG") ;;
+        X) POST+=("r:$OPTARG") ;;
+        h) usage 0 ;;
+        *) usage 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+SECTIONS=("$@")
+[ ${#SECTIONS[@]} -eq 0 ] && SECTIONS=(home etc usr)
 
-# andriy ALL=(ALL) NOPASSWD: /usr/bin/rsync, /bin/systemctl restart vins.service
+for s in "${SECTIONS[@]}"; do
+    case $s in home|etc|usr) ;; *) echo "неизвестная секция: $s" >&2; usage 1 ;; esac
+done
 
+T="${USER_}@${HOST}"
+SSH=(ssh -o BatchMode=yes -o ConnectTimeout=5)
+as_user() { "${SSH[@]}" "$T" "$1"; }
+as_root() { "${SSH[@]}" "$T" "sudo -S -p '' bash -c $(printf %q "$1")" <<< "$SUDOPW"; }
 
-#---------------------------------------------------------------------
+echo "== Jetson $T $( [ -n "$DRY" ] && echo '(DRY-RUN)' )"
+"${SSH[@]}" "$T" 'echo "   $(hostname) $(uname -m), up $(uptime -p)"' \
+    || { echo "!! $T недоступен по ssh" >&2; exit 2; }
 
-# ---
-# Настройка ключей
-# ---
+# -O: не трогать mtime каталогов (шум в itemize). Для etc/usr права СУЩЕСТВУЮЩИХ
+# файлов/каталогов на борту не трогаем (--no-perms), новым — по --chmod (git хранит
+# только бит x, каталоги рабочей копии 775). Секреты NM: новые файлы строго 600,
+# иначе NetworkManager молча игнорирует профиль.
+RS=(rsync -a -z -i -O $DRY -e "${SSH[*]}")
+SUDO=(--rsync-path="sudo rsync" --chown=root:root --no-perms --chmod=Dgo-w)
+NMC=etc/NetworkManager/system-connections
+changed=0
 
-# ssh-keygen -t ed25519 -C "laptop-to-jetson"
-# потребуется ввести пароль один, последний раз
-#ssh-copy-id -i ./jetson.pub andriy@192.168.0.133
-#Now try logging into the machine, with:   "ssh 'andriy@192.168.0.133'"
-#and check to make sure that only the key(s) you wanted were added.
+sync_section() {   # <секция> <src/> <dst/> [доп. опции rsync...]
+    local name=$1 src=$2 dst=$3; shift 3
+    echo "-- $name: $src → $T:$dst"
+    local out
+    out=$("${RS[@]}" "$@" "$src" "$T:$dst")
+    if [ -n "$out" ]; then
+        echo "$out" | sed 's/^/   /'
+        changed=$((changed + $(echo "$out" | grep -c '^[<>c]' || true)))
+    else
+        echo "   без изменений"
+    fi
+}
 
-# на ноуте
-# ~/.ssh/config
+for s in "${SECTIONS[@]}"; do
+    case $s in
+        home) sync_section home ./home/andriy/ /home/andriy/ ;;
+        etc)  sync_section etc  ./etc/ /etc/ "${SUDO[@]}" --exclude="/${NMC#etc/}/"
+              sync_section etc/nm ./$NMC/ /$NMC/ "${SUDO[@]}" --chmod=D700,F600 ;;
+        usr)  sync_section usr  ./usr/ /usr/ "${SUDO[@]}" ;;
+    esac
+done
 
-#Host 192.168.0.133
-#    User andriy
-#    IdentityFile /usr/local/DATA/Ardupilot/nvidia_skd_doc/distro/ssh-keys/jetson
+echo "== изменённых файлов/каталогов: $changed$( [ -n "$DRY" ] && echo ' (dry-run, не записано)' )"
+[ -n "$DRY" ] && exit 0
 
-#На Jetson
-#чтобы жестко зафиксировать правильные права:
-#chmod 700 ~/.ssh
-#chmod 600 ~/.ssh/authorized_keys
-#-------------------------------------------------------------------
-
-
-# Проверяем, передан ли первый параметр
-if [ -z "$1" ]; then
-    echo "Ошибка: Не указан IP-адрес назначения."
-    echo "Использование: $0 <IP-адрес>"
-    echo "Пример: $0 192.168.1.50"
-    exit 1
+if [ $RELOAD -eq 1 ]; then
+    echo "-- reload на борту (nmcli connection reload, systemctl daemon-reload)"
+    as_root 'nmcli connection reload && systemctl daemon-reload && echo "   ok"' \
+        || echo "!! reload не удался" >&2
 fi
 
-JETSON_IP="$1"
-JETSON_USER="andriy"
+for item in "${POST[@]}"; do
+    cmd=${item#?:}
+    case $item in
+        u:*) echo "-- на борту (andriy): $cmd"; as_user "$cmd" | sed 's/^/   /' ;;
+        r:*) echo "-- на борту (root): $cmd";   as_root "$cmd" | sed 's/^/   /' ;;
+    esac
+done
 
-
-
-echo "Начинаем деплой конфигурации на Jetson ($JETSON_IP)..."
-
-# 1. Копируем домашнюю директорию (с сохранением прав пользователя)
-echo "--- Копируем /home/andriy/ ---"
-rsync -avz ./home/andriy/ ${JETSON_USER}@${JETSON_IP}:/home/andriy/
-
-# 2. Копируем настройки в /etc (принудительно задаем владельца root:root)
-echo "--- Копируем /etc/ ---"
-rsync -avz --rsync-path="sudo rsync" --chown=root:root ./etc/ ${JETSON_USER}@${JETSON_IP}:/etc/
-
-# 3. Копируем исполняемые файлы в /usr (принудительно задаем владельца root:root)
-echo "--- Копируем /usr/ ---"
-rsync -avz --rsync-path="sudo rsync" --chown=root:root ./usr/ ${JETSON_USER}@${JETSON_IP}:/usr/
-
-echo "Деплой завершен!"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+echo "== деплой завершён"

@@ -1,19 +1,66 @@
 # distro/ — деплой на боевой борт (Jetson Orin Nano)
 
 Локальный контекст каталога. Архитектура боевого стека — в корневом `CLAUDE.md`
-(раздел «Боевой стек — `docker/orin/`»). Здесь — что лежит, что заморожено и
-чем бортовая запись bag отличается от симуляционной.
+(раздел «Боевой стек — `docker/orin/`»). Здесь — как работаем с бортом, что лежит,
+в каком он состоянии и чем бортовая запись bag отличается от симуляционной.
 
-> ⚠️ **Каталог ЗАМОРОЖЕН как есть до отдельного этапа деплоя на дрон**
-> (решение 2026-09-07, коммит 49f66d8). Это снимок старого состояния Jetson,
-> НЕ источник кода: боевой код едет в контейнер bind mount'ом из `src/`.
-> При работе над симуляцией сюда не лезть. Список известных несоответствий —
-> в корневом `CLAUDE.md`, там же.
+## Как работаем с бортом (с 2026-09-16, ветка `laptop_drone`)
+
+`distro/` — **источник правды для конфигурации Jetson** (юниты systemd, профили
+NetworkManager, скрипты, бинарники, всё вне контейнера). Цикл всегда один:
+
+```
+правка ЛОКАЛЬНО в distro/  →  ./deploy.sh -n (что изменится)  →  ./deploy.sh [секции]
+   →  проверка по ssh (read-only)  →  коммит
+```
+
+- **На борту руками НИЧЕГО не менять** — ни файлы, ни `nmcli`, ни `systemctl
+  enable`, ни `apt`. Иначе `distro/` перестаёт совпадать с бортом, а «снимок ≠ борт»
+  = ложные диагнозы (тот же принцип, что дисциплина прогона в симе). Исключение
+  сделал — сразу перенеси в `distro/` и задеплой, чтобы `./deploy.sh -n` был чист.
+- По ssh на борту можно: смотреть (логи, `systemctl status`, `ls`, `docker ps`),
+  запускать/останавливать сервисы, снимать bag. Нельзя: писать в `/etc`, `/usr`,
+  `~/` мимо deploy.sh.
+- Обратная сверка (борт → ноут): `rsync` покрываемых путей в scratch + `diff -rq`
+  с `distro/`. Делали 2026-09-16: расхождений 0, борт на уровне 2 июня.
+- `deploy.sh` без `--delete`: лишнее на борту не трогает, удаление файла — руками
+  через `-X 'rm …'` и из `distro/` одновременно.
+
+**Доступ.** Юзер `andriy`. ssh: `192.168.55.1` — USB-линк (l4tbr0), работает
+всегда; по Wi-Fi — DHCP (в TP-Link_6611 получил `192.168.0.104`). Ключ
+`doc/ssh-keys/jetson` (в `.gitignore`), `~/.ssh/config` ноута указывает на него для
+`192.168.55.1`, `192.168.0.133`, `192.168.1.202`. **Пароль sudo на борту: `ok`**
+(ценности не представляет — борт доступен только по USB/локалке). `rsync` в sudoers
+NOPASSWD (секции etc/usr), остальное root'ом deploy.sh делает через `sudo -S`
+(`-r`, `-X`; пароль — `$JETSON_SUDO`, дефолт `ok`).
+
+**Wi-Fi.** Профили — `etc/NetworkManager/system-connections/*.nmconnection`
+(с паролями, решение оставить в репо). Новая сеть = новый файл по образцу
+(свой uuid, `autoconnect-priority` ниже домашних), `./deploy.sh -r etc` (reload
+NM — иначе новый файл не подхватится), `-X 'nmcli connection up <id>'`.
+Файлы едут строго `600 root` (`--chmod=F600`; git 600 не хранит, NM с 644 профиль
+молча игнорирует).
+
+**Что на борту устарело (снимок 2026-09-16, всё на уровне май–июнь):**
+
+| Есть на борту | Должно быть (репо) |
+|---|---|
+| контейнер `vins_project_13_7` из образа `vins_ws-vins_core` — старый `home/andriy/vins_ws/Dockerfile` (`arm64v8/ros:humble-ros-base-jammy`, **без CUDA**), монтирует только `~/vins_ws/src` | `docker/orin/` — `dustynv/ros:humble-ros-base-l4t-r36.3.0`, `runtime: nvidia`, монтирует `src/vins`, `src/camera`, `src/nav` (+ добавить `src/control`, `src/mission`) |
+| VINS: апстрим `dongbo19` ветка `main` (4c3cf08) с ручными незакоммиченными правками в `~/vins_ws/src/VINS-MONO-ROS2` | форк `linux100talion`, ветка `1317_debug` |
+| камера: python `cam_node.py` через `vins_service.sh` | C++ `camera_node` (`src/camera/`) + `openhd_streamer` (`vins_service.sh` из `634119d`) |
+| `control_pkg`, `mission_pkg`, `nav_pkg` — нет вообще | `src/control`, `src/mission`, `src/nav` |
+| `~/workspaces/isaac_ros-dev` (166 МБ) — остатки; образы isaac_ros 40 ГБ **удалены 2026-09-16** | — |
+
+Шаги деплоя кода (TODO, по порядку): секция `src/` в deploy.sh под bind mount →
+`docker/orin/` вместо `vins_ws/{Dockerfile,compose}` + пересборка образа → клон форка
+`1317_debug` → актуальные `vins_service*.sh` → `colcon build` в контейнере.
 
 ## Что где лежит
 
 ```
-deploy.sh                    — rsync home/ etc/ usr/ на Jetson по IP (sudo rsync без пароля)
+deploy.sh                    — rsync секций home/ etc/ usr/ на Jetson: -n dry-run, -r reload
+                               NM/systemd, -x/-X команда после деплоя (andriy/root); шапка = usage
+etc/NetworkManager/system-connections/ — Wi-Fi-профили (600 root, см. «Wi-Fi» выше)
 etc/systemd/system/          — юниты: mavros, vins / vins_m, auto-bag / auto-bag-m, orin-shutdown
 home/andriy/mavlogs/         — auto_bag.sh / auto_bag_m.sh — запись bag (см. ниже)
 home/andriy/vins_ws/         — vins_service*.sh (старые: python cam_node.py, без стримера),

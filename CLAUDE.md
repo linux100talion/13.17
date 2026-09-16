@@ -37,8 +37,9 @@ src/
   nav/         — пакет nav_pkg: нейросети навигации (NN1/NN2, пока болванки)
                  + openhd_streamer (даунлинк в OpenHD с оверлеем детекций)
   orin_shutdown/ — Go-утилита graceful shutdown через MAVLink
-distro/        — деплой на Orin (etc/, home/andriy/, usr/, doc/, deploy.sh) —
-                 ⚠️ ЗАМОРОЖЕН как есть до этапа деплоя (см. «Боевой стек»)
+distro/        — ИСТОЧНИК ПРАВДЫ конфигурации Jetson (etc/, home/andriy/, usr/,
+                 doc/, deploy.sh): правим локально → deploy.sh → проверка по ssh,
+                 на борту руками ничего не менять (distro/CLAUDE.md)
 tools/mdtopdf/ — генератор CLAUDE.pdf (reportlab)
 ```
 
@@ -266,10 +267,12 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 (запуск VINS; суффикс `_m` = ручной режим без ожидания арминга),
 `auto-bag`/`auto-bag-m`, `orin-shutdown`. Скрипты — `distro/home/andriy/vins_ws/`.
 
-> ⚠️ **`distro/` ЗАМОРОЖЕН до отдельного этапа деплоя на дрон** (решение
-> 2026-09-07): каталог — снимок старого состояния Jetson, залитый как есть
-> (коммит 49f66d8), НЕ источник кода и не трогать при работе над симуляцией.
-> Известные несоответствия, разобрать ПРИ ДЕПЛОЕ: `vins_ws/vins_service*.sh`
+> **`distro/` РАЗМОРОЖЕН 2026-09-16** (ветка `laptop_drone`, этап деплоя начат):
+> каталог — источник правды конфигурации Jetson, цикл «правка локально →
+> `deploy.sh` → проверка по ssh», на борту руками ничего не менять — правила,
+> доступ (ssh, sudo) и таблица «что на борту устарело» в `distro/CLAUDE.md`.
+> Код в контейнер по-прежнему едет из `src/` (bind mount), не из `distro/`.
+> Известные несоответствия, разобрать ПО ХОДУ ДЕПЛОЯ: `vins_ws/vins_service*.sh`
 > запускают python `cam_node.py` вместо C++ `camera_node` и не поднимают
 > `openhd_streamer` (актуальная версия скриптов — `git show 634119d:distro/home/andriy/vins_service.sh`);
 > `vins_ws/src/plus/cuda/camera_node.cpp` — древний монолит с битой строкой
