@@ -72,8 +72,8 @@ MAVROS это прятал (INS_GYRO_FILTER + 21Гц); сырой gz-IMU отк�
         Шаг4 (опц.): сверка estimate_extrinsic=2.
   [ ] (сверка extrinsic) прогнать VINS estimate_extrinsic=2 → сравнить сошедшуюся матрицу
       с sim.yaml (хенд-расчёт дал транспонирование под допущением optical-frame; оракул
-      решит). Заодно проверит, не от кривого ли extrinsic срыв ~25 с. Боевой dummy_13_7
-      = identity-ротация (placeholder, нужна Kalibr перед боевым).
+      решит). Заодно проверит, не от кривого ли extrinsic срыв ~25 с. Бортовой dummy_13_7
+      = identity-ротация (placeholder, нужна Kalibr перед реальным бортом).
 
 
 КОНЕЧНАЯ ЦЕЛЬ (после стабильного VINS)

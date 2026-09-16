@@ -1,10 +1,10 @@
 // ============================================================================
 // camera_node_cpu.cpp — drop-in CPU-версия камера-ноды (без GPU/CUDA).
 //
-// Тот же базовый класс V4L2CameraBase (camera_core.hpp), что и боевой
+// Тот же базовый класс V4L2CameraBase (camera_core.hpp), что и лётный
 // camera_node.cpp, но дебайер + gain считаются на CPU через cv::* —
 // для машин без NVIDIA GPU/драйвера (GPU-less прогон gazebo→SITL→VINS,
-// ветка nn2_c3_cpu; T4 в дефиците). Боевой Orin и штатный GPU-sim остаются
+// ветка nn2_c3_cpu; T4 в дефиците). Реальный Orin и штатный GPU-sim остаются
 // на camera_node.cpp — этот executable их не трогает.
 //
 // ⚠️ Код Байера на CPU ДРУГОЙ: cv::COLOR_BayerGR2BGR (не BayerGB2RGB, как в

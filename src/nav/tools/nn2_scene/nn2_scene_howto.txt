@@ -107,7 +107,7 @@ FAISS хранит только векторы + порядковые ID, мет
   nav_pkg/scene_descriptor.py — ядро: SceneEncoder (DINOv2 +опц.MLP) + MetricHead
                                 + SceneMatcher (FAISS)
   nav_pkg/relocalizer.py      — ПУСТАЯ нода-заглушка (восстановление VINS)
-  tools/build_scene_map.py    — БОЕВАЯ сборка карты из bag (DINOv2[+MLP])
+  tools/build_scene_map.py    — НАСТОЯЩАЯ сборка карты из bag (DINOv2[+MLP])
   tools/generate_mock_map.py  — МОК карты (случайные векторы) для обвязки
   tools/train_topograph.py    — обучение MLP-«топографа» (MetricHead) из bag
   tools/eval_isometry.py      — замер изометрии эмбеддинга (до/после MLP)

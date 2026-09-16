@@ -1,7 +1,7 @@
 # FAQ — `bootstrap` (взлёт без GPS + инициализация VINS в полёте)
 
 Сценарий `bootstrap` поднимает дрон **без GPS** и инициализирует VINS прямо в
-полёте — под боевую GPS-denied архитектуру. Реализация: нода
+полёте — под целевую GPS-denied архитектуру. Реализация: нода
 `src/lab/alt_hold_bootstrap.py` (обёртка `src/lab/bootstrap.sh`). Теория и
 обоснование — `FAQ_gps.md`, `src/nav/FAQ_gps.md`. Ветка `nn2_c3_vins_althold`.
 

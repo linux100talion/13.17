@@ -15,7 +15,7 @@
   shuttle     — gz-hold(roll+pitch) + челнок (автономный system-ID, sim).
   assisted    — gz-hold(roll+pitch) + пульт-намерение (position). yaw пилот.
   manual      — [] : всё пилоту (per-axis база стека = сырые стики).
-  flow_assist — БОЕВОЙ пре-VINS: [DpRollHold, DpYawHold] (демпфер по потоку) + пульт (velocity-assist);
+  flow_assist — ЛЁТНЫЙ пре-VINS: [DpRollHold, DpYawHold] (демпфер по потоку) + пульт (velocity-assist);
                 pitch — сырой стик пилота, throttle держит миссия.
 """
 import math
@@ -188,7 +188,7 @@ STAB_NAMES = tuple(_STAB)
 
 def build_stabilizers(cfg, spec, wind=None):
     """spec: имя или '+'-склейка ('DpRollHold+DpYawHold') → список стратегий (может быть пуст).
-    Так «пульт + только yaw» = 'DpYawHold', «пульт + flow(roll)» = 'DpRollHold', боевой
+    Так «пульт + только yaw» = 'DpYawHold', «пульт + flow(roll)» = 'DpRollHold', лётный
     пре-VINS = 'DpRollHold+DpYawHold', демпфер всех осей = 'DpHold'.
     wind — общий WindTrim (wind_trim.py): рама станции демпфера (StationFrame) и DpVins
     держат трим в нём; None — у каждого свой (как было)."""

@@ -6,7 +6,7 @@
   <description>
     Ядро управления (hexagonal + DDD): стратегии стабилизации/движения/возбуждения,
     ControlStack, порты и ROS-адаптеры. Переиспользуется миссиями (mission_pkg) и
-    боевым бортом. Домен (domain/) не зависит от rclpy/mavros. См. architecture.md.
+    реальным бортом. Домен (domain/) не зависит от rclpy/mavros. См. architecture.md.
   </description>
   <maintainer email="andriykutsevol@gmail.com">Andriy Kutsevol</maintainer>
   <license>Proprietary</license>

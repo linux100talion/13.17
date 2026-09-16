@@ -46,7 +46,7 @@ export DISPLAY
 .PHONY: help ensure-env host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm rth smart-rth fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
 
 # .env (локальный профиль бокса, в .gitignore) сеется из эталона env.default
-# (в git): свежий клон получает боевые дефолты (WORLD/LV/BS_SF_MASTER) без
+# (в git): свежий клон получает штатные дефолты (WORLD/LV/BS_SF_MASTER) без
 # ручной возни. СУЩЕСТВУЮЩИЙ .env НЕ трогаем — машинные правки живут в нём.
 # Подробности — env.md.
 ensure-env:
@@ -82,7 +82,7 @@ gui:             ## окно Gazebo: GUI-клиент к работающему 
 	@echo "gui: панель «Камера дрона» (вид с камеры) пристыкована справа — worlds/gui_fpv.config."
 	@echo "gui: после restart-all/fresh-start окно закрыть и снова make gui."
 
-fpv:             ## окно оператора: боевой поток openhd_streamer (H.264 UDP :5600, с рамками NN)
+fpv:             ## окно оператора: штатный поток openhd_streamer (H.264 UDP :5600, с рамками NN)
 	@echo "fpv: смотрю UDP :5600 (закрыть — Ctrl+C или закрыть окно; стек не трогает)."
 	gst-launch-1.0 -q udpsrc port=5600 \
 	    caps="application/x-rtp,media=video,encoding-name=H264,payload=96" \

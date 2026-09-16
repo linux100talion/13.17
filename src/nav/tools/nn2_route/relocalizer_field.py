@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ============================================================================
-# relocalizer_field.py — НАБРОСОК боевой ноды relocalizer: route_field + ФЬЮЗ (XVIII).
+# relocalizer_field.py — НАБРОСОК лётной ноды relocalizer: route_field + ФЬЮЗ (XVIII).
 #
 # На борту одна пара (s,e) кормит ОБЕ грани (XV):
 #   ГРАНЬ 2 (засечка):  p̂ -> PoseWithCovarianceStamped -> Калман/ray_tracer

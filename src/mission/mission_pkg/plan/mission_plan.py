@@ -106,7 +106,7 @@ MISSIONS = {
     "Mission1": ["climb3", "mv_fwd2", "mv_bkwd4", "landing3"],
     # квадрат стик-профилем (уровень cfg.mv_level, 3с на сторону)
     "square":   ["climb3", "mv_fwd3", "mv_right3", "mv_bkwd3", "mv_left3", "land"],
-    # боевой station-keeping: оператор гоняет pitch +τ/−2τ/+τ (у точки), флоу демпфит roll/yaw
+    # лётный station-keeping: оператор гоняет pitch +τ/−2τ/+τ (у точки), флоу демпфит roll/yaw
     "sk_demo":  ["climb3", "sk_fwd3", "sk_fwd3", "land"],
     # bootstrap как профиль-миссия: взлёт → висеть (стабилизатор держит) → посадка
     "bootstrap": lambda cfg: [f"climb{cfg.alt:g}",
@@ -223,7 +223,7 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
     steps = [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget)]
     # loiter в миссии = профиль «взлёт на GPS → Loiter»: перед армом ждём, пока
     # EKF захватит позицию (урок LV4 — гонка бута, см. WaitEkfPos). Не-loiter
-    # миссии не трогаем: боевой пре-VINS профиль позиции на земле не имеет.
+    # миссии не трогаем: лётный пре-VINS профиль позиции на земле не имеет.
     if any(_parse(t)[0] == "loiter" for t in tokens):
         steps.append(WaitEkfPos("ekf_warmup", RC_MIN_THR, cfg.ekf_pos_budget))
     steps.append(Arm("arm", RC_MIN_THR, cfg.arm_budget))

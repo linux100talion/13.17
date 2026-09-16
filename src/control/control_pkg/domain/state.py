@@ -5,7 +5,7 @@
 ControlStack, MissionRunner) читает только этот объект — про ROS не знает.
 
 Замечание про источник позы: `gt_*` — истинная поза Gazebo (СИМ-костыль). На
-боевом Orin её НЕТ (gt_valid=False) — там источник позы даст VINS-адаптер в те
+реальном Orin её НЕТ (gt_valid=False) — там источник позы даст VINS-адаптер в те
 же поля позы (или отдельная стратегия VinsHold). Домен от этого не меняется.
 """
 from dataclasses import dataclass

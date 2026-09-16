@@ -349,7 +349,7 @@ class BootstrapConfig:
     pilot_pitch_sign: float   # сырой PWM пульта → намерение; парный к _PITCH_RC_SIGN
                                      # в ControlStack, вместе = pass-through (борт: сверить с радио)
     pilot_roll_sign: float
-    # ==== ДЕМПФЕР ПО ПОТОКУ (срез 3, БОЕВОЙ пре-VINS) — ТРИ НЕЗАВИСИМЫЕ ОСИ ====
+    # ==== ДЕМПФЕР ПО ПОТОКУ (срез 3, ЛЁТНЫЙ пре-VINS) — ТРИ НЕЗАВИСИМЫЕ ОСИ ====
     # Есть roll, pitch и yaw. Точка. У каждой оси СВОЙ полный набор — ничего не
     # шарится, дублирование НАМЕРЕННОЕ: тюнинг у осей разный (yaw ki=0 — интегратор
     # вреден, bias yaw_flow [[yaw-hold-tuning]]; roll ki=2 — победитель монолита),
@@ -833,13 +833,13 @@ class BootstrapConfig:
                                      # Публикуется только при ipm_ok (фильтр жив), body→ENU
                                      # поворот курсом самого EKF (att_yaw), штамп — WALL-время
                                      # (FCU в SITL живёт по wall, см. IMU-timesync).
-                                     # Репетиция боевой архитектуры (там это место VINS/NN1).
+                                     # Репетиция целевой архитектуры (там это место VINS/NN1).
                                      # BS_VISION_VEL / --vision-vel
     vision_pose_src: str  # источник ПОЗЫ vision-фида (при vision_vel>0):
                                      # 'integral' — интеграл IPM-скорости (суррогат
                                      # «хоть какая-то позиция», чтобы EK3 начал aiding);
                                      # 'extern' — позу в /mavros/vision_pose/pose даёт
-                                     # ВНЕШНЯЯ нода (ray_tracer: VINS → полётник, боевая
+                                     # ВНЕШНЯЯ нода (ray_tracer: VINS → полётник, целевая
                                      # архитектура), бутстрап шлёт только скорость+нули
                                      # на земле для арма. Два издателя позы недопустимы —
                                      # поэтому взаимоисключение здесь.
@@ -854,7 +854,7 @@ class BootstrapConfig:
                                      # Если VINS не ожил — GPS остаётся (безопасно).
                                      # BS_GPS_DISABLE / --gps-disable
     gps_denied: float          # профиль «GPS ОТСУТСТВУЕТ С БУТА» (LV=2 —
-                                     # модель боевого борта без приёмника; в симе
+                                     # модель реального борта без приёмника; в симе
                                      # eeprom готовит sitl_lv_profile.py 2:
                                      # SIM_GPS1_ENABLE=0 + extnav-пара POSXY=6/
                                      # VELXY=0 ещё ДО старта ноды). Меняет три вещи:
@@ -876,7 +876,7 @@ class BootstrapConfig:
                                      # + alt_src=baro (global rel_alt без GPS
                                      # замерзает). BS_GPS_DENIED / --gps-denied
     set_origin: float          # слать SET_GPS_GLOBAL_ORIGIN до подтверждения
-                                     # (боевой безжпсный бут: без origin EKF не даёт
+                                     # (штатный безжпсный бут: без origin EKF не даёт
                                      # локальный фрейм и не принимает extnav; с GPS
                                      # origin ставится сам — опт-ин не нужен).
                                      # BS_SET_ORIGIN / --set-origin
@@ -889,7 +889,7 @@ class BootstrapConfig:
     # (SIM_HOME в docker/sim/scripts/sim_up.sh, он же <spherical_coordinates>
     # мира = начало координат Gazebo). ⚠️ Эти три точки менять только ВМЕСТЕ:
     # магнитометр SITL рисуется от дома, WMM у EK3 — от origin.
-    # Боевой борт задаёт свои через BS_ORIGIN_LAT/LON/ALT.
+    # Реальный борт задаёт свои через BS_ORIGIN_LAT/LON/ALT.
     origin_lat: float    # BS_ORIGIN_LAT / --origin-lat
     origin_lon: float    # BS_ORIGIN_LON / --origin-lon
     origin_alt: float        # м AMSL; BS_ORIGIN_ALT / --origin-alt
@@ -918,7 +918,7 @@ class BootstrapConfig:
                                      # прогон 2026-08-19 — climb «не увидел» взлёта,
                                      # гейт IPM держал «на земле», фид слал нули);
                                      # 'baro' — сырой барометр (baro_alt.py,
-                                     # GPS-denied и боевой борт без GPS).
+                                     # GPS-denied и реальный борт без GPS).
                                      # BS_ALT_SRC / --alt-src
     # --- ГЕЙТЫ ДОВЕРИЯ к каналу вида сверху (обе оси по скорости, класс `_IpmGated`) ---
     # То же лечение, что получил курс после YW1s1, только поводы у осей другие: там

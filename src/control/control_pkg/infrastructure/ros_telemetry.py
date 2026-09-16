@@ -49,7 +49,7 @@ class RosTelemetry:
         node.create_subscription(Imu, '/mavros/imu/data', self._on_imu_alive,
                                  qos_profile_sensor_data)
         # Источник rel_alt: 'global' — GLOBAL_POSITION_INT (замерзает без GPS);
-        # 'baro' — сырой барометр (GPS-denied / боевой борт). См. baro_alt.py.
+        # 'baro' — сырой барометр (GPS-denied / реальный борт). См. baro_alt.py.
         if alt_src == 'baro':
             from .baro_alt import BaroAlt
             self._baro = BaroAlt(node, self._set_relalt)

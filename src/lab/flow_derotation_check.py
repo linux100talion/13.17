@@ -25,7 +25,7 @@ import sys
 
 import numpy as np
 
-# ⚠️ Проверяем БОЕВУЮ копию (`control_pkg/perception/flow_estimator.py`), а не
+# ⚠️ Проверяем ЛЁТНУЮ копию (`control_pkg/perception/flow_estimator.py`), а не
 # `src/lab/flow_estimator.py`: тот — старый скелет, разошедшийся с лётным кодом.
 # с 2026-09-01 оценщик — пакет (flow_estimator + миксины ipm/keyframe, relative
 # import): standalone-импорт мёртв, в sys.path кладём КОРЕНЬ с control_pkg
@@ -36,7 +36,7 @@ for _p in (os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contr
         sys.path.insert(0, _p)
         break
 else:                                    # noqa: PLW0120
-    sys.exit('боевой flow_estimator.py не найден — проверять нечего')
+    sys.exit('лётный flow_estimator.py не найден — проверять нечего')
 import control_pkg.perception.flow_estimator as _fe              # noqa: E402
 from control_pkg.perception.flow_estimator import FlowEstimator  # noqa: E402
 print(f'проверяем оценщик: {_fe.__file__}', file=sys.stderr)

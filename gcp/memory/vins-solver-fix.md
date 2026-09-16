@@ -14,7 +14,7 @@ system reboot», масштаб 2-26×, скорости до 50 м/с, td на�
 
 Три причины, все найдены и исправлены (в порядке убывания важности):
 
-1. **Солвер-пустышка (корень)**: в `sim.yaml` И боевых `dummy_13_7*.yaml` не было
+1. **Солвер-пустышка (корень)**: в `sim.yaml` И бортовых `dummy_13_7*.yaml` не было
    ключей `max_solver_time`/`max_num_iterations`/`keyframe_parallax` → OpenCV
    FileStorage отдаёт 0 → ceres 0 итераций → estimator = чистое IMU-счисление
    (потому не влияли ни экстринсики, ни шумы, ни штампы; td/ric замёрзшие).
@@ -24,7 +24,7 @@ system reboot», масштаб 2-26×, скорости до 50 м/с, td на�
    RTF≈1 это +60 мс смещения и ±30 мс джиттера к IMU (измерено кросс-корреляцией
    потока фич с гиро). Фикс: bayerizer кладёт в паддинг кадра трейлер
    `TS17+sec+nsec` (sim-время рендера Gazebo), camera_core.hpp достаёт его при
-   `stamp_from_frame:=true` (включён только в sim_nav.launch.py; боевой путь не тронут).
+   `stamp_from_frame:=true` (включён только в sim_nav.launch.py; лётный путь не тронут).
 3. **Экстринсики транспонированы**: в sim.yaml лежала матрица тело→камера, а
    VINS-Mono ждёт камера→тело (imu^R_cam, СТОЛБЦЫ = оси камеры в теле). Фикс:
    транспонирована + переписан комментарий-конвенция.
@@ -47,7 +47,7 @@ failure detection → reboot (сработал на yaw, ~30 с спустя); �
 на старте v4l2 роняла трекер навсегда — launch ноды не перезапускает).
 
 Фьюжн EK3 доказан (2026-08-19, бэг VINSEKF_bag, dataflash в скретчпаде ekf_test.BIN):
-боевая схема BS_VISION_VEL=1 + BS_VISION_POSE_SRC=extern (новый опт-ин: бутстрап
+лётная схема BS_VISION_VEL=1 + BS_VISION_POSE_SRC=extern (новый опт-ин: бутстрап
 шлёт IPM-скорость + нули на земле для арма и ставит пару EK3_SRC1_VELXY/POSXY=6,
 а ПОЗУ даёт ray_tracer из VINS; ray_tracer теперь штампует vision_pose WALL-временем
 — FCU в SITL живёт по wall). Требует VISO_TYPE=1 с бута (sitl-extra.parm; после
@@ -73,7 +73,7 @@ gps8.BIN в скретчпаде): полный полёт с глушением
 замолкает после GPS-kill. После серии: eeprom возвращён (3/3/GPS on),
 VISO_TYPE 1 ещё ВКЛЮЧЁН в sitl-extra.parm — закомментировать при закрытии серии.
 
-БЕЗЖПСНЫЙ БУТ ДОКАЗАН (2026-08-19, бэг VINSNOGPS_bag) — точный боевой профиль:
+БЕЗЖПСНЫЙ БУТ ДОКАЗАН (2026-08-19, бэг VINSNOGPS_bag) — точный профиль реального борта:
 SITL с SIM_GPS1_ENABLE=0 в eeprom (ни одного GPS-пакета от включения до посадки)
 + BS_SET_ORIGIN=1 (нода шлёт SET_GPS_GLOBAL_ORIGIN раз в 2 с до подтверждения
 gp_origin — ArduPilot принял за 7 с) + BS_ALT_SRC=baro + extern-поза + очередь

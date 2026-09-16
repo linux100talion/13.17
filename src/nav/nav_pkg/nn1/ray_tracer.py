@@ -447,7 +447,7 @@ class RayTracer(Node):
         # делает), «EKF variance: position lost». Пока EKF жив (взлёт на GPS) —
         # FrameAnchor защёлкивает Δyaw (курс EKF − курс VINS) + трансляцию тем
         # же механизмом, что у засечки NN1 (та потом уточнит трансляцию). Нет
-        # свежей EKF-позы (боевой GPS-denied бут) — якорь не латчится, сырой
+        # свежей EKF-позы (штатный GPS-denied бут) — якорь не латчится, сырой
         # VINS идёт как есть (поведение прежнее).
         #
         # СЛЕЖЕНИЕ после первого латча (полёт 2026-08-21 №7): разовый латч
@@ -566,7 +566,7 @@ class RayTracer(Node):
             vp.header.frame_id = self.vp_frame
             # Штамп — WALL-временем: FCU в SITL живёт по wall (JSON no_time_sync),
             # sim-штамп VINS уехал бы на часы AP_VisualOdom (см. vision-фид
-            # бутстрапа). На боевом Orin ROS-время = wall → поведение идентично.
+            # бутстрапа). На реальном Orin ROS-время = wall → поведение идентично.
             wall = time.time()
             vp.header.stamp.sec = int(wall)
             vp.header.stamp.nanosec = int((wall % 1.0) * 1e9)

@@ -13,7 +13,7 @@ gz IMU-сенсор (мостится в /gz_imu/data @250Гц, обход MAVLi
      осцилляция). 1-й порядок LP (cutoff GZ_IMU_LP_HZ, дефолт 10Гц; 0=выкл) срезает
      лимит-цикл, оставляя медленный полёт. На борту аналог — INS_GYRO_FILTER на FCU.
 
-На боевом Orin этого нет: IMU берётся с FCU через MAVROS (FLU, фильтрован, ~200Гц).
+На реальном Orin этого нет: IMU берётся с FCU через MAVROS (FLU, фильтрован, ~200Гц).
 Запускается в nav_up.sh, /gz_imu/data → /gz_imu/data_flu.
 """
 import math

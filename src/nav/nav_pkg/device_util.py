@@ -2,7 +2,7 @@
 # ============================================================================
 # device_util — авто-фолбэк выбора устройства torch (cuda -> cpu).
 #
-# Ноды NN1/NN2 по умолчанию просят device="cuda" (боевой Orin / GPU-sim). На
+# Ноды NN1/NN2 по умолчанию просят device="cuda" (реальный Orin / GPU-sim). На
 # машине без GPU (ветка nn2_c3_cpu, GPU-less прогон) такой запрос валит ноду на
 # загрузке модели (torch: no CUDA device). resolve_device() повторяет приём из
 # tools/nn2_route/train_route_coords.py: если cuda недоступна — молча уходим на

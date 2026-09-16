@@ -13,7 +13,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc cudaimgproc cudaarithm vide
 message(STATUS "OpenCV version: ${OpenCV_VERSION}")
 message(STATUS "OpenCV CUDA support: ${OpenCV_CUDA_VERSION}")
 
-# Боевая нода (CUDA): дебайер на cv::cuda::*, линкует полный OpenCV (вкл. CUDA).
+# Лётная нода (CUDA): дебайер на cv::cuda::*, линкует полный OpenCV (вкл. CUDA).
 add_executable(camera_node camera_node.cpp)
 
 ament_target_dependencies(camera_node

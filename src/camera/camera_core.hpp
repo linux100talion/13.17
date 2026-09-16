@@ -12,7 +12,7 @@
 //
 // Дебайеризация + per-channel gain вынесены в чистый виртуальный
 // process_frame(), который реализуют наследники:
-//   - camera_node.cpp     — CUDA (cv::cuda::*), боевой Orin и штатный GPU-sim;
+//   - camera_node.cpp     — CUDA (cv::cuda::*), реальный Orin и штатный GPU-sim;
 //   - camera_node_cpu.cpp — CPU  (cv::*), drop-in для машин без GPU/драйвера.
 //
 // ВАЖНО: поток захвата запускается НЕ в конструкторе, а методом start()
@@ -57,7 +57,7 @@ public:
         device_ = this->declare_parameter("device", std::string("/dev/video0"));
         RCLCPP_INFO(this->get_logger(), "V4L2 устройство: %s", device_.c_str());
 
-        // Разрешение — параметры (default 1280×720, как на боевом ArduCam/Orin).
+        // Разрешение — параметры (default 1280×720, как на реальном ArduCam/Orin).
         // В GPU-less симуляции (llvmpipe) ставится 320×180 через env CAMERA_W/H
         // (sim_nav.launch.py), чтобы софтрендер тянул камеру на fps для VINS.
         // Должно совпадать с SDF-камерой Gazebo, bayerizer и sim.yaml.

@@ -411,7 +411,7 @@ def main():
     scenario = {
         'version': 1,
         'name': os.path.basename(args.bag.rstrip('/')) + '_draft',
-        'note': ('черновик joy_timeline.py — тайминги сырые; перед боевым '
+        'note': ('черновик joy_timeline.py — тайминги сырые; перед настоящим '
                  'реплеем заменить наборы/снижения высоты на wait_alt, '
                  'латч режима — на wait_mode'),
         'init': init,

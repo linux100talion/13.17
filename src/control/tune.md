@@ -523,7 +523,7 @@ N=2 PREFIX=B0s BS_STAB=none BS_MISSION="climb3,hover40,land" bash src/lab/hover_
 ## Фаза 2 — паспорт ДАТЧИКА (0 новых прогонов, офлайн по бэгам фазы 1)
 
 Самая дешёвая и самая доходная фаза: считается по уже снятым бэгам, полётов не нужно.
-Инструмент — `src/lab/kf_vel_check.py` (переигрывает боевой `FlowEstimator` по кадрам
+Инструмент — `src/lab/kf_vel_check.py` (переигрывает лётный `FlowEstimator` по кадрам
 бэга) и `src/lab/mvfwd_check.py`.
 
 По каждой оси считаем против истины (одометрия Gazebo):

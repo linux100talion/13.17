@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-A/B на кадрах `docker/sim/output/joystick/yaw/swing/1/bag` (боевой `FlowEstimator`,
+A/B на кадрах `docker/sim/output/joystick/yaw/swing/1/bag` (лётный `FlowEstimator`,
 лётный конфиг, высота = EKF z − z₀ латча, углы — истина Gazebo), 1184 кадра воздуха:
 - yhalf 1.0 / 2.0 (полёт) / 3.5 м → шум приращения пути за кадр fwd 7.4/7.2/7.2 мм,
   lat 6.6/6.4/6.4; попарная разница приращений 0.2 мм (corr +1.00) — пиксельная

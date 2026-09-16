@@ -28,7 +28,7 @@ import sys
 import numpy as np
 import cv2
 
-# ⚠️ БОЕВАЯ копия оценщика — `control_pkg/perception/flow_estimator.py`, и проверять надо
+# ⚠️ ЛЁТНАЯ копия оценщика — `control_pkg/perception/flow_estimator.py`, и проверять надо
 # ЕЁ. `src/lab/flow_estimator.py` — старый скелет (129 строк против 471), разошедшийся
 # с лётным кодом; тест на нём пинил бы знак у кода, который никуда не летает.
 # Путь ищем от файла (репо) и по типовым точкам монтирования контейнеров.
@@ -40,8 +40,8 @@ for _p in (os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contr
     if os.path.isfile(os.path.join(_p, 'control_pkg', 'perception', 'flow_estimator.py')):
         sys.path.insert(0, _p)
         break
-else:                                    # noqa: PLW0120 — не нашли боевую: это ОШИБКА
-    sys.exit('боевой flow_estimator.py не найден — проверять нечего')
+else:                                    # noqa: PLW0120 — не нашли лётную: это ОШИБКА
+    sys.exit('лётный flow_estimator.py не найден — проверять нечего')
 import control_pkg.perception.flow_estimator as _fe              # noqa: E402
 from control_pkg.perception.flow_estimator import FlowEstimator  # noqa: E402
 print(f'проверяем оценщик: {_fe.__file__}')

@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # src/nav -> nav_pkg
 from route_geometry import Centerline                      # noqa: E402
 from route_field import RouteField                         # noqa: E402
-from nav_pkg.nn2.metric_decode import knn_decode_guard     # noqa: E402  (numpy, общий с боевым)
+from nav_pkg.nn2.metric_decode import knn_decode_guard     # noqa: E402  (numpy, общий с лётным)
 
 
 # ============================================================================
@@ -115,7 +115,7 @@ class MetricMap:
 
     def decode(self, q):
         """φ-вектор q -> (p̂ (2,), cov (2,2), conf). k ближайших в φ (L2≈метры) ->
-        ОБЩИЙ kNN-декод со стражем (knn_decode_guard), что и боевой SceneMatcher."""
+        ОБЩИЙ kNN-декод со стражем (knn_decode_guard), что и лётный SceneMatcher."""
         q = np.asarray(q, np.float64)
         d = np.linalg.norm(self.E - q, axis=1)             # L2 в φ ≈ метры
         idx = np.argsort(d)[:self.k]

@@ -2,7 +2,7 @@
 # metric_decode.py — kNN-декод метрической позиции СО СТРАЖЕМ алиасинга (XVIII).
 #
 # Общий «мозг» метрической засечки для ДВУХ потребителей (чтобы не разъезжались):
-#   - боевой SceneMatcher.metric_fix (FAISS-карта, nav_pkg) — на проводе;
+#   - лётный SceneMatcher.metric_fix (FAISS-карта, nav_pkg) — на проводе;
 #   - офлайн route_fusion.MetricMap.decode (in-memory φ, tools) — для прогона/анализа.
 #
 # Почему kNN, а не top-1 (см. разбор XVIII): top-1 возвращает одно реальное место

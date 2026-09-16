@@ -325,11 +325,11 @@ make land                 # Ctrl+C по fly, затем посадка
 
 ## Что делает байеризатор (`bayerizer.py`) и зачем он нужен?
 
-`bayerizer.py` (`src/sim/bayerizer.py`) — это **мост из Gazebo в виртуальную Bayer-камеру**. Его задача — позволить боевой `camera_node` работать в симуляции **БЕЗ переписывания**: камера-нода рассчитана на реальный сенсор, который отдаёт сырой Bayer-мозаик, а Gazebo отдаёт готовый RGB. Байеризатор «портит» RGB обратно до Bayer — как сделал бы настоящий сенсор — чтобы дальше всё шло штатным путём.
+`bayerizer.py` (`src/sim/bayerizer.py`) — это **мост из Gazebo в виртуальную Bayer-камеру**. Его задача — позволить лётный `camera_node` работать в симуляции **БЕЗ переписывания**: камера-нода рассчитана на реальный сенсор, который отдаёт сырой Bayer-мозаик, а Gazebo отдаёт готовый RGB. Байеризатор «портит» RGB обратно до Bayer — как сделал бы настоящий сенсор — чтобы дальше всё шло штатным путём.
 
 ### Зачем он вообще нужен
 
-Боевая `camera_node` делает: V4L2-захват сырого Bayer → CUDA-дебайер → `/image_mono` (+ `/image_color`). В симуляции реального сенсора нет, а есть RGB из Gazebo. Чтобы не плодить отдельную «симуляционную» камеру-ноду, мы разворачиваем картинку:
+Лётная `camera_node` делает: V4L2-захват сырого Bayer → CUDA-дебайер → `/image_mono` (+ `/image_color`). В симуляции реального сенсора нет, а есть RGB из Gazebo. Чтобы не плодить отдельную «симуляционную» камеру-ноду, мы разворачиваем картинку:
 
 ```
 Gazebo /camera/image_raw (RGB)
@@ -338,7 +338,7 @@ Gazebo /camera/image_raw (RGB)
   → camera_node (device:=/dev/rawbayer) → CUDA-дебайер обратно → /image_mono + /image_color
 ```
 
-В камера-ноде меняется **только** параметр `device:=/dev/rawbayer` — весь остальной боевой код (дебайер, штампы, топики) тот же.
+В камера-ноде меняется **только** параметр `device:=/dev/rawbayer` — весь остальной лётный код (дебайер, штампы, топики) тот же.
 
 ### Что он делает по шагам
 
@@ -390,8 +390,8 @@ v4l2loopback капризен — все эти детали выстрадан�
 
 ### Два переключателя через env (не правя launch)
 
-- **`CAMERA_NODE`** — какой executable камеры: `camera_node` (боевой CUDA-дебайер, default) или `camera_node_cpu` (drop-in CPU-дебайер для машин без GPU). CPU-оверрайд compose выставляет `camera_node_cpu`.
-- **`CAMERA_W`/`CAMERA_H`** — разрешение камеры (default 1280×720; CPU-режим 320×180). Функция `_vins_config()` при не-дефолтном разрешении масштабирует `image_width/height` и интринсики `fx/fy/cx/cy` из ОДНОГО источника (`sim.yaml`) в `/tmp/sim_WxH.yaml` — чтобы не держать второй .yaml, который бы дрейфовал. На 1280×720 возвращает `sim.yaml` как есть (боевой/GPU путь не трогаем).
+- **`CAMERA_NODE`** — какой executable камеры: `camera_node` (лётный CUDA-дебайер, default) или `camera_node_cpu` (drop-in CPU-дебайер для машин без GPU). CPU-оверрайд compose выставляет `camera_node_cpu`.
+- **`CAMERA_W`/`CAMERA_H`** — разрешение камеры (default 1280×720; CPU-режим 320×180). Функция `_vins_config()` при не-дефолтном разрешении масштабирует `image_width/height` и интринсики `fx/fy/cx/cy` из ОДНОГО источника (`sim.yaml`) в `/tmp/sim_WxH.yaml` — чтобы не держать второй .yaml, который бы дрейфовал. На 1280×720 возвращает `sim.yaml` как есть (лётный/GPU путь не трогаем).
 
 ### Как запускается
 
@@ -467,7 +467,7 @@ ros2 launch /root/sim_ws/src/sim/sim_nav.launch.py
 
 ### Когда нужен
 
-Когда прогоняешь симуляцию на машине **без NVIDIA-драйвера** (CPU-бокс). Боевой Orin и штатный GPU-sim остаются на базовом compose (`camera_node` + `runtime: nvidia`) — этот файл их не трогает.
+Когда прогоняешь симуляцию на машине **без NVIDIA-драйвера** (CPU-бокс). Реальный Orin и штатный GPU-sim остаются на базовом compose (`camera_node` + `runtime: nvidia`) — этот файл их не трогает.
 
 ### Что он переопределяет
 
@@ -500,12 +500,12 @@ make CPU=1 restart-all && make CPU=1 wait
 ### Замечания
 
 - Разрешение 320×180 здесь — **не** ради ускорения рендера (на RTF разрешение почти не влияет, горло — физика+геометрия сцены `mili_fortress`), а ради экономии CPU на nav-стороне и того, что llvmpipe масштабируется по числу пикселей под заполнение. Подробно про RTF и софтрендер — `src/sim/CLAUDE.md`.
-- `camera_node_cpu` — drop-in замена боевой ноды (тот же код через `camera_core.hpp`, CPU-дебайер вместо CUDA); см. `src/camera/`.
+- `camera_node_cpu` — drop-in замена лётной ноды (тот же код через `camera_core.hpp`, CPU-дебайер вместо CUDA); см. `src/camera/`.
 
 
-## Что такое `camera_node_cpu` и чем он отличается от боевого `camera_node`?
+## Что такое `camera_node_cpu` и чем он отличается от лётного `camera_node`?
 
-`camera_node_cpu` (`src/camera/camera_node_cpu.cpp`) — это **drop-in CPU-версия** камера-ноды: тот же V4L2-захват и те же топики, что у боевого `camera_node`, но дебайер и gain считаются на CPU (`cv::*`) вместо GPU (`cv::cuda::*`). Нужен для прогона на машинах **без NVIDIA GPU/драйвера** (GPU-less sim, ветка `nn2_c3_cpu`). Боевой Orin и штатный GPU-sim остаются на `camera_node` — этот executable их не трогает.
+`camera_node_cpu` (`src/camera/camera_node_cpu.cpp`) — это **drop-in CPU-версия** камера-ноды: тот же V4L2-захват и те же топики, что у лётного `camera_node`, но дебайер и gain считаются на CPU (`cv::*`) вместо GPU (`cv::cuda::*`). Нужен для прогона на машинах **без NVIDIA GPU/драйвера** (GPU-less sim, ветка `nn2_c3_cpu`). Реальный Orin и штатный GPU-sim остаются на `camera_node` — этот executable их не трогает.
 
 ### Общая база (почему «drop-in»)
 
@@ -513,7 +513,7 @@ make CPU=1 restart-all && make CPU=1 wait
 
 ### В чём именно разница
 
-| | `camera_node` (боевой) | `camera_node_cpu` |
+| | `camera_node` (бортовой) | `camera_node_cpu` |
 |---|---|---|
 | Дебайер | `cv::cuda::demosaicing` (GPU) | `cv::cvtColor` (CPU) |
 | Код Байера | `BayerGB2RGB` | `BayerGR2BGR` |
@@ -537,13 +537,13 @@ make CPU=1 restart-all && make CPU=1 wait
 - Поскольку база общая, `/image_mono` для VINS считается ровно так же (mono из корректного BGR через `BGR2GRAY`) — поведение VINS от подмены ноды не меняется, отличается только устройство дебайера.
 
 
-## Что такое `sim.yaml` и чем он отличается от боевого конфига?
+## Что такое `sim.yaml` и чем он отличается от бортового конфига?
 
-`sim.yaml` (`src/vins/VINS-MONO-ROS2/config_pkg/config/sim.yaml`) — это **конфиг VINS-Mono для симуляции** (Gazebo + SITL). Аналог боевого `dummy_13_7.yaml` (реальный ArduCam), но подогнан под идеальную Gazebo-камеру и sim-окружение. Его подхватывают `feature_tracker` и `vins_estimator` (через `config_file` в `sim_nav.launch.py`).
+`sim.yaml` (`src/vins/VINS-MONO-ROS2/config_pkg/config/sim.yaml`) — это **конфиг VINS-Mono для симуляции** (Gazebo + SITL). Аналог бортового `dummy_13_7.yaml` (реальный ArduCam), но подогнан под идеальную Gazebo-камеру и sim-окружение. Его подхватывают `feature_tracker` и `vins_estimator` (через `config_file` в `sim_nav.launch.py`).
 
-### Чем отличается от боевого `dummy_13_7.yaml`
+### Чем отличается от бортового `dummy_13_7.yaml`
 
-| | Боевой (ArduCam) | `sim.yaml` (Gazebo) |
+| | Бортовой (ArduCam) | `sim.yaml` (Gazebo) |
 |---|---|---|
 | Дисторсия | реальная (линза) | **нулевая** — Gazebo-камера идеальный pinhole |
 | Интринсики | калибровка камеры | из `model.sdf`: fov 90° @ 1280×720 → `fx=fy=640`, `cx=640`, `cy=360` |
@@ -556,7 +556,7 @@ make CPU=1 restart-all && make CPU=1 wait
 
 - **Нулевая дисторсия + простые интринсики** — Gazebo рендерит идеальный pinhole, считать искажения не нужно; `fx = (width/2)/tan(fov/2) = 640/tan(45°) = 640`.
 - **`td=0`, оценку выкл** — камера и IMU оба штампуются sim-clock'ом (`use_sim_time`), так что смещение между ними нулевое (см. `src/sim/CLAUDE.md`, раздел про два времени). Если инициализация VINS будет страдать на штампах — рычаг тут: включить `estimate_td: 1`.
-- **Заниженный шум IMU** — в симуляции нет вибраций рамы, поэтому `acc_n/gyr_n` возвращены к базовым (в боевом они подняты ~×10). Комментарий в файле: «check2» был из-за ill-conditioned ковариации, не из-за `acc_n`.
+- **Заниженный шум IMU** — в симуляции нет вибраций рамы, поэтому `acc_n/gyr_n` возвращены к базовым (в бортовом они подняты ~×10). Комментарий в файле: «check2» был из-за ill-conditioned ковариации, не из-за `acc_n`.
 - **Экстринсики** считаются из позы камеры в SDF: `extrinsicRotation` (RIC, тело FLU → camera-optical) выведена из наклона 0.26 рад, `extrinsicTranslation = [0.15, 0, 0.05]`. `estimate_extrinsic: 0` — фиксируем, не оптимизируем.
 
 ### ⚠️ Разрешение должно быть согласовано
@@ -574,13 +574,13 @@ make CPU=1 restart-all && make CPU=1 wait
 
 ## Что такое `dummy_13_7.yaml` и чем он отличается от `sim.yaml`?
 
-`dummy_13_7.yaml` (`src/vins/VINS-MONO-ROS2/config_pkg/config/dummy_13_7.yaml`) — это **боевой конфиг VINS-Mono** для реального борта (ArduCam на Jetson Orin). Его подхватывают `feature_tracker`/`vins_estimator` на Orin. Симуляционный аналог — `sim.yaml`.
+`dummy_13_7.yaml` (`src/vins/VINS-MONO-ROS2/config_pkg/config/dummy_13_7.yaml`) — это **бортовой конфиг VINS-Mono** для реального борта (ArduCam на Jetson Orin). Его подхватывают `feature_tracker`/`vins_estimator` на Orin. Симуляционный аналог — `sim.yaml`.
 
 «dummy» в имени — потому что это **стартовый/некалиброванный** конфиг: интринсики и шум проставлены ориентировочно, а экстринсики и временную задержку VINS должен **довести сам онлайн** (см. ниже). Это рабочая заготовка под реальную камеру, а не финальная калибровка.
 
 ### Чем отличается от `sim.yaml`
 
-| | `dummy_13_7.yaml` (боевой) | `sim.yaml` (Gazebo) |
+| | `dummy_13_7.yaml` (бортовой) | `sim.yaml` (Gazebo) |
 |---|---|---|
 | `estimate_td` | **1** — VINS сам оценивает задержку камера↔IMU | 0 (оба на sim-clock → td=0) |
 | `estimate_extrinsic` | **1** — оптимизирует экстринсики от начального guess | 0 — зафиксированы из SDF |
@@ -590,7 +590,7 @@ make CPU=1 restart-all && make CPU=1 wait
 | Пути | `/root/vins_ws/` | `/root/sim_ws/` |
 | Шум IMU | поднят под вибрации рамы | занижен (в sim вибраций нет) |
 
-### Почему так (боевая специфика)
+### Почему так (бортовая специфика)
 
 - **`estimate_td: 1`** — на реальном железе камера и IMU идут разными путями с аппаратной задержкой, которая заранее неизвестна → пусть VINS подстраивает её онлайн. В симуляции оба на sim-clock, поэтому там `td=0` фиксирован.
 - **`estimate_extrinsic: 1` + единичная RIC** — точное крепление камера↔IMU на борту не измерено идеально; даём грубый начальный guess и позволяем VINS откалибровать вокруг него (в этом форке: 0=fix, 1=optimize, 2=no prior/calibrate). В sim геометрия известна точно из SDF → фиксируем.
@@ -600,7 +600,7 @@ make CPU=1 restart-all && make CPU=1 wait
 ### Замечания
 
 - Топики те же, что в sim: `imu_topic: /mavros/imu/data_raw`, `image_topic: /image_mono`.
-- Это конфиг для боевого стека `docker/orin/`; в симуляции используется `sim.yaml` (его выбирает `sim_nav.launch.py`).
+- Это конфиг для бортового стека `docker/orin/`; в симуляции используется `sim.yaml` (его выбирает `sim_nav.launch.py`).
 
 
 ## Что такое `mavlink_router` и зачем он в стеке?

@@ -887,7 +887,7 @@
          Нужна gz-position-hold стабилизатору в alt_hold_bootstrap: в GPS-denied EKF
          не держит горизонт (tilt/accel ambiguity → runaway), поэтому на ВРЕМЯ
          бутстрапа подменяем «идеальным VINS» = истинной позой Gazebo, чтобы дрон
-         стоял на месте и VINS успел заinit'иться. На боевом Orin этого НЕТ — там
+         стоял на месте и VINS успел заinit'иться. На реальном Orin этого НЕТ — там
          референс даёт реальный VINS. Мостится ros_gz_bridge → /model/iris_cam/odometry. -->
     <plugin filename="gz-sim-odometry-publisher-system"
             name="gz::sim::systems::OdometryPublisher">

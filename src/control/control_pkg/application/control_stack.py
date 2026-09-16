@@ -8,7 +8,7 @@ PER-AXIS модель (срез 3): стабилизаторов может бы
      живой пульт (RcTransmitter читает s.pilot_*) / (будущее) NN2 — profile-only до конца;
   2) каждый стабилизатор ПЕРЕЗАПИСЫВАЕТ свои оси (regulate/velocity-assist);
   3) Excitation подмешивается сверху (ADDITIVE/REPLACE).
-Так «пульт + только yaw» = [DpYawHold] (yaw держит, roll/pitch = профиль-оператор); боевой
+Так «пульт + только yaw» = [DpYawHold] (yaw держит, roll/pitch = профиль-оператор); лётный
 пре-VINS = [DpRollHold,DpYawHold] (roll/yaw демпфер, pitch = оператор). Manual = [] (всё
 оператору через RcTransmitter). Живой пилот входит ТОЛЬКО как Trajectory (RcTransmitter),
 не как отдельная база — единый «язык» намерения c_*.

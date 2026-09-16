@@ -41,7 +41,7 @@ for _p in (os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contr
         sys.path.insert(0, _p)
         break
 else:                                    # noqa: PLW0120
-    sys.exit('боевой flow_estimator.py не найден — проверять нечего')
+    sys.exit('лётный flow_estimator.py не найден — проверять нечего')
 import control_pkg.perception.flow_estimator as _fe              # noqa: E402
 from control_pkg.perception.flow_estimator import FlowEstimator  # noqa: E402
 print(f'проверяем оценщик: {_fe.__file__}')
@@ -51,7 +51,7 @@ FX = FY = 640.0
 CX, CY = 640.0, 360.0
 R = [0.0, -1.0, 0.0, -0.25708, 0.0, -0.96639, 0.96639, 0.0, -0.25708]
 DT = 1.0 / 30.0
-TILT = 0.26          # наклон камеры вниз, рад (как в боевом конфиге)
+TILT = 0.26          # наклон камеры вниз, рад (как в бортовом конфиге)
 ALT = 3.0            # высота, м
 K = np.array([[FX, 0, CX], [0, FY, CY], [0, 0, 1]], dtype=np.float64)
 KI = np.linalg.inv(K)

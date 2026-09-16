@@ -18,7 +18,7 @@
 # GUIDED/ExternalNav нужна позиция в EKF. Её даёт РОВНО ОДИН издатель в
 # /mavros/vision_pose/pose — два издателя в один топик ломают фьюжн. Выбор:
 #   ray_tracer (default) — полный узел NN1: засечки по ориентирам + сброс дрейфа
-#                          (до 1-й засечки = сырой VINS). Боевой путь.
+#                          (до 1-й засечки = сырой VINS). Лётный путь.
 #   bridge               — тонкий vision_pose_bridge: только сырой VINS →
 #                          vision_pose, без NN1-логики. Для тестов
 #                          ALT_HOLD-bootstrap/handover, пока ray_tracer отложен.

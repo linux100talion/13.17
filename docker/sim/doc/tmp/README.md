@@ -4,7 +4,7 @@
 ArduPilot SITL эмулирует полётный контроллер, Gazebo Harmonic рендерит мир и
 виртуальную камеру, VINS-Mono и нейросети работают как на дроне.
 
-Параллелен боевому стеку `docker/orin/` (Jetson Orin + реальная камера/полётник).
+Параллелен бортовому стеку `docker/orin/` (Jetson Orin + реальная камера/полётник).
 
 ## Архитектура
 
@@ -227,7 +227,7 @@ Gazebo — софтовый llvmpipe. Барьер тут — fps софтрен
 отсутствие GPU.
 
 **Стена №1 — тривиальная: РЕШЕНА авто-фолбэком cuda→cpu.** Дефолты нод
-по-прежнему `"cuda"` (боевой Orin / GPU-sim не трогаем):
+по-прежнему `"cuda"` (реальный Orin / GPU-sim не трогаем):
 - `nav_pkg/nn1/nn1_anchor.py` — `declare_parameter("device", "cuda")` →
   `anchor_matcher: LightGlue(...).to(device)`
 - `nav_pkg/nn2/nn2_scene.py` — `declare_parameter("device", "cuda")` →

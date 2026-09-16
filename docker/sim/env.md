@@ -31,7 +31,7 @@
 
 `.env` при отсутствии создаётся копией `env.default` **автоматически**: таргет
 `ensure-env` прицеплен к `make build`/`up`/`restart-all`/`fresh-start`, тот же
-посев делает `freefly_lv.sh`. Свежий клон летит боевым профилем без ручной
+посев делает `freefly_lv.sh`. Свежий клон летит штатным профилем без ручной
 возни; существующий `.env` НИКОГДА не перетирается.
 
 **Куда писать правку:**
@@ -70,7 +70,7 @@
 | `VINS_SRC` | `/home/andriy/VINS-MONO-ROS2` | compose | путь к форку VINS-MONO-ROS2 (ветка `1317_debug`) на хосте → bind mount в nav как `/root/sim_ws/src/vins_oss`. ⚠️ машинно-зависим (GCE-бокс: `/root/VINS-MONO-ROS2`) |
 | `CUDA_ARCH_BIN` | `8.9` | compose (build) | арка CUDA для сборки OpenCV в образе nav (RTX 4050 = Ada); одна арка — быстрее сборка. ⚠️ машинно-зависим (под GPU бокса) |
 | `WORLD` | `/root/worlds/mili_fortress_fine.sdf` | compose → simulator | мир по умолчанию: мелкая фактура земли (grass_plane_fine, texel 3.7 мм) — зрение живёт у земли. Базовый мир — закомментировать строку |
-| `LV` | `2` | freefly_lv.sh | профиль «GPS отсутствует с бута» (модель боевого борта) |
+| `LV` | `2` | freefly_lv.sh | профиль «GPS отсутствует с бута» (модель реального борта) |
 | `BS_SF_MASTER` | `1` | freefly_lv.sh → нода | схема «SF-мастер»: SF (CH7) = мастер сырых стиков, SC (CH6) = потолок лесенки демпфер/VinsHold/LOITER. Нужен микс SF→CH7 в EdgeTX |
 | `BS_LAND_JOY` | `b1` (эталон с 2026-09-02; дефолт ноды `b0`) | freefly_lv.sh → нода | где в `/joy` кнопка SA (мягкая посадка): `b<i>`/`a<i>`; зависит от микшера пульта — мерить `src/lab/joystick/js_probe.py` |
 

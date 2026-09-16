@@ -38,7 +38,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all      # graphics+compute: нужно для EGL/рендера
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      # Разрешение камеры — из env хоста (default 1280×720, боевой ArduCam).
+      # Разрешение камеры — из env хоста (default 1280×720, реальный ArduCam).
       # Применяется при СОЗДАНИИ контейнера → менять только через up/fresh-start.
       - CAMERA_W=${CAMERA_W:-1280}
       - CAMERA_H=${CAMERA_H:-720}

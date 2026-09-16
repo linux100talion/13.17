@@ -128,13 +128,13 @@ r, p, t, y, sw = joy_sticks([0.25, 0.0])
 check("joy_sticks короткий axes → отсутствующие оси = центр", t == 1500 and y == 1500)
 check("joy_sticks без оси тумблера → AUTO", sw == 0)
 check("joy_sticks присутствующая ось при коротком axes работает", r == 1600)
-# боевые знаки TX12 (выверены живыми полётами): зеркальны roll/yaw/throttle,
+# настоящие знаки TX12 (выверены живыми полётами): зеркальны roll/yaw/throttle,
 # прямой только pitch (провод RC2 сам инвертирован — низ = вперёд)
 from control_pkg.infrastructure.ros_pilot import JOY_SIGNS_DEFAULT   # noqa: E402
 check("JOY_SIGNS_DEFAULT: roll/yaw/thr зеркальны, pitch прямой",
       JOY_SIGNS_DEFAULT == (-1.0, 1.0, -1.0, -1.0))
 r, p, t, y, _ = joy_sticks([1.0, 1.0, 1.0, 1.0], signs=JOY_SIGNS_DEFAULT)
-check("joy_sticks с боевыми знаками: +1 по всем осям → 1100/1900/1100/1100",
+check("joy_sticks с настоящими знаками: +1 по всем осям → 1100/1900/1100/1100",
       (r, p, t, y) == (1100, 1900, 1100, 1100))
 
 # --- joy_master: схема «SF-мастер» (SF на CH7/axes[6], SC — потолок лесенки) ---

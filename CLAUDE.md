@@ -1,19 +1,25 @@
 # Проект 13.17 — Автономный дрон без GPS
 
 Навигация без GPS на основе компьютерного зрения и VINS-Mono.
-- **Боевой борт:** NVIDIA Jetson Orin Nano (ARM64, JetPack 6 / L4T r36).
+- **Реальный борт:** NVIDIA Jetson Orin Nano (ARM64, JetPack 6 / L4T r36).
 - **Симуляция:** ноутбук x86 + NVIDIA GPU (ArduPilot SITL + Gazebo Harmonic).
+
+Словарь (с 2026-09-16, слово «боевой» не используем — ничего боевого тут нет):
+**бортовой** — то, что крутится на Jetson (стек, конфиг, камера; противоположность
+сима); **реальный борт / Orin** — само железо; **лётный** — код/путь/нода, которые
+летят (противоположность стенда, реплея, болванки); **штатный** — дефолт/профиль
+по умолчанию; **целевая архитектура** — куда идём (VINS + NN1 вместо GPS).
 
 ## Структура репозитория
 
 ```
 docker/
-  orin/        — БОЕВОЙ стек (Jetson, реальная камера + полётник)
+  orin/        — БОРТОВОЙ стек (Jetson, реальная камера + полётник)
   sim/         — СИМУЛЯЦИЯ (x86 + NVIDIA: SITL + Gazebo + VINS)
 src/
   camera/      — C++ CUDA камера-нода (camera_pkg) + tuner
   vins/        — VINS-MONO-ROS2 (конфиги) + python cam-ноды (fallback); calib/ —
-                 калибровка боевой камеры/IMU Kalibr: мишень A4, версии, пайплайн
+                 калибровка бортовой камеры/IMU Kalibr: мишень A4, версии, пайплайн
   sim/         — симуляционная обвязка (байеризатор, launch)
   control/     — пакет control_pkg: стабилизаторы, арбитр, гейты + ручки прогона
                  (profiles/). Доки рядом: architecture.md (слои, порты),
@@ -60,7 +66,7 @@ intrinsics + барометр/IMU → абсолютная позиция → с
 
 ## Камера и C++ нода
 
-**`src/camera/camera_node.cpp`** (`camera_pkg`) — боевая ROS2 нода:
+**`src/camera/camera_node.cpp`** (`camera_pkg`) — лётная ROS2 нода:
 - V4L2 захват (`v4l2-ctl`, формат BA10) → CUDA дебайер (`cv::cuda::demosaicing`,
   `BayerGB2RGB`) → публикует `mono8` в `/image_mono` (вход VINS)
 - публикует **`/image_color`** (bgr8, полный кадр, каждый кадр) — вход nav-стороны
@@ -157,7 +163,7 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   пост-рендер из bag тем же кодом (`nav_pkg/hud_renderer.py`, без ROS) через
   `src/lab/hud_video.py` (freefly_lv.sh делает сам, `HUD_MP4=0` — выкл).
   Третий ролик того же прогона — **`scene_ipm.mp4`**, «глазами КАНАЛА ВИДА
-  СВЕРХУ»: полоса земли, нарисованная на кадре боевым `_ipm_px`, + сам
+  СВЕРХУ»: полоса земли, нарисованная на кадре лётным `_ipm_px`, + сам
   выпрямленный варп + лётные скорости `/flow_dbg8|9` рядом с истиной Gazebo
   (`src/lab/ipm_video.py`, рисовалка `ipm_panel.py` общая с офлайн-стендом
   `ipm_alt_replay.py`; `IPM_MP4=0` — выкл). Варп в bag не пишется — он
@@ -217,10 +223,10 @@ republish полного `/image_color` — осознанная плата, п�
 Для NN2 в образ `nav` добавлен **`faiss-cpu`**; DINOv2 тянется в рантайме через
 `torch.hub` (использует уже стоящий torch). На Orin NN2 пока не запускается.
 
-**Боевой борт (`docker/orin/`):** камера больше не гонит OpenHD сама
+**Реальный борт (`docker/orin/`):** камера больше не гонит OpenHD сама
 (`stream_openhd:=false`) — `openhd_streamer` запускается рядом с камерой в
 `vins_service.sh`/`vins_service_m.sh` (PID4). На Orin поднимается ТОЛЬКО стример
-(не болванки NN1/NN2): отдаёт чистое видео, рамки появятся, когда боевые
+(не болванки NN1/NN2): отдаёт чистое видео, рамки появятся, когда настоящие
 нейросети начнут публиковать `/nn1/detections`, `/nn2/scene`. `src/nav` смонтирован
 в контейнер, в Dockerfile добавлен `vision-msgs`.
 
@@ -251,12 +257,12 @@ git clone --branch 1317_debug https://github.com/linux100talion/VINS-MONO-ROS2 /
 ```
 
 Конфиги: `src/vins/VINS-MONO-ROS2/config_pkg/config/`
-- `dummy_13_7.yaml` — боевой (реальный ArduCam)
+- `dummy_13_7.yaml` — бортовой (реальный ArduCam)
 - `sim.yaml` — симуляция (см. ниже)
 
 ---
 
-# Боевой стек — `docker/orin/`
+# Бортовой стек — `docker/orin/`
 
 База: `dustynv/ros:humble-ros-base-l4t-r36.3.0` (NVIDIA L4T: ROS2 Humble +
 CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
@@ -276,7 +282,7 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 > запускают python `cam_node.py` вместо C++ `camera_node` и не поднимают
 > `openhd_streamer` (актуальная версия скриптов — `git show 634119d:distro/home/andriy/vins_service.sh`);
 > `vins_ws/src/plus/cuda/camera_node.cpp` — древний монолит с битой строкой
-> x264enc (боевой код — `src/camera/`, едет в контейнер bind mount'ом);
+> x264enc (лётный код — `src/camera/`, едет в контейнер bind mount'ом);
 > заглушка `usr/local/bin/orin_shutdown__bin` удалена. Секреты
 > (`doc/ssh-keys/jetson`, `doc/wifi.txt`) — в `.gitignore`, репо публичный.
 > Раскладка каталога и сравнение бортовой записи bag (auto-bag) с симуляционной
@@ -451,7 +457,7 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 Локальный профиль бокса **`docker/sim/.env`** (compose + дефолты
 `freefly_lv.sh`: LV=2, BS_SF_MASTER=1, WORLD) сеется из эталона
 **`env.default`** (в git) автоматически при отсутствии — свежий клон летит
-боевым профилем. Шпаргалка: `docker/sim/env.md`.
+штатным профилем. Шпаргалка: `docker/sim/env.md`.
 
 ## Дрон — `worlds/iris_cam/`
 
@@ -462,7 +468,7 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 
 ## sim.yaml (VINS для Gazebo)
 
-Отличия от боевого: **нулевая дисторсия** (идеальный pinhole), интринсики
+Отличия от бортового: **нулевая дисторсия** (идеальный pinhole), интринсики
 `fx=fy=640, cx=640, cy=360` (fov 90° @ 1280×720), пути `/root/sim_ws/`,
 экстринсики из позы камеры в SDF, заниженный шум IMU (нет вибраций рамы).
 

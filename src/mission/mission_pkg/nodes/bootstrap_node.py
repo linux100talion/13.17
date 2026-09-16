@@ -374,7 +374,7 @@ class BootstrapArch2Node(Node):
             self._vision_pub = self.create_publisher(
                 TwistStamped, '/mavros/vision_speed/speed_twist', 10)
             # Поза: 'integral' — наш интеграл IPM (суррогат); 'extern' — позу
-            # публикует ray_tracer (VINS, боевая архитектура), мы её НЕ дублируем
+            # публикует ray_tracer (VINS, целевая архитектура), мы её НЕ дублируем
             # (два издателя vision_pose ломают фьюжн). Скорость+нули на земле
             # для арма шлём в любом случае.
             if cfg.vision_pose_src != 'extern':
@@ -523,7 +523,7 @@ class BootstrapArch2Node(Node):
         if kind == 'ros':
             return RosPilot(self, sf_master=sf)
         # flow_assist — НЕЙТРАЛЬНЫЙ пилот (центр): флоу-демпфер держит снос сам;
-        # изолирует боевой пре-VINS сценарий (аналог liftland --flow-hold монолита).
+        # изолирует лётный пре-VINS сценарий (аналог liftland --flow-hold монолита).
         script = {'assisted': ASSISTED_SCRIPT, 'manual': MANUAL_SCRIPT}.get(cfg.control_mode, [])
         return ScriptedPilot(self.clock, script)
 

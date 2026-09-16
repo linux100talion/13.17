@@ -17,7 +17,7 @@ from .flow_damper import _FlowDamper1D
 
 
 class DpRollHold(_FlowDamper1D):
-    """Демпфер БОКОВОГО сноса по потоку → ROLL (был FlowDamper). Боевой пре-VINS.
+    """Демпфер БОКОВОГО сноса по потоку → ROLL (был FlowDamper). Лётный пре-VINS.
     ⚠️ osign: drift_check подтвердил −1 (config.flow_osign=-1); класс-дефолт +1 (тесты)."""
     axes = frozenset({"roll"})
     _axis = "roll"

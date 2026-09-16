@@ -92,7 +92,7 @@ class AltHoldBootstrap(Node):
         self.create_subscription(RCIn, '/mavros/rc/in', self._on_rcin, qos_profile_sensor_data)
         # Ground-truth одометрия из Gazebo (СИМ-костыль для gz-position-hold):
         # истинная поза+скорость тела в world. Мостится ros_gz_bridge из
-        # /model/iris_cam/odometry. На боевом Orin её НЕТ (там референс — VINS).
+        # /model/iris_cam/odometry. На реальном Orin её НЕТ (там референс — VINS).
         self.create_subscription(Odometry, '/model/iris_cam/odometry', self._on_gt_odom, 10)
         # сервисы
         self.mode_cli = self.create_client(SetMode, '/mavros/set_mode')

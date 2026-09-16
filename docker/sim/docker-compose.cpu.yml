@@ -14,9 +14,9 @@
 #       камеры Gazebo (ГЕЙТ-РИСК: тянет ли llvmpipe 1280×720 на нужном fps —
 #       проверяется в рантайме).
 #   • nav: CAMERA_NODE=camera_node_cpu — sim_nav.launch.py поднимает drop-in
-#       CPU-камеру (cv::* вместо cv::cuda::*), а не боевую CUDA-ноду.
+#       CPU-камеру (cv::* вместо cv::cuda::*), а не лётную CUDA-ноду.
 #
-# ⚠️ Это режим разработки на безгпушной машине. Боевой Orin и штатный GPU-sim
+# ⚠️ Это режим разработки на безгпушной машине. Реальный Orin и штатный GPU-sim
 #    остаются на базовом compose (camera_node + runtime: nvidia).
 # ============================================================================
 
@@ -41,7 +41,7 @@ services:
       # camera_node делает S_FMT, интринсики VINS пересчитываются из sim.yaml.
       - CAMERA_W=${CAMERA_W:-320}
       - CAMERA_H=${CAMERA_H:-180}
-      # Источник /mavros/vision_pose/pose: ray_tracer (боевой, default) | bridge
+      # Источник /mavros/vision_pose/pose: ray_tracer (лётный, default) | bridge
       # (тонкий VINS-passthrough для тестов ALT_HOLD-bootstrap/handover, пока
       # ray_tracer отложен). Применяется при СОЗДАНИИ контейнера → флип:
       #   VISION_POSE_SOURCE=bridge make CPU=1 fresh-start

@@ -4,7 +4,7 @@
 yaw_flow_check — ДИАГНОСТИКА bias визуального yaw_flow (источник дрейфа YAW-hold).
 
 Прогоняет записанные кадры /image_mono + гироскоп /gz_imu/data_flu через ТОТ ЖЕ
-FlowEstimator, что и боевая нода (alt_hold_bootstrap.py), получая yaw_flow(t), и
+FlowEstimator, что и лётная нода (alt_hold_bootstrap.py), получая yaw_flow(t), и
 сравнивает с ИСТИНОЙ Gazebo (/model/iris_cam/odometry): истинной yaw-скоростью и
 боковой/продольной скоростью. Цель — понять, ОТ ЧЕГО постоянное смещение yaw_flow:
 

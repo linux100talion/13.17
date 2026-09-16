@@ -26,14 +26,14 @@ CFG = "/root/sim_ws/src/vins/VINS-MONO-ROS2/config_pkg/config/sim.yaml"
 DEVICE = "/dev/rawbayer"
 
 # Какой executable камеры запускать:
-#   camera_node     — боевой CUDA-дебайер (default, штатный GPU-sim),
+#   camera_node     — лётный CUDA-дебайер (default, штатный GPU-sim),
 #   camera_node_cpu — drop-in CPU-дебайер для машин без GPU (env CAMERA_NODE).
 # Переключается через окружение, не правя launch — CPU-оверрайд compose
 # выставляет CAMERA_NODE=camera_node_cpu.
 CAMERA_EXECUTABLE = os.environ.get("CAMERA_NODE", "camera_node")
 
 # Разрешение камеры — единый переключатель по env CAMERA_W/CAMERA_H
-# (default 1280×720, как боевой ArduCam). В GPU-less прогоне (llvmpipe слишком
+# (default 1280×720, как реальный ArduCam). В GPU-less прогоне (llvmpipe слишком
 # медленный на 1280×720) CPU-оверрайд compose ставит 320×180 — это в ~16 раз
 # меньше пикселей под софтрендер. Значение прокидывается в camera_node И в
 # bayerizer (nav_up.sh), плюс пересчитываются интринсики VINS (см. ниже).
@@ -41,7 +41,7 @@ CAMERA_W = int(os.environ.get("CAMERA_W", "1280"))
 CAMERA_H = int(os.environ.get("CAMERA_H", "720"))
 
 # Источник /mavros/vision_pose/pose (см. nav.launch.py):
-#   ray_tracer (default) — полный узел NN1, боевой путь;
+#   ray_tracer (default) — полный узел NN1, лётный путь;
 #   bridge               — тонкий vision_pose_bridge (сырой VINS), для тестов
 #                          ALT_HOLD-bootstrap/handover пока ray_tracer отложен.
 # Переключается env VISION_POSE_SOURCE (nav_up.sh), не правя launch.
@@ -54,7 +54,7 @@ def _vins_config(width, height):
     Базовый sim.yaml посчитан под 1280×720. При другом разрешении (CPU-режим)
     масштабируем image_width/height + интринсики fx/fy/cx/cy ИЗ ОДНОГО ИСТОЧНИКА
     (sim.yaml) в /tmp — без второго .yaml, который бы дрейфовал. 1280×720 →
-    возвращаем sim.yaml как есть (боевой/GPU путь не трогаем).
+    возвращаем sim.yaml как есть (лётный/GPU путь не трогаем).
     """
     if (width, height) == (1280, 720):
         return CFG

@@ -19,7 +19,7 @@
 # ЧЕМ ДОКАЗЫВАТЬ: (1) регрессия — полёт как 171454 (висение 10/15/20 м на DpHold и DpVins, плечи)
 # → в статусе scl=0 весь полёт, brake_phase/gust_hold_compare как раньше; (2) реплей на новых
 # bag: vins_sane_replay.py с ручками профиля — 0 ложных, с --vins-scale 0.2 — срабатывания на
-# плечах; (3) ipm_alt_quality.py на боевых bag Orin — гейн/шум по высотам перед включением там.
+# плечах; (3) ipm_alt_quality.py на бортовых bag Orin — гейн/шум по высотам перед включением там.
 include baseline.txt
 BS_VINS_VEL_SRC=twist
 BS_VINS_SCALE_ALT_MAX=25

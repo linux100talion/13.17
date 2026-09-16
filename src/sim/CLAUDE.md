@@ -88,7 +88,7 @@ VINS уйма реального времени на обработку → он
 
 ## Переключатель разрешения CAMERA_W / CAMERA_H
 
-Добавлен в GPU-less ветке. Default 1280×720 (боевой ArduCam/Orin не трогаем);
+Добавлен в GPU-less ветке. Default 1280×720 (реальный ArduCam/Orin не трогаем);
 CPU-оверрайд compose (`docker/sim/docker-compose.cpu.yml`) ставит 320×180.
 ВАЖНО: разрешение завязано в 5 точках, все переключаются одним env CAMERA_W/H:
 - SDF-камера Gazebo — `sim_up.sh` патчит КОПИЮ модели iris_cam в /tmp (репо чист);

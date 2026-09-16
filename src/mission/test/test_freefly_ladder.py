@@ -256,7 +256,7 @@ tick_until(r, clock, 3.0, lvl=2, odom=700, vins_age=0.1, extnav=True)
 check("без ff_loiter: LOITER не слался", "LOITER" not in mode.modes)
 check("без ff_loiter: потолок 2 живёт на VinsHold", names(stack) == ['yawd', 'vins'])
 
-# --- 10. ярус LOITER с КОМПОЗИТОМ (боевой DpHoldM: один стаб на все три оси):
+# --- 10. ярус LOITER с КОМПОЗИТОМ (лётный DpHoldM: один стаб на все три оси):
 # в стек идёт его yaw-суб (yaw_sub), а не композит целиком и не пусто ---
 yaw_part = FakeStab('yaw_part', ('yaw',))
 composite = FakeStab('dphold', ('roll', 'pitch', 'yaw'))

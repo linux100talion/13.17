@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """ЗАПАЗДЫВАНИЕ ОРИЕНТАЦИИ в канале вида сверху — стенд A/B по ОДНИМ кадрам.
 
-⚠️ СТЕНД ГОНЯЕТ БОЕВОЙ КОД, А НЕ СВОЮ КОПИЮ. Выпрямление и скорость считает настоящий
+⚠️ СТЕНД ГОНЯЕТ ЛЁТНЫЙ КОД, А НЕ СВОЮ КОПИЮ. Выпрямление и скорость считает настоящий
 `FlowEstimator._ipm_update` из `control_pkg`, углы на кадр — настоящая `attitude_at` из
 `control_pkg.infrastructure.ros_perception`. Стенд отвечает только за чтение бэга и
 за арифметику сверки. Своя копия геометрии (как в `ipm_flow_test.py`) для A/B не годится:
@@ -46,7 +46,7 @@ R² — сколько дисперсии объяснено. Отдельной
 ⚠️ `PYTHONPATH` на ИСХОДНИКИ, а не на install: colcon КОПИРУЕТ ament_python-пакет при
 сборке, и без этого стенд молча возьмёт версию кода на момент последнего colcon build —
 то есть проверит не то, что лежит в дереве. Ровно та ошибка, ради которой стенд вообще
-переписан на боевой код.
+переписан на лётный код.
 Env: AE_BAG, AE_MAXF, AE_EXTRAP_MAX (потолок дотяжки, 0.2).
 """
 import math
@@ -139,7 +139,7 @@ def read(bag):
 
 
 def att_for(imu, t, mode):
-    """Углы (тангаж, крен) на момент кадра. `hold`/`extrap` — БОЕВАЯ `attitude_at`."""
+    """Углы (тангаж, крен) на момент кадра. `hold`/`extrap` — ЛЁТНАЯ `attitude_at`."""
     if mode == 'near':
         i = int(np.argmin(np.abs(imu[:, 0] - t)))
         return imu[i, 2], imu[i, 1]
@@ -200,7 +200,7 @@ def wz_series(frames, imu, src, tau):
 
 
 def replay(frames, od, imu, mode, model='legacy', derot=0.0, wztau=0.0, wzsrc='gyro'):
-    """Канал вида сверху БОЕВЫМ кодом. Возвращает (t, v_вперёд, v_вбок) по кадрам."""
+    """Канал вида сверху ЛЁТНЫМ кодом. Возвращает (t, v_вперёд, v_вбок) по кадрам."""
     est = FlowEstimator(CAM_W / 2.0, CAM_W / 2.0, CAM_W / 2.0, CAM_H / 2.0, FLOW_R,
                         ipm_model=model, ipm_derot=derot,
                         ipm_wz_tau=(wztau if wzsrc == 'gyro' else 0.0))

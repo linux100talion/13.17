@@ -98,7 +98,7 @@ database.json:
   nav_pkg/anchor_matcher.py  — ядро: SuperPoint+LightGlue + загрузка базы
   nav_pkg/ray_tracer.py      — ROS-нода засечки/сброса дрейфа (Инкремент 2)
   nav_pkg/geo.py             — чистая геометрия (ENU, кватернионы, луч)
-  tools/build_reference_db.py— БОЕВАЯ сборка базы из кадров облёта (SuperPoint)
+  tools/build_reference_db.py— НАСТОЯЩАЯ сборка базы из кадров облёта (SuperPoint)
   tools/generate_mock_db.py  — МОК базы (случайные дескрипторы) для проверки
                                обвязки; реальных совпадений не даёт
   tools/lg_example.py        — отдельный пример матчинга LightGlue
