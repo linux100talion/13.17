@@ -1,0 +1,14 @@
+# Мишень Kalibr — AprilGrid 6×8 на листе A4 (src/vins/calib/aprilgrid_a4.pdf).
+# Сгенерирована kalibr_create_target_pdf из закреплённого коммита Kalibr 1f60227
+# (тот же, что в образе kalibr:1f60227 для калибровки) — см. README.md рядом.
+#
+#   kalibr_create_target_pdf --type apriltag --nx 6 --ny 8 --tsize 0.023 --tspace 0.3
+#
+# ⚠️ tagSize — ПОСЛЕ ПЕЧАТИ ИЗМЕРИТЬ ЛИНЕЙКОЙ (принтер может масштабировать):
+# сторона чёрного квадрата тега; номинал 23.0 мм. Если между тегами промежуток
+# не 6.9 мм — печать не 1:1, tagSize вписать измеренный, tagSpacing не трогать.
+target_type: 'aprilgrid'
+tagCols: 6
+tagRows: 8
+tagSize: 0.023        # [м] сторона тега — заменить измеренным
+tagSpacing: 0.3       # промежуток / сторона тега (безразмерный)

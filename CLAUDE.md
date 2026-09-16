@@ -12,7 +12,8 @@ docker/
   sim/         — СИМУЛЯЦИЯ (x86 + NVIDIA: SITL + Gazebo + VINS)
 src/
   camera/      — C++ CUDA камера-нода (camera_pkg) + tuner
-  vins/        — VINS-MONO-ROS2 (конфиги) + python cam-ноды (fallback)
+  vins/        — VINS-MONO-ROS2 (конфиги) + python cam-ноды (fallback); calib/ —
+                 калибровка боевой камеры/IMU Kalibr: мишень A4, версии, пайплайн
   sim/         — симуляционная обвязка (байеризатор, launch)
   control/     — пакет control_pkg: стабилизаторы, арбитр, гейты + ручки прогона
                  (profiles/). Доки рядом: architecture.md (слои, порты),
