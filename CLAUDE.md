@@ -19,7 +19,7 @@ docker/
 src/
   camera/      — C++ CUDA камера-нода (camera_pkg) + tuner
   vins/        — VINS-MONO-ROS2 (конфиги) + python cam-ноды (fallback); calib/ —
-                 калибровка бортовой камеры/IMU Kalibr: мишени A1/A4, версии, пайплайн
+                 калибровка бортовой камеры/IMU Kalibr: мишени ПВХ 1×1 м / A1 / A4, версии, пайплайн
   sim/         — симуляционная обвязка (байеризатор, launch)
   control/     — пакет control_pkg: стабилизаторы, арбитр, гейты + ручки прогона
                  (profiles/). Доки рядом: architecture.md (слои, порты),
