@@ -4,7 +4,8 @@
 #   ./deploy.sh [-H host] [-n] [-r] [-x 'cmd'] [-X 'cmd'] [секция ...]
 #
 #   секции   home | etc | usr        по умолчанию — все три
-#   -H host  адрес Jetson            умолч. $JETSON_HOST, иначе 192.168.55.1 (USB)
+#   -H host  адрес Jetson            умолч. $JETSON_HOST; иначе первый отвечающий из
+#            192.168.0.104 (Wi-Fi, встроенный) → jetson.local → 192.168.55.1 (USB)
 #   -n       dry-run: показать, что изменится, ничего не писать
 #   -r       после деплоя: `nmcli connection reload` + `systemctl daemon-reload`
 #            на борту (root)
@@ -37,7 +38,8 @@
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
-HOST="${JETSON_HOST:-192.168.55.1}"
+HOST="${JETSON_HOST:-}"
+CANDIDATES=(192.168.0.104 jetson.local 192.168.55.1)   # Wi-Fi встроенный → mDNS → USB
 USER_="andriy"
 SUDOPW="${JETSON_SUDO:-ok}"
 DRY=""
@@ -65,8 +67,14 @@ for s in "${SECTIONS[@]}"; do
     case $s in home|etc|usr) ;; *) echo "неизвестная секция: $s" >&2; usage 1 ;; esac
 done
 
+SSH=(ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new)
+if [ -z "$HOST" ]; then
+    for c in "${CANDIDATES[@]}"; do
+        if "${SSH[@]}" "${USER_}@${c}" true 2>/dev/null; then HOST=$c; break; fi
+    done
+    [ -n "$HOST" ] || { echo "!! Jetson не найден: ${CANDIDATES[*]}" >&2; exit 2; }
+fi
 T="${USER_}@${HOST}"
-SSH=(ssh -o BatchMode=yes -o ConnectTimeout=5)
 as_user() { "${SSH[@]}" "$T" "$1"; }
 as_root() { "${SSH[@]}" "$T" "sudo -S -p '' bash -c $(printf %q "$1")" <<< "$SUDOPW"; }
 

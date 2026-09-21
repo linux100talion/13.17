@@ -17,11 +17,11 @@ psk=26685250
 
 [ipv4]
 method=auto
-route-metric=100
+route-metric=700
 
 [ipv6]
 addr-gen-mode=stable-privacy
 method=auto
-route-metric=100
+route-metric=700
 
 [proxy]
