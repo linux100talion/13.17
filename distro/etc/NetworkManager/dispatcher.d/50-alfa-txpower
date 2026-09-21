@@ -1,0 +1,16 @@
+#!/bin/bash
+# NM dispatcher: мощность передатчика Alfa AWUS036ACH под РЧ-бустер.
+# Бустер имеет предел входной мощности (обычно ≤15–20 dBm), а драйвер 8812au после
+# каждой (пере)ассоциации возвращает 17 dBm; `iw set txpower` не переживает
+# переподключение → ставим заново на каждом `up` интерфейса. Журнал: `journalctl -t alfa-txpower`.
+# Значение под паспорт бустера — см. distro/doc/alfa.md §5.
+IF=wlx00c0cab9550c
+DBM=15
+
+[ "$1" = "$IF" ] || exit 0
+[ "$2" = "up" ] || exit 0
+if iw dev "$IF" set txpower fixed $((DBM * 100)); then
+    logger -t alfa-txpower "$IF: txpower ${DBM} dBm ($(iw dev "$IF" info | grep -oE 'txpower.*'))"
+else
+    logger -t alfa-txpower "$IF: НЕ удалось выставить txpower ${DBM} dBm"
+fi

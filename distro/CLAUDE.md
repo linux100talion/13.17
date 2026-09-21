@@ -50,7 +50,7 @@ NM — иначе новый файл не подхватится), `-X 'nmcli c
 обновления ядра повторить); опции `etc/modprobe.d/8812au.conf`. Там же: почему
 micro-USB 2.0 кабель в USB 3.0 micro-B гнезде даёт `error -71`, как отличить кабель,
 почему адаптер сидит на USB 2.0 (норма), причуды драйвера (пустой `iw scan`, диод, `txpower`)
-профиль NM `TP-Link_6611_alfa` (Alfa `wlx00c0cab9550c`; **метрика 700 — резерв**, встроенный 600 основной: Alfa молча терял линк без события disconnect и, будучи основным маршрутом, глотал ответы на `.104`), `rtw_power_mgnt=0`; TODO — кабель и стабильность линка.
+профиль NM `TP-Link_6611_alfa` (Alfa `wlx00c0cab9550c`; **метрика 700 — резерв**, встроенный 600 основной: Alfa молча терял линк без события disconnect и, будучи основным маршрутом, глотал ответы на `.104`), `rtw_power_mgnt=0`, `rtw_ips_mode=0`, NM `powersave=2`; бустер EDUP EP-AB025 — **только 5.8 ГГц** (макс. вход 20 dBm, порог 3), мощность Alfa 15 dBm держит dispatcher `etc/NetworkManager/dispatcher.d/50-alfa-txpower`; TODO — кабель, обрывы (тест мимо бустера), 5.8 ГГц на обеих сторонах.
 
 **Что на борту устарело (снимок 2026-09-16, всё на уровне май–июнь):**
 
@@ -80,7 +80,8 @@ home/andriy/simple_cam/      — стримеры и профили камеры
 home/andriy/workspaces/      — остатки isaac_ros (драйвер камеры Argus не поддерживает)
 usr/local/bin/               — start_mavros.sh (MAVROS + запрос HIGHRES_IMU/RAW_IMU 200 Гц)
 usr/local/sbin/              — setup-rtl8812au.sh: DKMS-драйвер Alfa AWUS036ACH (см. «Wi-Fi Alfa»)
-etc/modprobe.d/8812au.conf   — опции модуля 8812au (копия из installer'а драйвера)
+etc/modprobe.d/8812au.conf   — опции модуля 8812au (сны выключены)
+etc/NetworkManager/dispatcher.d/50-alfa-txpower — txpower Alfa 15 dBm под бустер на каждом up
 doc/                         — заметки: cmd.txt, cam.txt, wifi, ssh config, параметры ArduPilot;
                                alfa.md — Wi-Fi Alfa AWUS036ACH: кабель/USB, драйвер, причуды, TODO
 doc/ssh-keys/jetson, doc/wifi.txt — СЕКРЕТЫ, в .gitignore (репо публичный)
