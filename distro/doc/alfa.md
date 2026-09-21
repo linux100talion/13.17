@@ -140,6 +140,19 @@ USB 2.0 порт даже с родным кабелем). `nmcli connection up 
 маршрутом**; два адаптера в одной подсети с «мёртвым, но up» — ловушка. TODO: сторож
 (`iw link` пуст при `carrier=1` → `nmcli con up`) или policy-routing по source-IP.
 
+**Все «сны» Alfa выключены (2026-09-21)** — три уровня, всё в `distro/`, переживает ребут
+(опции модуля — при загрузке `8812au`, профиль NM — при каждом подключении):
+
+| Уровень | Было | Стало | Где |
+|---|---|---|---|
+| Wi-Fi power save интерфейса (NM) | `Power save: on` | **`powersave=2`** (выкл.) | `etc/NetworkManager/system-connections/TP-Link_6611_alfa.nmconnection` |
+| Драйвер, LPS — сон в ассоциации | `rtw_power_mgnt=2` (maxPS) | **`rtw_power_mgnt=0`** | `etc/modprobe.d/8812au.conf` |
+| Драйвер, IPS — сон при простое | `rtw_ips_mode=1` | **`rtw_ips_mode=0`** | там же |
+| USB autosuspend ядра | не усыплял (`power/control=on`, `runtime_suspended_time=0`) | не трогали | — |
+
+Проверка на борту после перезагрузки модуля: `iw dev wlx… get power_save` → `off`,
+`/sys/module/8812au/parameters/`: `rtw_ips_mode=0`, `rtw_power_mgnt=0`.
+
 **Тест простоя 25 мин (2026-09-21, 21:33–21:58, все «сны» выключены).** Гипотеза
 (по опыту с TP-Link-свистком): линк умирает после нескольких минут без трафика. Проверено
 и выключено: NM `wifi.powersave=2` в профиле (было `Power save: on`), драйвер
