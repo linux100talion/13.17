@@ -41,20 +41,12 @@ NM — иначе новый файл не подхватится), `-X 'nmcli c
 Файлы едут строго `600 root` (`--chmod=F600`; git 600 не хранит, NM с 644 профиль
 молча игнорирует).
 
-**Wi-Fi Alfa AWUS036ACH (RTL8812AU, `0bda:8812`) — с 2026-09-21.** Драйвера в ядре
-`5.15.185-tegra` нет (in-tree `rtw88_8812au` — только с 6.13), устройство энумерируется,
-интерфейса не даёт. Ставится **`usr/local/sbin/setup-rtl8812au.sh`** (DKMS,
-`morrownr/8812au-20210820` @ `4722250`, исходники на борту `/opt/src/8812au-20210820`,
-модуль `8812au`, опции `etc/modprobe.d/8812au.conf`): `./deploy.sh -X
-/usr/local/sbin/setup-rtl8812au.sh usr etc`, сборка ~3 мин, интерфейс `wlx00c0cabacab9`.
-После обновления ядра — перезапустить тот же скрипт. Причуды драйвера: голый `iw scan`
-пуст (сканировать через `nmcli dev wifi rescan ifname …`), `txpower −100 dBm` — фикция.
-Уроки подключения: адаптер тянет до 0.8 А и **энумерируется в USB 2.0 по умолчанию**
-(`rtw_switch_usb_mode=0` — норма, 480 Мбит ≫ радио); micro-USB 2.0 кабель физически
-влезает в его USB 3.0 micro-B гнездо, но SuperSpeed-пар и тока не даёт → на Jetson
-`error -71`/`Cannot enable`, на ноуте — «работает», но на `Bus 1`/480. Проверка кабеля:
-адаптер на `Bus 2`/5000 Мбит = USB 3.0. Все 4 Type-A девкита раздвоены на два хаба
-(USB 2.0 `1-2.x` + USB 3.0 `2-1.x`) — «переткнуть в другой порт» ничего не меняет.
+**Wi-Fi Alfa AWUS036ACH (RTL8812AU) — `doc/alfa.md`.** Драйвера в ядре борта нет —
+ставится `usr/local/sbin/setup-rtl8812au.sh` (DKMS, `./deploy.sh -X … usr etc`, после
+обновления ядра повторить); опции `etc/modprobe.d/8812au.conf`. Там же: почему
+micro-USB 2.0 кабель в USB 3.0 micro-B гнезде даёт `error -71`, как отличить кабель,
+почему адаптер сидит на USB 2.0 (норма), причуды драйвера (пустой `iw scan`, диод, `txpower`)
+и TODO (кабель, профиль NM под дроновский Alfa, `rtw_power_mgnt=0`).
 
 **Что на борту устарело (снимок 2026-09-16, всё на уровне май–июнь):**
 
@@ -85,7 +77,8 @@ home/andriy/workspaces/      — остатки isaac_ros (драйвер кам
 usr/local/bin/               — start_mavros.sh (MAVROS + запрос HIGHRES_IMU/RAW_IMU 200 Гц)
 usr/local/sbin/              — setup-rtl8812au.sh: DKMS-драйвер Alfa AWUS036ACH (см. «Wi-Fi Alfa»)
 etc/modprobe.d/8812au.conf   — опции модуля 8812au (копия из installer'а драйвера)
-doc/                         — заметки: cmd.txt, cam.txt, wifi, ssh config, параметры ArduPilot
+doc/                         — заметки: cmd.txt, cam.txt, wifi, ssh config, параметры ArduPilot;
+                               alfa.md — Wi-Fi Alfa AWUS036ACH: кабель/USB, драйвер, причуды, TODO
 doc/ssh-keys/jetson, doc/wifi.txt — СЕКРЕТЫ, в .gitignore (репо публичный)
 ```
 
