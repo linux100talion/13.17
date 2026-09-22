@@ -40,6 +40,10 @@ TX12 (USB HID) → joy_linux_node → /joy → JoyPilot            (src/control/
 ```
 
 Нода — **единственный писатель** `rc/override`; каналы 5..18 уходят `NOCHANGE`.
+Пропал сам источник (`/joy` молчит дольше `BS_PILOT_STALE`, 0.5 с) — нода
+**ОТПУСКАЕТ** ch1..4 (`RC_RELEASE = 0`) и выходит из цепочки: борт остаётся на
+физическом приёмнике (сторож `control_pkg/domain/pilot_link.py`, поле `pw=` в
+`/mission/status`, страховки — `src/control/gates.md`).
 Реплей (`BS_PILOT=replay`) подставляет `joy_replay.py` вместо `joy_linux_node` —
 те же `/joy`-индексы, поэтому карта ниже общая для живого пульта и сценариев.
 

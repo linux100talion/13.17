@@ -13,7 +13,7 @@ from mavros_msgs.srv import CommandBool, CommandLong, SetMode
 
 from ..domain.modes import to_fcu
 
-from ..domain.rc import RC_NOCHANGE, RcCommand
+from ..domain.rc import RC_NOCHANGE, RC_RELEASE, RcCommand
 
 
 class MavrosActuator:
@@ -33,6 +33,17 @@ class MavrosActuator:
         ch[2] = int(cmd.throttle)
         ch[3] = int(cmd.yaw)
         msg.channels = ch
+        self._rc_pub.publish(msg)
+
+    def release(self) -> None:
+        """ОТПУСТИТЬ ch1..4 обратно радио (RC_RELEASE = 0 — не RC_NOCHANGE!):
+        у ArduPilot нулевой override не активен, и FCU в тот же кадр возвращается
+        к физическому приёмнику. Зовётся сторожем свежести пульта (PilotLink),
+        когда источник стиков замолчал: держать override с замороженными стиками
+        опаснее, чем выйти из цепочки. ⚠️ Семантику нуля проверить на стенде
+        (SITL/борт) — laptop_move.md §5.3, шаг 1."""
+        msg = OverrideRCIn()
+        msg.channels = [RC_RELEASE] * 4 + [RC_NOCHANGE] * 14
         self._rc_pub.publish(msg)
 
     # --- SetpointOutput ---

@@ -12,6 +12,12 @@ RC_CENTER = 1500
 RC_MIN_THR = 1000
 # 65535 (UINT16_MAX) = «ИГНОРИРОВАТЬ канал» в OverrideRCIn (не оверрайдим канал).
 RC_NOCHANGE = 65535
+# 0 = «ОТПУСТИТЬ канал обратно радио» (mavros OverrideRCIn.CHAN_RELEASE): у
+# ArduPilot override с нулевым значением не считается активным (has_override()
+# false) → FCU в тот же кадр возвращается к ФИЗИЧЕСКОМУ приёмнику. Не путать с
+# RC_NOCHANGE («не трогать», канал остаётся как был). Наш аварийный выход из
+# override — сторож свежести пульта (domain/pilot_link.py).
+RC_RELEASE = 0
 
 
 @dataclass

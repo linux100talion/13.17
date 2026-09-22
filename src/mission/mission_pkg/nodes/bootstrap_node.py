@@ -30,6 +30,7 @@ from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
 from control_pkg.application.rth_ready import RthReadiness
 from control_pkg.domain.control.stabilization import VinsHold
+from control_pkg.domain.pilot_link import PilotLink
 from control_pkg.domain.rc import RC_CENTER, RcCommand
 
 from control_pkg.infrastructure.mavros_actuator import MavrosActuator
@@ -109,6 +110,12 @@ class BootstrapArch2Node(Node):
         self.logger = RosLogger(self)
         self.debug = RosDebugSink(self)
         self.pilot = self._make_pilot(cfg, pilot_kind)
+        # сторож свежести пульта: замолчал источник стиков → override ОТПУСКАЕМ
+        # (см. _publish). У ScriptedPilot внешнего канала нет — сторож молчит сам.
+        self.link = PilotLink(cfg.pilot_stale)
+        if self.link.enabled:
+            self.logger.info(f"сторож пульта: тишина {cfg.pilot_stale:g} с → "
+                             f"override ОТПУСКАЕТСЯ (ch1..4 → 0)")
         self.arbiter = Arbiter()
 
         # Путь: заданный mission → ОРТОГОНАЛЬНЫЙ (stab+mission); иначе ЛЕГАСИ (control_mode).
@@ -841,7 +848,8 @@ class BootstrapArch2Node(Node):
         line = hud_status(s, self.cfg.vins_fresh_sec, self.cfg.loiter_alt,
                           ladder=ladder, vins_min=self._vins_min,
                           ripe_sec=self._ripe_sec, ripe_min=self._ripe_min,
-                          land=land)
+                          land=land,
+                          link=(self.link.alive if self.link.enabled else None))
         # scl — срабатываний чека ЗАНИЖЕНИЯ |vins_v| против IPM (Handover.vins_sane):
         # состояние гейта, не датчика — поэтому здесь, а не в hud_status. В ленте
         # joy_timeline объясняет демоут яруса 1 при свежем и «медленном» VINS.
@@ -1087,6 +1095,20 @@ class BootstrapArch2Node(Node):
     def _publish(self, rc: RcCommand):
         if self.runner.finished:          # план завершён — override не нужен
             return
+        # СТОРОЖ СВЕЖЕСТИ ПУЛЬТА (PilotLink). Зовётся здесь, а не в тике, чтобы
+        # накрыть ОБА писателя override: sim-тик и wall-цикл main (тот держит
+        # свежесть override на FCU и без сторожа продолжал бы лить замороженную
+        # команду). Протух → release вместо publish: FCU возвращается к
+        # физическому приёмнику, нода выходит из цепочки (laptop_move.md §5.2).
+        if self.link.update(self.pilot.link_age()):
+            if self.link.changed:
+                self.logger.error(
+                    f"ПУЛЬТ ЗАМОЛЧАЛ ({self.link.age:.1f} с без семпла) — "
+                    f"ОТПУСКАЮ override (ch1..4 → 0), борт на физическом приёмнике")
+            self.actuator.release()
+            return
+        if self.link.changed:
+            self.logger.warn("пульт снова жив — override восстановлен")
         self.actuator.publish(rc)
 
     @property

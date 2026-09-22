@@ -12,7 +12,13 @@
   по sim-времени. Валидирует пилот-пайплайн воспроизводимо. Drop-in замена JoyPilot.
 
 Все реализуют один порт: sticks()->RcCommand, mode_switch()->int.
+
+link_age() — ВОЗРАСТ последнего семпла источника (монотонные часы) для сторожа
+свежести пульта (domain/pilot_link.py): живые адаптеры штампуют каждый приход,
+ScriptedPilot отдаёт None (внешнего канала нет — сторожить нечего).
 """
+import time
+
 from ..domain.rc import RC_CENTER, RcCommand
 
 # Карта /joy для EdgeTX (RadioMaster TX12/TX16S): в режиме USB-джойстика пульт отдаёт
@@ -170,9 +176,13 @@ class JoyPilot:
         self._lvl = 0
         self._land = False
         self._rth = False
+        # штамп последнего /joy для сторожа свежести: ЗАВОДИМ от старта ноды —
+        # «пульта не было ни разу» и «пульт пропал» для сторожа одно и то же
+        self._seen = time.monotonic()
         node.create_subscription(Joy, '/joy', self._on, qos_profile_sensor_data)
 
     def _on(self, m):
+        self._seen = time.monotonic()
         self._r, self._p, self._t, self._y, sw = joy_sticks(m.axes, self._signs)
         if self._sf_master:
             self._sw, self._lvl = joy_master(m.axes)
@@ -196,6 +206,9 @@ class JoyPilot:
     def rth_switch(self) -> bool:
         return self._rth
 
+    def link_age(self):
+        return time.monotonic() - self._seen
+
 
 class RosPilot:
     """⚠️ ЛЕГАСИ. /mavros/rc/in под активным override — эхо собственной команды ноды
@@ -210,9 +223,11 @@ class RosPilot:
         self._sw = 1 if sf_master else 0     # дефолты — как у JoyPilot
         self._lvl = 0
         self._land = False
+        self._seen = time.monotonic()    # штамп RC_CHANNELS для сторожа свежести
         node.create_subscription(RCIn, '/mavros/rc/in', self._on, qos_profile_sensor_data)
 
     def _on(self, m):
+        self._seen = time.monotonic()
         ch = m.channels
         if len(ch) >= 4:
             self._r, self._p, self._t, self._y = ch[0], ch[1], ch[2], ch[3]
@@ -244,6 +259,12 @@ class RosPilot:
         # канал возврата легаси-адаптеру не назначен: живой пульт читает JoyPilot,
         # а тут остаётся хост (/mission/rth, /mission/smart_rth)
         return False
+
+    def link_age(self):
+        # ⚠️ период источника задаёт стрим-рейт FCU (MAV1_*), а он бывает редким
+        # и пропадающим (память fcu-telemetry-streams-race) — порог сторожа
+        # (BS_PILOT_STALE) держать с запасом
+        return time.monotonic() - self._seen
 
 
 class ScriptedPilot:
@@ -288,6 +309,9 @@ class ScriptedPilot:
 
     def rth_switch(self) -> bool:
         return False        # скриптовый пилот возврат не жмёт (это жест оператора)
+
+    def link_age(self):
+        return None         # внешнего канала нет — сторожить нечего (PilotLink)
 
     def total(self) -> float:
         """Длительность профиля (для триггера land в пилот-режимах)."""

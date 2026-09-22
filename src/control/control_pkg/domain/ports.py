@@ -15,7 +15,7 @@ RosDebugSink давно 6 методов, в порте был 1) — порт �
 а НАПОЛНЯЮТ DroneState (снапшот и есть их контракт); StationFrame читает нода
 через dbg() (пулл, как hold_dbg/rate_dbg — см. station_frame.py).
 """
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 from .rc import RcCommand
 from .state import DroneState
@@ -34,6 +34,10 @@ class Telemetry(Protocol):
 @runtime_checkable
 class RcOutput(Protocol):
     def publish(self, cmd: RcCommand) -> None: ...
+    # ОТПУСТИТЬ ch1..4 обратно радио (OverrideRCIn: 0 = CHAN_RELEASE, не 65535
+    # «не трогать»): нода выходит из цепочки, FCU возвращается к физическому
+    # приёмнику. Зовёт сторож свежести пульта (domain/pilot_link.py).
+    def release(self) -> None: ...
 
 
 @runtime_checkable
@@ -63,6 +67,11 @@ class PilotInput(Protocol):
                                          # адаптеры без источника отдают False
     def rth_switch(self) -> bool: ...    # кнопка возврата домой (SD): тоже УРОВЕНЬ —
                                          # в импульс его превращает узел (PressEdge)
+    def link_age(self) -> Optional[float]: ...
+                                         # ВОЗРАСТ последнего семпла источника, с
+                                         # (монотонные часы — канал физический, не
+                                         # sim-время). None = внешнего канала нет
+                                         # (ScriptedPilot), сторожу нечего сторожить
 
 
 @runtime_checkable

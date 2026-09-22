@@ -133,7 +133,7 @@ def vinshold_gate(s, fresh_sec: float, vins_min: int):
 
 def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
                vins_min: int = 0, ripe_sec: float = 0.0, ripe_min: int = 0,
-               land=None) -> str:
+               land=None, link=None) -> str:
     """Строка "k=v k=v ..." для /mission/status по снапшоту DroneState.
 
     loiter_alt — гейт «в воздухе» (м): обязан совпадать с cfg.loiter_alt лётной
@@ -144,7 +144,10 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
     по ним ПРОГРЕСС ожидания «extnav», а не голое слово.
     land — состояние мягкой посадки (SoftLand.land_state: ключ LAND_NAMES);
     None = шаг посадки не активен, поля land= в строке нет. Кнопка посадки
-    пилота (sa=) — всегда: её фронт в ленте joy_timeline объясняет переход."""
+    пилота (sa=) — всегда: её фронт в ленте joy_timeline объясняет переход.
+    link — сторож свежести пульта (PilotLink.alive): True = канал пилота жив,
+    False = ПРОТУХ и override отпущен (борт на физическом приёмнике); None =
+    сторож выключен (BS_PILOT_STALE=0) — поля pw= в строке нет."""
     ekf = int(s.now_sim - s.ekf_pos_last_sim < EKF_FRESH_SEC)
     # tel — жива ли телеметрия FCU вообще (свежий /mavros/imu/data). ekf=0 при tel=0
     # значит «MAVROS не получает потоков», а не «EKF без позиции» (прогон 122716:
@@ -191,6 +194,10 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
             f"rct={s.pilot_throttle - RC_CENTER} rcy={s.pilot_yaw - RC_CENTER} "
             f"sw={s.pilot_switch} sa={int(bool(getattr(s, 'pilot_land', False)))}"
             + (f" land={land}" if land else "")
+            # pw — СТОРОЖ СВЕЖЕСТИ ПУЛЬТА: pw=0 значит «источник стиков замолчал,
+            # override ОТПУЩЕН» — борт слушается только физического приёмника, а не
+            # ноды. В ленте joy_timeline объясняет внезапную потерю стабилизации.
+            + (f" pw={int(bool(link))}" if link is not None else "")
             # rth — ЛАТЧ ДОВЕРИЯ К ВОЗВРАТУ (rth_ready.py): heal/<м от арма> —
             # круг лечения; ready/<м до дома> — рама цела, дом записан, возврат
             # разрешён; lost:<причина> — рама рвалась (reborn|insane|bridge) или
