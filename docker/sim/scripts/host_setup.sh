@@ -12,7 +12,13 @@
 #   3. v4l2loopback — виртуальная камера /dev/rawbayer (video_nr=9), куда
 #      байеризатор пишет кадры из Gazebo; пробрасывается в контейнер nav.
 #
-# Идемпотентно: повторный запуск ничего не ломает.
+# Идемпотентно: повторный запуск ничего не ломает. Все root-шаги УСЛОВНЫЕ — если
+# устройство уже есть (см. host_persist.sh: модуль грузится при старте системы,
+# симлинк и права ставит udev), скрипт не зовёт sudo вообще и проходит молча.
+#
+# ⚠️ Надоело вводить пароль после каждого ребута — ОДИН раз:
+#       sudo bash docker/sim/scripts/host_persist.sh   (make host-persist)
+# после этого /dev/rawbayer появляется сам при загрузке.
 # ============================================================================
 set -euo pipefail
 
@@ -27,13 +33,20 @@ fi
 # v4l2loopback зависит от videodev; если его нет в /lib/modules, modprobe
 # v4l2loopback падает на неразрешённых символах. videodev приходит с
 # linux-modules-extra-<kernel> (на GCE/минимальных образах не предустановлен).
+if [ -e /dev/rawbayer ] && [ -w /dev/rawbayer ]; then
+    # всё уже сделано при загрузке (host_persist.sh) — root-шаги не нужны
+    echo "host: /dev/rawbayer уже готов ($(readlink -f /dev/rawbayer)) — sudo не нужен"
+    echo "host: DISPLAY=${DISPLAY:-<не задан>}"
+    exit 0
+fi
+
 if ! modinfo videodev >/dev/null 2>&1; then
     echo "host: videodev отсутствует — ставлю linux-modules-extra-$(uname -r)..."
     sudo apt-get update -qq
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         "linux-modules-extra-$(uname -r)"
 fi
-sudo modprobe videodev
+lsmod | grep -q '^videodev' || sudo modprobe videodev
 
 # --- 3. v4l2loopback — /dev/rawbayer --------------------------------------
 # ВНИМАНИЕ: параметры width=/height= тут НЕ передаём — в v4l2loopback >= 0.13
@@ -46,10 +59,10 @@ if ! lsmod | grep -q '^v4l2loopback'; then
 fi
 
 # Фиксированное имя: docker-compose пробрасывает именно /dev/rawbayer.
-sudo ln -sf /dev/video9 /dev/rawbayer
+[ "$(readlink -f /dev/rawbayer 2>/dev/null)" = /dev/video9 ] || sudo ln -sf /dev/video9 /dev/rawbayer
 # udev переустанавливает права на video-устройствах асинхронно после modprobe —
 # дождёмся, иначе chmod может не «прилипнуть».
 command -v udevadm >/dev/null 2>&1 && sudo udevadm settle || true
-sudo chmod 666 /dev/video9 || true
+[ -w /dev/video9 ] || sudo chmod 666 /dev/video9 || true
 
 echo "host: DISPLAY=${DISPLAY:-<не задан>}, /dev/rawbayer -> /dev/video9 готовы"

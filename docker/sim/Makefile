@@ -8,7 +8,8 @@
 #   make logs             # непрерывный хвост output/*.log
 #
 # Первый запуск / пересборка образов:
-#   make host-setup       # хост: v4l2loopback + xhost
+#   make host-persist     # ОДИН РАЗ на машину (sudo): /dev/rawbayer переживает ребут
+#   make host-setup       # хост: v4l2loopback + xhost (после host-persist — без sudo)
 #   make build            # собрать образы (долго)
 #   make up               # создать и запустить контейнеры (скрипты стартуют сами)
 #
@@ -43,7 +44,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help ensure-env host-setup build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm rth smart-rth fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
+.PHONY: help ensure-env host-setup host-persist build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm rth smart-rth fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
 
 # .env (локальный профиль бокса, в .gitignore) сеется из эталона env.default
 # (в git): свежий клон получает штатные дефолты (WORLD/LV/BS_SF_MASTER) без
@@ -61,8 +62,11 @@ help:            ## показать список целей
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
 
-host-setup:      ## хост: xhost + v4l2loopback (/dev/rawbayer) — нужен sudo
+host-setup:      ## хост: xhost + v4l2loopback (/dev/rawbayer); после host-persist sudo не нужен
 	bash scripts/host_setup.sh
+
+host-persist:    ## ОДИН РАЗ на машину (sudo): /dev/rawbayer переживает ребут (modprobe.d+udev)
+	sudo bash scripts/host_persist.sh
 
 build: ensure-env  ## собрать образы (долго: SITL+Gazebo+OpenCV из исходников)
 	$(DC) build

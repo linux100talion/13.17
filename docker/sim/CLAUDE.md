@@ -57,7 +57,15 @@ doc/tmp/                    — архив (FAQ*, todo*, README, concept.txt,
 ## Рабочий цикл (всё через Makefile)
 
 ```bash
-make host-setup     # один раз: v4l2loopback + xhost (нужен sudo)
+make host-persist   # ОДИН РАЗ НА МАШИНУ (sudo): /dev/rawbayer переживает ребут —
+                    #   modprobe.d (параметры модуля) + modules-load.d (грузить при
+                    #   старте) + udev-правило (симлинк /dev/rawbayer, права 0666).
+                    #   Без него после КАЖДОГО ребута модуль не загружен, контейнер
+                    #   nav не создаётся («error gathering device information while
+                    #   adding custom device /dev/rawbayer»), а make host-setup просит
+                    #   пароль — из неинтерактивной сессии его не ввести.
+make host-setup     # xhost для GUI Gazebo + страховка на устройство; ПОСЛЕ host-persist
+                    #   sudo не нужен (все root-шаги условные, устройство уже есть)
 make build          # собрать образы (долго: SITL+Gazebo+OpenCV из исходников)
 make up             # поднять контейнеры; sim_up.sh + nav_up.sh стартуют сами
 make wait           # ждать «nav: готово» (= потоки FCU идут; до 5 мин), «nav: ОШИБКА» — падает
