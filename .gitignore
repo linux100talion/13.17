@@ -29,3 +29,6 @@ docker/sim/.env
 # Секреты деплоя на Jetson — НЕ коммитить (репозиторий публичный)
 distro/doc/ssh-keys/jetson
 distro/doc/wifi.txt
+
+# Настройки редактора — у каждого свои, в репу не едут
+.vscode/
