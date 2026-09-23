@@ -19,6 +19,9 @@ setup(
     entry_points={
         "console_scripts": [
             "bootstrap_arch2 = mission_pkg.nodes.bootstrap_node:main",
+            # мостик CRSF→/joy: живой пульт на борту мимо полётника (отвод RC-линии
+            # на UART Orin). В симе ту же роль играет joy_linux_node.
+            "crsf_joy = mission_pkg.nodes.crsf_joy_node:main",
         ],
     },
 )
