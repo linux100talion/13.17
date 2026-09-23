@@ -1,0 +1,14 @@
+Копия описания платы из исходников ArduPilot — той же версии, что прошита в FC
+(ArduCopter 4.8.0-dev, коммит e3d4be86083cce8eb0db811e4874cdbb1dd799f6):
+  libraries/AP_HAL_ChibiOS/hwdef/StellarH7V2/{hwdef.dat,hwdef-bl.dat,README.md,*.png}
+  https://github.com/ArduPilot/ardupilot/tree/e3d4be86083cce8eb0db811e4874cdbb1dd799f6/libraries/AP_HAL_ChibiOS/hwdef/StellarH7V2
+
+Что отсюда взято (2026-09-23):
+- SERIAL_ORDER OTG1 USART1 USART2 USART3 UART4 USART6 UART7 UART8 → SERIAL0..7
+  (README прав: SERIAL5=UART6, SERIAL6=UART7, SERIAL7=UART8).
+- ⚠ ОШИБКА hwdef: DEFAULT_SERIAL6/7/8_PROTOCOL записаны номером UART, а не SERIAL →
+  по умолчанию GPS сидит на UART7 (SERIAL6), DisplayPort на UART8 (SERIAL7). Порты
+  задаём явно в MP/stellar_cld.txt.
+- Батарея: пин 10 = делитель на FC (×11), пин 18 = делитель PDB (×21); ток пин 11.
+- Моторы M1–M4: PB0/PB1 (TIM3), PA0/PA1 (TIM5), BIDIR — двунаправленный DShot есть.
+- Компаса на плате НЕТ — только внешний по I2C2 (SDA/SCL), авто-поиск включён.

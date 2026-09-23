@@ -1,0 +1,123 @@
+
+
+Компоновка проекта 13.17: Полетник и pdb образуют стек и находятся в раме (pdb вместо single esc). 
+
+ESC вынесены на лучи. Orin nano закреплён в алюминиевом корпусе снизу на раме. 
+
+GPS закреплён в пластиковом корпусе сзади дрона. 
+
+BEC установлены сзади в раме (с кулером). Модули , 
+
+и бустер WiFi с кулером закреплеы снизу рамы (сзади от orin nano), 
+
+в пластиковом корпусе над ними BECи (в раме). 
+
+Антены WiFi 5.8gz 2 шт, закреплены на лучах рамы, направлены вертикально в низ. 
+
+Антенна erls закреплена в стандартном месте сзади рамы. Камеры снизу рамы перед orin nano.
+
+
+
+-----------------------------------------------------------
+Расчетный взлетный вес проекта 13.17: 
+
+Рама (Mark4 13"): ~550 г (с фурнитурой). 
+
+Моторы (4 x BH Avenger 4115 490kv): ~960 г. 
+
+Аккумулятор (8S4P Molicel P45B): ~2450 г. 
+
+Электроника (FC, ESC, GPS, RX): ~150 г. 
+
+Полезная нагрузка (Jetson + WiFi + Камеры + Радиаторы): ~450 г. 
+
+Общий взлетный вес (AUW): ~4.5 - 4.7 кг.
+
+-----------------------------------------------------------
+
+
+Расчетные летные характеристики проекта 13.7: 
+
+Расчетное время висения (в штиль): 56 минут. 
+
+Расчетное время полета (Миссия / Круиз): 
+
+В реальном полете с ветром, маневрами и движением вперед потребление 
+вырастает примерно на 15-20%, примерно 45-47 минут. 
+Реалистичный прогноз (до посадки на 3.0В на банку): 40-45 минут.
+
+
+-----------------------------------------------------------
+
+
+
+Силова установка проекту 13.7: 
+
+Рама для дрону FPV, Mark4, 13 дюймів, карбонова - 2000 грн. 
+Мотори BrotherHobby Avenger 4115 V5 490KV - 7200 грн.
+Акумулятор 8S4P Molicel P45B, 18000mAh, 180A - Li-ion Molicel INR-21700-P45B - 7290 грн.
+
+Плата розподілу живлення Stellar PDB 12S. 
+
+---
+Регулятор швидкості Flycolor X-CROSS HV3 60A ESC 5-12S, 4 * 2085грн. 
+Configuration software: BLHeilDuite32
+Rampup power: Rampup power can be set to relative values from 3% to 150%.
+    This is the maximum power that is allowed when rampint up allow rpms and durint startup.
+    For low rpms, the maxinum power to the motor is limited, in order to facilitate detection of low BEMF voltages.
+    Rampup power also affects bidirectional operation, as the parameter is used to limit the poser applied during direction reversal.
+    During startup, the actual applied power depends in throttle input, and cab be lower that the maxinum level set by the rampup power parameter, but the minimum level is a quarter fo the maxinum level.
+Motor timing: Motor timing  can be set between approximately 1* and approxitately 31* in approximately 1* increments (actual accurate values here are can have a very long connutation demagnetization time. 
+    This can result in motor stip or stutter upon quick throttle incrase, particularly when running at a low rpm. Settling timing to high will allow more time for demagnetization, and often helps.)   
+PWM requency: Motor pwm frequency can be programmed in a range. Support variable pwm frequencyh where the pwm frequency is controlled by moter RPM.
+    - Low frequency for low threttle givbes good active braking where is a most needed. - Hight frequency for higher threttole makes ruuning smoother.
+---
+Регулятор живлення Matek BEC12S-PRO 9-55V 5V/8V/12V плата mateksys модуль живлення bec 12s pro . 2 штуки 
+(1 для orin nano, 1 для бустера 5.8 ГГц. 2 * 1000 грн)
+
+
+-----------------------------------------------------------
+
+Зв'язок 13.17: 
+
+Антена управління (пульт + дрон, 915 Mhz). 
+FPV SET: Happymodel ES900TX + ES900RX ELRS 915Mhz під пульт Radiomaster TX12 TX16S Radiomaster Boxer 1998 грн. 
+
+Пульт радіоуправління RadioMaster TX12 MKII CC25 5195 грн. 
+
+Usb Wi-Fi адаптер Alfa AWUS036ACH v.2 (AWUS036ACH-C) чип Realtek RTL8812AU (приймач на ноутбук) 4500 грн. 
+Usb Wi-Fi адаптер Alfa AWUS036ACH v.2 (AWUS036ACH-C) чип Realtek RTL8812AU (передавач openhd на дрон) 4500 грн. 
+Підсилювач сигналу на дрон, WiFi EDUP EP-AB025 5.8Ghz 4W 36 dB подвійний двоканальний для керування квадрокоптером 3500грн. 
+
+GNSS-модуль Matek M9N-5883 з магнітним компасом QMC5883L 2590 грн.
+
+Цифровой барометрический датчик Bosch BMP390 (пины INT, SCL, SDA, GND, VCC)
+
+-----------------------------------------------------------
+
+Вычислительные ресурсы проекта 13.17: 
+
+Полетный контроллер StingBee Stellar H7V2 12S revision. 2500 грн. 
+
+Модуль Jetson Orin Nano Super Developer Kit 8GB (нейронные сети, умные режими полета), 20 000 грн. 
+
+SSD Samsung PM9A1 256GB, 2500 грн.
+
+
+-----------------------------------------------------------
+
+Камеры проекта 13.7: Кольорова камера ArduCam AR0234 з глобальним затвором для NVIDIA Jetson, 2,3 МП, 1920x1200, 30fps, MIPI, 38x38 мм. 
+Для vins mono та для пілоту основна. 
+
+-----------------------------------------------------------
+
+Софт проекта 13.17: На дроне Ardupilot, Nvidia Orin Nano ROS2, Ubuntu 22.04(jammy), VINS-Mono. 
+Для тестирования, SITL, Gazebo VINS-Mono на Ubuntu 24.04, 
+Mission Planner VirtualBox Windows guest. 
+Левый стик газа настроен так, чтобы он возвращался в центр. 
+Когда стики в центре, дрон стоит на месте.
+
+-----------------------------------------------------------
+
+
+

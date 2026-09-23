@@ -1,0 +1,291 @@
+2026/04/03 13:40:11: ESC 1 seems to be locked (0) - updating might fail
+2026/04/03 13:40:12: Updating ESC 1 - finished
+2026/04/03 13:40:12: ESC 2 seems to be locked (0) - updating might fail
+2026/04/03 13:40:12: Updating ESC 2 - finished
+2026/04/03 13:40:13: ESC 3 seems to be locked (0) - updating might fail
+2026/04/03 13:40:13: Updating ESC 3 - finished
+2026/04/03 13:40:13: ESC 4 seems to be locked (0) - updating might fail
+2026/04/03 13:40:14: Updating ESC 4 - finished
+2026/04/03 13:40:17: Closed port
+2026/04/03 13:40:18: MSP command failed: Timed out after 1000ms
+2026/04/03 13:43:44: Unplugged
+2026/04/03 13:44:03: Plugged in
+2026/04/03 13:44:09: Could not open serial port 
+2026/04/03 13:44:09: Error: Could not open serial port 
+2026/04/03 13:44:09: Port already in use by another application - try re-connecting
+2026/04/03 13:44:22: Chrome (143.0.0.0) on Linux
+2026/04/03 13:44:22: Plugged in
+2026/04/03 13:44:24: Opened serial port
+2026/04/03 13:44:24: MultiWii API version received: 1.46.0
+2026/04/03 13:44:24: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 13:44:24: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 13:44:24: Board: S7X2, version: 0
+2026/04/03 13:44:24: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 13:44:29: Trying to read 4 ESCs
+2026/04/03 13:44:29: Read ESC 1: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:44:29: Read ESC 2: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:44:30: Read ESC 3: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:44:30: Read ESC 4: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:44:30: Done reading ESCs
+2026/04/03 13:44:38: ESC 1 seems to be locked (0) - updating might fail
+2026/04/03 13:44:38: Updating ESC 1 - finished
+2026/04/03 13:44:39: ESC 2 seems to be locked (0) - updating might fail
+2026/04/03 13:44:39: Updating ESC 2 - finished
+2026/04/03 13:44:39: ESC 3 seems to be locked (0) - updating might fail
+2026/04/03 13:44:40: Updating ESC 3 - finished
+2026/04/03 13:44:40: ESC 4 seems to be locked (0) - updating might fail
+2026/04/03 13:44:40: Updating ESC 4 - finished
+2026/04/03 13:44:51: Closed port
+2026/04/03 13:44:58: Opened serial port
+2026/04/03 13:44:58: MultiWii API version received: 1.46.0
+2026/04/03 13:44:58: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 13:44:58: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 13:44:58: Board: S7X2, version: 0
+2026/04/03 13:44:58: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 13:56:03: Trying to read 4 ESCs
+2026/04/03 13:56:03: Read ESC 1: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:56:04: Read ESC 2: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:56:04: Read ESC 3: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:56:04: Read ESC 4: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:56:04: Done reading ESCs
+2026/04/03 13:56:10: Closed port
+2026/04/03 13:56:11: MSP command failed: Timed out after 1000ms
+2026/04/03 13:56:23: Unplugged
+2026/04/03 13:56:32: Plugged in
+2026/04/03 13:56:49: Unplugged
+2026/04/03 13:57:01: Plugged in
+2026/04/03 13:57:07: Could not open serial port 
+2026/04/03 13:57:07: Error: Could not open serial port 
+2026/04/03 13:57:07: Port already in use by another application - try re-connecting
+2026/04/03 13:57:18: Chrome (143.0.0.0) on Linux
+2026/04/03 13:57:18: Plugged in
+2026/04/03 13:58:01: Opened serial port
+2026/04/03 13:58:01: MultiWii API version received: 1.46.0
+2026/04/03 13:58:01: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 13:58:01: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 13:58:01: Board: S7X2, version: 0
+2026/04/03 13:58:01: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 13:58:10: Trying to read 4 ESCs
+2026/04/03 13:58:10: Read ESC 1: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:58:10: Read ESC 2: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:58:11: Read ESC 3: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:58:11: Read ESC 4: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 13:58:11: Done reading ESCs
+2026/04/03 13:58:19: ESC 1 seems to be locked (0) - updating might fail
+2026/04/03 13:58:19: Updating ESC 1 - finished
+2026/04/03 13:58:20: ESC 2 seems to be locked (0) - updating might fail
+2026/04/03 13:58:20: Updating ESC 2 - finished
+2026/04/03 13:58:20: ESC 3 seems to be locked (0) - updating might fail
+2026/04/03 13:58:21: Updating ESC 3 - finished
+2026/04/03 13:58:21: ESC 4 seems to be locked (0) - updating might fail
+2026/04/03 13:58:21: Updating ESC 4 - finished
+2026/04/03 13:58:24: Closed port
+2026/04/03 13:58:31: Opened serial port
+2026/04/03 13:58:31: MultiWii API version received: 1.46.0
+2026/04/03 13:58:31: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 13:58:31: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 13:58:31: Board: S7X2, version: 0
+2026/04/03 13:58:31: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 13:58:53: Reader failed NetworkError: The device has been lost.
+2026/04/03 13:58:53: Unplugged
+2026/04/03 14:06:57: Could not open serial port 
+2026/04/03 14:06:57: Error: Could not open serial port 
+2026/04/03 14:06:57: Port already in use by another application - try re-connecting
+2026/04/03 14:06:58: MSP command failed: Timed out after 1000ms
+2026/04/03 14:07:20: Plugged in
+2026/04/03 14:09:12: Chrome (143.0.0.0) on Linux
+2026/04/03 14:09:12: Plugged in
+2026/04/03 14:09:16: Opened serial port
+2026/04/03 14:09:16: MultiWii API version received: 1.46.0
+2026/04/03 14:09:16: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 14:09:16: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 14:09:16: Board: S7X2, version: 0
+2026/04/03 14:09:16: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 14:09:29: Closed port
+2026/04/03 14:09:30: MSP command failed: Timed out after 1000ms
+2026/04/03 14:09:36: Unplugged
+2026/04/03 14:09:44: Plugged in
+2026/04/03 14:09:45: Unplugged
+2026/04/03 14:09:55: Plugged in
+2026/04/03 14:10:04: Opened serial port
+2026/04/03 14:10:04: MultiWii API version received: 1.46.0
+2026/04/03 14:10:04: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 14:10:04: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 14:10:04: Board: S7X2, version: 0
+2026/04/03 14:10:04: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 14:10:08: Trying to read 4 ESCs
+2026/04/03 14:10:09: Read ESC 1: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 14:10:09: Read ESC 2: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 14:10:09: Read ESC 3: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 14:10:09: Read ESC 4: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 14:10:09: Done reading ESCs
+2026/04/03 14:10:18: ESC 1 seems to be locked (0) - updating might fail
+2026/04/03 14:10:18: Updating ESC 1 - finished
+2026/04/03 14:10:18: ESC 2 seems to be locked (0) - updating might fail
+2026/04/03 14:10:19: Updating ESC 2 - finished
+2026/04/03 14:10:19: ESC 3 seems to be locked (0) - updating might fail
+2026/04/03 14:10:19: Updating ESC 3 - finished
+2026/04/03 14:10:20: ESC 4 seems to be locked (0) - updating might fail
+2026/04/03 14:10:20: Updating ESC 4 - finished
+2026/04/03 14:10:22: Closed port
+2026/04/03 14:10:36: Opened serial port
+2026/04/03 14:10:36: MultiWii API version received: 1.46.0
+2026/04/03 14:10:36: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 14:10:36: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 14:10:36: Board: S7X2, version: 0
+2026/04/03 14:10:36: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 14:10:39: Closed port
+2026/04/03 14:10:43: Unplugged
+2026/04/03 14:18:50: Could not open serial port 
+2026/04/03 14:18:50: Error: Could not open serial port 
+2026/04/03 14:18:50: Port already in use by another application - try re-connecting
+2026/04/03 14:18:56: Plugged in
+2026/04/03 14:19:26: Chrome (143.0.0.0) on Linux
+2026/04/03 14:19:26: Plugged in
+2026/04/03 14:19:28: Opened serial port
+2026/04/03 14:19:28: MultiWii API version received: 1.46.0
+2026/04/03 14:19:28: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 14:19:28: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 14:19:28: Board: S7X2, version: 0
+2026/04/03 14:19:28: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 14:31:48: Reader failed NetworkError: The device has been lost.
+2026/04/03 14:31:48: Unplugged
+2026/04/03 14:32:00: Plugged in
+2026/04/03 14:33:15: Unplugged
+2026/04/03 14:33:17: Plugged in
+2026/04/03 14:33:28: Chrome (143.0.0.0) on Linux
+2026/04/03 14:33:28: Plugged in
+2026/04/03 14:33:29: Opened serial port
+2026/04/03 14:33:29: Reader failed NetworkError: The device has been lost.
+2026/04/03 14:33:30: MSP command failed: Timed out after 1000ms
+2026/04/03 14:33:31: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:33:32: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:33:34: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:33:36: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:33:38: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:33:38: Failed processing command cmd_DeviceInitFlash after 5 retries. 
+2026/04/03 14:33:38: Failed resetting ESC 1 - power cycle and try again
+2026/04/03 14:33:38: Port already in use by another application - try re-connecting
+2026/04/03 14:34:05: Opened serial port
+2026/04/03 14:34:05: Reader failed NetworkError: The device has been lost.
+2026/04/03 14:34:06: MSP command failed: Timed out after 1000ms
+2026/04/03 14:34:07: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:34:08: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:34:09: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:34:12: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:34:15: Command cmd_DeviceInitFlash failed: Timed out after 1000ms 
+2026/04/03 14:34:15: Failed processing command cmd_DeviceInitFlash after 5 retries. 
+2026/04/03 14:34:15: Failed resetting ESC 1 - power cycle and try again
+2026/04/03 14:34:15: Port already in use by another application - try re-connecting
+2026/04/03 14:34:19: Unplugged
+2026/04/03 14:34:32: Plugged in
+2026/04/03 14:34:37: Opened serial port
+2026/04/03 14:34:37: MultiWii API version received: 1.46.0
+2026/04/03 14:34:37: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 14:34:37: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 14:34:37: Board: S7X2, version: 0
+2026/04/03 14:34:37: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 14:34:44: Trying to read 4 ESCs
+2026/04/03 14:34:44: Read ESC 1: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 14:34:44: Read ESC 2: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 14:34:45: Read ESC 3: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 14:34:45: Read ESC 4: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/03 14:34:45: Done reading ESCs
+2026/04/03 14:52:45: Reader failed NetworkError: The device has been lost.
+2026/04/03 14:52:45: Unplugged
+2026/04/03 18:06:43: Plugged in
+2026/04/03 18:06:50: Opened serial port
+2026/04/03 18:06:50: MultiWii API version received: 1.46.0
+2026/04/03 18:06:50: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/03 18:06:50: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/03 18:06:50: Board: S7X2, version: 0
+2026/04/03 18:06:50: Unique device ID received - 0x01f00253433510e32393837
+2026/04/03 18:09:21: Closed port
+2026/04/03 18:09:22: MSP command failed: Timed out after 1000ms
+2026/04/03 18:09:32: Unplugged
+2026/04/05 00:34:05: Chrome (143.0.0.0) on Linux
+2026/04/05 00:34:05: Plugged in
+2026/04/05 00:34:09: Opened serial port
+2026/04/05 00:34:09: MultiWii API version received: 1.42.0
+2026/04/05 00:34:09: Flight controller info, identifier: ARDU version: 3.3.1
+2026/04/05 00:34:09: Running firmware released on: Mar 16 2018 08:42:29
+2026/04/05 00:34:09: Board: ARCH, version: 0
+2026/04/05 00:34:09: Unique device ID received - 0x050003b3231511431313531
+2026/04/05 00:34:14: Trying to read 4 ESCs
+2026/04/05 00:34:17: Failed processing command cmd_DeviceInitFlash after 5 retries. 
+2026/04/05 00:34:17: MessageNotOkError: Message not OK 
+2026/04/05 00:34:17: Failed reading ESC 1
+2026/04/05 00:34:20: Failed processing command cmd_DeviceInitFlash after 5 retries. 
+2026/04/05 00:34:20: MessageNotOkError: Message not OK 
+2026/04/05 00:34:20: Failed reading ESC 2
+2026/04/05 00:34:22: Failed processing command cmd_DeviceInitFlash after 5 retries. 
+2026/04/05 00:34:22: MessageNotOkError: Message not OK 
+2026/04/05 00:34:22: Failed reading ESC 3
+2026/04/05 00:34:25: Failed processing command cmd_DeviceInitFlash after 5 retries. 
+2026/04/05 00:34:25: MessageNotOkError: Message not OK 
+2026/04/05 00:34:25: Failed reading ESC 4
+2026/04/05 00:34:25: Failed processing command cmd_InterfaceTestAlive after 10 retries. 
+2026/04/05 00:34:25: Alive Test failed 
+2026/04/05 00:34:27: Failed processing command cmd_InterfaceTestAlive after 10 retries. 
+2026/04/05 00:34:27: Alive Test failed 
+2026/04/05 00:34:30: Failed processing command cmd_InterfaceTestAlive after 10 retries. 
+2026/04/05 00:34:30: Alive Test failed 
+2026/04/05 00:34:30: Reader failed NetworkError: The device has been lost.
+2026/04/05 12:57:10: Chrome (143.0.0.0) on Linux
+2026/04/05 12:57:12: Plugged in
+2026/04/05 12:57:14: Could not open serial port 
+2026/04/05 12:57:14: Error: Could not open serial port 
+2026/04/05 12:57:14: Port already in use by another application - try re-connecting
+2026/04/05 12:57:21: Unplugged
+2026/04/05 12:57:46: Could not open serial port 
+2026/04/05 12:57:46: Error: Could not open serial port 
+2026/04/05 12:57:46: Port already in use by another application - try re-connecting
+2026/04/05 12:58:19: Chrome (143.0.0.0) on Linux
+2026/04/05 12:58:32: Chrome (143.0.0.0) on Linux
+2026/04/05 12:58:51: Chrome (143.0.0.0) on Linux
+2026/04/05 12:59:05: NotFoundError: Failed to execute 'requestPort' on 'Serial': No port selected by the user. 
+2026/04/05 13:01:09: Chrome (143.0.0.0) on Linux
+2026/04/05 13:03:34: Chrome (143.0.0.0) on Linux
+2026/04/05 13:03:35: Plugged in
+2026/04/05 13:03:38: Opened serial port
+2026/04/05 13:03:38: MultiWii API version received: 1.46.0
+2026/04/05 13:03:38: Flight controller info, identifier: BTFL version: 4.5.2
+2026/04/05 13:03:38: Running firmware released on: Dec 24 2025 16:46:30
+2026/04/05 13:03:38: Board: S7X2, version: 0
+2026/04/05 13:03:38: Unique device ID received - 0x01f00253433510e32393837
+2026/04/05 13:03:44: Trying to read 4 ESCs
+2026/04/05 13:03:44: Read ESC 1: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/05 13:03:45: Read ESC 2: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/05 13:03:45: Read ESC 3: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/05 13:03:45: Read ESC 4: E-X-30 - Bluejay, 0.21.1 RC1, 24kHz
+2026/04/05 13:03:45: Done reading ESCs
+2026/04/05 13:03:59: ESC 1 seems to be locked (0) - updating might fail
+2026/04/05 13:03:59: Updating ESC 1 - finished
+2026/04/05 13:04:00: ESC 2 seems to be locked (0) - updating might fail
+2026/04/05 13:04:00: Updating ESC 2 - finished
+2026/04/05 13:04:00: ESC 3 seems to be locked (0) - updating might fail
+2026/04/05 13:04:01: Updating ESC 3 - finished
+2026/04/05 13:04:01: ESC 4 seems to be locked (0) - updating might fail
+2026/04/05 13:04:01: Updating ESC 4 - finished
+2026/04/05 13:04:09: Closed port
+2026/09/23 13:34:02: Chrome (143.0.0.0) on Linux
+2026/09/23 13:34:11: Port selected
+2026/09/23 13:34:15: Opened serial port
+2026/09/23 13:34:15: MultiWii API version received: 1.42.0
+2026/09/23 13:34:15: Flight controller info, identifier: ARDU version: 3.3.1
+2026/09/23 13:34:15: Running firmware released on: Mar 16 2018 08:42:29
+2026/09/23 13:34:15: Board: ARCH, version: 0
+2026/09/23 13:34:15: Unique device ID received - 0x02600383533510139363630
+2026/09/23 13:36:15: Trying to read 4 ESCs
+2026/09/23 13:36:18: Failed processing command cmd_DeviceInitFlash after 5 retries. 
+2026/09/23 13:36:18: MessageNotOkError: Message not OK 
+2026/09/23 13:36:18: Failed reading ESC 1
+2026/09/23 13:36:18: ESC 2 read settings failed Unknown platform: Neither SiLabs nor Arm UnknownPlatformError: Unknown platform: Neither SiLabs nor Arm
+2026/09/23 13:36:18: Error: UnknownPlatformError: Unknown platform: Neither SiLabs nor Arm 
+2026/09/23 13:36:18: Failed reading ESC 2
+2026/09/23 13:36:18: ESC 3 read settings failed Unknown platform: Neither SiLabs nor Arm UnknownPlatformError: Unknown platform: Neither SiLabs nor Arm
+2026/09/23 13:36:18: Error: UnknownPlatformError: Unknown platform: Neither SiLabs nor Arm 
+2026/09/23 13:36:18: Failed reading ESC 3
+2026/09/23 13:36:18: ESC 4 read settings failed Unknown platform: Neither SiLabs nor Arm UnknownPlatformError: Unknown platform: Neither SiLabs nor Arm
+2026/09/23 13:36:18: Error: UnknownPlatformError: Unknown platform: Neither SiLabs nor Arm 
+2026/09/23 13:36:18: Failed reading ESC 4
