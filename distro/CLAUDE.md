@@ -73,6 +73,8 @@ deploy.sh                    — rsync секций home/ etc/ usr/ на Jetson:
                                NM/systemd, -x/-X команда после деплоя (andriy/root); шапка = usage
 etc/NetworkManager/system-connections/ — Wi-Fi-профили (600 root, см. «Wi-Fi» выше)
 etc/systemd/system/          — юниты: mavros, vins / vins_m, auto-bag / auto-bag-m, orin-shutdown
+home/andriy/hw_check.sh      — проверка железа через полётник (MAVLink, только чтение):
+                               секции baro (оба барометра I2C2, шум, сдвиг пары); шапка = usage
 home/andriy/mavlogs/         — auto_bag.sh / auto_bag_m.sh — запись bag (см. ниже)
 home/andriy/vins_ws/         — vins_service*.sh (старые: python cam_node.py, без стримера),
                                Dockerfile/compose, конфиги VINS, древний camera_node.cpp
@@ -84,6 +86,7 @@ etc/modprobe.d/8812au.conf   — опции модуля 8812au (сны выкл
 etc/NetworkManager/dispatcher.d/50-alfa-txpower — txpower Alfa 15 dBm под бустер на каждом up
 doc/                         — заметки: cmd.txt, cam.txt, wifi, ssh config, параметры ArduPilot;
                                alfa.md — Wi-Fi Alfa AWUS036ACH: кабель/USB, драйвер, причуды, TODO
+                               esc/ — настройки ESC Flycolor X-Cross HV3 (xcross_hv3.ixi) + как снять/восстановить
 doc/ssh-keys/jetson, doc/wifi.txt — СЕКРЕТЫ, в .gitignore (репо публичный)
 ```
 
