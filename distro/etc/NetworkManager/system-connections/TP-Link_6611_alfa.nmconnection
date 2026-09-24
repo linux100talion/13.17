@@ -3,7 +3,7 @@ id=TP-Link_6611_alfa
 uuid=937996cc-4ef3-4fce-ab51-45a6c29468d5
 type=wifi
 interface-name=wlx00c0cab9550c
-autoconnect=true
+autoconnect=false
 autoconnect-priority=200
 
 [wifi]

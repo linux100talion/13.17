@@ -82,8 +82,11 @@ home/andriy/vins_ws/         — vins_service*.sh (старые: python cam_node
 home/andriy/simple_cam/      — стримеры и профили камеры, tuner plus/cuda
 home/andriy/workspaces/      — остатки isaac_ros (драйвер камеры Argus не поддерживает)
 usr/local/bin/               — start_mavros.sh (MAVROS + запрос HIGHRES_IMU/RAW_IMU 200 Гц)
-usr/local/sbin/              — setup-rtl8812au.sh: DKMS-драйвер Alfa AWUS036ACH (см. «Wi-Fi Alfa»)
-etc/modprobe.d/8812au.conf   — опции модуля 8812au (сны выключены)
+usr/local/sbin/              — setup-rtl8812au-wfb.sh: DKMS svpcom 88XXau_wfb — Alfa под WFB-ng (монитор,
+                               с 2026-09-24); setup-rtl8812au.sh — прежний morrownr (клиент роутера)
+etc/modprobe.d/88XXau_wfb.conf — мощность Alfa ИНДЕКСОМ, старт 10 (бустер! калибровка — doc/HW/alfa.md)
+etc/modprobe.d/8812au.conf   — опции прежнего модуля 8812au (сны выключены)
+etc/NetworkManager/conf.d/90-alfa-unmanaged.conf — NM не трогает бортовой Alfa (ни подключений, ни сканов)
 etc/NetworkManager/dispatcher.d/50-alfa-txpower — txpower Alfa 15 dBm под бустер на каждом up
 doc/                         — заметки: cmd.txt, cam.txt, wifi, ssh config
 doc/HW/                      — ЖЕЛЕЗО: hw.txt (паспорт борта), фото/мануалы (TX12, M9N);
