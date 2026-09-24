@@ -25,11 +25,11 @@ BLHeli_32 пищал моторами после 10 мин нулевого га
 2. BLHeliSuite32Test: интерфейс «BLHeli32 Bootloader (Betaflight/Cleanflight)», COM полётника,
    Connect → Read Setup (все 4 ESC). Проброс к ESC разрешает `SERVO_BLH_AUTO=1`.
 3. Save Setup в `.ixi` → открыть в Notepad → Ctrl+A, Ctrl+C → на ноуте сохранить сюда
-   (`xclip -o -selection clipboard > distro/doc/esc/xcross_hv3.ixi`).
+   (`xclip -o -selection clipboard > distro/doc/HW/esc/xcross_hv3.ixi`).
 
 ## Как восстановить
 
-1. На ноуте: `xclip -selection clipboard < distro/doc/esc/xcross_hv3.ixi` → в Win11 вставить в
+1. На ноуте: `xclip -selection clipboard < distro/doc/HW/esc/xcross_hv3.ixi` → в Win11 вставить в
    Notepad → Save As `xcross_hv3.ixi` (тип «All files»).
 2. BLHeliSuite32Test → Connect → Load Setup из файла → Write Setup → Read Setup для проверки.
 3. ТОЛЬКО на эти же ESC с той же прошивкой (Layout `Flycolor_X_Cross_HV3_G071`, rev 31.101).

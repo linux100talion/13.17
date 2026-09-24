@@ -45,7 +45,7 @@ NM — иначе новый файл не подхватится), `-X 'nmcli c
 Файлы едут строго `600 root` (`--chmod=F600`; git 600 не хранит, NM с 644 профиль
 молча игнорирует).
 
-**Wi-Fi Alfa AWUS036ACH (RTL8812AU) — `doc/alfa.md`.** Драйвера в ядре борта нет —
+**Wi-Fi Alfa AWUS036ACH (RTL8812AU) — `doc/HW/alfa.md`.** Драйвера в ядре борта нет —
 ставится `usr/local/sbin/setup-rtl8812au.sh` (DKMS, `./deploy.sh -X … usr etc`, после
 обновления ядра повторить); опции `etc/modprobe.d/8812au.conf`. Там же: почему
 micro-USB 2.0 кабель в USB 3.0 micro-B гнезде даёт `error -71`, как отличить кабель,
@@ -74,7 +74,8 @@ deploy.sh                    — rsync секций home/ etc/ usr/ на Jetson:
 etc/NetworkManager/system-connections/ — Wi-Fi-профили (600 root, см. «Wi-Fi» выше)
 etc/systemd/system/          — юниты: mavros, vins / vins_m, auto-bag / auto-bag-m, orin-shutdown
 home/andriy/hw_check.sh      — проверка железа через полётник (MAVLink, только чтение):
-                               секции baro (оба барометра I2C2, шум, сдвиг пары); шапка = usage
+                               секции baro (оба барометра I2C2), compass (QMC5883L: найден,
+                               поле, шум, калибровка), gps (M9N: фикс, спутники); шапка = usage
 home/andriy/mavlogs/         — auto_bag.sh / auto_bag_m.sh — запись bag (см. ниже)
 home/andriy/vins_ws/         — vins_service*.sh (старые: python cam_node.py, без стримера),
                                Dockerfile/compose, конфиги VINS, древний camera_node.cpp
@@ -84,8 +85,10 @@ usr/local/bin/               — start_mavros.sh (MAVROS + запрос HIGHRES_
 usr/local/sbin/              — setup-rtl8812au.sh: DKMS-драйвер Alfa AWUS036ACH (см. «Wi-Fi Alfa»)
 etc/modprobe.d/8812au.conf   — опции модуля 8812au (сны выключены)
 etc/NetworkManager/dispatcher.d/50-alfa-txpower — txpower Alfa 15 dBm под бустер на каждом up
-doc/                         — заметки: cmd.txt, cam.txt, wifi, ssh config, параметры ArduPilot;
-                               alfa.md — Wi-Fi Alfa AWUS036ACH: кабель/USB, драйвер, причуды, TODO
+doc/                         — заметки: cmd.txt, cam.txt, wifi, ssh config
+doc/HW/                      — ЖЕЛЕЗО: hw.txt (паспорт борта), фото/мануалы (TX12, M9N);
+                               Ardupilot_Params/ — параметры полётника (MP/stellar_cld.txt) и плата;
+                               alfa.md — Wi-Fi Alfa AWUS036ACH: кабель/USB, драйвер, причуды, TODO;
                                esc/ — настройки ESC Flycolor X-Cross HV3 (xcross_hv3.ixi) + как снять/восстановить
 doc/ssh-keys/jetson, doc/wifi.txt — СЕКРЕТЫ, в .gitignore (репо публичный)
 ```

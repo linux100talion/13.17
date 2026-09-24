@@ -23,7 +23,7 @@ MOT_PWM_TYPE,5           # DShot300 (как в старом дампе); зав�
 SERVO_BLH_AUTO,1         # проброс BLHeli к ESC на всех моторных выходах (конфигуратор по USB)
 # SERVO_BLH_PORT = 0 (USB) — заводское, не трогаем
 #
-# ESC: 4 шт. Flycolor X-CROSS HV3 60A 5-12S на лучах, ПО BLHeliSuite32 (distro/doc/hw.txt).
+# ESC: 4 шт. Flycolor X-CROSS HV3 60A 5-12S на лучах, ПО BLHeliSuite32 (distro/doc/HW/hw.txt).
 #   ⚠ «E-X-30 Bluejay 0.21.1» из esc-configurator-log.txt — ДРУГОЙ борт (FC ID 0x01f0…,
 #   у нашего 0x0260…). Проброс ArduPilot + esc-configurator 2026-09-23 не читает; для
 #   BLHeli_32 штатный путь — BLHeliSuite32 через проброс ArduPilot.
@@ -39,7 +39,7 @@ SERVO_BLH_RVMASK,8       # реверс DShot на выходе 4 (задний 
 # MOT_THST_EXPO,0.2      # кривая тяги, зависит от пропов; заводское 0.65 (5")
 # MOT_THST_HOVER — не задаём: ArduPilot учит сам (MOT_HOVER_LEARN)
 
-# === Батарея 8S4P Molicel P45B, 18000 мА·ч (distro/doc/hw.txt) =================
+# === Батарея 8S4P Molicel P45B, 18000 мА·ч (distro/doc/HW/hw.txt) =================
 # hwdef StellarH7V2: пин 10 = делитель на плате FC (×11), пин 18 = делитель PDB (×21).
 # Разъём батареи — на PDB → основной монитор на пин 18. Старый дамп читал пин 10 ×21 —
 # на этой прошивке там 0.59 В сырых (≈12 В), не батарея.

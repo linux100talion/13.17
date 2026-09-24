@@ -3,7 +3,7 @@
 #
 #   ~/hw_check.sh [-t сек] [-u url] [секция ...]
 #
-#   секции   baro                     по умолчанию — все готовые
+#   секции   baro compass gps         по умолчанию — все
 #   -t сек   длительность замера      умолч. 10
 #   -u url   куда цепляться pymavlink умолч. tcp:127.0.0.1:5760 (TcpServer
 #            mavlink-router; Mission Planner может сидеть там же — не мешает)
@@ -14,13 +14,21 @@
 # Только читает: параметры, телеметрию, STATUSTEXT. Ничего не пишет в полётник
 # и не трогает сервисы — если mavlink-router лежит, скажет, как поднять.
 #
-# baro — оба барометра на ОДНОЙ шине I2C2 (distro/doc/Ardupilot_Params/StellarH7V2/
+# baro — оба барометра на ОДНОЙ шине I2C2 (distro/doc/HW/Ardupilot_Params/StellarH7V2/
 #   hwdef.dat): встроенный DPS310 @0x76 и внешний BMP390 @0x77; там же компас
 #   модуля GPS (QMC5883L @0x0D). «Config Error: Baro: unable to initialise driver»
-#   = не нашёлся НИ ОДИН барометр = мёртвая шина (2026-09-24: шину клал модуль
-#   GPS, с одним BMP390 всё ожило). Постоянный сдвиг между барометрами не
+#   = не нашёлся НИ ОДИН барометр = мёртвая шина (2026-09-24: мёртвая при модуле
+#   GPS, с одним BMP390 ожила; после пересборки на обесточенном борте с модулем —
+#   норма, причина не установлена). Постоянный сдвиг между барометрами не
 #   страшен — ArduPilot берёт ноль земли для каждого отдельно; важны шум и
 #   чтобы сдвиг не плыл за время замера.
+# compass — QMC5883L модуля GPS на той же I2C2 (встроенного компаса у платы нет):
+#   найден ли (COMPASS_DEV_ID), здоровье, модуль поля (Украина ~500 мГс; до
+#   калибровки и в помещении меньше — WARN, не FAIL), шум, откалиброван ли.
+# gps — M9N на UART3: включён ли (GPS1_TYPE), отвечает ли приёмник, фикс,
+#   спутники, точность. Без фикса в помещении — WARN. Координаты НЕ печатаются.
+#
+# Любые перетыкания проводов для этих проверок — ТОЛЬКО на обесточенном борте.
 
 set -euo pipefail
 
@@ -37,7 +45,7 @@ while getopts "t:u:h" o; do
 done
 shift $((OPTIND - 1))
 SECTIONS=("$@")
-[ ${#SECTIONS[@]} -eq 0 ] && SECTIONS=(baro)
+[ ${#SECTIONS[@]} -eq 0 ] && SECTIONS=(baro compass gps)
 
 # ---- связь: USB полётника и mavlink-router ------------------------------
 if [ "$URL" = "tcp:127.0.0.1:5760" ]; then
@@ -73,8 +81,12 @@ hb = None
 t0 = time.time()
 while time.time() - t0 < 10:
     h = m.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
-    # компонент 1 и не GCS/роутер — это сам полётник
-    if h and h.get_srcComponent() == 1 and h.autopilot != mavutil.mavlink.MAV_AUTOPILOT_INVALID:
+    # сам полётник: компонент 1, автопилот и тип — летательный аппарат (на роутере сидят
+    # ещё GCS/компаньоны со своими HEARTBEAT, напр. sysid 255 — их не брать)
+    if (h and h.get_srcComponent() == 1
+            and h.autopilot != mavutil.mavlink.MAV_AUTOPILOT_INVALID
+            and h.type not in (mavutil.mavlink.MAV_TYPE_GCS,
+                               mavutil.mavlink.MAV_TYPE_ONBOARD_CONTROLLER)):
         hb = h
         break
 if hb is None:
@@ -133,6 +145,27 @@ NOISE_WARN_M, NOISE_FAIL_M = 0.3, 1.0   # СКО высоты в покое
 OFFSET_WARN_HPA = 1.5                   # сдвиг пары: паспортная абс. точность ±1 + ±0.5
 DRIFT_WARN_M = 0.5                      # сдвиг пары уплыл за замер
 
+I2C_DEAD = ('полётник не нашёл НИ ОДНОГО барометра и завис в Config Error — шина I2C2 '
+            'мертва (встроенный DPS310 на ней же). ОБЕСТОЧИТЬ борт, снять SDA/SCL внешних '
+            'модулей (GPS/компас, BMP390), включить; возвращать модули по одному, каждый '
+            'раз на обесточенном борте')
+
+def config_error(texts):
+    """Полётник завис в Config Error (шина мертва) — дальше данные датчиков врут."""
+    return any('Config Error' in t for t in texts)
+
+def sys_flag(ss, bit, name):
+    if not ss:
+        res('WARN', 'SYS_STATUS не пришёл — здоровье %s по флагам не проверено' % name)
+        return
+    s = ss[-1]
+    if not s.onboard_control_sensors_present & bit:
+        res('FAIL', 'SYS_STATUS: %s не заявлен (present=0)' % name)
+    elif not s.onboard_control_sensors_health & bit:
+        res('FAIL', 'SYS_STATUS: %s нездоров (healthy=0)' % name)
+    else:
+        res('OK', 'SYS_STATUS: %s present/enabled/healthy' % name)
+
 def check_baro():
     print('\n== baro: барометры (I2C2), замер %.0f с, борт не трогать ==' % dur)
     got, texts = sample([29, 137, 143, mavutil.mavlink.MAVLINK_MSG_ID_SYS_STATUS], dur)
@@ -140,10 +173,7 @@ def check_baro():
     for t in cfg:
         print('       FCU: %s' % t)
     if any('Baro' in t and 'initialise' in t for t in cfg):
-        res('FAIL', 'полётник не нашёл НИ ОДНОГО барометра и завис в Config Error — '
-                    'шина I2C2 мертва (встроенный DPS310 на ней же). Снять SDA/SCL '
-                    'внешних модулей (GPS/компас, BMP390), обесточить борт, включить; '
-                    'возвращать модули по одному')
+        res('FAIL', I2C_DEAD)
         return
     ss = got.get('SYS_STATUS')
     if ss:
@@ -163,6 +193,9 @@ def check_baro():
         dv = param('BARO%d_DEVID' % i)
         L = got.get(BARO_MSG[i], [])
         exp = BARO_EXPECT.get(i)
+        if dv is None:
+            res('FAIL', 'BARO%d_DEVID: полётник не ответил на запрос параметра' % i)
+            continue
         if not dv:
             if exp:
                 res('FAIL', 'BARO%d (%s) не найден: BARO%d_DEVID=0' % (i, exp[1], i))
@@ -209,7 +242,107 @@ def check_baro():
         else:
             res('OK', line)
 
-CHECKS = {'baro': check_baro}
+# ---- compass -------------------------------------------------------------
+# QMC5883L @0x0D на I2C2 (stellar_cld.txt «Компас»), находится авто-поиском.
+COMPASS_EXPECT = (855297, 'QMC5883L модуля GPS')
+FIELD_MG = (250, 750)       # |B| в мГс: Украина ~500; до калибровки/у железа меньше
+MAG_NOISE_WARN_MG = 15      # СКО модуля поля в покое
+
+def check_compass():
+    print('\n== compass: компас (I2C2), замер %.0f с, борт не трогать ==' % dur)
+    got, texts = sample([mavutil.mavlink.MAVLINK_MSG_ID_RAW_IMU,
+                         mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE,
+                         mavutil.mavlink.MAVLINK_MSG_ID_SYS_STATUS], dur)
+    if config_error(texts):
+        res('FAIL', I2C_DEAD)
+        return
+    dv = param('COMPASS_DEV_ID')
+    if dv is None:
+        res('FAIL', 'COMPASS_DEV_ID: полётник не ответил на запрос параметра')
+        return
+    if not dv:
+        res('FAIL', 'компас не найден (COMPASS_DEV_ID=0): SDA/SCL и питание модуля GPS '
+                    '(проверять на обесточенном борте)')
+        return
+    if int(dv) != COMPASS_EXPECT[0]:
+        res('WARN', 'COMPASS_DEV_ID=%d (%s), ждали %d (%s)' % (dv, devid(dv), *COMPASS_EXPECT))
+    else:
+        res('OK', 'компас %s найден [%s]' % (COMPASS_EXPECT[1], devid(dv)))
+    sys_flag(got.get('SYS_STATUS'), mavutil.mavlink.MAV_SYS_STATUS_SENSOR_3D_MAG, 'mag')
+
+    L = got.get('RAW_IMU', [])
+    if len(L) < max(3, dur):
+        res('FAIL', 'RAW_IMU: %d сообщений за %.0f с — поле компаса не идёт' % (len(L), dur))
+        return
+    v = [(x.xmag, x.ymag, x.zmag) for x in L]
+    n = [math.sqrt(a * a + b * b + c * c) for a, b, c in v]
+    B, sd = statistics.fmean(n), statistics.pstdev(n)
+    x, y, z = (statistics.fmean(c) for c in zip(*v))
+    line = 'поле x %+.0f y %+.0f z %+.0f мГс, |B| %.0f, шум σ %.1f (n=%d)' % (x, y, z, B, sd, len(n))
+    if B < 50 or B > 2000:
+        res('FAIL', line + ' — мусор/насыщение датчика')
+    elif sd > MAG_NOISE_WARN_MG:
+        res('WARN', line + ' — шумит (рядом ток: силовые провода, моторы?)')
+    elif not FIELD_MG[0] <= B <= FIELD_MG[1]:
+        res('WARN', line + ' — модуль поля вне %d..%d (не откалиброван / железо рядом?)' % FIELD_MG)
+    else:
+        res('OK', line)
+    a = got.get('ATTITUDE', [])
+    if a and abs(a[-1].roll) < 0.17 and abs(a[-1].pitch) < 0.17 and z < 0:
+        res('WARN', 'борт стоит ровно, а z поля < 0: в северном полушарии поле смотрит вниз '
+                    '(z > 0) — ориентация компаса? (COMPASS_ORIENT / COMPASS_AUTO_ROT)')
+
+    ofs = [param('COMPASS_OFS_' + c) for c in 'XYZ']
+    print('       COMPASS_USE=%s ORIENT=%s AUTO_ROT=%s EXTERNAL=%s' % tuple(
+        param(p) for p in ('COMPASS_USE', 'COMPASS_ORIENT', 'COMPASS_AUTO_ROT', 'COMPASS_EXTERNAL')))
+    if all(o == 0 for o in ofs if o is not None):
+        res('WARN', 'компас не откалиброван (COMPASS_OFS_* = 0): калибровка в Mission '
+                    'Planner — на улице, подальше от железа')
+    else:
+        res('OK', 'калибровка есть: OFS %s' % ' '.join('%+.0f' % o for o in ofs))
+
+# ---- gps -----------------------------------------------------------------
+# Matek M9N-5883 (u-blox NEO-M9N) на UART3 = SERIAL3_PROTOCOL 5 (stellar_cld.txt «Порты»).
+GPS_FIX = {0: 'нет GPS', 1: 'нет фикса', 2: '2D', 3: '3D', 4: 'DGPS', 5: 'RTK float', 6: 'RTK fixed'}
+GPS_MIN_SATS, GPS_MAX_HDOP = 8, 2.0
+
+def check_gps():
+    print('\n== gps: приёмник GPS (UART3), замер %.0f с ==' % dur)
+    t = param('GPS1_TYPE')
+    if t is None:
+        res('FAIL', 'GPS1_TYPE: полётник не ответил на запрос параметра')
+        return
+    if not t:
+        res('FAIL', 'GPS выключен в параметрах (GPS1_TYPE=%s)' % t)
+        return
+    got, texts = sample([mavutil.mavlink.MAVLINK_MSG_ID_GPS_RAW_INT,
+                         mavutil.mavlink.MAVLINK_MSG_ID_SYS_STATUS], dur)
+    if config_error(texts):
+        res('FAIL', I2C_DEAD + ' (GPS при этом не инициализирован)')
+        return
+    sys_flag(got.get('SYS_STATUS'), mavutil.mavlink.MAV_SYS_STATUS_SENSOR_GPS, 'gps')
+    L = got.get('GPS_RAW_INT', [])
+    if not L:
+        res('FAIL', 'GPS_RAW_INT не пришёл за %.0f с' % dur)
+        return
+    g = L[-1]
+    fix, sats = g.fix_type, g.satellites_visible
+    hdop = g.eph / 100.0 if g.eph != 65535 else float('nan')
+    hacc = getattr(g, 'h_acc', 0)
+    acc = ', точность %.1f м' % (hacc / 1000.0) if 0 < hacc < 4294967295 else ''
+    line = 'GPS: %s, спутников %d, HDOP %.2f%s (GPS1_TYPE=%d, SERIAL3_PROTOCOL=%s)' % (
+        GPS_FIX.get(fix, fix), sats, hdop, acc, t, param('SERIAL3_PROTOCOL'))
+    if fix == 0:
+        res('FAIL', line + ' — приёмник не отвечает: UART3 TX/RX, питание модуля')
+    elif fix < 3:
+        res('WARN', line + ' — нет 3D-фикса (в помещении норма; на улице холодный '
+                           'старт до ~5 мин)')
+    elif sats < GPS_MIN_SATS or not hdop <= GPS_MAX_HDOP:
+        res('WARN', line + ' — слабый фикс (мало спутников / большой HDOP)')
+    else:
+        res('OK', line)
+
+CHECKS = {'baro': check_baro, 'compass': check_compass, 'gps': check_gps}
 for s in sections:
     if s not in CHECKS:
         print('[FAIL] нет такой секции: %s (есть: %s)' % (s, ' '.join(CHECKS)))

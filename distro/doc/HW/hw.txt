@@ -62,7 +62,7 @@ BEC установлены сзади в раме (с кулером). Моду�
 ---
 Регулятор швидкості Flycolor X-CROSS HV3 60A ESC 5-12S, 4 * 2085грн. 
   (прошивка BLHeli_32 rev 31.101 предрелизная — настраивать ТОЛЬКО BLHeliSuite32Test 31.10;
-   Beacon Delay = Infinite с 2026-09-24; снимок настроек и как восстановить — distro/doc/esc/)
+   Beacon Delay = Infinite с 2026-09-24; снимок настроек и как восстановить — distro/doc/HW/esc/)
 Configuration software: BLHeilDuite32
 Rampup power: Rampup power can be set to relative values from 3% to 150%.
     This is the maximum power that is allowed when rampint up allow rpms and durint startup.

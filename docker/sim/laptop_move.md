@@ -464,7 +464,7 @@ REFUSED; заодно за 80 с попыток z-оценка EKF уехала 
 в STABILIZE, а ch1..4 продолжат приходить от ноды на 20 Гц. Аварийный выход сегодня
 один: убить ноду и ждать `RC_OVERRIDE_TIME` (в дампе борта — 3 с).
 
-Хуже, по дампу `distro/doc/Ardupilot_Params/MP/params.txt`: `FLTMODE1..6 = 2` —
+Хуже, по дампу `distro/doc/HW/Ardupilot_Params/MP/params.txt`: `FLTMODE1..6 = 2` —
 **все шесть позиций ALT_HOLD**, т.е. щелчок тумблера сегодня и режим-то меняет
 формально.
 
