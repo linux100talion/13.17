@@ -32,3 +32,7 @@ distro/doc/wifi.txt
 
 # Настройки редактора — у каждого свои, в репу не едут
 .vscode/
+
+# Ключи радиолинка WFB-ng (пара drone.key/gs.key из wfb_keygen) — секрет, репо публичный
+distro/etc/drone.key
+tools/wfb/gs.key
