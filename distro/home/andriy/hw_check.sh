@@ -245,6 +245,7 @@ def check_baro():
 # ---- compass -------------------------------------------------------------
 # QMC5883L @0x0D на I2C2 (stellar_cld.txt «Компас»), находится авто-поиском.
 COMPASS_EXPECT = (855297, 'QMC5883L модуля GPS')
+COMPASS_ORIENT = 4          # модуль GPS смонтирован стрелкой назад: ROTATION_YAW_180 (stellar_cld.txt)
 FIELD_MG = (250, 750)       # |B| в мГс: Украина ~500; до калибровки/у железа меньше
 MAG_NOISE_WARN_MG = 15      # СКО модуля поля в покое
 
@@ -295,6 +296,10 @@ def check_compass():
     ofs = [param('COMPASS_OFS_' + c) for c in 'XYZ']
     print('       COMPASS_USE=%s ORIENT=%s AUTO_ROT=%s EXTERNAL=%s' % tuple(
         param(p) for p in ('COMPASS_USE', 'COMPASS_ORIENT', 'COMPASS_AUTO_ROT', 'COMPASS_EXTERNAL')))
+    orient = param('COMPASS_ORIENT')
+    if orient is not None and int(orient) != COMPASS_ORIENT:
+        res('WARN', 'COMPASS_ORIENT=%d, ждали %d: модуль GPS стоит стрелкой назад (hw.txt) — '
+                    'курс будет врать на 180°, если модуль не переставляли' % (orient, COMPASS_ORIENT))
     if all(o == 0 for o in ofs if o is not None):
         res('WARN', 'компас не откалиброван (COMPASS_OFS_* = 0): калибровка в Mission '
                     'Planner — на улице, подальше от железа')
