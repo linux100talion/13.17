@@ -7,9 +7,9 @@
 # Запуск:  sudo bash tools/wfb/setup_gs_driver.sh
 # Порядок: сначала ТОЛЬКО сборка DKMS; штатный rtw88 блокируется и модули меняются лишь
 # если сборка под текущее ядро прошла. Ядро ноута заморожено (apt-mark hold), DKMS
-# пересоберёт сам при смене ядра (AUTOINSTALL). Мощность: rtw_tx_pwr_idx_override=20 —
-# у наземного Alfa бустера нет, но без активного охлаждения высокий индекс может сжечь
-# карту (wfb-ng Setup HOWTO); поднимать осознанно.
+# пересоберёт сам при смене ядра (AUTOINSTALL). Мощность: rtw_tx_pwr_idx_override=10 —
+# с земли уходят только команды MAVLink/ssh, главное — приём (от мощности не зависит); было 20,
+# но на батарее ноута Alfa (800 мА + пики TX) отваливался с USB 2026-09-24 → снижено.
 # Откат: dkms remove realtek-rtl88xxau/5.2.20.2~20190429 --all;
 #        rm /etc/modprobe.d/wfb-gs.conf; modprobe rtw88_8812au
 set -euo pipefail
@@ -49,7 +49,7 @@ cat > /etc/modprobe.d/wfb-gs.conf <<EOF
 # tools/wfb/setup_gs_driver.sh: наземный Alfa под WFB-ng — патченый svpcom вместо штатного rtw88
 blacklist rtw88_8812au
 blacklist rtw_8812au
-options 88XXau_wfb rtw_tx_pwr_idx_override=20
+options 88XXau_wfb rtw_tx_pwr_idx_override=10
 EOF
 systemctl stop wifibroadcast@gs 2>/dev/null || true
 modprobe -r rtw88_8812au 2>/dev/null || modprobe -r rtw_8812au 2>/dev/null || true
