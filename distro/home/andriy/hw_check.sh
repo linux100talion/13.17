@@ -3,7 +3,7 @@
 #
 #   ~/hw_check.sh [-t сек] [-u url] [секция ...]
 #
-#   секции   baro compass gps wfb     по умолчанию — все
+#   секции   baro compass gps rc wfb  по умолчанию — все
 #            (на НОУТЕ — только wfb: hw_check.sh wfb, наземная сторона радиолинка)
 #   -t сек   длительность замера      умолч. 10
 #   -u url   куда цепляться pymavlink умолч. tcp:127.0.0.1:5760 (TcpServer
@@ -29,6 +29,12 @@
 #   калибровки и в помещении меньше — WARN, не FAIL), шум, откалиброван ли.
 # gps — M9N на UART3: включён ли (GPS1_TYPE), отвечает ли приёмник, фикс,
 #   спутники, точность. Без фикса в помещении — WARN. Координаты НЕ печатаются.
+# rc — пульт RadioMaster TX12 → ELRS ES900RX: приёмник воткнут в полётник (CRSF, UART4), а его
+#   TX ОТВЕТВЛЁН на RX хедера Orin (pin 10 → /dev/ttyTHS1, 420000 бод; память crsf-tap-orin).
+#   Слушает провод и RC_CHANNELS полётника ОДНОВРЕМЕННО: кадры/CRC/частота, LQ и RSSI линка
+#   ELRS, и совпадают ли каналы на Orin и в FCU (по ближайшему по времени кадру). Во время
+#   замера пошевелить стиками/тумблерами — покажет, какие каналы живые.
+#   Только читает порт; если его держит другой процесс (crsf_joy), читатели делят байты — WARN.
 # wfb — радиолинк WFB-ng на Alfa AWUS036ACH (distro/doc/HW/alfa.md), сторона — по ключу
 #   (/etc/drone.key — борт, /etc/gs.key — ноут): Alfa на USB (скорость/ток), драйвер
 #   88XXau_wfb (штатный rtw88 инжекцию не передаёт), индекс мощности (борт: 28, потолок 30 —
@@ -54,7 +60,7 @@ while getopts "t:u:h" o; do
 done
 shift $((OPTIND - 1))
 SECTIONS=("$@")
-[ ${#SECTIONS[@]} -eq 0 ] && SECTIONS=(baro compass gps wfb)
+[ ${#SECTIONS[@]} -eq 0 ] && SECTIONS=(baro compass gps rc wfb)
 NEED_FCU=0
 for s in "${SECTIONS[@]}"; do [ "$s" = wfb ] || NEED_FCU=1; done
 
@@ -359,6 +365,172 @@ def check_gps():
     else:
         res('OK', line)
 
+# ---- rc ------------------------------------------------------------------
+# Провод отвода — stellar_cld.txt «Пульт» (CRSF на UART4 полётника) + отвод на Orin 2026-09-23.
+RC_PORT, RC_BAUD = '/dev/ttyTHS1', 420000
+RC_NAMES = 'roll pitch throttle yaw ch5 ch6 ch7 ch8'.split()
+RC_MIN_HZ = 50              # ELRS шлёт каналы с частотой пакетов (50..500 Гц), на борту ~198
+RC_LQ_WARN = 70             # % качества аплинка
+RC_MATCH_US = 10            # |Orin − FCU| по каналу, медиана
+RC_MOVED_US = 50            # размах канала за замер — «шевелили»
+
+def crsf_crc8(data):
+    crc = 0
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0xD5) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+    return crc
+
+def crsf_read(secs, out):
+    """Кадры с провода за secs: out['rc'] = [(t, [16 µs])], out['link'] = [payload], счётчики.
+    Разбор как у control_pkg/infrastructure/crsf.py (тут своя копия — пакет на борт не едет)."""
+    import serial
+    try:
+        ser = serial.Serial(RC_PORT, RC_BAUD, timeout=0.02)
+    except Exception as e:
+        out['err'] = str(e)
+        return
+    buf = bytearray()
+    t0 = time.time()
+    with ser:
+        while time.time() - t0 < secs:
+            c = ser.read(512)
+            now = time.time()
+            out['bytes'] += len(c)
+            buf += c
+            while len(buf) >= 2:
+                if buf[0] not in (0xC8, 0xEA, 0xEE, 0xEC) or not 2 <= buf[1] <= 62:
+                    del buf[0]
+                    continue
+                ln = buf[1]
+                if len(buf) < ln + 2:
+                    break
+                body, crc = bytes(buf[2:ln + 1]), buf[ln + 1]
+                if crsf_crc8(body) != crc:
+                    out['crc_bad'] += 1
+                    del buf[0]
+                    continue
+                del buf[:ln + 2]
+                out['ok'] += 1
+                if body[0] == 0x16 and len(body) == 23:
+                    bits = int.from_bytes(body[1:], 'little')
+                    out['rc'].append((now, [round((((bits >> (11 * i)) & 0x7FF) - 992) * 5 / 8 + 1500)
+                                            for i in range(16)]))
+                elif body[0] == 0x14 and len(body) >= 11:
+                    out['link'].append(body[1:])
+
+def tty_holders(dev):
+    pids = []
+    for pid in filter(str.isdigit, os.listdir('/proc')):
+        try:
+            for fd in os.listdir('/proc/%s/fd' % pid):
+                if os.readlink('/proc/%s/fd/%s' % (pid, fd)) == dev:
+                    pids.append('%s(%s)' % (pid, rd('/proc/%s/comm' % pid)))
+                    break
+        except OSError:
+            pass
+    return pids
+
+def check_rc():
+    import threading
+    print('\n== rc: пульт TX12 → ELRS → отвод %s + полётник, замер %.0f с — ПОШЕВЕЛИТЬ стиками '
+          'и тумблерами ==' % (RC_PORT, dur))
+    held = tty_holders(RC_PORT)
+    if held:
+        res('WARN', '%s уже открыт: %s — два читателя делят байты, цифры провода занижены'
+            % (RC_PORT, ' '.join(held)))
+    tap = dict(bytes=0, ok=0, crc_bad=0, rc=[], link=[])
+    th = threading.Thread(target=crsf_read, args=(dur, tap))
+    th.start()
+    got, texts = sample([mavutil.mavlink.MAVLINK_MSG_ID_RC_CHANNELS,
+                         mavutil.mavlink.MAVLINK_MSG_ID_SYS_STATUS], dur, rate=10)
+    th.join()
+
+    # --- провод на Orin
+    if 'err' in tap:
+        res('FAIL', 'отвод: %s не открылся — %s' % (RC_PORT, tap['err']))
+    elif tap['bytes'] == 0:
+        res('FAIL', 'отвод %s: тишина (0 байт) — провод pin 10/земля pin 9, приёмник запитан?'
+            % RC_PORT)
+    else:
+        hz = len(tap['rc']) / dur
+        bad = tap['crc_bad'] / float(tap['ok'] + tap['crc_bad'] or 1)
+        line = 'отвод %s: %d байт, кадров %d, битых CRC %d, каналы %.0f Гц, link stats %.0f Гц' % (
+            RC_PORT, tap['bytes'], tap['ok'], tap['crc_bad'], hz, len(tap['link']) / dur)
+        if not tap['rc']:
+            res('FAIL', line + ' — кадров каналов нет: приёмник не связан с пультом (failsafe)?')
+        elif hz < RC_MIN_HZ:
+            res('WARN', line + ' — каналы реже %d Гц' % RC_MIN_HZ)
+        elif bad > 0.01:
+            res('WARN', line + ' — битых > 1 %%: земля/помеха на отводе (1 кОм на месте?)')
+        else:
+            res('OK', line)
+    if tap['link']:
+        lq = [x[2] for x in tap['link']]
+        # ES900RX — одна антенна (ant2 = 0); мощность пульта и даунлинк приёмник полётнику
+        # не заполняет (нули в кадре, замер 2026-09-25) — не печатаем
+        rs = ['%.0f' % statistics.fmean(-x[k] for x in tap['link'])
+              for k in (0, 1) if any(x[k] for x in tap['link'])]
+        snr = [x[3] - 256 if x[3] > 127 else x[3] for x in tap['link']]
+        line = 'ELRS аплинк: LQ мин %d / сред %.0f %%, RSSI %s dBm, SNR %.0f dB, rf_mode %d' % (
+            min(lq), statistics.fmean(lq), ' / '.join(rs) or '?', statistics.fmean(snr),
+            tap['link'][-1][5])
+        if min(lq) == 0:
+            res('FAIL', line + ' — были провалы до 0 (failsafe)')
+        elif min(lq) < RC_LQ_WARN:
+            res('WARN', line + ' — LQ проседает')
+        else:
+            res('OK', line)
+    if tap['rc']:
+        last = tap['rc'][-1][1]
+        print('       каналы (µs): ' + ' '.join('%s=%d' % (RC_NAMES[i], last[i]) for i in range(8)))
+        print('       ch9..16: ' + ' '.join(str(u) for u in last[8:]))
+        span = [max(f[1][i] for f in tap['rc']) - min(f[1][i] for f in tap['rc']) for i in range(16)]
+        moved = ['%s(%d)' % (RC_NAMES[i] if i < 8 else 'ch%d' % (i + 1), span[i])
+                 for i in range(16) if span[i] >= RC_MOVED_US]
+        print('       шевелились (размах µs): %s' % (' '.join(moved) or
+              'ничего — стики не трогали; живость органов не проверена'))
+
+    # --- полётник
+    sys_flag(got.get('SYS_STATUS'), mavutil.mavlink.MAV_SYS_STATUS_SENSOR_RC_RECEIVER, 'rc_receiver')
+    L = got.get('RC_CHANNELS', [])
+    if not L:
+        res('FAIL', 'RC_CHANNELS полётника не пришёл за %.0f с' % dur)
+        return
+    f = L[-1]
+    line = 'полётник: RC_CHANNELS %d шт., каналов %d, rssi %s' % (
+        len(L), f.chancount, f.rssi if f.rssi != 255 else 'н/д')
+    if f.chancount == 0:
+        res('FAIL', line + ' — полётник пульта не видит (UART4 / SERIAL4_PROTOCOL 23)')
+        return
+    res('OK', line)
+    if not tap['rc']:
+        return
+    # сверка Orin ↔ FCU: к каждому RC_CHANNELS — ближайший по времени кадр с провода
+    diffs = [[] for _ in range(8)]
+    j = 0
+    for msg in L:
+        t = getattr(msg, '_timestamp', None)
+        if t is None:
+            continue
+        while j + 1 < len(tap['rc']) and abs(tap['rc'][j + 1][0] - t) <= abs(tap['rc'][j][0] - t):
+            j += 1
+        us = tap['rc'][j][1]
+        for i in range(8):
+            diffs[i].append(abs(getattr(msg, 'chan%d_raw' % (i + 1)) - us[i]))
+    if not diffs[0]:
+        res('WARN', 'сверка Orin↔FCU не сделана: у RC_CHANNELS нет штампа приёма')
+        return
+    med = [statistics.median(d) for d in diffs]
+    line = 'Orin = FCU: медиана |Δ| по ch1..8 %s µs (пар %d)' % (
+        ' '.join('%.0f' % x for x in med), len(diffs[0]))
+    if max(med) > RC_MATCH_US:
+        res('FAIL', line + ' — провод и полётник видят разное (другой приёмник / RCMAP / '
+                           'отвод не от того провода?)')
+    else:
+        res('OK', line)
+
 # ---- wfb -----------------------------------------------------------------
 # Пара Alfa AWUS036ACH (distro/doc/HW/alfa.md §4–5, память wfb-ng-link). Борт — за бустером
 # EDUP EP-AB025; ноут — голый Alfa, индекс 10 (на 20 отваливался с USB на батарее ноута).
@@ -592,7 +764,8 @@ def check_wfb():
     else:
         res('OK', line)
 
-CHECKS = {'baro': check_baro, 'compass': check_compass, 'gps': check_gps, 'wfb': check_wfb}
+CHECKS = {'baro': check_baro, 'compass': check_compass, 'gps': check_gps, 'rc': check_rc,
+          'wfb': check_wfb}
 for s in sections:
     if s not in CHECKS:
         print('[FAIL] нет такой секции: %s (есть: %s)' % (s, ' '.join(CHECKS)))

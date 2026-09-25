@@ -75,7 +75,8 @@ etc/NetworkManager/system-connections/ — Wi-Fi-профили (600 root, см.
 etc/systemd/system/          — юниты: mavros, vins / vins_m, auto-bag / auto-bag-m, orin-shutdown
 home/andriy/hw_check.sh      — проверка железа через полётник (MAVLink, только чтение):
                                секции baro (оба барометра I2C2), compass (QMC5883L: найден,
-                               поле, шум, калибровка), gps (M9N: фикс, спутники), wfb (радиолинк
+                               поле, шум, калибровка), gps (M9N: фикс, спутники), rc (пульт: отвод
+                               CRSF на ttyTHS1 — кадры/CRC/LQ, сверка каналов с RC_CHANNELS FCU), wfb (радиолинк
                                WFB-ng: Alfa USB/драйвер/индекс мощности, служба и автозапуск,
                                пакеты/потери/RSSI с другой стороны, ping туннеля — идёт и на ноуте:
                                `distro/home/andriy/hw_check.sh wfb`); шапка = usage
