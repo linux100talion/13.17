@@ -80,6 +80,9 @@ home/andriy/hw_check.sh      — проверка железа через пол
                                WFB-ng: Alfa USB/драйвер/индекс мощности, служба и автозапуск,
                                пакеты/потери/RSSI с другой стороны, ping туннеля — идёт и на ноуте:
                                `distro/home/andriy/hw_check.sh wfb`); шапка = usage
+home/andriy/accel_cal.py     — калибровка акселерометра по MAVLink без MP: 6 положений (accel) или
+                               горизонт (level); подтверждение Enter или «ok» в --fifo (ведёт агент);
+                               после SUCCESS — ребут полётника; шапка = usage и первая калибровка
 home/andriy/mavlogs/         — auto_bag.sh / auto_bag_m.sh — запись bag (см. ниже)
 home/andriy/vins_ws/         — vins_service*.sh (старые: python cam_node.py, без стримера),
                                Dockerfile/compose, конфиги VINS, древний camera_node.cpp
