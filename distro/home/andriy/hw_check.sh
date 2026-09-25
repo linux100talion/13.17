@@ -3,7 +3,8 @@
 #
 #   ~/hw_check.sh [-t сек] [-u url] [секция ...]
 #
-#   секции   baro compass gps         по умолчанию — все
+#   секции   baro compass gps wfb     по умолчанию — все
+#            (на НОУТЕ — только wfb: hw_check.sh wfb, наземная сторона радиолинка)
 #   -t сек   длительность замера      умолч. 10
 #   -u url   куда цепляться pymavlink умолч. tcp:127.0.0.1:5760 (TcpServer
 #            mavlink-router; Mission Planner может сидеть там же — не мешает)
@@ -11,8 +12,9 @@
 # Итог каждой проверки: [ OK ] / [WARN] / [FAIL]. Код выхода: 0 — без FAIL,
 # 1 — есть FAIL, 2 — нет связи с полётником (дальше проверять нечего).
 #
-# Только читает: параметры, телеметрию, STATUSTEXT. Ничего не пишет в полётник
-# и не трогает сервисы — если mavlink-router лежит, скажет, как поднять.
+# Только читает: параметры, телеметрию, STATUSTEXT, sysfs, статистику WFB-ng. Ничего не
+# пишет в полётник и не трогает сервисы — если что-то лежит, скажет, как поднять.
+# Единственный трафик — 5 ping'ов через туннель WFB-ng (секция wfb).
 #
 # baro — оба барометра на ОДНОЙ шине I2C2 (distro/doc/HW/Ardupilot_Params/StellarH7V2/
 #   hwdef.dat): встроенный DPS310 @0x76 и внешний BMP390 @0x77; там же компас
@@ -27,6 +29,13 @@
 #   калибровки и в помещении меньше — WARN, не FAIL), шум, откалиброван ли.
 # gps — M9N на UART3: включён ли (GPS1_TYPE), отвечает ли приёмник, фикс,
 #   спутники, точность. Без фикса в помещении — WARN. Координаты НЕ печатаются.
+# wfb — радиолинк WFB-ng на Alfa AWUS036ACH (distro/doc/HW/alfa.md), сторона — по ключу
+#   (/etc/drone.key — борт, /etc/gs.key — ноут): Alfa на USB (скорость/ток), драйвер
+#   88XXau_wfb (штатный rtw88 инжекцию не передаёт), индекс мощности (борт: 28, потолок 30 —
+#   бустер EDUP, предел 20 dBm на входе), wifi_txpower=None, служба и автозапуск, монитор на
+#   канале, туннель, и за время замера JSON API: пакеты с другой стороны, потери, RSSI, ping.
+#   Бустер программно не виден: судить по RSSI на ДРУГОЙ стороне (рядом, индекс 28 —
+#   около −36 dBm; без бустера/под порогом −45…−49) и по тому, что линк вообще есть.
 #
 # Любые перетыкания проводов для этих проверок — ТОЛЬКО на обесточенном борте.
 
@@ -45,10 +54,12 @@ while getopts "t:u:h" o; do
 done
 shift $((OPTIND - 1))
 SECTIONS=("$@")
-[ ${#SECTIONS[@]} -eq 0 ] && SECTIONS=(baro compass gps)
+[ ${#SECTIONS[@]} -eq 0 ] && SECTIONS=(baro compass gps wfb)
+NEED_FCU=0
+for s in "${SECTIONS[@]}"; do [ "$s" = wfb ] || NEED_FCU=1; done
 
 # ---- связь: USB полётника и mavlink-router ------------------------------
-if [ "$URL" = "tcp:127.0.0.1:5760" ]; then
+if [ $NEED_FCU = 1 ] && [ "$URL" = "tcp:127.0.0.1:5760" ]; then
     if [ ! -e /dev/ttyACM0 ]; then
         echo "[FAIL] полётника нет на USB (/dev/ttyACM0): переподключить USB-кабель без BOOT"
         echo "       (после старта он иногда виснет на USB — см. hw.txt), затем:"
@@ -63,8 +74,7 @@ if [ "$URL" = "tcp:127.0.0.1:5760" ]; then
 fi
 
 exec python3 - "$URL" "$DUR" "${SECTIONS[@]}" <<'PY'
-import math, statistics, sys, time
-from pymavlink import mavutil
+import json, math, os, re, socket, statistics, subprocess, sys, time
 
 url, dur, sections = sys.argv[1], float(sys.argv[2]), sys.argv[3:]
 fails = 0
@@ -75,28 +85,30 @@ def res(level, text):
         fails += 1
     print('[%-4s] %s' % (level, text) if level != 'OK' else '[ OK ] %s' % text)
 
-# ---- подключение ---------------------------------------------------------
-m = mavutil.mavlink_connection(url, source_system=250)
-hb = None
-t0 = time.time()
-while time.time() - t0 < 10:
-    h = m.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
-    # сам полётник: компонент 1, автопилот и тип — летательный аппарат (на роутере сидят
-    # ещё GCS/компаньоны со своими HEARTBEAT, напр. sysid 255 — их не брать)
-    if (h and h.get_srcComponent() == 1
-            and h.autopilot != mavutil.mavlink.MAV_AUTOPILOT_INVALID
-            and h.type not in (mavutil.mavlink.MAV_TYPE_GCS,
-                               mavutil.mavlink.MAV_TYPE_ONBOARD_CONTROLLER)):
-        hb = h
-        break
-if hb is None:
-    print('[FAIL] нет HEARTBEAT полётника за 10 с (%s)' % url)
-    sys.exit(2)
-SYS = hb.get_srcSystem()
-m.target_system, m.target_component = SYS, 1
-print('полётник: sysid %d, режим %s, %s' % (
-    SYS, mavutil.mode_string_v10(hb),
-    'ARMED' if hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED else 'disarmed'))
+# ---- подключение (только секциям полётника; wfb — без MAVLink, в т.ч. на ноуте) ----
+if any(s != 'wfb' for s in sections):
+    from pymavlink import mavutil
+    m = mavutil.mavlink_connection(url, source_system=250)
+    hb = None
+    t0 = time.time()
+    while time.time() - t0 < 10:
+        h = m.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
+        # сам полётник: компонент 1, автопилот и тип — летательный аппарат (на роутере сидят
+        # ещё GCS/компаньоны со своими HEARTBEAT, напр. sysid 255 — их не брать)
+        if (h and h.get_srcComponent() == 1
+                and h.autopilot != mavutil.mavlink.MAV_AUTOPILOT_INVALID
+                and h.type not in (mavutil.mavlink.MAV_TYPE_GCS,
+                                   mavutil.mavlink.MAV_TYPE_ONBOARD_CONTROLLER)):
+            hb = h
+            break
+    if hb is None:
+        print('[FAIL] нет HEARTBEAT полётника за 10 с (%s)' % url)
+        sys.exit(2)
+    SYS = hb.get_srcSystem()
+    m.target_system, m.target_component = SYS, 1
+    print('полётник: sysid %d, режим %s, %s' % (
+        SYS, mavutil.mode_string_v10(hb),
+        'ARMED' if hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED else 'disarmed'))
 
 def param(name):
     m.mav.param_request_read_send(SYS, 1, name.encode(), -1)
@@ -347,7 +359,240 @@ def check_gps():
     else:
         res('OK', line)
 
-CHECKS = {'baro': check_baro, 'compass': check_compass, 'gps': check_gps}
+# ---- wfb -----------------------------------------------------------------
+# Пара Alfa AWUS036ACH (distro/doc/HW/alfa.md §4–5, память wfb-ng-link). Борт — за бустером
+# EDUP EP-AB025; ноут — голый Alfa, индекс 10 (на 20 отваливался с USB на батарее ноута).
+WFB_SIDE = {
+    'drone': dict(mac='00:c0:ca:b9:55:0c', api=8102, tun='drone-wfb', peer='10.5.0.1',
+                  idx=28, idx_max=30, usb_min=480, what='бортовой Alfa (за бустером)'),
+    'gs':    dict(mac='00:c0:ca:ba:ca:b9', api=8103, tun='gs-wfb', peer='10.5.0.2',
+                  idx=10, idx_max=20, usb_min=5000, what='наземный Alfa (ноут)'),
+}
+WFB_LOSS_WARN, WFB_LOSS_FAIL = 0.05, 0.20   # доля потерянных пакетов с другой стороны
+WFB_RSSI_HOT, WFB_RSSI_WEAK = -20, -80      # dBm: перегруз приёмника (вплотную) / край
+
+def sh(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+
+def rd(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+def wfb_cfg(key):
+    t = rd('/etc/wifibroadcast.cfg') or ''
+    r = re.search(r'^%s\s*=\s*([^#\n]*)' % key, t, re.M)
+    return r.group(1).strip() if r else None
+
+def wfb_api(port, secs):
+    """Строки JSON API wfb-server за secs секунд: rx/tx раз в log_interval (1 с)."""
+    out = []
+    try:
+        s = socket.create_connection(('127.0.0.1', port), timeout=3)
+    except OSError as e:
+        return None, str(e)
+    s.settimeout(0.5)
+    buf, t0 = b'', time.time()
+    while time.time() - t0 < secs:
+        try:
+            d = s.recv(65536)
+        except socket.timeout:
+            continue
+        if not d:
+            break
+        buf += d
+        *lines, buf = buf.split(b'\n')
+        for ln in lines:
+            try:
+                out.append(json.loads(ln))
+            except ValueError:
+                pass
+    s.close()
+    return out, None
+
+def check_wfb():
+    side = 'drone' if os.path.exists('/etc/drone.key') else 'gs' if os.path.exists('/etc/gs.key') else None
+    print('\n== wfb: радиолинк WFB-ng на Alfa, сторона %s, замер %.0f с ==' % (side or '?', dur))
+    if side is None:
+        res('FAIL', 'нет ни /etc/drone.key, ни /etc/gs.key — WFB-ng тут не настроен '
+                    '(борт: distro/usr/local/sbin/setup-wfb-ng.sh, ноут: tools/wfb/setup_gs.sh)')
+        return
+    S = WFB_SIDE[side]
+
+    # USB: Alfa 0bda:8812 — скорость и заявленный ток
+    usb = [d for d in os.listdir('/sys/bus/usb/devices')
+           if rd('/sys/bus/usb/devices/%s/idVendor' % d) == '0bda'
+           and rd('/sys/bus/usb/devices/%s/idProduct' % d) == '8812']
+    if not usb:
+        res('FAIL', 'Alfa (USB 0bda:8812) не найден: кабель USB 3.0 micro-B во всё гнездо '
+                    '(alfa.md §1); перетыкать — на обесточенном борте')
+        return
+    for d in usb:
+        p = '/sys/bus/usb/devices/' + d
+        spd, ver, pw = rd(p + '/speed'), rd(p + '/version'), rd(p + '/bMaxPower')
+        line = 'Alfa на USB %s: %s Мбит, bcdUSB %s, %s' % (d, spd, ver, pw)
+        if spd is None or int(spd) < 480:
+            res('FAIL', line + ' — full-speed: Alfa просел по питанию/кабелю (переткнуть; ноут — '
+                               'на сеть, не батарею)')
+        elif int(spd) < S['usb_min']:
+            res('WARN', line + ' — ждали %d: USB 2.0 кабель в USB 3.0 гнезде или просадка '
+                               'питания (на ноуте с батареи сползал 5000→480→12)' % S['usb_min'])
+        else:
+            res('OK', line + (' (на Orin USB 2.0 — норма, alfa.md §1)' if side == 'drone' else ''))
+
+    # интерфейс по MAC и драйвер
+    ifc = next((n for n in os.listdir('/sys/class/net')
+                if rd('/sys/class/net/%s/address' % n) == S['mac']), None)
+    if ifc is None:
+        res('FAIL', '%s %s: интерфейса нет — драйвер не загружен? (lsmod | grep 88XXau_wfb)'
+            % (S['what'], S['mac']))
+        return
+    drv = os.path.basename(os.readlink('/sys/class/net/%s/device/driver' % ifc))
+    if drv != 'rtl88xxau_wfb':
+        res('FAIL', '%s: драйвер %s, нужен rtl88xxau_wfb (svpcom): штатный rtw88 принимает, но '
+                    'инжекцию не передаёт (TX packets 0)' % (ifc, drv))
+    else:
+        res('OK', '%s %s, драйвер %s' % (S['what'], ifc, drv))
+    if (rd('/etc/default/wifibroadcast') or '').find(ifc) < 0:
+        res('FAIL', 'WFB_NICS в /etc/default/wifibroadcast не %s' % ifc)
+
+    # мощность: индекс модуля (не dBm), iw показывает его как -N.00 dBm
+    idx = rd('/sys/module/88XXau_wfb/parameters/rtw_tx_pwr_idx_override')
+    r = re.search(r'txpower (-?[\d.]+) dBm', sh('iw', 'dev', ifc, 'info'))
+    live = int(-float(r.group(1))) if r and float(r.group(1)) < 0 else None
+    tp = wfb_cfg('wifi_txpower')
+    if idx is None:
+        res('FAIL', 'rtw_tx_pwr_idx_override не читается — модуль 88XXau_wfb не загружен')
+    else:
+        idx = int(idx)
+        line = 'мощность: индекс модуля %d, в эфире %s, wifi_txpower=%s' % (
+            idx, live if live is not None else '?', tp)
+        if max(idx, live or 0) > S['idx_max']:
+            res('FAIL', line + ' — выше потолка %d%s' % (S['idx_max'],
+                ' (вход бустера > 20 dBm, alfa.md §5)' if side == 'drone' else ''))
+        elif tp != 'None':
+            res('FAIL' if side == 'drone' else 'WARN',
+                line + ' — wifi_txpower должен быть None, мощность держит модуль')
+        elif live is not None and live != idx:
+            res('WARN', line + ' — в эфире не модульный индекс (меняли на лету iw set txpower?)')
+        elif idx != S['idx']:
+            res('WARN', line + ' — штатный %d (калибровка alfa.md §5)' % S['idx'])
+        else:
+            res('OK', line)
+
+    # служба
+    unit = 'wifibroadcast@' + side
+    act = sh('systemctl', 'is-active', unit).strip()
+    if side == 'drone':
+        en = [sh('systemctl', 'is-enabled', u).strip() for u in ('wifibroadcast.service', unit)]
+        if en != ['enabled', 'enabled']:
+            res('WARN', 'автозапуск: wifibroadcast.service %s, %s %s — после ребута радио не '
+                        'поднимется (экземпляр WantedBy родителя): sudo systemctl enable '
+                        'wifibroadcast.service %s' % (en[0], unit, en[1], unit))
+    if act != 'active':
+        res('FAIL', '%s %s — радио молчит: sudo systemctl start %s' % (unit, act or '?', unit))
+        return
+    res('OK', '%s active' % unit)
+
+    info = sh('iw', 'dev', ifc, 'info')
+    ch = re.search(r'channel (\d+) \((\d+) MHz\)', info)
+    typ = re.search(r'type (\S+)', info)
+    want = wfb_cfg('wifi_channel')
+    line = '%s: %s, канал %s' % (ifc, typ.group(1) if typ else '?',
+                                 '%s (%s МГц)' % ch.groups() if ch else '?')
+    if not typ or typ.group(1) != 'monitor' or not ch or ch.group(1) != want:
+        res('FAIL', line + ' — ждали monitor, канал %s (wifibroadcast.cfg)' % want)
+    else:
+        res('OK', line)
+    tun = sh('ip', '-br', 'addr', 'show', S['tun']).split()
+    if len(tun) < 3:
+        res('FAIL', 'туннель %s не поднят' % S['tun'])
+    else:
+        res('OK', 'туннель %s %s' % (S['tun'], tun[2]))
+
+    # статистика линка: пинги туннеля в фоне дают трафик в обе стороны на время замера
+    pg = subprocess.Popen(['ping', '-c', '5', '-i', '1', '-W', '1', S['peer']],
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    msgs, err = wfb_api(S['api'], max(dur, 6))
+    pout = pg.communicate()[0]
+    if msgs is None:
+        res('FAIL', 'JSON API :%d не отвечает (%s)' % (S['api'], err))
+        return
+    rx, tx = {}, {}
+    rssi = {}
+    for d in msgs:
+        if d.get('type') == 'rx':
+            P = rx.setdefault(d['id'], {})
+            for k in ('all', 'lost', 'dec_err', 'bad', 'fec_rec', 'out'):
+                P[k] = P.get(k, 0) + d['packets'][k][0]
+            for a in d['rx_ant_stats']:
+                rssi.setdefault(a['ant'], []).append((a['pkt_recv'], a['rssi_avg'], a['snr_avg']))
+        elif d.get('type') == 'tx':
+            P = tx.setdefault(d['id'], {})
+            for k in ('injected', 'dropped'):
+                P[k] = P.get(k, 0) + d['packets'][k][0]
+    inj = sum(p['injected'] for p in tx.values())
+    drp = sum(p['dropped'] for p in tx.values())
+    line = 'передача: %d пакетов в эфир, %d сброшено (%s)' % (
+        inj, drp, ', '.join('%s %d' % (k, v['injected']) for k, v in sorted(tx.items())))
+    if inj == 0:
+        res('FAIL', line + ' — инжекции нет')
+    elif drp > 0.01 * (inj + drp):
+        res('WARN', line + ' — драйвер сбрасывает (USB/питание Alfa?)')
+    else:
+        res('OK', line)
+
+    got = sum(p['out'] for p in rx.values())
+    lost = sum(p['lost'] for p in rx.values())
+    bad = sum(p['dec_err'] + p['bad'] for p in rx.values())
+    other = 'ноута' if side == 'drone' else 'борта'
+    if got == 0:
+        res('FAIL', 'с %s за %.0f с ни одного пакета — там WFB-ng не запущен / бустер без '
+                    'питания 12 В / антенны / канал' % (other, max(dur, 6)))
+    else:
+        loss = lost / float(got + lost)
+        line = 'приём с %s: %d пакетов, потеряно %d (%.1f %%), восстановлено FEC %d (%s)' % (
+            other, got, lost, 100 * loss, sum(p['fec_rec'] for p in rx.values()),
+            ', '.join('%s %d' % (k, v['out']) for k, v in sorted(rx.items())))
+        if bad:
+            res('FAIL', line + ' — %d не расшифровано: ключи drone.key/gs.key не пара' % bad)
+        elif loss > WFB_LOSS_FAIL:
+            res('FAIL', line)
+        elif loss > WFB_LOSS_WARN:
+            res('WARN', line)
+        else:
+            res('OK', line)
+    for ant, L in sorted(rssi.items()):
+        n = sum(x[0] for x in L)
+        if not n:
+            continue
+        r = sum(x[0] * x[1] for x in L) / n
+        s = sum(x[0] * x[2] for x in L) / n
+        line = 'RSSI с %s, антенна %d.%d: %.0f dBm, SNR %.0f dB (пакетов %d)' % (
+            other, ant >> 8, ant & 0xFF, r, s, n)
+        if r > WFB_RSSI_HOT:
+            res('WARN', line + ' — перегруз приёмника (вплотную?)')
+        elif r < WFB_RSSI_WEAK:
+            res('WARN', line + ' — край линка')
+        else:
+            res('OK', line)
+    pl = re.search(r'(\d+)% packet loss', pout)
+    rt = re.search(r'= [\d.]+/([\d.]+)/', pout)
+    line = 'ping %s по туннелю: потерь %s%%, среднее %s мс' % (
+        S['peer'], pl.group(1) if pl else '?', rt.group(1) if rt else '?')
+    if not pl or int(pl.group(1)) == 100:
+        res('FAIL', line)
+    elif int(pl.group(1)) > 20:
+        res('WARN', line)
+    else:
+        res('OK', line)
+
+CHECKS = {'baro': check_baro, 'compass': check_compass, 'gps': check_gps, 'wfb': check_wfb}
 for s in sections:
     if s not in CHECKS:
         print('[FAIL] нет такой секции: %s (есть: %s)' % (s, ' '.join(CHECKS)))

@@ -59,7 +59,9 @@ fi
 systemctl daemon-reload
 if [ -f /etc/drone.key ]; then
     chmod 600 /etc/drone.key
-    systemctl enable wifibroadcast@drone
+    # экземпляр WantedBy=wifibroadcast.service: без enable родителя при загрузке его никто
+    # не запускает (2026-09-25: после ребута радио молчало при «enabled» экземпляре)
+    systemctl enable wifibroadcast.service wifibroadcast@drone
     systemctl restart wifibroadcast@drone
     sleep 5
     systemctl --no-pager status wifibroadcast@drone | head -15
