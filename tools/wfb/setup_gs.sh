@@ -6,10 +6,11 @@
 # Запуск:  sudo bash tools/wfb/setup_gs.sh
 # Нужен tools/wfb/gs.key (пара к /etc/drone.key борта; секрет, в .gitignore).
 # Ставит wfb-ng из исходников, отдаёт Alfa из-под NetworkManager, пишет /etc/wifibroadcast.cfg,
-# /etc/default/wifibroadcast, /etc/gs.key и ЗАПУСКАЕТ wifibroadcast@gs (в автозапуск не
-# включает — Alfa не всегда воткнут). Дальше:  wfb-cli gs   (статистика линка),
+# /etc/default/wifibroadcast, /etc/gs.key, ЗАПУСКАЕТ wifibroadcast@gs и включает автозапуск
+# (с 2026-09-25; без воткнутого Alfa служба просто перезапускается раз в 5 с, Restart=on-failure).
+# Дальше:  wfb-cli gs   (статистика линка), distro/home/andriy/hw_check.sh wfb (проверка),
 # ssh andriy@10.5.0.2 (туннель), телеметрия — UDP 127.0.0.1:14550.
-# Откат: systemctl stop wifibroadcast@gs; rm /etc/NetworkManager/conf.d/90-wfb-gs-unmanaged.conf;
+# Откат: systemctl disable --now wifibroadcast@gs wifibroadcast.service; rm /etc/NetworkManager/conf.d/90-wfb-gs-unmanaged.conf;
 #        systemctl reload NetworkManager
 set -euo pipefail
 HERE="$(dirname "$(readlink -f "$0")")"
@@ -58,6 +59,9 @@ echo "WFB_NICS=\"$IF\"" > /etc/default/wifibroadcast
 install -m 600 "$HERE/gs.key" /etc/gs.key
 
 systemctl daemon-reload
+# экземпляр WantedBy=wifibroadcast.service: без enable родителя при загрузке его никто не
+# запускает (так на борту 2026-09-25 радио молчало после ребута при «enabled» экземпляре)
+systemctl enable wifibroadcast.service wifibroadcast@gs
 systemctl restart wifibroadcast@gs
 sleep 6
 systemctl --no-pager status wifibroadcast@gs | sed -n 1,14p

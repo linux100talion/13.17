@@ -660,12 +660,14 @@ def check_wfb():
     # служба
     unit = 'wifibroadcast@' + side
     act = sh('systemctl', 'is-active', unit).strip()
-    if side == 'drone':
-        en = [sh('systemctl', 'is-enabled', u).strip() for u in ('wifibroadcast.service', unit)]
-        if en != ['enabled', 'enabled']:
-            res('WARN', 'автозапуск: wifibroadcast.service %s, %s %s — после ребута радио не '
-                        'поднимется (экземпляр WantedBy родителя): sudo systemctl enable '
-                        'wifibroadcast.service %s' % (en[0], unit, en[1], unit))
+    # автозапуск — на обеих сторонах (ноут с 2026-09-25 тоже): экземпляр WantedBy родителя
+    en = [sh('systemctl', 'is-enabled', u).strip() for u in ('wifibroadcast.service', unit)]
+    if en != ['enabled', 'enabled']:
+        res('WARN', 'автозапуск: wifibroadcast.service %s, %s %s — после ребута радио не '
+                    'поднимется (экземпляр WantedBy родителя): sudo systemctl enable '
+                    'wifibroadcast.service %s' % (en[0], unit, en[1], unit))
+    else:
+        res('OK', 'автозапуск: wifibroadcast.service и %s enabled' % unit)
     if act != 'active':
         res('FAIL', '%s %s — радио молчит: sudo systemctl start %s' % (unit, act or '?', unit))
         return
