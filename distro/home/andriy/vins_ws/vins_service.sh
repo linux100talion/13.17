@@ -58,7 +58,9 @@ cleanup() {
     docker stop $CONTAINER
     
     # Жестко прибиваем зависающую утилиту ros2 на хосте
-    pkill -9 -f "ros2 topic echo /mavros/state" 2>/dev/null
+    # ТОЛЬКО в своей сессии (у каждой службы systemd своя): без -s этот pkill убивал
+    # одноимённый наблюдатель СОСЕДНЕЙ службы (2026-09-25: стоп vins уложил auto-bag)
+    pkill -9 -s "$(ps -o sid= -p $$ | tr -d ' ')" -f "ros2 topic echo /mavros/state" 2>/dev/null
     
     exit 0
 }
@@ -97,3 +99,9 @@ while read -r line; do
     fi
 
 done < <(stdbuf -oL ros2 topic echo /mavros/state mavros_msgs/msg/State | grep --line-buffered "armed:")
+
+# Сюда попадаем, только если наблюдатель /mavros/state умер (убит, упал DDS). Выход с
+# ошибкой — чтобы Restart=on-failure поднял службу; с кодом 0 она молча гасла.
+stop_vins_nodes
+echo "Наблюдатель /mavros/state завершился — выход с ошибкой для перезапуска"
+exit 1
