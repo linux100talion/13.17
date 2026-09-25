@@ -135,7 +135,7 @@ Trap на `systemctl stop`: SIGINT рекордеру, wait, `pkill -9` зави
 | Bag на прогон | По одному на цикл арм/дизарм | Ровно один `scene_bag`, прошлый чистится на старте |
 | Куда | `/home/andriy/mavlogs/bag_<дата>`, навсегда | `output/scene_bag` → `output/joystick/<имя>/bag` (mv изнутри контейнера, `KEEP_BAG=1`) |
 | Окружение | humble, CycloneDDS, `LOCALHOST_ONLY=1` | humble + overlay cv_bridge + `sim_ws/install` |
-| Топики | 7: `/mavros/imu/data_raw`, `/mavros/imu/data`, `/image_mono`, `/camera_info`, `/odometry`, `/path`, `/feature` | ~19: `/image_color`, `/mavros/local_position/pose`, `/joy`, `/mavros/state`, `/mission/status`, `/feature`, `/odometry`, `/model/iris_cam/odometry` (истина), `/flow_dbg{,2,6,7,8,9,10}`, `/mavros/imu/data`, `/nn1/bridge`, `/vins/sane` (`TOPICS_EXTRA`) |
+| Топики | 13 (с 2026-09-25): все `/mavros/imu/*` (data_raw, data, mag, static/diff_pressure, temperature_imu/baro) + `/mavros/state` + `/image_mono`, `/camera_info`, `/odometry`, `/path`, `/feature`; на каждом арме заново запрашивает HIGHRES_IMU/RAW_IMU/ATTITUDE_QUATERNION 200 Гц (перезагрузка одного FCU стирает частоты, выставленные `start_mavros.sh`) | ~19: `/image_color`, `/mavros/local_position/pose`, `/joy`, `/mavros/state`, `/mission/status`, `/feature`, `/odometry`, `/model/iris_cam/odometry` (истина), `/flow_dbg{,2,6,7,8,9,10}`, `/mavros/imu/data`, `/nn1/bridge`, `/vins/sane` (`TOPICS_EXTRA`) |
 | Картинка | `/image_mono` (вход VINS) | `/image_color` (полный BGR) → scene.mp4 / scene_hud.mp4 / scene_ipm.mp4 |
 | Пост-обработка | Нет | mp4, HUD-рендер, IPM-видео, кадры, Google Drive, `analyze.sh`, мета `.env`, лог порывов |
 | Ручки | Нет | `RECORD`, `SKIP_CAM`, `TOPICS_EXTRA`, `KEEP_BAG` |
@@ -161,14 +161,14 @@ Trap на `systemctl stop`: SIGINT рекордеру, wait, `pkill -9` зави
 - **Нет меты прогона.** Сим кладёт рядом с bag'ом `.env` со всеми `BS_*` и
   `joy.log`; на борту — только timestamp в имени. Нужен дамп окружения
   лётной ноды рядом с bag'ом.
-- **Остановка — гонка.** На борту дизарм одновременно гасит запись (SIGINT из
-  `auto_bag.sh`) и через `orin_shutdown` делает `shutdown -h now`; systemd даёт
-  3 с на закрытие bag'а — на большом sqlite может не успеть, гарантии
-  сохранности последнего bag'а нет. В симе стоп явный и упорядоченный, но если
+- **Остановка.** Дизарм гасит запись (SIGINT из `auto_bag.sh`). `orin_shutdown` на
+  дизарм НЕ реагирует (проверено по `src/orin_shutdown/main.go` 2026-09-25, прежняя запись
+  тут была неверной): `shutdown -h now` — по кнопке CH10 > 1500 µs 3 с на задизармленном
+  борту. Если нажать её сразу после посадки, systemd даёт `auto-bag` 3 с на закрытие bag'а —
+  на большом sqlite может не успеть. Тест моторов тоже армит FCU → каждый шаг теста = bag. В симе стоп явный и упорядоченный, но если
   прогон упал между стартом и стопом записи, trap EXIT рекордер не трогает —
   зачищает следующий `restart-all`.
-- **Мелочь:** в `auto_bag.sh` строка `BAG_PID=$!` продублирована (83–84),
-  безвредно. `doc/cmd.txt` советует добавить `/tf /tf_static` — нужны RViz.
+- `doc/cmd.txt` советует добавить `/tf /tf_static` — нужны RViz.
 
 ## ЗАДАЧА ПЕРЕД ДЕПЛОЕМ: чем заменить зелёную линию (истину Gazebo)
 

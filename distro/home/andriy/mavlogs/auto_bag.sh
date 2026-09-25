@@ -78,9 +78,22 @@ while read -r line; do
         BAG_NAME="$LOG_DIR/bag_$(date +%Y%m%d_%H%M%S)"
         
         echo "Дрон ЗААРМЛЕН! Начинаю запись в $BAG_NAME..."
-        #ros2 bag record -o "$BAG_NAME" /mavros/imu/data_raw /mavros/imu/data /image_mono /odometry /path /feature &
-        ros2 bag record -o "$BAG_NAME" /mavros/imu/data_raw /mavros/imu/data /image_mono /camera_info /odometry /path /feature &
-BAG_PID=$!
+        # Частоты IMU — ЗАНОВО на каждом арме: start_mavros.sh ставит их один раз при старте
+        # MAVROS, а перезагрузка одного полётника их стирает (постоянных MAV1_* нет) — 2026-09-25
+        # после ребута FCU 14 bag'ов вышли по 0 сообщений. В фоне: запись не ждёт сервисов.
+        (
+            for id in 105 27 31; do   # HIGHRES_IMU (→ imu/data_raw), RAW_IMU, ATTITUDE_QUATERNION (→ imu/data)
+                ros2 service call /mavros/set_message_interval mavros_msgs/srv/MessageInterval \
+                    "{message_id: $id, message_rate: 200.0}" >/dev/null 2>&1
+            done
+            echo "частоты IMU 200 Гц запрошены"
+        ) &
+        # весь IMU MAVROS + состояние (время арма/режим) + прежние топики VINS/камеры
+        ros2 bag record -o "$BAG_NAME" \
+            /mavros/imu/data_raw /mavros/imu/data /mavros/imu/mag /mavros/imu/static_pressure \
+            /mavros/imu/diff_pressure /mavros/imu/temperature_imu /mavros/imu/temperature_baro \
+            /mavros/state \
+            /image_mono /camera_info /odometry /path /feature &
         BAG_PID=$!
         
     elif [[ "$line" == *"false"* ]] && [[ -n "$BAG_PID" ]]; then
