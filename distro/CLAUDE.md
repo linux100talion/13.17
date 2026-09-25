@@ -83,6 +83,9 @@ home/andriy/hw_check.sh      — проверка железа через пол
 home/andriy/accel_cal.py     — калибровка акселерометра по MAVLink без MP: 6 положений (accel) или
                                горизонт (level); подтверждение Enter или «ok» в --fifo (ведёт агент);
                                после SUCCESS — ребут полётника; шапка = usage и первая калибровка
+home/andriy/mag_cal.py       — калибровка компаса по MAVLink без MP: без --save — репетиция (ничего не
+                               пишет), --save — на улице; --say озвучивает прогресс на ноуте, --delay
+                               — успеть взять борт; с ноута по радио -u tcp:10.5.0.2:5760
 home/andriy/mavlogs/         — auto_bag.sh / auto_bag_m.sh — запись bag (см. ниже)
 home/andriy/vins_ws/         — vins_service*.sh (старые: python cam_node.py, без стримера),
                                Dockerfile/compose, конфиги VINS, древний camera_node.cpp
