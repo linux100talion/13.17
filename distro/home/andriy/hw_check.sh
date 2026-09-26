@@ -726,8 +726,11 @@ def check_wfb():
     bad = sum(p['dec_err'] + p['bad'] for p in rx.values())
     other = 'ноута' if side == 'drone' else 'борта'
     if got == 0:
-        res('FAIL', 'с %s за %.0f с ни одного пакета — там WFB-ng не запущен / бустер без '
-                    'питания 12 В / антенны / канал' % (other, max(dur, 6)))
+        hint = ('там WFB-ng не запущен / бустер без питания 12 В / антенны / канал' if side == 'drone'
+                else 'если БОРТ при этом слышит ноут (hw_check.sh wfb на борту: «приём с ноута» OK) — '
+                     'завис приём станции на ноуте (wfb_rx, 2026-09-26 после ~6 ч): sudo systemctl '
+                     'restart wifibroadcast@gs; иначе — WFB-ng на борту / бустер / антенны / канал')
+        res('FAIL', 'с %s за %.0f с ни одного пакета — %s' % (other, max(dur, 6), hint))
     else:
         loss = lost / float(got + lost)
         line = 'приём с %s: %d пакетов, потеряно %d (%.1f %%), восстановлено FEC %d (%s)' % (
@@ -760,6 +763,9 @@ def check_wfb():
     line = 'ping %s по туннелю: потерь %s%%, среднее %s мс' % (
         S['peer'], pl.group(1) if pl else '?', rt.group(1) if rt else '?')
     if not pl or int(pl.group(1)) == 100:
+        if side == 'drone' and got > 0 and inj > 0:
+            line += (' — борт слышит ноут и передаёт, но ответов нет: скорее всего, завис приём станции '
+                     'на ноуте → там sudo systemctl restart wifibroadcast@gs')
         res('FAIL', line)
     elif int(pl.group(1)) > 20:
         res('WARN', line)
