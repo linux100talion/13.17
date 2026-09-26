@@ -19,7 +19,7 @@
 Ничего не пишет в полётник и на диск; только запросы сообщений (REQUEST_MESSAGE).
 Ctrl-C — выход.
 """
-import argparse, time
+import argparse, socket, time
 from pymavlink import mavutil
 
 ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
@@ -35,17 +35,21 @@ REASON_TTL = 40                                   # с: PreArm повторяю�
 
 
 def connect():
+    # pymavlink делает TCP connect без таймаута (×6 попыток) — при мёртвом радиолинке молчит
+    # минутами. Сначала быстрая проба с таймаутом, пока борт не ответит.
+    host, port = args.url.split(':')[1:]
     while True:
         try:
-            m = mavutil.mavlink_connection(args.url, source_system=250, source_component=201,
-                                           autoreconnect=True)
-            return m
+            socket.create_connection((host, int(port)), timeout=3).close()
+            return mavutil.mavlink_connection(args.url, source_system=250, source_component=201,
+                                              autoreconnect=True, retries=1)
         except OSError as e:
-            print('%s нет связи с бортом (%s) — повтор через 3 с' % (time.strftime('%H:%M:%S'), e),
-                  flush=True)
+            print('%s | нет связи с бортом %s:%s (%s) — радиолинк? борт включён? повтор через 3 с'
+                  % (time.strftime('%H:%M:%S'), host, port, e), flush=True)
             time.sleep(3)
 
 
+print('поле: %s — подключаюсь…' % args.url, flush=True)
 m = connect()
 hb = gps = sys = rcch = None
 hb_t = 0.0
