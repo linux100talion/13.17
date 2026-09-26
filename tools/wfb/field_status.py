@@ -5,13 +5,16 @@
 
 Каждые -i секунд (умолч. 3) одна строка: время | режим | ARMED/disarmed | GPS фикс,
 спутники, HDOP | координаты «широта, долгота» (вставляются в Google Карты как есть) |
-напряжение батареи | готовность к армингу (флаг полётника «prearm-проверки пройдены»;
+напряжение батареи | сигнал пульта ELRS | готовность к армингу (флаг полётника «prearm-проверки пройдены»;
 если не готов — последние причины PreArm/Arm, полётник повторяет их раз в ~30 с).
 
   -u url   умолч. tcp:10.5.0.2:5760 — mavlink-router борта через IP-туннель WFB-ng.
            UDP 14551 не трогаем: его держит проброс VirtualBox к Mission Planner.
   --mask   координаты скрыть (для логов/скриншотов/проверок) — печатаются как «скрыто».
 
+Сигнал пульта — RSSI приёмника ELRS через полётник (RC_CHANNELS.rssi, нужен RSSI_TYPE=3):
+0..255 ≈ −120..−50 dBm (CRSF). Качество (LQ %) по MAVLink не передаётся — его видит только отвод
+на Orin (hw_check.sh rc). Хуже −100 dBm — «СЛАБО» (у ELRS 900 МГц/200 Гц предел приёма ~−110).
 Координаты — сырые от приёмника (GPS_RAW_INT), не из EKF: видно, что говорит сам GPS.
 Ничего не пишет в полётник и на диск; только запросы сообщений (REQUEST_MESSAGE).
 Ctrl-C — выход.
@@ -44,7 +47,7 @@ def connect():
 
 
 m = connect()
-hb = gps = sys = None
+hb = gps = sys = rcch = None
 hb_t = 0.0
 reasons = {}                                      # текст → время последнего появления
 last_check = 0.0                                  # когда последний раз просили prearm-проверку
@@ -54,7 +57,7 @@ try:
     while True:
         now = time.time()
         if now >= nxt:
-            for mid in (L.MAVLINK_MSG_ID_GPS_RAW_INT, L.MAVLINK_MSG_ID_SYS_STATUS):
+            for mid in (L.MAVLINK_MSG_ID_GPS_RAW_INT, L.MAVLINK_MSG_ID_SYS_STATUS, L.MAVLINK_MSG_ID_RC_CHANNELS):
                 try:
                     m.mav.command_long_send(1, 1, L.MAV_CMD_REQUEST_MESSAGE, 0, mid, 0, 0, 0, 0, 0, 0)
                 except OSError:
@@ -68,6 +71,8 @@ try:
                 gps = r
             elif t == 'SYS_STATUS':
                 sys = r
+            elif t == 'RC_CHANNELS':
+                rcch = r
             elif t == 'STATUSTEXT' and (r.text.startswith('PreArm') or r.text.startswith('Arm')):
                 reasons[r.text.strip()] = time.time()
         if now < nxt:
@@ -94,6 +99,11 @@ try:
         else:
             g, pos = 'GPS ?', 'координат нет'
         volt = '%.1f В' % (sys.voltage_battery / 1000) if sys and sys.voltage_battery > 0 else '? В'
+        if rcch is None or rcch.rssi == 255:
+            rc = 'пульт ?'
+        else:
+            dbm = rcch.rssi * 70.0 / 255 - 120
+            rc = 'пульт %.0f dBm%s' % (dbm, ' СЛАБО' if dbm < -100 else '')
         if armed:
             ready = 'В ВОЗДУХЕ/ЗААРМЛЕН'
         elif sys is None:
@@ -107,7 +117,7 @@ try:
                 m.mav.command_long_send(1, 1, L.MAV_CMD_RUN_PREARM_CHECKS, 0, 0, 0, 0, 0, 0, 0, 0)
                 last_check = now
             ready = 'арм: НЕТ — ' + ('; '.join(live) if live else 'запрошена проверка, причина — в следующей строке')
-        print('%s | %-9s | %-8s | GPS %s | %s | %s | %s' % (
-            ts, mode, 'ARMED' if armed else 'disarmed', g, pos, volt, ready), flush=True)
+        print('%s | %-9s | %-8s | GPS %s | %s | %s | %s | %s' % (
+            ts, mode, 'ARMED' if armed else 'disarmed', g, pos, volt, rc, ready), flush=True)
 except KeyboardInterrupt:
     print()
