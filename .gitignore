@@ -36,3 +36,4 @@ distro/doc/wifi.txt
 # Ключи радиолинка WFB-ng (пара drone.key/gs.key из wfb_keygen) — секрет, репо публичный
 distro/etc/drone.key
 tools/wfb/gs.key
+distro/doc/HW/BAG/
