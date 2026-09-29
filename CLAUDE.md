@@ -420,9 +420,10 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
       preintegration` (dt²=1e-12 деградирует ковариационную матрицу) — заменён.
     Оба патча зафиксированы в ветке `1317_debug` форка `linux100talion/VINS-MONO-ROS2`
     (bind-mounted из `/root/VINS-MONO-ROS2`); `nav_up.sh` патчи не применяет.
-12. **SITL параметры (ephemeral)** — применяются внутри контейнера `simulator`
-    в `/root/ardupilot/Tools/autotest/default_params/gazebo-iris.parm` при первом
-    запуске; теряются на `fresh-start` (пересоздание контейнера). Критичные:
+12. **SITL параметры** — `docker/sim/config/sitl-extra.parm`, bind mount
+    `/root/sitl-extra.parm:ro`, подаётся в `sim_vehicle.py` через
+    `--add-param-file` (`scripts/sim_up.sh`) — выживает при `fresh-start`.
+    Критичные:
     ```
     SCHED_LOOP_RATE 100   # иначе "Main loop slow (249Hz < 400Hz)" → краш FCU
     FS_GCS_ENABLE 0       # отключить failsafe GCS
@@ -430,7 +431,6 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
                           # переименован, старая строка молча игнорировалась)
     DISARM_DELAY 0
     ```
-    TODO: зафиксировать в образе (Dockerfile COPY или volume-монтирование .parm).
 
 ## Мир — Military fortress
 
@@ -442,7 +442,8 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 
 Портирование Classic → Harmonic: добавлены обязательные system-плагины,
 `<population>`→явная расстановка, `<road>` убран, `ode`→DART, Ogre-материалы
-(`grass_plane`/`digital_wall`)→PBR, убрана битая ссылка `model://home`.
+(`grass_plane`/`digital_wall`)→PBR, убрана битая ссылка `model://home`,
+фон-горы `mt_background` (heightmap на текстурах Ogre Classic) отключены в SDF.
 
 ⚠️ **Базовая земля бесфактурна вблизи** (gz-sim не тайлит текстуру по грани
 бокса: один grass_dry.png 512px растянут на 150 м, texel 29 см) — ближе ~3 м
@@ -517,16 +518,6 @@ FCU перезапущен → ложные диагнозы). Поведени�
   (`arm`/`takeoff`/`hover`/`land`/`disarm`) + запись bag + извлечение кадров). Новые
   сценарии оформлять так же — обёрткой над `make`/скриптами `src/lab/`, а не
   ручными командами в контейнере.
-
-## ⚠️ Не протестировано без Gazebo / известные проблемы
-
-- Вложенные `<include>` в `mili_map` (если карта не появится — расплющить)
-- `mt_background` (heightmap) — может ломать загрузку
-- Scope `iris_with_standoffs::base_link` (крепление камеры)
-- ✅ Формат v4l2loopback — решено: BGR4-транспорт + eager init байеризатора
-- ✅ IMU disorder — решено: `timesync_mode:=NONE` + монотонный патч в estimator_node.cpp
-- ✅ Main loop slow — решено: `SCHED_LOOP_RATE 100` в .parm (ephemeral, см. п.12)
-- ⚠️ SITL .parm теряется на `fresh-start` — TODO: зафиксировать в образе
 
 ---
 

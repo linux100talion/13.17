@@ -106,9 +106,8 @@
       <uri>model://grass_plane_fine</uri>
     </include>
 
-    <!-- Главная карта: стены, дома, техника, солдаты (вложенные include).
-         РИСК: gz-sim композиция вложенных include. Если не загрузится —
-         расплющить mili_map в world-level include (см. README). -->
+    <!-- Главная карта: стены, дома, техника, солдаты (вложенные include;
+         в Harmonic грузятся штатно). -->
     <include>
       <static>true</static>
       <pose>-35 -5 0 0 0 0</pose>
