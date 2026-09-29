@@ -246,6 +246,7 @@ republish полного `/image_color` — осознанная плата, п�
 за полёт (O(N³); разбор в памяти `vins-ground-stand-init`).
 C++ исходники (`feature_tracker`, `vins_estimator`) НЕ вендорены в репо — клонируются
 вручную рядом с `config_pkg`:
+
 ```bash
 # на Orin (в контейнере vins_project_13_7):
 cd /root/vins_ws/src
@@ -352,6 +353,7 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
    Поэтому `cv_bridge` собирается из исходников против нашего OpenCV (overlay
    `/opt/overlay`). `CUDA_ARCH_BIN` — build-arg под GPU ноута.
 4. **Камера через v4l2loopback** (камера-нода НЕ переписывается):
+
    ```
    Gazebo /camera/image_raw (RGB)
      → bayerizer.py  (RGB→Bayer16)
@@ -393,15 +395,18 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 10. **Entrypoint-скрипты** (auto-start при старте контейнера). Скрипты
     `scripts/sim_up.sh` и `scripts/nav_up.sh` монтируются в контейнеры как
     `/scripts/:ro` и запускаются автоматически через `command:` в compose:
+
     ```
     command: bash -c "bash /scripts/sim_up.sh; exec tail -f /dev/null"
     ```
     Итерация разработки (без пересоздания контейнеров, ephemeral state жив):
+
     ```
     make restart-all   # docker compose stop → start
     make logs          # tail -f output/*.log
     ```
     Полный сброс (пересоздать контейнеры):
+
     ```
     make fresh-start   # docker compose down → up
     ```
@@ -424,6 +429,7 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
     `/root/sitl-extra.parm:ro`, подаётся в `sim_vehicle.py` через
     `--add-param-file` (`scripts/sim_up.sh`) — выживает при `fresh-start`.
     Критичные:
+
     ```
     SCHED_LOOP_RATE 100   # иначе "Main loop slow (249Hz < 400Hz)" → краш FCU
     FS_GCS_ENABLE 0       # отключить failsafe GCS
@@ -490,6 +496,7 @@ gz sim (мир+дрон)
 ```
 
 **Запуск (после `make host-setup` и `make build`):**
+
 ```bash
 make up           # создать контейнеры; sim_up.sh + nav_up.sh запустятся автоматически
 make logs         # смотреть output/*.log
@@ -530,6 +537,7 @@ GPU/CPU-прогоны torch/CUDA/ROS2, вынесенные с ноута/Jetso
 **Поднятие нового GCE-бокса — через `gcp/bootstrap_gce.sh`** (не вручную):
 запускается НА инстансе, ставит Node+Claude Code, клонирует репу и **подхватывает
 память из `gcp/memory/`** (едет в самой репе; tarball/scp — опц. override).
+
 ```
 ./gcp/bootstrap_gce.sh [REPO_DIR] [MEMORY_TARBALL]
 ```
