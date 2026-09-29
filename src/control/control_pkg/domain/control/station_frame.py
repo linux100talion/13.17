@@ -107,7 +107,7 @@ class StationFrame:
     def set_trim_body(self, axis, value, sign=1.0) -> None:
         """Записать компоненту оси в мировой вектор (другая компонента не тронута)."""
         if self.wind is not None:
-            # подпись рамой: в ярусе 1 композит-тень читает, но не пишет (owner)
+            # подпись рамой: пишет, только пока рама владелец (ярус 0, owner)
             self.wind.set_channel_axis(self.psi, axis, sign * value, who=self)
             return
         f, l = self.trim_body("pitch"), self.trim_body("roll")

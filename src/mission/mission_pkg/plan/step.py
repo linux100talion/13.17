@@ -10,6 +10,7 @@ ctx.elapsed()/try_cmd()/keep_mode() — ни строчки rclpy.
 """
 import math
 
+from control_pkg.application.control_stack import yaw_stabs
 from control_pkg.application.hud import LadderState
 from control_pkg.domain.control.bank_limit import YawBankLimit
 from control_pkg.domain.control.throttle_latch import ThrottleLatch
@@ -74,15 +75,7 @@ def _yaw_stabs(stabs):
     разворота, за которым контур FCU успевает (v·ω < LOIT_ACC_MAX). Визуальный
     демпфер оси в LOITER почти нем (курс держит FCU → flow_yaw ≈ 0; на ходу его
     глушит v_gate) — остаётся именно передача стика."""
-    out = []
-    for st in stabs or []:
-        axes = getattr(st, "axes", frozenset())
-        if "yaw" not in axes:
-            continue
-        st = st if axes == frozenset({"yaw"}) else getattr(st, "yaw_sub", None)
-        if st is not None:
-            out.append(st)
-    return out
+    return yaw_stabs(stabs)
 
 
 def ground_speed(s, fresh_sec):

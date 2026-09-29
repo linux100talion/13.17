@@ -275,6 +275,17 @@ tick_until(r, clock, 1.0, lvl=0, odom=700, vins_age=0.1, extnav=True)
 check("композит: потолок 2→0 возвращает композит целиком",
       names(stack) == ['dphold'])
 
+# --- 10б. ярус 1 с КОМПОЗИТОМ: тоже только yaw-суб + VinsHold. Раньше композит
+# входил ЦЕЛИКОМ — тенью (выход крена/тангажа перезаписан VinsHold, а оси
+# считались и писали И-член в общий WindTrim — code_smells/shadow_composite_tier1.md).
+# Инвариант всех ярусов: оси стабов стека не пересекаются ---
+from control_pkg.application.control_stack import shared_axes   # noqa: E402
+tick_until(r, clock, 3.0, lvl=1, odom=700, vins_age=0.1)
+check("композит в ярусе 1: стек = yaw-суб + VinsHold (тени нет)",
+      names(stack) == ['yaw_part', 'vins'] and not shared_axes(stack.stabs))
+tick_until(r, clock, 1.0, lvl=0, odom=700, vins_age=0.1)
+check("композит: 1→0 возвращает композит целиком", names(stack) == ['dphold'])
+
 # --- 11. ladder_state(): правда лесенки для /mission/status (HUD-блок режимов).
 # Активный ярус и возраст незалатченного LOITER берутся ОТСЮДА (гистерезисы по
 # снапшоту не восстановимы); без sf_master — None (HUD рисует голый гейт) ---

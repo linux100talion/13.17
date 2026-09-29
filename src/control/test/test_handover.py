@@ -79,20 +79,29 @@ check("odom есть, но stale (Δ>fresh) → не ready",
 # 7. КОМПОЗИТ (DpHold/DpHoldM: ОДИН стаб с осями roll+pitch+yaw). Ловушка LV1/LV3:
 # «есть yaw» сохранял композит ЦЕЛИКОМ, тот стоял ПОСЛЕ VinsHold и перезаписывал
 # roll/pitch — VinsHold обезврежен, борт дрейфовал 1.3 м/с до fence при здоровом
-# VINS. Порядок keep+[vins]: композит пишет все оси, VinsHold поверх — roll/pitch.
+# VINS. Потом порядок keep+[vins] спас выход, но композит остался ТЕНЬЮ: его
+# крен/тангаж считались каждый тик (гвозди, брейки, И-член в общий WindTrim —
+# code_smells/shadow_composite_tier1.md). Теперь в стек идёт только yaw_sub.
+from control_pkg.application.control_stack import shared_axes             # noqa: E402
 from control_pkg.domain.control.stabilization import DpHold                # noqa: E402
 comp = DpHold()
 stack3 = ControlStack([comp], StaticSetpoint(), NoExcitation())
 stack3.enter(s(0, 10.0, 10.0))
 ho3 = VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0)
 sw3 = ho3.maybe_switch(stack3, s(5, 11.0, 11.0))
-check("композит: switch сработал, композит сохранён (yaw жив)",
-      sw3 and comp in stack3.stabs)
-check("композит: VinsHold ПОСЛЕДНИЙ → его roll/pitch перезаписывают композит",
-      isinstance(stack3.stabs[-1], VinsHold))
+check("композит: switch сработал, в стеке yaw_sub + VinsHold (тени нет)",
+      sw3 and comp not in stack3.stabs and stack3.stabs[0] is comp.yaw_sub
+      and len(stack3.stabs) == 2)
+check("композит: VinsHold ПОСЛЕДНИЙ, оси стабов не пересекаются",
+      isinstance(stack3.stabs[-1], VinsHold) and not shared_axes(stack3.stabs))
+calls = []
+for sub in comp._subs:
+    if sub is not comp.yaw_sub:
+        sub.update = (lambda *a, _f=sub.update, **k: (calls.append(1), _f(*a, **k))[1])
 rc3 = stack3.update(s(odom=6, last_sim=11.1, now=11.1, vins_x=1.5))
 check("композит: на форвард-дрейфе vins команда тангажа — от VinsHold (≠1500)",
       rc3.pitch != 1500)
+check("композит: крен/тангаж композита в ярусе VINS не считаются", not calls)
 
 # ============ ГЕЙТ ЗДОРОВЬЯ VINS (авто-демоут яруса 1 при разносе) ============
 def sh(now, vx=0.0, vy=0.0, ipm_ok=False, ipm_vfwd=0.0, ipm_vlat=0.0,

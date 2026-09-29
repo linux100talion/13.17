@@ -191,7 +191,7 @@ class DpVins(StabilizationStrategy):
         self._brake_since = None
         if self.wind is not None:
             # вход в ярус 1: вердикт общего трима (живой / снимок / ноль) и владелец
-            # = DpVins (после композита-тени того же тика). «Выучен» — всегда: посев
+            # = DpVins. «Выучен» — всегда: посев
             # тоже взводил, иначе ki_trim до гвоздя раскачивал борт (T 7 с, 220204)
             self.wind.handover(s.now_sim, who=self, force_learned=True)
         # ТРИМ НЕ ТРОГАЕМ (trim_keep): ветер на переключении яруса не исчезает,

@@ -386,7 +386,7 @@ class DpHold(StabilizationStrategy):
         wind = getattr(self.frame, "wind", None) if self.frame is not None else None
         if wind is not None:
             # снимок устойчивого hold для общего трима (wind_trim.py п.2); подпись
-            # рамой — в ярусе 1 композит тень, его наблюдения WindTrim отбросит
+            # рамой — WindTrim примет, только пока рама владелец (ярус 0)
             wind.observe(s.now_sim, self._wind_steady(s, wind), who=self.frame)
         return rc
 

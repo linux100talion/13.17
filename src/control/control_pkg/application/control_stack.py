@@ -44,6 +44,36 @@ def _as_list(stab):
     return list(stab) if isinstance(stab, (list, tuple)) else [stab]
 
 
+def yaw_stabs(stabs):
+    """Только yaw из стека: чистые yaw-стабы как есть, у композита (DpHold,
+    оси roll+pitch+yaw) — его `yaw_sub`. Ярусы, где roll/pitch держит кто-то
+    другой (ярус 1 — DpVins, ярус 2 — FCU), берут yaw ТАК, а не композитом
+    целиком: иначе композит стоит в стеке «тенью» — выход крена/тангажа
+    перезаписан, а оси считаются каждый тик с живыми побочными эффектами
+    (два писателя в общий WindTrim — src/control/code_smells/shadow_composite_tier1.md)."""
+    out = []
+    for st in stabs or []:
+        axes = getattr(st, "axes", frozenset())
+        if "yaw" not in axes:
+            continue
+        st = st if axes == frozenset({"yaw"}) else getattr(st, "yaw_sub", None)
+        if st is not None:
+            out.append(st)
+    return out
+
+
+def shared_axes(stabs):
+    """Оси, объявленные БОЛЕЕ чем одним стабом стека (пусто = инвариант цел).
+    Инвариант: каждый стаб в стеке владеет каждой своей осью — правило «поздний
+    перезаписывает» не должно прятать мёртвые оси раннего (тень композита)."""
+    seen, dup = set(), set()
+    for st in stabs or []:
+        axes = set(getattr(st, "axes", ()))
+        dup |= seen & axes
+        seen |= axes
+    return dup
+
+
 def _compose(rc: RcCommand, axis: str, off: int, policy: AxisPolicy) -> RcCommand:
     cur = getattr(rc, axis)
     if policy is AxisPolicy.ADDITIVE:

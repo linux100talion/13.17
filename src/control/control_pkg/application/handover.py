@@ -22,6 +22,7 @@ VINSHANDOVER: hover_1 держал 0.9 м, hover_4/7 болтало 4-7 м де�
 """
 from ..domain.modes import navigates as fcu_navigates
 from ..domain.rc import RC_CENTER
+from .control_stack import yaw_stabs
 
 
 class VinsHandover:
@@ -168,12 +169,17 @@ class VinsHandover:
                 self.vins_sane(s))
 
     def vins_stabs(self, base, s):
-        """Состав яруса VinsHold: yaw-стабы из base + VinsHold ПОСЛЕДНИМ (порядок —
-        см. maybe_switch: поздний перезаписывает свои оси у раннего; keep+[vins]
-        верен и для композитов, и для раздельных стабов). VinsHold.enter здесь же:
-        опора = текущая точка. Используется и одноразовым свапом (maybe_switch),
-        и лесенкой SF-мастера (Freefly._ladder_apply — там переходы двусторонние)."""
-        keep = [st for st in base if "yaw" in getattr(st, "axes", frozenset())]
+        """Состав яруса VinsHold: yaw из base + VinsHold ПОСЛЕДНИМ. Yaw — через
+        yaw_stabs: у композита DpHold только его yaw_sub, как в ярусе LOITER.
+        Раньше keep брал стабы «с yaw в осях», и композит (roll+pitch+yaw) входил
+        ЦЕЛИКОМ — тенью: крен/тангаж перезаписывал VinsHold, но оси тени
+        считались каждый тик (гвозди, брейки, И-член в общий WindTrim —
+        code_smells/shadow_composite_tier1.md). Теперь оси стабов яруса не
+        пересекаются, порядок keep+[vins] оставлен как страховка. VinsHold.enter
+        здесь же: опора = текущая точка. Используется и одноразовым свапом
+        (maybe_switch), и лесенкой SF-мастера (Freefly._ladder_apply — там
+        переходы двусторонние)."""
+        keep = yaw_stabs(base)
         self.seed_vins(base, s)
         self._vins.enter(s)
         return keep + [self._vins]
@@ -223,9 +229,9 @@ class VinsHandover:
         roll+pitch+yaw): «есть yaw» сохранял его целиком, композит стоял после
         VinsHold и перезаписывал roll/pitch — VinsHold обезврежен, борт летел
         на голом демпфере (прогоны LV1/LV3 2026-08-19: дрейф 1.3 м/с до fence
-        при ЗДОРОВОМ VINS). С keep+[vins] композит пишет все три оси, VinsHold
-        поверх забирает roll/pitch, yaw остаётся демпферу — верно и для
-        раздельных стабов (оси не пересекаются, порядок безразличен)."""
+        при ЗДОРОВОМ VINS). Сейчас композита в стеке яруса нет вовсе (vins_stabs
+        берёт его yaw_sub), оси не пересекаются и порядок безразличен; keep+[vins]
+        оставлен страховкой на случай нового композита."""
         if not self.vins_ready(s):
             return False
         if self._vins in stack.stabs:
