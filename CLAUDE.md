@@ -135,7 +135,7 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   (`/feature` | `/feature_tracker/feature`) — счётчик FEAT и ЗЕЛЁНЫЕ ТОЧКИ
   самих фич на кадре (пиксельные u,v из каналов PointCloud [id,u,v,vx,vy];
   параметр `hud_features`), armed `/mavros/state` (баннер статуса борта),
-  PWM-смещения демпферов `/flow_dbg*`, дрейф `/nn1/drift`. Без лётной ноды
+  PWM-смещения демпферов `/flow_dbg*` (PWM = канал пульта/стика, не ШИМ моторов), дрейф `/nn1/drift`. Без лётной ноды
   (голый стример на Orin) баннер гейта не рисуется, остальное живёт.
   `/mission/status` пишется в bag (`freefly_lv.sh`), `joy_timeline` показывает
   переходы «HUD: LOITER READY» / «HUD: ярус 1 VINSHOLD» в ленте событий; баннер
