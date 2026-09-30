@@ -102,6 +102,22 @@ if [ "${BS_PILOT:-}" = "replay" ]; then
     echo ">>> joy_replay запущен (pid=$JOY_PID, лог output/joy_replay.log)"
 fi
 
+# ── мост пульта в RC-вход SITL (laptop_move.md §5.8, вариант A) ───────────────
+# /joy (живой TX12 или реплей) → UDP :5501 SITL = настоящий radio_in полётника, как
+# физический приёмник на борту. Пока нода пишет override, он сильнее RC-входа —
+# в полёте ничего не меняется; нужен для ALT_HOLD «только пилот» после переезда на углы.
+BRIDGE_PID=""
+# RC_BRIDGE=0 — выключить (A/B «мост влияет?»); проброс — capture_scene.sh
+if [ "${BS_PILOT:-}" = "joy" ] && [ "${RC_BRIDGE:-1}" != "0" ]; then
+    BARGS=()
+    [ -n "${BS_JOY_SIGNS:-}" ] && BARGS+=("--signs=$BS_JOY_SIGNS")
+    python3 /root/sim_ws/src/sim/joy_rc_bridge.py "${BARGS[@]}" \
+        > /root/sim_ws/output/joy_rc_bridge.log 2>&1 &
+    BRIDGE_PID=$!
+    trap '[ -n "$JOY_PID" ] && kill "$JOY_PID" 2>/dev/null; [ -n "$BRIDGE_PID" ] && kill "$BRIDGE_PID" 2>/dev/null || true' EXIT
+    echo ">>> joy_rc_bridge запущен (pid=$BRIDGE_PID, лог output/joy_rc_bridge.log)"
+fi
+
 echo ">>> ARCH2 bootstrap (control_pkg/mission_pkg): stab=$BS_STAB mission=$BS_MISSION pilot=$BS_PILOT"
 ros2 run mission_pkg bootstrap_arch2
 echo ">>> bootstrap_arch2 завершён."

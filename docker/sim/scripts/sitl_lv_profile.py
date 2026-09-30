@@ -64,7 +64,10 @@ PROFILE = {
 # GLOBAL_POSITION_INT), EXTRA1 50 (ATTITUDE), EXT_STAT 2 (SYS_STATUS,
 # EXTENDED_SYS_STATE), EXTRA2 5 (VFR_HUD).
 STREAMS = {'MAV1_RAW_SENS': 200.0, 'MAV1_POSITION': 25.0, 'MAV1_EXTRA1': 50.0,
-           'MAV1_EXT_STAT': 2.0, 'MAV1_EXTRA2': 5.0}
+           'MAV1_EXT_STAT': 2.0, 'MAV1_EXTRA2': 5.0,
+           # RC_CHANNELS → /mavros/rc/in: что пришло в полётник с RC-входа (мост /joy →
+           # RC SITL, src/sim/joy_rc_bridge.py) или из override ноды; 2026-09-30
+           'MAV1_RC_CHAN': 25.0}
 
 # РЕВЕРС КАНАЛОВ ПОЛЁТНИКА — сток (0) в КАЖДОМ прогоне. cmd/rc_rev ставит бортовой
 # RC2_REVERSED 1 через BS_FCU_PARAMS (идёт последним и перекрывает), а eeprom переживает

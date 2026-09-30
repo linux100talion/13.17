@@ -302,10 +302,11 @@ while [ "$i" -lt "${#SEQ[@]}" ]; do
     # С 2026-09-07 ручки ноды в контейнер НЕ пробрасываются: едет только СПИСОК
     # профилей PROFILES (bootstrap_arch2.sh собирает их загрузчиком по схеме), аргументы
     # прогона BS_REPLAY_* (сценарий реплея) и ARM_* (бюджеты arm.sh/takeoff.sh — лаб-
-    # скрипты, не нода). Хостовые BS_* до ноды не доезжают по построению.
+    # скрипты, не нода). Хостовые BS_* до ноды не доезжают по построению. RC_BRIDGE —
+    # выключатель моста /joy → RC-вход SITL (0 = выкл, src/sim/joy_rc_bridge.py).
     ENVS=()
     while IFS= read -r k; do ENVS+=(-e "$k"); done \
-        < <(env | sed -n 's/^\(\(PROFILES\|BS_REPLAY_[A-Z]*\|ARM_[A-Z0-9_]*\)\)=.*/\1/p' | sort)
+        < <(env | sed -n 's/^\(\(PROFILES\|BS_REPLAY_[A-Z]*\|ARM_[A-Z0-9_]*\|RC_BRIDGE\)\)=.*/\1/p' | sort)
     docker exec "${ENVS[@]}" \
       "$NAV" bash /lab/"$cmd".sh $arg
     i=$((i+1))

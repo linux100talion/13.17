@@ -172,6 +172,7 @@ if ! pgrep -f "mavros_node" >/dev/null; then
 10 50
 2 2
 11 5
+3 25
 STREAMS
         ros2 service call /mavros/set_message_interval mavros_msgs/srv/MessageInterval \
             '{message_id: 168, message_rate: 5.0}' >> "$SLOG" 2>&1 || true
@@ -179,7 +180,7 @@ STREAMS
         echo "  IMU ≈ ${hz:-?} sim-Гц" >> "$SLOG"
         if [ -n "$hz" ] && awk "BEGIN{exit !(${hz:-0}>=15)}"; then
             ok=1
-            echo "  stream_rate: IMU идёт ${hz} sim-Гц (попытка $i) — RAW_SENS/POSITION/EXTRA1/EXT_STAT/EXTRA2 + WIND запрошены"
+            echo "  stream_rate: IMU идёт ${hz} sim-Гц (попытка $i) — RAW_SENS/POSITION/EXTRA1/EXT_STAT/EXTRA2/RC_CHAN + WIND запрошены"
             break
         fi
         sleep 3
