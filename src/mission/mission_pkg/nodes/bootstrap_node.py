@@ -1125,6 +1125,8 @@ class BootstrapArch2Node(Node):
             self._flow_seq_seen, self._flow_seq_t = s.flow_seq, s.now_sim
         landed = ((s.rel_alt is not None and s.rel_alt <= 0.3)
                   or (s.gt_valid and s.gt_z <= 0.3))
+        if not s.armed or landed:
+            self.actuator.hold_yaw_at_ahrs()     # на земле цель курса = курс AHRS
         ev = self._arm_gesture.update(s.now_sim, s.pilot_throttle, s.pilot_yaw,
                                       s.armed, landed)
         if ev == 'arm':
