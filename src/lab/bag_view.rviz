@@ -253,6 +253,57 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /ekf/path
       Value: true
+    # ── ЧТО ЕДЕТ В EKF (/mavros/vision_pose/pose, frame 'map'): поза VINS, уже ─
+    # повёрнутая якорем в кадр полётника (до латча — мост позы бута); голубая
+    # тянется к ЭТОЙ, а не к красной (docker/sim/rviz.md) ─────────────────────
+    - Alpha: 1
+      Axes Length: 1
+      Axes Radius: 0.1
+      Class: rviz_default_plugins/Pose
+      Color: 255; 140; 0
+      Enabled: true
+      Head Length: 0.25
+      Head Radius: 0.12
+      Name: VINS→FCU pose
+      Shaft Length: 0.6
+      Shaft Radius: 0.04
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /mavros/vision_pose/pose
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 140; 0
+      Enabled: true
+      Head Diameter: 0.3
+      Head Length: 0.2
+      Length: 0.3
+      Line Style: Billboards
+      Line Width: 0.05
+      Name: VINS→FCU path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.03
+      Shaft Diameter: 0.1
+      Shaft Length: 0.1
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /vins/path_fcu
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

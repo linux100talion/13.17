@@ -11,10 +11,12 @@
 #   1. static_transform_publisher world→map (identity) — /mavros/local_position/pose
 #      живёт во frame 'map', истина Gazebo и VINS — в 'world'; TF в bag не пишется.
 #   2. bag_path_pub.py — Odometry/PoseStamped → nav_msgs/Path (/truth/path,
-#      /vins/path, /ekf/path): в bag'е нет /path, а линию RViz рисует только из Path.
+#      /vins/path, /ekf/path, /vins/path_fcu): в bag'е нет /path, а линию RViz
+#      рисует только из Path.
 #   3. rviz2 -d src/lab/bag_view.rviz: Image /image_color; Odometry-стрелки (нос =
 #      ось x тела) истины (зелёные) и VINS (красные) со шлейфом Keep; Pose EKF
-#      (голубая, Best Effort — так публикует MAVROS); три линии Path; Fixed Frame
+#      (голубая, Best Effort — так публикует MAVROS) и Pose того, что едет в EKF
+#      (/mavros/vision_pose/pose, оранжевая); четыре линии Path; Fixed Frame
 #      world. Сохранённый вид «Top-down» — в панели Views.
 #   4. ros2 bag play (foreground: SPACE пауза, стрелки — шаг/скорость).
 #
