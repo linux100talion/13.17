@@ -34,7 +34,7 @@ cmd/yaw_ab — A/B «ЧЕЙ КУРС ДЕРЖИТ EKF»: КОМПАС ПРОТИ
     BS_PILOT=replay bash cmd/yaw_ab/yaw_ab.sh compass diagonal
     BS_PILOT=replay bash cmd/yaw_ab/yaw_ab.sh vins    diagonal
 
-Сценарий подставляется сам — src/lab/joystick/scenarios/yaw_ab.json (переопределить:
+Сценарий подставляется сам — src/lab/joystick/scenarios/old/yaw_ab.json (переопределить:
 BS_REPLAY_SCENARIO=...). Пульт не нужен, человек не нужен, маршрут покомандно один и
 тот же во всех четырёх клетках. Фазы закрыты ПО СОСТОЯНИЮ, а не по секундомеру:
 

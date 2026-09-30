@@ -66,6 +66,22 @@ PROFILE = {
 STREAMS = {'MAV1_RAW_SENS': 200.0, 'MAV1_POSITION': 25.0, 'MAV1_EXTRA1': 50.0,
            'MAV1_EXT_STAT': 2.0, 'MAV1_EXTRA2': 5.0}
 
+# РЕВЕРС КАНАЛОВ ПОЛЁТНИКА — сток (0) в КАЖДОМ прогоне. cmd/rc_rev ставит бортовой
+# RC2_REVERSED 1 через BS_FCU_PARAMS (идёт последним и перекрывает), а eeprom переживает
+# прогоны: без явного возврата реверс унаследовал бы любой соседний кандидат, чей
+# профиль BS_FCU_PARAMS про реверс не знает (loiter/rth*, smart_rth). В симе реверс
+# не нужен — причуду TX12 по USB исправляет JOY_SIGNS ноды (laptop_move.md §5.7).
+RC_REVERSE = {f'RC{i}_REVERSED': 0.0 for i in range(1, 5)}
+
+# ДАЛЬНОМЕР ВЫКЛ — в КАЖДОМ прогоне. Стоковый gazebo-iris.parm (--defaults в sim_up.sh)
+# включает RNGFND1_TYPE 1: аналоговый дальномер, который симулирует САМ SITL, а не мир
+# Gazebo. Он читает 23–25 м при истинных 1–3 м (статус «исправен»), и ALT_HOLD со
+# слежением за поверхностью (SURFTRAK_MODE 1 по умолчанию) держит это фантомное
+# расстояние: на плече вперёд показание росло 24.7→25.4 м, и полётник при газе ровно 1500
+# сам заказал снижение до земли (vins_init_20260930_120758, dataflash CTUN SAlt/DSAlt).
+# В eeprom, а не в sitl-extra.parm: eeprom сильнее --defaults (урок VISO_TYPE).
+RANGEFINDER = {'RNGFND1_TYPE': 0.0}
+
 
 def read_param(m, name, budget=8.0):
     t0 = time.time()
@@ -99,6 +115,8 @@ def main():
         return 2
     want = dict(want)     # копия: не мутируем PROFILE между вызовами
     want.update(STREAMS)  # потоки телеметрии — всегда (см. STREAMS)
+    want.update(RC_REVERSE)  # реверс каналов — сток, пока BS_FCU_PARAMS не скажет иначе
+    want.update(RANGEFINDER)  # фантомный дальномер SITL — выкл (см. RANGEFINDER)
     # BS_EKF_DRAG — drag-фьюжн ветра EKF3 (BCOEF, кг/м²; 0 = выкл). Наблюдаемость
     # на VINS-external-nav доказана Ф0 (ветер сошёлся к истине 10 м/с). Даёт
     # стрелку ветра HUD во ВСЕХ режимах (windspeed.md). ⚠️ МЕНЯЕТ EKF (добавляет

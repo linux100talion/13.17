@@ -1,0 +1,8 @@
+# КАНДИДАТ — РЕВЕРС ВСЕХ УГЛОВЫХ КАНАЛОВ ПОЛЁТНИКА (cmd/rc_rev, 2026-09-30).
+# Всё остальное = loiter/guard.txt → loiter/baseline.txt (стек cmd/bl бит в бит).
+# Зачем: компенсация (rc_reverse.py) обязана работать для любого реверса крен/тангаж/
+# рыскание, не только для бортового RC2. Рыскание реверсное — руддер-арм и дизарм тоже
+# идут через компенсацию. Газ (RC3) не трогаем: его реверс нода не поддерживает
+# сознательно (override не шлёт, release).
+include guard.txt
+BS_FCU_PARAMS=RTL_ALT_M=15 RTL_LOIT_TIME=5000 LAND_ALT_LOW_M=10 SRTL_ACCURACY=2 SRTL_POINTS=300 RC1_REVERSED=1 RC2_REVERSED=1 RC4_REVERSED=1

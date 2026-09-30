@@ -427,10 +427,21 @@ class JoyReplay(Node):
             # стека: «висим в круге, пока не позеленел RTH» — момент зрелости VINS
             # плавает от прогона к прогону, и фиксированный hold сделал бы стороны
             # A/B несравнимыми. Пример: {"wait_status": {"has": "rth=ready"}}
-            want = step['wait_status']['has']
+            # "swing": {"amp": 0.15, "period": 4} — пока ждём, крен/тангаж ведут
+            # лёгкую раскачку ПО КРУГУ (как пилот раскачивает борт у земли, чтобы
+            # дать VINS параллакс для init); на выходе из шага — стики в центр.
+            w = step['wait_status']
+            want = w['has']
+            sw = w.get('swing')
             if self._status is not None and want in self._status:
                 self.get_logger().info(f"    статус: есть «{want}»")
+                if sw:
+                    self._sem.update({'roll': 0.0, 'pitch': 0.0})
                 return True
+            if sw:
+                ph = 2.0 * math.pi * (now - self._step_t0) / float(sw.get('period', 4.0))
+                amp = float(sw.get('amp', 0.15))
+                self._sem.update({'roll': amp * math.sin(ph), 'pitch': -amp * math.cos(ph)})
             return (self._abort(f"wait_status {want!r} (статус={self._status!r})")
                     if self._timeout(now, step, 120) else False)
         if 'wait_mode' in step:

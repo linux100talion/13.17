@@ -1,0 +1,11 @@
+# КАНДИДАТ — РЕВЕРС ТАНГАЖА ПОЛЁТНИКА, КАК НА РЕАЛЬНОМ БОРТУ (cmd/rc_rev, 2026-09-30).
+# Всё остальное = loiter/guard.txt → loiter/baseline.txt (стек cmd/bl бит в бит).
+# Зачем: на борту RC2_REVERSED 1 (TX12 по ELRS шлёт тангаж «вперёд = 2011»), а override
+# FCU переворачивает так же, как приёмник. Нода компенсирует (5780d48, rc_reverse.py):
+# читает RCn_REVERSED/TRIM и зеркалит реверсные каналы. Здесь SITL получает бортовой
+# реверс — если компенсация верна, полёт совпадает со стороной loiter/guard (реверс 0).
+# Стоковые значения возврата — копия loiter/baseline.txt (ключ перекрывается целиком).
+# Соседей восстанавливает sitl_lv_profile.py: RC1..4_REVERSED = 0 в каждом прогоне,
+# пока BS_FCU_PARAMS не скажет иначе.
+include guard.txt
+BS_FCU_PARAMS=RTL_ALT_M=15 RTL_LOIT_TIME=5000 LAND_ALT_LOW_M=10 SRTL_ACCURACY=2 SRTL_POINTS=300 RC2_REVERSED=1

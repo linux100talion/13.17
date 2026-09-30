@@ -36,7 +36,7 @@ if [ "${BS_PILOT:-}" = "replay" ]; then
     [ "$SIDE" = "vins" ] && P="$P mission/yaw_vins_replay" || P="$P mission/replay"
     # МАРШРУТ ОДИН НА ВСЕ ЧЕТЫРЕ КЛЕТКИ — иначе сравнивать нечего: разброс ручного
     # пилотирования (1.75° по двум дням) больше измеряемой разницы (~1.1°)
-    export BS_REPLAY_SCENARIO="${BS_REPLAY_SCENARIO:-/lab/joystick/scenarios/yaw_ab.json}"
+    export BS_REPLAY_SCENARIO="${BS_REPLAY_SCENARIO:-/lab/joystick/scenarios/old/yaw_ab.json}"
 else
     [ "$SIDE" = "vins" ] && P="$P mission/yaw_vins" || P="$P mission/baseline"
 fi
