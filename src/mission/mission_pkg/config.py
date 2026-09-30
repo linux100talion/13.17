@@ -1226,6 +1226,15 @@ class BootstrapConfig:
     #   damper/vinshold — иначе: остаёмся в ALT_HOLD (стик = наклон — семантика
     #            демпфера/VinsHold сохранена), газ ниже зоны на land_rate,
     #            касание → газ в пол → дизарм сервисом (force через 5 с).
+    att_out: float             # 1 = ВЫХОД В УГЛАХ (переезд с override, laptop_move.md
+                                     # §5.7): нода override НЕ шлёт вообще; в воздухе
+                                     # (≥ 0.7 м, SF вверх) полётник в GUIDED_NOGPS и
+                                     # получает углы SET_ATTITUDE_TARGET, на земле /
+                                     # SF не вверх / после дизарма — ALT_HOLD «только
+                                     # пилот» (стики с RC-входа: мост в симе,
+                                     # приёмник на борту); LOITER/LAND/RTL — как
+                                     # заявляет план, нода молчит. 0 = override,
+                                     # как раньше. BS_ATT_OUT
     ff_land: float             # 1 = кнопка SA сажает (шаг SoftLand в плане
                                      # freefly); 0 = как раньше (сажает пилот).
                                      # BS_FF_LAND / --ff-land

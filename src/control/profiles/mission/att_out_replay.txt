@@ -1,0 +1,6 @@
+# КАНДИДАТ — ВЫХОД В УГЛАХ под реплеем пульта (переезд с override, laptop_move.md §5.7,
+# 2026-09-30). Всё = mission/replay.txt; отличие одно: BS_ATT_OUT=1 — нода override не шлёт,
+# ALT_HOLD — только пилот (стики через мост /joy → RC-вход SITL), в воздухе GUIDED_NOGPS +
+# SET_ATTITUDE_TARGET (порт AttitudeOutput, пересчёт PWM → углы как в ALT_HOLD).
+include replay.txt
+BS_ATT_OUT=1

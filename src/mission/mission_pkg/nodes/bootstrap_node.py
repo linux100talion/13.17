@@ -24,7 +24,8 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from std_msgs.msg import Bool, Empty
 
-from control_pkg.application.arbiter import Arbiter
+from control_pkg.application.arbiter import PILOT_MANUAL, Arbiter
+from control_pkg.application.att_mode import GUIDED_NOGPS, AttModeProxy
 from control_pkg.domain.control.wind_trim import WindTrim
 from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
@@ -216,7 +217,16 @@ class BootstrapArch2Node(Node):
         else:
             plan = build_bootstrap_plan(cfg, build_control_stack(cfg), handover,
                                         live_pilot=live_pilot)
-        self.runner = PlanRunner(plan, self.clock, self.actuator, self.logger,
+        # ВЫХОД В УГЛАХ (config.att_out): режим FCU решает прокси (ALT_HOLD — только
+        # пилот, в воздухе GUIDED_NOGPS), выход — углы, override не шлём вообще
+        self._att_out = cfg.att_out > 0
+        self._fcu_mode = None
+        self._mode_proxy = AttModeProxy(self.actuator) if self._att_out else None
+        if self._att_out:
+            self.logger.warn("ВЫХОД В УГЛАХ: override не шлю; ALT_HOLD — только пилот по "
+                             "RC-входу, в воздухе GUIDED_NOGPS + SET_ATTITUDE_TARGET")
+        self.runner = PlanRunner(plan, self.clock,
+                                 self._mode_proxy or self.actuator, self.logger,
                                  perception=self.perception,
                                  setpoints=self.actuator)
 
@@ -748,6 +758,9 @@ class BootstrapArch2Node(Node):
         self._rth_tick(s)                        # латч возврата + зрелость моста
 
         self._send_origin()              # безжпсный бут: origin до подтверждения
+        self._fcu_mode = s.mode
+        if self._mode_proxy is not None:
+            self._mode_proxy.update(s, s.pilot_switch == PILOT_MANUAL)
         rc = self.runner.tick(s)
         # восстановление после разноса: гейт здоровья демотнул ярус → /restart VINS
         # (переинициализация), с кулдауном (сброс окна VINS сам занимает время)
@@ -1106,6 +1119,14 @@ class BootstrapArch2Node(Node):
         # команду). Протух → release вместо publish: FCU возвращается к
         # физическому приёмнику, нода выходит из цепочки (laptop_move.md §5.2).
         if self.link.update(self.pilot.link_age()):
+            if self._att_out:
+                # углы: просто замолкаем — полётник по GUID_TIMEOUT выравнивается и
+                # держит высоту; override (даже release) в этом режиме не шлём вовсе
+                if self.link.changed:
+                    self.logger.error(
+                        f"ПУЛЬТ ЗАМОЛЧАЛ ({self.link.age:.1f} с без семпла) — углы не шлю, "
+                        f"полётник по GUID_TIMEOUT выровняется и будет держать высоту")
+                return
             if self.link.changed:
                 self.logger.error(
                     f"ПУЛЬТ ЗАМОЛЧАЛ ({self.link.age:.1f} с без семпла) — "
@@ -1114,6 +1135,12 @@ class BootstrapArch2Node(Node):
             return
         if self.link.changed:
             self.logger.warn("пульт снова жив — override восстановлен")
+        if self._att_out:
+            # углы — ТОЛЬКО в GUIDED_NOGPS; в прочих режимах нода молчит (ALT_HOLD —
+            # пилот по RC-входу, LOITER/LAND/RTL ведёт полётник). Override не шлём никогда.
+            if self._fcu_mode == GUIDED_NOGPS:
+                self.actuator.publish_rc_as_attitude(rc)
+            return
         self.actuator.publish(rc)
 
     @property

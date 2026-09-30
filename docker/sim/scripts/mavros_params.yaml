@@ -1,0 +1,9 @@
+# Параметры плагинов MAVROS (mavros_node запускается БЕЗ штатного apm_config.yaml — nav_up.sh).
+# setpoint_raw.thrust_scaling: без него плагин ОТБРАСЫВАЕТ каждый SET_ATTITUDE_TARGET
+# («Recieved thrust, but ignore_thrust is true … Actuation will be ignored»; дефолт nan).
+# 1.0 = поле thrust 0..1 проходит как есть (так в штатном apm_config.yaml). Нужен выходу в
+# углах (порт AttitudeOutput, BS_ATT_OUT=1): прогон attout_att_20260930_153618 — полётник в
+# GUIDED_NOGPS держал DesRoll 0 весь полёт, наших углов не видел.
+/mavros/setpoint_raw:
+  ros__parameters:
+    thrust_scaling: 1.0

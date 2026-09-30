@@ -133,11 +133,14 @@ fi
 #    JSON-протоколом возвращает no_time_sync и использует wall-time FCU-часы,
 #    отличные от Gazebo sim-времени. При дефолтном MAVLINK-режиме offset дрейфует
 #    → IMU timestamps уходят назад → VINS получает "imu message in disorder".
+#    --params-file /scripts/mavros_params.yaml — параметры плагинов (thrust_scaling для
+#    SET_ATTITUDE_TARGET: без него setpoint_raw отбрасывает все команды углом).
 if ! pgrep -f "mavros_node" >/dev/null; then
     nohup ros2 run mavros mavros_node --ros-args \
         -p use_sim_time:=true \
         -p fcu_url:="udp://:14540@127.0.0.1" \
         -p conn/timesync_mode:=NONE \
+        --params-file /scripts/mavros_params.yaml \
         >"$LOG/mavros.log" 2>&1 &
     echo "  MAVROS   -> $LOG/mavros.log"
     # ── ПОТОКИ ТЕЛЕМЕТРИИ FCU — В ФОРГРАУНДЕ, «nav: готово» ТОЛЬКО ПОСЛЕ НИХ ──

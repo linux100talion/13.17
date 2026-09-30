@@ -57,6 +57,11 @@ class PlanRunner:
             self.perception.reset_keyframe()
 
     def keep_mode(self, s, mode):
+        # выход в углах (config.att_out): «держать ALT_HOLD» в воздухе = GUIDED_NOGPS —
+        # решает прокси режима (application/att_mode.py); без него — как заявлено
+        eff = getattr(self.mode, 'effective', None)
+        if eff is not None:
+            mode = eff(mode)
         # ре-ассерт режима (страховка на смену полётником); '' — транзиент до heartbeat
         if s.mode not in (None, "", mode) and self.now() - self._last_mode_assert >= 2.0:
             self._last_mode_assert = self.now()

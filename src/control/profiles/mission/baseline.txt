@@ -128,6 +128,9 @@ BS_YAW_SETTLE=6
 # второе нажатие до касания ОТМЕНЯЕТ (с 2026-09-06); на ярусе LOITER кнопка ВЫКЛ (отмена из
 # LAND полётника не сработала — сажать руками либо CH6 вниз → ярус 0/1 → SA); гейт кнопки
 # rel_alt ≤ 5 м и |v| ≤ 1 м/с; снижение 0.15 м/с (= LAND_SPD_MS ветки pos)
+# слой: нода — выход в УГЛАХ (переезд с override, laptop_move.md §5.7): 1 = ALT_HOLD только
+# пилот по RC-входу, в воздухе GUIDED_NOGPS + SET_ATTITUDE_TARGET, override нет; 0 = override
+BS_ATT_OUT=0
 BS_FF_LAND=1
 BS_FF_LAND_CANCEL=1
 BS_LAND_IN_LOITER=0
