@@ -57,7 +57,7 @@ TIER_NAMES = {0: "DAMPER", 1: "VINSHOLD", 2: "LOITER"}
 # позицию держит FCU (LAND на EKF-от-VINS) или касание; жёлтый — снижение в
 # ALT_HOLD под нашим стеком (демпфер/VinsHold, стик = наклон).
 LAND_NAMES = {"pos": "FCU POS", "damper": "DAMPER", "vinshold": "VINSHOLD",
-              "touch": "TOUCHDOWN"}
+              "near": "NEAR GROUND", "touch": "TOUCHDOWN"}
 # FCU не подтверждает LOITER дольше этого — «refuses» (зеркало _latch_warned
 # в Freefly._mode_target: предупреждение в лог через 5 с ре-ассерта).
 LATCH_REFUSE_SEC = 5.0

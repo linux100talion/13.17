@@ -92,7 +92,7 @@ RC_CENTER = 1500
 # держит EKF (стек пуст); damper/vinshold — снижение в ALT_HOLD под нашим
 # стеком (стик = наклон); touch — касание, ждём дизарм.
 LAND_NAMES = {'pos': 'FCU POS', 'damper': 'DAMPER', 'vinshold': 'VINSHOLD',
-              'touch': 'TOUCHDOWN'}
+              'near': 'NEAR GROUND', 'touch': 'TOUCHDOWN'}
 
 
 def loiter_gate(s, fresh_sec: float, loiter_alt: float):

@@ -86,6 +86,30 @@ class RosTelemetry:
                                      self._on_ext, 10)
         except ImportError:
             pass
+        # ⚠️ ArduCopter НЕ кладёт EXTENDED_SYS_STATE ни в один поток SRx/MAVx (замер 2026-09-30:
+        # /mavros/extended_state молчал весь полёт, fcu_landed=-1 — касание SoftLand жило
+        # только на баро ≤ 0.3 м, газ в пол за 0.25 м до земли, пик 0.5–0.7 м/с). Просим
+        # сообщение сами — SET_MESSAGE_INTERVAL (id 245, 5 Гц), раз в 3 с, пока не пошло;
+        # так и в симе, и на борту без правки конфигурации MAVROS.
+        self._ext_cli = None
+        self._ext_log = node.get_logger()
+        try:
+            from mavros_msgs.srv import MessageInterval
+            self._ext_cli = node.create_client(MessageInterval, '/mavros/set_message_interval')
+            self._ext_req_type = MessageInterval
+            node.create_timer(3.0, self._ask_ext)
+        except ImportError:
+            pass
+
+    def _ask_ext(self) -> None:
+        if self._s.fcu_landed_sim > -1e8 or self._ext_cli is None:
+            return                       # пошло (или просить нечем)
+        if not self._ext_cli.service_is_ready():
+            return
+        req = self._ext_req_type.Request()
+        req.message_id = 245             # EXTENDED_SYS_STATE (landed_state)
+        req.message_rate = 5.0
+        self._ext_cli.call_async(req)
 
     def _on_ext(self, m):
         self._s.fcu_landed = int(m.landed_state)

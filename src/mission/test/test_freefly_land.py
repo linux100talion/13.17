@@ -343,11 +343,36 @@ tick_until(r, clock, 6.0, alt=0.8, ipm=(0.0, 0.0))
 check("бюджет 5 с без касания → LAND_TIMEOUT, error в логе",
       r.finished and r.result == "LAND_TIMEOUT" and log.count("ERR") >= 1)
 
+# --- 12b. МЯГКИЙ ГАЗ ДО РЕАЛЬНОГО КОНТАКТА: у земли, но ещё снижается — газ в пол НЕ даём;
+#          детектор FCU — сразу; страховка NEAR_MAX ---
+r, clock, mode, log, stack, ff, land = make()
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 0.2, alt=0.8, ipm=(0.0, 0.0), sa=True)
+alt = 0.3
+for _ in range(20):                                   # 1 с: 0.30 → 0.15 м, спуск 0.15 м/с
+    alt -= 0.0075
+    rc, _ = tick_until(r, clock, 0.05, alt=alt, ipm=(0.0, 0.0))
+check("у земли и ещё снижается 0.15 м/с — не касание, газ снижения",
+      land.land_state() == "near" and rc.throttle == DESC)
+rc, _ = tick_until(r, clock, 0.1, alt=alt, ipm=(0.0, 0.0), fcu_landed=1)
+check("детектор FCU ON_GROUND → касание сразу, газ в пол",
+      land.land_state() == "touch" and rc.throttle == FLOOR
+      and any("детектор FCU ON_GROUND" in ln for ln in log.lines))
+r, clock, mode, log, stack, ff, land = make()
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 0.2, alt=0.8, ipm=(0.0, 0.0), sa=True)
+alt = 0.3
+for _ in range(90):                                   # 4.5 с медленно ползёт вниз 0.1 м/с
+    alt -= 0.005
+    tick_until(r, clock, 0.05, alt=alt, ipm=(0.0, 0.0))
+check("страховка: 4 с у земли без подтверждения → касание",
+      land.land_state() == "touch" and any("4 с у земли" in ln for ln in log.lines))
+
 # --- 13. касание без дизарма 30 с → LAND_STUCK ---
 r, clock, mode, log, stack, ff, land = make()
 tick_until(r, clock, 1.0)
 tick_until(r, clock, 0.2, alt=0.8, ipm=(0.0, 0.0), sa=True)
-tick_until(r, clock, 31.0, alt=0.1)
+tick_until(r, clock, 33.0, alt=0.1)   # «у земли» → баро встало (~1.5 с) → касание → 30 с
 check("30 с после касания заармлен → LAND_STUCK (громкий error)",
       r.finished and r.result == "LAND_STUCK"
       and any("ЗААРМЛЕННЫМ" in ln for ln in log.lines))
@@ -399,8 +424,13 @@ check("после отмены из LAND: стек перепринят лесе
 r, clock, mode, log, stack, ff, land = make()
 tick_until(r, clock, 1.0)
 tick_until(r, clock, 0.2, alt=0.8, ipm=(0.05, 0.0), sa=True)
-tick_until(r, clock, 0.3, alt=0.2, ipm=(0.05, 0.0), sa=False)          # касание по баро
-check("касание: land_state=touch", land.land_state() == "touch")
+rc, _ = tick_until(r, clock, 0.3, alt=0.2, ipm=(0.05, 0.0), sa=False)  # баро ≤ ground_z
+check(f"МЯГКИЙ ГАЗ: баро 0.2 ≤ 0.3 — «у земли» (near), газ снижения {DESC}, не в пол",
+      land.land_state() == "near" and rc.throttle == DESC)
+tick_until(r, clock, 2.0, alt=0.2, ipm=(0.05, 0.0), sa=False)          # баро стоит
+check("баро встало при команде вниз (1.5 с) → касание: land_state=touch",
+      land.land_state() == "touch"
+      and any("касание — баро встало" in ln for ln in log.lines))
 tick_until(r, clock, 0.2, alt=0.2, sa=True)
 check("SA после касания: остаёмся в land, предупреждение",
       cur(r) == "land" and any("ПОСЛЕ касания" in ln for ln in log.lines))
