@@ -60,16 +60,27 @@ tilt = deg(math.atan(math.hypot(math.tan(a.pitch), math.tan(a.roll) / math.cos(a
 check("полный крен+тангаж: наклон вектора ≤ 20° (потолок держит ядро)", tilt <= 20.0 + 1e-6, f"{tilt:.2f}")
 a = rc_to_attitude(RcCommand(pitch=1510), BOARD)
 check("борт: мёртвой зоны нет — 10 µs уже дают угол", abs(a.pitch) > 0)
-check("борт: 988/2011 → в упор ровно 20°",
+check("борт: 2011 (за пределом 500 µs) → кламп 20°",
       abs(deg(rc_to_attitude(RcCommand(pitch=2011), BOARD).pitch) - 20) < 1e-9)
 check("реверс не применяется: вперёд всегда нос вниз и на борту",
       rc_to_attitude(RcCommand(pitch=1300), BOARD).pitch < 0)
 
 print("курс")
-check("вправо в упор = +PILOT_Y_RATE",
-      abs(deg(rc_to_attitude(RcCommand(yaw=2000), SIM).yaw_rate) - 202.5) < 1e-9)
-check("влево 1250 → −101.25 °/с",
-      abs(deg(rc_to_attitude(RcCommand(yaw=1250), SIM).yaw_rate) + 101.25) < 1e-9)
+check("вправо в упор (2000) = +90 °/с — фиксированный масштаб, не PILOT_Y_RATE",
+      abs(deg(rc_to_attitude(RcCommand(yaw=2000), SIM).yaw_rate) - 90.0) < 1e-9)
+check("влево 1250 → −45 °/с",
+      abs(deg(rc_to_attitude(RcCommand(yaw=1250), SIM).yaw_rate) + 45.0) < 1e-9)
+
+print("единицы не зависят от борта (вариант A 2026-09-30)")
+for rc in (RcCommand(pitch=1400), RcCommand(roll=1620, pitch=1450), RcCommand(yaw=1700)):
+    a_sim, a_brd = rc_to_attitude(rc, SIM), rc_to_attitude(rc, BOARD)
+    check(f"{rc}: сим и борт дают тот же угол и темп",
+          abs(a_sim.roll - a_brd.roll) < 1e-12 and abs(a_sim.pitch - a_brd.pitch) < 1e-12
+          and abs(a_sim.yaw_rate - a_brd.yaw_rate) < 1e-12)
+check("0.040 °/µs: 100 µs → 4°", abs(deg(rc_to_attitude(RcCommand(pitch=1600), SIM).pitch) - 4.0) < 1e-9)
+tight = dict(SIM, ATC_ANGLE_MAX=10)
+check("потолок — ATC_ANGLE_MAX полётника (10° режет 16°)",
+      abs(deg(rc_to_attitude(RcCommand(pitch=1100), tight).pitch) + 10.0) < 1e-6)
 
 print("газ (get_pilot_desired_climb_rate_ms)")
 check("1500 = центр → 0", climb_from_throttle(1500, SIM) == 0.0)
