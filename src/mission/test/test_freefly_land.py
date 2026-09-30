@@ -368,6 +368,15 @@ for _ in range(90):                                   # 4.5 с медленно 
 check("страховка: 4 с у земли без подтверждения → касание",
       land.land_state() == "touch" and any("4 с у земли" in ln for ln in log.lines))
 
+# --- 12c. выход в углах: лог называет режим, который реально попросят у полётника ---
+r, clock, mode, log, stack, ff, land = make()
+mode.effective = lambda m: "GUIDED_NOGPS" if m == "ALT_HOLD" else m   # прокси att_mode
+tick_until(r, clock, 1.0)
+tick_until(r, clock, 0.2, alt=0.8, ipm=(0.0, 0.0), sa=True)
+check("выход в углах: лог посадки — «снижение в GUIDED_NOGPS», не ALT_HOLD",
+      any("снижение в GUIDED_NOGPS" in ln for ln in log.lines)
+      and not any("снижение в ALT_HOLD" in ln for ln in log.lines))
+
 # --- 13. касание без дизарма 30 с → LAND_STUCK ---
 r, clock, mode, log, stack, ff, land = make()
 tick_until(r, clock, 1.0)

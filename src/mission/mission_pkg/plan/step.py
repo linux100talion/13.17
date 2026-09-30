@@ -53,6 +53,13 @@ def _step_climb(ctx, s, alt_hold, throttle) -> float:
     return _gas(ctx, throttle).climb
 
 
+def _eff(ctx, mode):
+    """Имя режима для лога — фактически запрошенное у полётника (ALT_HOLD → GUIDED_NOGPS
+    при выходе в углах); стенды без прокси — как заявлено."""
+    f = getattr(ctx, "effective_mode", None)
+    return f(mode) if f is not None else mode
+
+
 def _run(rc): return StepResult(rc, RUN)
 def _next(rc, result=""): return StepResult(rc, NEXT, result=result)
 def _goto(rc, name, result=""): return StepResult(rc, GOTO, goto=name, result=result)
@@ -304,7 +311,8 @@ class Control(Step):
                 self.stack.switch_stabilization(self._pilot_stabs if pos == -1 else [])
                 self.stack.enter(s)      # пересев опор: держим ОТ ТЕКУЩЕЙ точки
                 ctx.log.info("    тумблер: {}".format(
-                    "НАШ СТАБИЛИЗАТОР" if pos == -1 else "чистый ALT_HOLD (стики=наклоны)"))
+                    "НАШ СТАБИЛИЗАТОР" if pos == -1
+                    else f"чистый {_eff(ctx, 'ALT_HOLD')} (стики=наклоны)"))
         if self.handover is not None and self.handover.maybe_switch(self.stack, s):
             ctx.log.info(f"    ✅ VINS сошёлся ({s.vins_odom_count} odom) → Flow→Vins (hot-swap)")
         ctrl = self.stack.update(s)
@@ -653,7 +661,7 @@ class Freefly(Step):
                 # работала). Окно LAND_EXIT_SEC: keep ре-ассертится, стики в центре.
                 self._land_exit_until = s.now_sim + self.LAND_EXIT_SEC
                 ctx.mode.set_mode(self.keep)
-                ctx.log.warn(f"    freefly: FCU ещё в LAND — выход в {self.keep} "
+                ctx.log.warn(f"    freefly: FCU ещё в LAND — выход в {_eff(ctx, self.keep)} "
                              f"(ре-ассерт {self.LAND_EXIT_SEC:g} с, стики в центре)")
 
     def _land_press(self, ctx, s) -> bool:
@@ -928,7 +936,8 @@ class Freefly(Step):
                 self.stack.switch_stabilization(self._pilot_stabs if pos == -1 else [])
                 self.stack.enter(s)      # пересев опор: держим ОТ ТЕКУЩЕЙ точки
                 ctx.log.info("    тумблер: {}".format(
-                    "НАШ СТАБИЛИЗАТОР" if pos == -1 else "чистый ALT_HOLD (стики=наклоны)"))
+                    "НАШ СТАБИЛИЗАТОР" if pos == -1
+                    else f"чистый {_eff(ctx, 'ALT_HOLD')} (стики=наклоны)"))
         # режим — ПОСЛЕ селектора (loiter_center читает свежий _stab_pos/_level)
         ctx.keep_mode(s, self._mode_target(ctx, s))
         if self._pilot_stabs is not None and self.sf_master:
@@ -1223,9 +1232,9 @@ class SoftLand(Step):
             self.stack.switch_stabilization(stabs)
         ctx.reset_keyframe()
         self.stack.enter(s)
-        ctx.log.info("    {}: {} — снижение в ALT_HOLD под {} ({:+.2f} м/с), стик = наклон"
-                     .format(self.name, why, "VINS" if self._tier == 1 else "ДЕМПФЕРОМ",
-                             self.descent))
+        ctx.log.info("    {}: {} — снижение в {} под {} ({:+.2f} м/с), стик = наклон"
+                     .format(self.name, why, _eff(ctx, self.keep),
+                             "VINS" if self._tier == 1 else "ДЕМПФЕРОМ", self.descent))
 
     def _decide(self, ctx, s) -> None:
         if s.mode == "LOITER":
