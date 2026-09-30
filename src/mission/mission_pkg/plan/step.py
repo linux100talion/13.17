@@ -12,6 +12,7 @@ import math
 
 from control_pkg.application.control_stack import yaw_stabs
 from control_pkg.application.hud import LadderState
+from control_pkg.domain.control.altitude import ThrottleMap
 from control_pkg.domain.control.bank_limit import YawBankLimit
 from control_pkg.domain.control.throttle_latch import ThrottleLatch
 from control_pkg.domain.modes import matches as mode_matches
@@ -1098,8 +1099,8 @@ class SoftLand(Step):
         self.fresh_sec = fresh_sec
         self.keep = keep
         self.throttle_hold = throttle_hold
-        # газ снижения ветки alt: та же карта «PWM → vz», что у AltHold
-        self.descent = int(round(RC_CENTER - (alt_dz + rate / alt_rate_full * alt_span)))
+        # газ снижения ветки alt: скорость rate (м/с) → µs той же картой, что у AltHold
+        self.descent = int(round(RC_CENTER - ThrottleMap(alt_dz, alt_span, alt_rate_full).off(rate)))
         self.enter(None, None)
 
     def enter(self, ctx, s) -> None:

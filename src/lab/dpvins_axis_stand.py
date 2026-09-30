@@ -7,7 +7,7 @@
 ось, собирает DpVins руками (не штатные ручки) и держит модель борта старого сима. Здесь:
   * DpVins — ШТАТНЫЙ: mission_pkg.recipes.build_vins_stab(BootstrapConfig.baseline(**ручки),
     WindTrim) — ровно тот объект и те ручки профилей, что летают (dpvins/brake5_stop…), с общим
-    ветровым тримом; перебор — переопределением полей конфига (--set dpvins_kp_lat=40 …);
+    ветровым тримом; перебор — переопределением полей конфига (--set dpvins_kp_lat_deg=1.6 …);
   * боковая ось: курс 0 → «влево» = ENU y, команда — rc.roll (вправо +);
   * модель борта — СНЯТАЯ по полёту (plant_id по rollbig_rc_nogust_20260930_173309, R² 1.00):
     ускорение на PWM α, апериодика наклона τ_act, чистое запаздывание команды delay, вязкое
@@ -20,7 +20,7 @@
 
   python3 src/lab/dpvins_axis_stand.py                       # борт сегодня, без порывов
   python3 src/lab/dpvins_axis_stand.py --gust 43             # + порывы до 5 м/с
-  python3 src/lab/dpvins_axis_stand.py --set dpvins_kp_lat=40 dpvins_ki=6
+  python3 src/lab/dpvins_axis_stand.py --set dpvins_kp_lat_deg=1.6 dpvins_ki_deg=0.24
   python3 src/lab/dpvins_axis_stand.py --plant old           # модель старого сима (30°, TC 0.1)
 """
 import argparse
@@ -31,12 +31,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "control"))
 sys.path.insert(0, os.path.join(HERE, "..", "mission"))
-from control_pkg.domain.control.wind_trim import WindTrim          # noqa: E402
 from control_pkg.domain.rc import RC_CENTER                          # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
 from mission_pkg.config import BootstrapConfig                       # noqa: E402
-from mission_pkg.recipes import build_vins_stab                       # noqa: E402
+from mission_pkg.recipes import build_vins_stab, build_wind_trim      # noqa: E402
 
 DT = 0.02
 # модели борта: α м/с² на PWM, τ_act с, delay с, β 1/с (plant_id 2026-09-30)
@@ -78,7 +77,7 @@ def stick_at(t):
 
 def run(overrides, plant, gust_pwm=0.0, base_pwm=BASE_PWM, tau_meas=TAU_MEAS):
     cfg = BootstrapConfig.baseline(**overrides)
-    wind = WindTrim(imax=max(cfg.dpvins_imax, cfg.roll_imax, cfg.pitch_imax))
+    wind = build_wind_trim(cfg)
     st = build_vins_stab(cfg, wind)
     p = PLANTS[plant] if isinstance(plant, str) else plant
     nd = max(0, int(round(p['delay'] / DT)))
@@ -139,7 +138,7 @@ def main():
     ap.add_argument('--base', type=float, default=BASE_PWM)
     ap.add_argument('--tau-meas', type=float, default=TAU_MEAS)
     ap.add_argument('--delay-scale', type=float, default=1.0, help='множитель запаздываний (запас)')
-    ap.add_argument('--set', nargs='*', help='переопределить поля BootstrapConfig: dpvins_kp_lat=40 …')
+    ap.add_argument('--set', nargs='*', help='переопределить поля BootstrapConfig: dpvins_kp_lat_deg=1.6 …')
     a = ap.parse_args()
     plant = dict(PLANTS[a.plant])
     plant['tau_act'] *= a.delay_scale

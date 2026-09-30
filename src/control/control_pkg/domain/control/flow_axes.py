@@ -354,6 +354,7 @@ class DpHold(StabilizationStrategy):
             osign = getattr(x, "osign", None)
             if i is None or osign is None:
                 continue
+            i = x._us(i)                 # валюта каналов — µs (PWM-эквивалент)
             if getattr(x, "_axis", None) == "pitch":
                 po = osign * i
             elif getattr(x, "_axis", None) == "roll":

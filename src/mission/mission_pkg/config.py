@@ -102,11 +102,13 @@ class BootstrapConfig:
     climb_budget: float
     land_budget: float        # бэкстоп (sim-сек): касание ловит детект (баро/gt_z), не бюджет
     # gz-hold (PID по истинной позе Gazebo)
-    gz_kp: float
-    gz_kd: float
-    gz_ki: float
-    gz_imax: float
-    gz_max: float
+    # ЕДИНИЦЫ (СИ с 2026-09-30, ключи _DEG): kp — ° на м ошибки позиции, kd — ° на м/с,
+    # ki — ° на м·с, imax/max — °; max — ещё и потолок наклона DpVins. PWM-экв.: 1 PWM = 0.04°.
+    gz_kp_deg: float
+    gz_kd_deg: float
+    gz_ki_deg: float
+    gz_imax_deg: float
+    gz_max_deg: float
     gz_psign: float
     gz_rsign: float
     # интегратор стик-команды → уставка в позиц-холдерах Gz*/Vins (setpoint-ед/с при полном стике)
@@ -244,19 +246,22 @@ class BootstrapConfig:
     # 3.4–3.8 в норме). Прежние 80/60/0.2 (σθ ~1.05 на агрессивных прямых,
     # 0.5–0.9 на мягких live) доказаны lv2_joy_055400; стартовые 200/120/20/0.1
     # звенели втрое (v1 ab_dpvins σθ 3.5°) — гейны IPM-демпфера не перенеслись.
-    dpvins_kp_fwd: float
-    dpvins_kp_lat: float
-    dpvins_ki: float
+    # ЕДИНИЦЫ (СИ с 2026-09-30): kp — ° наклона на м/с ошибки скорости, ki — °/(м/с)/с,
+    # imax/ff — °, °/(м/с); в коде радианы. Числа истории ниже — PWM-эквивалент прежнего
+    # домена: 1 PWM = 0.04° (20° на 500 µs, control_pkg/domain/units.py) — kp 40 = 1.6°.
+    dpvins_kp_fwd_deg: float
+    dpvins_kp_lat_deg: float
+    dpvins_ki_deg: float
     dpvins_cmd_gain: float
     dpvins_pos_kp: float
     dpvins_pos_vmax: float
     dpvins_pos_acc: float
     dpvins_vsmooth: float
-    # кап И-члена (трима), PWM. Ветру нужен трим до ~уровня ветра: при WIND 5 —
+    # кап И-члена (трима), ° (было PWM: 120 = 4.8°). Ветру нужен трим до ~уровня ветра: при WIND 5 —
     # ~44 PWM, при WIND 10 — ~100 (кап 50 не держал: снос 1-1.3 м/с, унос 9-18 м,
     # lv2_joy_082437). Держим ВЫСОКИМ (120) для авторитета; момент не наматывается
     # — АНТИ-ВИНДАП по насыщению выхода (см. update), а не тесный кап.
-    dpvins_imax: float
+    dpvins_imax_deg: float
     # БЫСТРОЕ ОБУЧЕНИЕ ТРИМА (унос на входе в ярус 1). Трим стартует с нуля,
     # и путь по ветру до выучивания = нужный трим / ki обучения — от kp НЕ
     # зависит (kp задаёт лишь скорость дрейфа: равновесие kp·v = ветер). При
@@ -269,7 +274,7 @@ class BootstrapConfig:
     # СЕКУНДЫ: контур ki_trim слабозатухающий (ζ≈0.26), поэтому гвоздь вяжется
     # и без стика — первым стопом после движения (полёт lv2_joy_20260903_220204:
     # конец фазы был привязан к стику, голое висение раскачало, период 7.1 с).
-    dpvins_ki_trim: float
+    dpvins_ki_trim_deg: float
     # НЕ обнулять трим на повторных входах в ярус 1: ветер на переключении
     # яруса не исчезает, а дребезг гейта (wind_back: 1 тик insane → ярус
     # 1→0→1 за 60 мс) обнулял трим повторно — двойное обучение, унос 24 м
@@ -337,7 +342,7 @@ class BootstrapConfig:
     # ось чистый P (трим на стике заморожен), ошибка (лобовое+ветер)/kp 40 ≈ 0.75–1 м/с.
     # ff·цель = наклон «за лобовое» (ветер 5 м/с ≈ 44 PWM, 10 ≈ 100 → на 4 м/с ~35–55);
     # только на стик-цели, станция висения не трогается. 0 = выкл (старое).
-    dpvins_ff: float
+    dpvins_ff_deg: float
     # ЛИНИЯ НА ПЛЕЧЕ DpVins (cmd/7): 1 = при стике одной оси 2D-гвоздь остаётся, свободная
     # ось держит его проекцию на себя в текущем курсе (линия через гвоздь вдоль курса, как
     # StationFrame демпфера) с BRAKE; уход курса > 17° — перезахват. Без этого свободная ось
@@ -410,7 +415,7 @@ class BootstrapConfig:
                                      # конфиге стояли 120 / 1 — иначе запуск без env даёт
                                      # НЕизмеренный контур.
     roll_kd: float
-    roll_imax: float
+    roll_imax_deg: float
     roll_pos_kp: float         # станция-кипинг боковой оси (путь ipm_lat), см.
                                      # pitch_pos_kp. BS_ROLL_POS_KP / --roll-pos-kp
     roll_pos_vmax: float       # BS_ROLL_POS_VMAX / --roll-pos-vmax
@@ -435,7 +440,7 @@ class BootstrapConfig:
                                      # (_POS_PIN_V). Канал видит 0.4-0.6 истины: на
                                      # ab_brake_win5 пик 0.30 — брейк не проснулся;
                                      # 0.25 разбудил бы. BS_ROLL_POS_BRAKE_V / --roll-pos-brake-v
-    roll_max: float
+    roll_max_deg: float
     # --- боковая ось ПО МЕТРИЧЕСКОЙ СКОРОСТИ (DpRollRate, сигнал ipm_vlat в М/С) ---
     # 30 — ИЗМЕРЕННЫЙ дефолт по свипу G (n=5 на точку, DpHoldM, `rate_gain_series.sh`):
     #        kp   уход м        СКО v_lat   вбок           внутри 10 м
@@ -448,13 +453,18 @@ class BootstrapConfig:
     # но пересчёт переносит ЧУВСТВИТЕЛЬНОСТЬ, а не запас устойчивости: у ipm_vlat своё
     # запаздывание (окно МНК 0.5 с), и на нём тот же гейн уже раскачивает.
     # Тренд не выдохся → 15 стоит проверить отдельной серией.
-    roll_rate_kp: float
-    roll_rate_ki: float
-    roll_rate_ki_trim: float   # ki в упоре ПЕРВОГО брейка станции (набор трима
+    # ЕДИНИЦЫ rate-осей (СИ с 2026-09-30, ключи _DEG): kp — ° на м/с ошибки скорости IPM,
+    # ki/ki_trim — ° на м, kd — ° на м/с², imax/max — ° (потолок наклона). В коде радианы.
+    # Числа истории выше/ниже — PWM-эквивалент: 1 PWM = 0.04° (kp 90 = 3.6, max 150 = 6°).
+    # roll_imax_deg/roll_max_deg (и pitch_*) читают и легаси-оси по потоку (legacy/) —
+    # им recipes переводит градусы обратно в µs.
+    roll_rate_kp_deg: float
+    roll_rate_ki_deg: float
+    roll_rate_ki_trim_deg: float   # ki в упоре ПЕРВОГО брейка станции (набор трима
                                      # ветра), 0 = ki. Ручка — BS_ROLL_RATE_KI_TRIM /
                                      # --roll-rate-ki-trim; смысл — flow_damper.py,
                                      # _FlowDamper1D.__init__ (ki_trim)
-    roll_rate_kd: float
+    roll_rate_kd_deg: float
     roll_rate_cmd_gain: float   # м/с при полном стике (0 = чистое удержание:
                                       # стик roll в DpHoldM игнорируется). Ручка —
                                       # BS_ROLL_RATE_CMD_GAIN / --roll-rate-cmd-gain
@@ -523,15 +533,15 @@ class BootstrapConfig:
     # пороге 2.3). Обоснование честно звучит как «не хуже по всем меркам и надёжнее по
     # попаданию в круг» — счётный признак 5/5 против 2/5 разбросом не размывается.
     # Цена против 200: снос втрое больше, платим сознательно за отсутствие раскачки.
-    pitch_rate_kp: float
-    pitch_rate_ki: float
-    pitch_rate_ki_trim: float  # зеркало roll_rate_ki_trim: BS_PITCH_RATE_KI_TRIM
-    pitch_rate_kd: float       # производная скорости = ускорение, шумно; пока 0
+    pitch_rate_kp_deg: float
+    pitch_rate_ki_deg: float
+    pitch_rate_ki_trim_deg: float  # зеркало roll_rate_ki_trim: BS_PITCH_RATE_KI_TRIM
+    pitch_rate_kd_deg: float       # производная скорости = ускорение, шумно; пока 0
     pitch_rate_cmd_gain: float  # м/с при полном стике (0 = чистое удержание:
                                       # стик pitch в DpHoldM игнорируется — полёт
                                       # 2026-08-17: полный «на себя» не тормозил).
                                       # BS_PITCH_RATE_CMD_GAIN / --pitch-rate-cmd-gain
-    pitch_imax: float
+    pitch_imax_deg: float
     pitch_pos_kp: float        # СТАНЦИЯ-КИПИНГ продольной оси: стик в центре →
                                      # цель скорости = pos_kp·(точка − путь ipm_fwd), м/с
                                      # на метр ошибки; стик живой → точка отпущена (пульт
@@ -568,7 +578,7 @@ class BootstrapConfig:
     # Источник курса для рамы: 'fcu' — att_yaw (гиро + компас EKF). Подключаемый
     # вход: сюда встанет визуальный курс для борта без компаса. BS_STATION_HEADING
     station_heading: str
-    pitch_max: float
+    pitch_max_deg: float
     pitch_conf_min: float
     pitch_conf_full: float
     pitch_osign: float        # ПРОТИВОПОЛОЖЕН roll — и это НЕ опечатка. Провод у осей

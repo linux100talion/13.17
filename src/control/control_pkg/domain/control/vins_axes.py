@@ -23,8 +23,14 @@ DpVins повторяет архитектуру демпфера/LOITER — vel
   1-го порядка (аналог окна МНК 0.3 с демпфера), НЕ D-член 2-го порядка, где
   сглаживание съедало демпфирование (тупик BS_VINS_VSMOOTH в VinsHold).
 
+ЕДИНИЦЫ (перевод домена в СИ, 2026-09-30): выход — наклон, рад; kp/ff — рад на м/с,
+ki — рад на м/с·с, imax/max_tilt — рад (в профилях градусы, ключи _DEG). Числа в
+комментариях ниже — в PWM-эквиваленте прежнего домена (20° на 500 µs, domain/units.py:
+40 PWM на м/с = 1.6 °/(м/с)). Носитель выхода пока RcCommand — наклон переводится в µs
+тем же масштабом на самом выходе; посев от демпфера и trim_pwm() — в µs (валюта пулла HUD).
+
 Оси в раме курса: скорость/позиция VINS (мир) проецируются по vins_yaw. Трим —
-В ОСЯХ МИРА (как StationFrame демпфера), хранится в PWM: ветер мировой, трим
+В ОСЯХ МИРА (как StationFrame демпфера), хранится в радианах: ветер мировой, трим
 следует за курсом под разворотом (фикс lv2_joy_075118). Обучение трима
 ДВУХСКОРОСТНОЕ: до первого ГВОЗДЯ — ki_trim (быстрый захват ветра: унос на
 входе в ярус = нужный трим / ki обучения, при ветре 10 (~100 PWM) и ki 6 было
@@ -53,6 +59,7 @@ import math
 from ..rc import RC_CENTER, RcCommand, clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
+from ..units import rc_off_tilt, tilt_from_us, us_from_tilt
 from .base import StabilizationStrategy
 from .station_keeper import StationKeeper
 
@@ -65,14 +72,15 @@ class DpVins(StabilizationStrategy):
     _YAW_TOL = 0.3     # рад: уход курса на плече больше — линия перезахватывается
                        # в текущей точке (зеркало _POS_YAW_TOL демпфера)
 
-    def __init__(self, kp_fwd=200.0, kp_lat=120.0, ki=20.0, ki_trim=0.0,
-                 imax=100.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
+    def __init__(self, kp_fwd=math.radians(8.0), kp_lat=math.radians(4.8),
+                 ki=math.radians(0.8), ki_trim=0.0,
+                 imax=math.radians(4.0), max_tilt=math.radians(6.0), cmd_gain=4.0, pos_kp=0.3,
                  pos_vmax=0.3, pos_acc=0.15, psign=1.0, rsign=1.0, vsmooth=0.1,
                  i_latch=True, trim_keep=True, brake=0.0, brake_v=0.25,
                  brake_vmax=1.0, brake_t=0.0, latch_axis=False, pin_armed=False,
                  ff=0.0, line_hold=False, settle_brake=False, pin_t=0.0):
         self.kp_fwd, self.kp_lat = kp_fwd, kp_lat
-        self.ki, self.imax, self.max = ki, imax, max_pwm
+        self.ki, self.imax, self.max = ki, imax, max_tilt
         self.ki_trim = ki_trim             # скорость обучения ДО первого гвоздя (0 = ki)
         self.trim_keep = trim_keep         # трим переживает enter() (входы в ярус)
         self.cmd_gain = cmd_gain
@@ -126,7 +134,7 @@ class DpVins(StabilizationStrategy):
         # цена ожидания — вход без станции: bag 130326 ярус 1 включился за 1 с до
         # порыва (set/set), 11 с дрейфа на одном P без BRAKE, 8 м, гвоздь по стопу.
         self.pin_armed = pin_armed
-        # ПРЯМАЯ ПЕРЕДАЧА СТИКА (ff, PWM на м/с ЦЕЛИ стика; cmd/7, плечи 150448):
+        # ПРЯМАЯ ПЕРЕДАЧА СТИКА (ff, рад на м/с ЦЕЛИ стика; cmd/7, плечи 150448):
         # движимая ось — чистый P (трим на стике заморожен, иначе рывок после
         # стопа), установившаяся ошибка = (лобовое + ветер)/kp: при kp 40 на
         # 3–4 м/с это 0.75–1 м/с — стик в упор давал 2.5–3.7 м/с при цели 4.0
@@ -165,9 +173,9 @@ class DpVins(StabilizationStrategy):
         self._pin_pending = False          # гвоздь заказан (стик жил, ждём стопа)
         self._pend_fwd = self._pend_rgt = False   # хвост защёлки по осям (latch_axis)
         self._moved = False                # ярус видел движение (|v| > _PIN_V)
-        self._itx = self._ity = 0.0        # трим (PWM) в осях МИРА (x, y) — без WindTrim
+        self._itx = self._ity = 0.0        # трим (рад) в осях МИРА (x, y) — без WindTrim
         # ОБЩИЙ ВЕТРОВОЙ ТРИМ (wind_trim.py): задаётся снаружи (recipes/нода). С ним
-        # трим читается/пишется в валюте PWM каналов по курсу AHRS att_yaw, посев и
+        # трим читается/пишется в валюте каналов (рад, после psign/rsign) по курсу AHRS att_yaw, посев и
         # сброс по перерождению — no-op, «ветер выучен» = wind.learned. None — как было.
         self.wind = None
         self._last_att_yaw = 0.0
@@ -232,16 +240,17 @@ class DpVins(StabilizationStrategy):
         обращением СОБСТВЕННОГО уравнения выхода: po = psign·(kp·err + i_fwd)
         → i_fwd = psign·pitch_off (psign² = 1), никаких рассуждений о
         конвенциях; тело → мир по vins_yaw — та же проекция, которой трим
-        учится в update(). Сеем только ДЕВСТВЕННЫЙ трим (< 1 PWM и не armed):
+        учится в update(). Смещения на входе — µs (PWM-эквивалент), внутри — рад.
+        Сеем только ДЕВСТВЕННЫЙ трим (< 1 µs и не armed):
         начатое обучение (дребезг гейта, trim_keep) и выученный ветер не
         перетираем — свой свежее. Посев ВЗВОДИТ «ветер выучен» (armed): дальше
         рабочий ki, не ki_trim — см. комментарий в теле (вход на ходу)."""
         if self.wind is not None:
             return False                    # общий трим: сеять нечего, он и так один
-        if self._trim_armed or math.hypot(self._itx, self._ity) >= 1.0:
+        if self._trim_armed or math.hypot(self._itx, self._ity) >= tilt_from_us(1.0):
             return False
-        i_fwd = self.psign * float(pitch_off)
-        i_rgt = self.rsign * float(roll_off)
+        i_fwd = self.psign * tilt_from_us(float(pitch_off))
+        i_rgt = self.rsign * tilt_from_us(float(roll_off))
         c = math.cos(s.vins_yaw)
         sn = math.sin(s.vins_yaw)
         self._itx = clamp(i_fwd * c - i_rgt * sn, -self.imax, self.imax)
@@ -279,14 +288,15 @@ class DpVins(StabilizationStrategy):
         тикает, кэш заморожен на выходе из яруса, а борт крутится — нода даёт
         текущий s.vins_yaw). Девственный трим честно отдаёт (0, 0)."""
         if self.wind is not None:
-            return self.wind.channel(self._last_att_yaw if yaw is None else yaw)
+            p, r = self.wind.channel(self._last_att_yaw if yaw is None else yaw)
+            return (us_from_tilt(p), us_from_tilt(r))
         if yaw is None:
             yaw = self._last_yaw
         c = math.cos(yaw)
         sn = math.sin(yaw)
         i_fwd = self._itx * c + self._ity * sn
         i_rgt = -self._itx * sn + self._ity * c
-        return (self.psign * i_fwd, self.rsign * i_rgt)
+        return (self.psign * us_from_tilt(i_fwd), self.rsign * us_from_tilt(i_rgt))
 
     @property
     def braking(self) -> bool:
@@ -431,10 +441,10 @@ class DpVins(StabilizationStrategy):
         if self.wind is not None:
             # общий трим: валюта каналов по курсу AHRS → пре-знаковые единицы DpVins
             self._last_att_yaw = s.att_yaw
-            pitch_off, roll_off = self.wind.channel(s.att_yaw)
+            pitch_off, roll_off = self.wind.channel(s.att_yaw)      # рад
             i_fwd, i_rgt = self.psign * pitch_off, self.rsign * roll_off
         else:
-            i_fwd = self._itx * c + self._ity * sn    # мировой трим (PWM) → тело (курс)
+            i_fwd = self._itx * c + self._ity * sn    # мировой трим (рад) → тело (курс)
             i_rgt = -self._itx * sn + self._ity * c
         # прямая передача стика (ff, см. __init__): только на стик-цели; знак —
         # как у P при v < цели (наклон в сторону цели)
@@ -527,5 +537,5 @@ class DpVins(StabilizationStrategy):
             self.wind.observe(now, steady, who=self)
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
-        return RcCommand(roll=RC_CENTER + int(ro), pitch=RC_CENTER + int(po),
+        return RcCommand(roll=RC_CENTER + rc_off_tilt(ro), pitch=RC_CENTER + rc_off_tilt(po),
                          throttle=RC_CENTER, yaw=RC_CENTER)

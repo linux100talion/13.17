@@ -20,6 +20,7 @@ from control_pkg.domain.control.stabilization import (               # noqa: E40
 from control_pkg.domain.control.trajectory import StaticSetpoint     # noqa: E402
 from control_pkg.domain.rc import RC_CENTER                          # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -319,35 +320,35 @@ for x in comp8._subs:                      # рукотворный устано
 check("DpHold.trim_pwm: каналы (osign·И-член) = (−40, 10)",
       comp8.trim_pwm() == (-40.0, 10.0))
 
-dpv = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
+dpv = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0))
 ho8 = VinsHandover(dpv, min_count=5, fresh_sec=2.0)      # trim_seed дефолт ВКЛ
 ho8.vins_stabs([comp8], s(5, 11.0, 11.0))
 check("vins_stabs: трим DpVins посеян из демпфера (мир, yaw=0)",
-      abs(dpv._itx + 40.0) < 1e-9 and abs(dpv._ity - 10.0) < 1e-9)
+      abs(us(dpv._itx) + 40.0) < 1e-9 and abs(us(dpv._ity) - 10.0) < 1e-9)
 check("посев ВЗВОДИТ «ветер выучен» → дальше рабочий ki, не ki_trim (вход на ходу: "
       "ki_trim 60 за секунду переписывал посев скоростью возврата, cmd_3/wind_right)",
       dpv._trim_armed)
 
 # начатое обучение не перетирается (дребезг гейта: трим уже нажит, trim_keep)
-dpv2 = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
-dpv2._itx = 5.0
+dpv2 = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0))
+dpv2._itx = tilt_from_us(5.0)
 VinsHandover(dpv2, min_count=5, fresh_sec=2.0).vins_stabs([comp8], s(5, 11.0, 11.0))
-check("трим не девственный → посев отказал (своё свежее)", dpv2._itx == 5.0)
+check("трим не девственный → посев отказал (своё свежее)", abs(us(dpv2._itx) - 5.0) < 1e-9)
 
 # ручка: trim_seed=False — посева нет (учить с нуля, старое поведение)
-dpv3 = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
+dpv3 = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0))
 VinsHandover(dpv3, min_count=5, fresh_sec=2.0,
              trim_seed=False).vins_stabs([comp8], s(5, 11.0, 11.0))
-check("trim_seed=False: трим остался нулевым", dpv3._itx == 0.0 and dpv3._ity == 0.0)
+check("trim_seed=False: трим остался нулевым", us(dpv3._itx) == 0.0 and us(dpv3._ity) == 0.0)
 
 # /restart: сброс старой рамы, затем посев СВЕЖЕЙ — в одном входе в ярус
-dpv4 = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
-dpv4._itx, dpv4._trim_armed = 50.0, True
+dpv4 = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0))
+dpv4._itx, dpv4._trim_armed = tilt_from_us(50.0), True
 ho11 = VinsHandover(dpv4, min_count=5, fresh_sec=2.0)
 ho11.note_vins_restart()
 ho11.vins_stabs([comp8], s(5, 11.0, 11.0))
 check("после /restart: сброс старого трима, посев в свежую раму (armed от посева)",
-      abs(dpv4._itx + 40.0) < 1e-9 and dpv4._trim_armed)
+      abs(us(dpv4._itx) + 40.0) < 1e-9 and dpv4._trim_armed)
 
 # VinsHold посева не имеет — vins_stabs не падает
 VinsHandover(VinsHold(), min_count=5, fresh_sec=2.0).vins_stabs(
@@ -357,14 +358,14 @@ check("VinsHold (без seed_trim): vins_stabs не падает", True)
 # seed_vins напрямую (вход в ярус 2 LOITER МИНУЯ vins_stabs): трим DpVins
 # сеется, DpVins в стек НЕ идёт — на нём стоит стрелка ветра HUD в LOITER.
 # Это и есть «прыжок 0→2»: без явного посева трим был бы девственным.
-dpv12 = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0)
+dpv12 = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0, imax=120.0))
 ho12 = VinsHandover(dpv12, min_count=5, fresh_sec=2.0)
 ho12.seed_vins([comp8], s(5, 11.0, 11.0))
 check("seed_vins (вход 0→2 в LOITER): трим DpVins посеян как в vins_stabs",
-      abs(dpv12._itx + 40.0) < 1e-9 and abs(dpv12._ity - 10.0) < 1e-9)
+      abs(us(dpv12._itx) + 40.0) < 1e-9 and abs(us(dpv12._ity) - 10.0) < 1e-9)
 check("seed_vins идемпотентен: повторный вызов не перетирает (уже нажит)",
       ho12.seed_vins([comp8], s(5, 11.0, 11.0)) is None
-      and abs(dpv12._itx + 40.0) < 1e-9)
+      and abs(us(dpv12._itx) + 40.0) < 1e-9)
 
 ok_all = all(ok for _, ok in results)
 print("ИТОГ:", "✅ HANDOVER Flow→Vins OK" if ok_all else "❌ СБОЙ")

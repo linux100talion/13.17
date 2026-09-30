@@ -29,6 +29,7 @@ from control_pkg.domain.control.vins_axes import DpVins                    # noq
 from control_pkg.domain.rc import RC_CENTER                                # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                           # noqa: E402
 from control_pkg.domain.state import DroneState                            # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -46,7 +47,7 @@ def make(**kw):
              cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3, pos_acc=0.15,
              vsmooth=0.0, i_latch=True)
     d.update(kw)
-    vh = DpVins(**d)
+    vh = DpVins(**si(**d))
     vh.enter(DroneState(now_sim=100.0, vins_x=0.0, vins_y=0.0))
     return vh
 
@@ -122,25 +123,25 @@ check("первое торможение (не armed): трим ИНТЕГРИР
       r0.pitch > RC_CENTER + 40)
 vh.update(st(vx=0.0, x=1.0, t=102.0), Setpoint(), DT)      # встал → гвоздь, armed
 vh.update(st(vx=1.0, t=102.05), Setpoint(c_fwd=1.0), DT)   # стик оживил → гвоздь снят
-i0 = vh._itx
+i0 = us(vh._itx)
 for i in range(20):                          # торможение armed: трим ЗАМОРОЖЕН
     vh.update(st(vx=1.0, t=102.1 + i * DT), Setpoint(), DT)
 check("торможение после первого гвоздя (armed): трим ЗАМОРОЖЕН (не растёт)",
-      abs(vh._itx - i0) < 1e-6)
+      abs(us(vh._itx) - i0) < 1e-6)
 
 # --- 7d. АНТИ-ВИНДАП: выход в упоре + ошибка глубже → трим НЕ мотается ---
 # imax высокий, но в насыщении торможения трим замерзает (momentum не копится)
 vh = make(ki=20.0, kp_fwd=40.0, imax=120.0, pos_kp=0.0)
 vh.update(st(vx=5.0, t=100.05), Setpoint(c_fwd=1.0), DT)   # стик → pin_pending
-i0 = vh._itx
+i0 = us(vh._itx)
 for i in range(20):                          # тормозим v=5: kp·5=200 → упор, sat
     vh.update(st(vx=5.0, x=1.0, t=100.1 + i * DT), Setpoint(), DT)
 check("выход в упоре (тормоз v=5): анти-виндап морозит трим",
-      abs(vh._itx - i0) < 1e-6)
+      abs(us(vh._itx) - i0) < 1e-6)
 # не в упоре (малый снос): трим ИНТЕГРИРУЕТ (учит ветер)
 for i in range(10):
     vh.update(st(vx=0.5, x=1.0, t=101.2 + i * DT), Setpoint(), DT)
-check("малый снос (не упор): трим растёт (учит ветер)", abs(vh._itx) > 0.01)
+check("малый снос (не упор): трим растёт (учит ветер)", abs(us(vh._itx)) > 0.01)
 
 # --- 7c. ТРИМ В ОСЯХ МИРА: набран на курсе 0, после разворота 90° гасит ту же
 # мировую ось (не устаревает по телу) — фикс сноса при развороте (lv2_joy_075118)
@@ -149,7 +150,7 @@ vh.update(st(vx=0.5, t=100.05), Setpoint(c_fwd=1.0), DT)   # стик → pin_pe
 for i in range(30):                            # первый брейк: копим трим (мир +x)
     vh.update(st(vx=0.5, x=0.5, t=100.1 + i * DT), Setpoint(), DT)
 vh.update(st(vx=0.0, x=0.5, t=102.0), Setpoint(), DT)      # гвоздь → armed
-tx = vh._itx
+tx = us(vh._itx)
 check("трим набран в мировом +x (itx > 0)", tx > 0.5)
 # теперь борт на КУРСЕ 90° держит ту же точку: мировой +x трим = боковой у тела
 # → должен пойти в КРЕН (roll), тангаж почти чист
@@ -193,7 +194,7 @@ check("vsmooth=0 воспроизводимо бит-в-бит", noisy(0.0) == r
 
 # --- 11. ki_trim: быстрый захват ветра ДО первого гвоздя, после — рабочий ki ---
 def learn(**kw):
-    vh = DpVins(**dict(kp_fwd=40.0, kp_lat=32.0, ki=6.0, imax=120.0,
+    vh = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=6.0, imax=120.0,
                        max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3,
                        pos_acc=0.15, vsmooth=0.0, i_latch=True, **kw))
     vh.enter(DroneState(now_sim=100.0))
@@ -204,26 +205,26 @@ def learn(**kw):
 
 fast, slow = learn(ki_trim=60.0), learn()
 check("ki_trim 60 против ki 6: захват ветра на первом брейке ×10",
-      abs(fast._itx - 10.0 * slow._itx) < 1e-6 and slow._itx > 0.0)
+      abs(us(fast._itx) - 10.0 * us(slow._itx)) < 1e-6 and us(slow._itx) > 0.0)
 fast.update(st(vx=0.0, x=1.0, t=101.0), Setpoint(), DT)   # встал → гвоздь, armed
-i0 = fast._itx
+i0 = us(fast._itx)
 fast.update(st(vx=0.5, x=1.0, t=101.05), Setpoint(), DT)  # удержание: рабочий ki
 check("после первого гвоздя обучение падает до рабочего ki (6)",
-      abs((fast._itx - i0) - 0.5 * DT * 6.0) < 1e-6)
+      abs((us(fast._itx) - i0) - 0.5 * DT * 6.0) < 1e-6)
 
 # --- 12. trim_keep: трим переживает enter() (повторный вход в ярус) ---
 vh = learn(ki_trim=60.0)
 vh.update(st(vx=0.0, x=1.0, t=101.0), Setpoint(), DT)     # гвоздь → armed
-t0 = vh._itx
+t0 = us(vh._itx)
 vh.enter(st(t=200.0))                                     # повторный вход в ярус
 check("enter(): трим и «ветер выучен» живы (ветер не исчез на переключении)",
-      vh._itx == t0 and vh._trim_armed)
+      us(vh._itx) == t0 and vh._trim_armed)
 vh.reset_trim()                                           # фактический /restart VINS
 check("reset_trim(): трим обнулён и разоружён (рама мира переродилась)",
-      vh._itx == 0.0 and not vh._trim_armed)
+      us(vh._itx) == 0.0 and not vh._trim_armed)
 vh2 = learn(ki_trim=60.0, trim_keep=False)
 vh2.enter(st(t=200.0))
-check("trim_keep=False: старое поведение — сброс на enter()", vh2._itx == 0.0)
+check("trim_keep=False: старое поведение — сброс на enter()", us(vh2._itx) == 0.0)
 
 
 # --- 13. ЗАМКНУТЫЙ КОНТУР: унос обучения = нужный трим / ki обучения ---
@@ -231,7 +232,7 @@ check("trim_keep=False: старое поведение — сброс на ente
 # равновесный трим 100 PWM (как ветер 10 м/с в полётах wind_* 2026-09-03:
 # унос 16-17.5 м при ki 6, формула 100/6 = 16.7). Меряем путь по ветру.
 def carry(**kw):
-    vh = DpVins(**dict(kp_fwd=40.0, kp_lat=32.0, ki=6.0, imax=120.0,
+    vh = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=6.0, imax=120.0,
                        max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3,
                        pos_acc=0.15, vsmooth=0.0, i_latch=True, **kw))
     vh.enter(DroneState(now_sim=100.0))
@@ -274,7 +275,7 @@ check("первый стоп после движения: гвоздь в точ
 # латентность VINS) съедают остаток запаса: рост, период 7.1 с, ±2 м и
 # 2.2 м/с к 40-й секунде яруса. Модель: наклон — апериодика τ=0.5 с.
 def hover_lag(**kw):
-    vh = DpVins(**dict(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0,
+    vh = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0,
                        imax=120.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
                        pos_vmax=0.3, pos_acc=0.15, vsmooth=0.3, i_latch=True,
                        **kw))
@@ -313,7 +314,7 @@ check("трим уже нажит (≥1 PWM) → повторный посев �
 vh16a = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
 vh16a._trim_armed = True
 check("ветер выучен (armed) → посев отказан (своё свежее)",
-      not vh16a.seed_trim(99.0, 0.0, st()) and vh16a._itx == 0.0)
+      not vh16a.seed_trim(99.0, 0.0, st()) and us(vh16a._itx) == 0.0)
 
 # трим МИРОВОЙ: посеян на курсе 0, после разворота на 90° проецируется
 # в другие оси тела (ветер не вращается вместе с бортом)
@@ -328,7 +329,7 @@ check("разворот 90° после посева: трим следует з
 
 # --- 17. замкнутый контур с посевом: унос ≈ 0 (п.5.3 dpvins.txt) ---
 def carry_seed(seed, **kw):
-    vh = DpVins(**dict(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0,
+    vh = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0,
                        imax=120.0, max_pwm=150.0, cmd_gain=4.0, pos_kp=0.3,
                        pos_vmax=0.3, pos_acc=0.15, vsmooth=0.0, i_latch=True,
                        **kw))
@@ -428,13 +429,13 @@ for i in range(5):
 for i in range(5):
     vh_d.update(st(vx=0.0, x=0.5, t=t), Setpoint(), DT); t += DT
 check("подготовка: ветер «выучен» (первый гвоздь прошёл)", vh_d._trim_armed)
-itx0 = vh_d._itx
+itx0 = us(vh_d._itx)
 x = 0.5
 for i in range(20):
     x += 0.6 * DT
     vh_d.update(st(vx=0.6, x=x, t=t), Setpoint(), DT); t += DT
 check("BRAKE после первого гвоздя: трим не мотается (заморожен)",
-      vh_d.braking and abs(vh_d._itx - itx0) < 1e-9)
+      vh_d.braking and abs(us(vh_d._itx) - itx0) < 1e-9)
 # без брейка тот же унос интегрировал бы трим
 vh_e = make(kp_fwd=40.0, kp_lat=32.0, ki=30.0, brake=0.0)
 t = 100.05
@@ -442,11 +443,11 @@ for i in range(5):
     vh_e.update(st(vx=0.6, x=0.1 * i, t=t), Setpoint(), DT); t += DT
 for i in range(5):
     vh_e.update(st(vx=0.0, x=0.5, t=t), Setpoint(), DT); t += DT
-ite0 = vh_e._itx; x = 0.5
+ite0 = us(vh_e._itx); x = 0.5
 for i in range(20):
     x += 0.6 * DT
     vh_e.update(st(vx=0.6, x=x, t=t), Setpoint(), DT); t += DT
-check("без брейка тот же унос учит трим (контроль)", abs(vh_e._itx - ite0) > 1.0)
+check("без брейка тот же унос учит трим (контроль)", abs(us(vh_e._itx) - ite0) > 1.0)
 # 19. живой стик гасит BRAKE и снимает гвоздь
 vh_f, _, xf, tf = hover_then_push(3.0)
 vh_f.update(st(vx=0.6, x=xf, t=tf), Setpoint(c_fwd=1.0), DT)
@@ -466,8 +467,8 @@ def locked(brake_t, secs=12.0):
         vh.update(st(vx=0.6, x=0.1 * i, t=t), Setpoint(), DT); t += DT
     for i in range(5):
         vh.update(st(vx=0.0, x=0.5, t=t), Setpoint(), DT); t += DT       # гвоздь
-    vh._itx = -56.0                                                    # ошибочный трим
-    x, it0 = 0.5, vh._itx
+    vh._itx = tilt_from_us(-56.0)                                                   # ошибочный трим
+    x, it0 = 0.5, us(vh._itx)
     seen_brake = False
     for i in range(int(secs / DT)):                                    # secs с уноса 0.5 м/с
         x += 0.5 * DT
@@ -476,26 +477,26 @@ def locked(brake_t, secs=12.0):
     return vh, seen_brake, it0
 vh21a, br_a, it_a = locked(0.0)
 check("brake_t=0: BRAKE активен весь унос, трим заморожен (запирание как в полёте)",
-      br_a and vh21a.braking and abs(vh21a._itx - it_a) < 1e-9)
+      br_a and vh21a.braking and abs(us(vh21a._itx) - it_a) < 1e-9)
 vh21b, br_b, it_b = locked(8.0)
 check("brake_t=8: через 8 с непрерывного BRAKE трим снова учится (страховка)",
-      br_b and abs(vh21b._itx - it_b) > 5.0)
+      br_b and abs(us(vh21b._itx) - it_b) > 5.0)
 # brake_t < 0 — хвост брейка как у демпфера: трим учится с первой секунды BRAKE (только
 # анти-виндап в упоре), таймера нет; за 3 с уноса при brake_t 8 трим ещё стоит
 vh21c, br_c, it_c = locked(-1.0, secs=3.0)
 vh21d, br_d, it_d = locked(8.0, secs=3.0)
 check("brake_t=-1: трим учится в BRAKE сразу (правило демпфера), при 8 — ещё заморожен",
-      br_c and br_d and abs(vh21c._itx - it_c) > 5.0 and abs(vh21d._itx - it_d) < 1e-9)
+      br_c and br_d and abs(us(vh21c._itx) - it_c) > 5.0 and abs(us(vh21d._itx) - it_d) < 1e-9)
 check("brake_t=-1: трим в брейке ПРОТИВ уноса (ошибка ×6 по знаку скорости)",
-      (vh21c._itx - it_c) > 0.0)
+      (us(vh21c._itx) - it_c) > 0.0)
 # 22. посев взводит armed → обучение рабочим ki, не ki_trim
 vh22 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
 vh22.seed_trim(-40.0, 10.0, st(t=100.05))
 check("seed_trim: armed (ветер известен)", vh22._trim_armed)
-it0 = vh22._itx; t = 100.05
+it0 = us(vh22._itx); t = 100.05
 for i in range(20):                                # 1 с движения 0.85 м/с (возврат демпфера)
     vh22.update(st(vx=0.85, x=0.85 * DT * i, t=t), Setpoint(), DT); t += DT
-d22 = abs(vh22._itx - it0)
+d22 = abs(us(vh22._itx) - it0)
 check(f"после посева 1 с хода 0.85 м/с меняет трим на {d22:.1f} PWM (ki 6, не ki_trim 60 ≈ 51)",
       d22 < 10.0)
 
@@ -514,23 +515,23 @@ def cruise(latch_axis, secs=5.0, c_right=0.0):
     return vh, t
 vh23a, _ = cruise(False)
 check("latch_axis=0: стик тангажа морозит ОБЕ оси (боковой трим стоит)",
-      abs(vh23a._ity) < 1e-9 and abs(vh23a._itx) < 1e-9)
+      abs(us(vh23a._ity)) < 1e-9 and abs(us(vh23a._itx)) < 1e-9)
 vh23b, t23 = cruise(True)
-check(f"latch_axis=1: свободная боковая ось учится на стике тангажа (ity {vh23b._ity:.1f} PWM ≈ 0.5·8·5 = 20)",
-      15.0 < abs(vh23b._ity) < 25.0)
-check("latch_axis=1: движимая продольная ось заморожена (itx 0)", abs(vh23b._itx) < 1e-9)
+check(f"latch_axis=1: свободная боковая ось учится на стике тангажа (ity {us(vh23b._ity):.1f} PWM ≈ 0.5·8·5 = 20)",
+      15.0 < abs(us(vh23b._ity)) < 25.0)
+check("latch_axis=1: движимая продольная ось заморожена (itx 0)", abs(us(vh23b._itx)) < 1e-9)
 vh23c, _ = cruise(True, c_right=0.3)
 check("latch_axis=1: оба стика — обе оси заморожены",
-      abs(vh23c._itx) < 1e-9 and abs(vh23c._ity) < 1e-9)
+      abs(us(vh23c._itx)) < 1e-9 and abs(us(vh23c._ity)) < 1e-9)
 # отпустили стик тангажа: продольная ось в хвосте защёлки (до гвоздя) — стоит,
 # боковая — учится дальше; торможение вперёд 1.0 м/с с боковым 0.5
-ity0 = vh23b._ity
+ity0 = us(vh23b._ity)
 for i in range(20):
     vh23b.update(st(vx=1.0, vy=0.5, x=10.0 + 1.0 * DT * i, y=3.0 + 0.5 * DT * i, t=t23),
                  Setpoint(), DT); t23 += DT
 check("latch_axis=1: после отпускания хвост до гвоздя только у движимой оси "
-      f"(itx 0, ity растёт {ity0:.1f} → {vh23b._ity:.1f})",
-      abs(vh23b._itx) < 1e-9 and abs(vh23b._ity) > abs(ity0) + 2.0)
+      f"(itx 0, ity растёт {ity0:.1f} → {us(vh23b._ity):.1f})",
+      abs(us(vh23b._itx)) < 1e-9 and abs(us(vh23b._ity)) > abs(ity0) + 2.0)
 
 # 24. ГВОЗДЬ СРАЗУ НА ВХОДЕ (pin_armed, bag 130326): трим посеян (armed) и борт стоит →
 # гвоздь первым кадром; без посева (девственный трим) — как раньше, только по стопу после

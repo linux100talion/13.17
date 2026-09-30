@@ -115,6 +115,10 @@ def flight_gains(bag):
                         env[k] = v
                 break
     up = AXIS.upper()
+    # с 2026-09-30 гейны в мете — градусы (ключи _DEG); стенд считает в PWM-экв. (0.04 °/µs)
+    for k in (f'BS_{up}_RATE_KP', f'BS_{up}_RATE_KI', 'BS_ROLL_IMAX'):
+        if k + '_DEG' in env and k not in env:
+            env[k] = str(float(env[k + '_DEG']) / 0.04)
     kp = env.get(f'BS_{up}_RATE_KP', os.environ.get('GS_KP', '30'))
     ki = env.get(f'BS_{up}_RATE_KI', os.environ.get('GS_KI', '30'))
     imax = env.get('BS_ROLL_IMAX', os.environ.get('GS_IMAX', '150'))

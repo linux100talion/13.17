@@ -27,7 +27,6 @@ from std_msgs.msg import Bool, Empty
 from control_pkg.application.arbiter import PILOT_MANUAL, Arbiter
 from control_pkg.application.att_mode import GUIDED_NOGPS, AttModeProxy
 from control_pkg.application.node_arm import ArmGesture, ready_reasons
-from control_pkg.domain.control.wind_trim import WindTrim
 from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
 from control_pkg.application.rth_ready import RthReadiness
@@ -47,7 +46,7 @@ from ..config import BootstrapConfig
 from ..plan.bootstrap_plan import build_bootstrap_plan
 from ..plan.mission_plan import compile_mission, resolve_mission
 from ..plan.runner import PlanRunner
-from ..recipes import build_control_stack, build_vins_stab
+from ..recipes import build_control_stack, build_vins_stab, build_wind_trim
 
 # ПОТОКИ ТЕЛЕМЕТРИИ FCU, которые читает нода (сторож _telemetry_watch): id
 # MAVLink, Гц, имя. Темпы = запросам nav_up.sh (стримы RAW_SENS 200 / POSITION 25 /
@@ -173,9 +172,7 @@ class BootstrapArch2Node(Node):
         # ОБЩИЙ ВЕТРОВОЙ ТРИМ ярусов 0/1 (WindTrim; config.wind_trim): один вектор
         # в валюте PWM каналов по курсу AHRS — без посева между ярусами, переживает
         # переключения, LOITER и перерождение VINS; сброс на фронте арма
-        self.wind = (WindTrim(imax=max(cfg.dpvins_imax, cfg.roll_imax, cfg.pitch_imax),
-                              steady_sec=cfg.wind_steady_sec, steady_v=cfg.wind_steady_v)
-                     if cfg.wind_trim > 0 else None)
+        self.wind = build_wind_trim(cfg)
         handover = None
         if cfg.handover_vins and (cfg.control_mode == 'flow_assist' or
                                   (use_mission and 'Dp' in stab_spec)):
@@ -192,8 +189,8 @@ class BootstrapArch2Node(Node):
                                     scale_alt_max=cfg.vins_scale_alt_max,
                                     scale_hold=cfg.vins_scale_hold)
             if str(cfg.vins_stab).lower() == 'dpvins':
-                note = (f", DpVins (velocity-каскад) kp {cfg.dpvins_kp_fwd:g}/"
-                        f"{cfg.dpvins_kp_lat:g} ki {cfg.dpvins_ki:g} "
+                note = (f", DpVins (velocity-каскад) kp {cfg.dpvins_kp_fwd_deg:g}/"
+                        f"{cfg.dpvins_kp_lat_deg:g} °/(м/с) ki {cfg.dpvins_ki_deg:g} "
                         f"vsmooth {cfg.dpvins_vsmooth:g}")
             else:
                 kd_note = ", kd на ошибке скорости" if cfg.vins_kd_err > 0 else ""

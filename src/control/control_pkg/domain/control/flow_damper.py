@@ -12,6 +12,7 @@ StationKeeper (station_keeper.py), демпфер держит его в `self.s
 from ..rc import RC_CENTER, RcCommand, clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
+from ..units import rc_off_tilt, tilt_from_us, us_from_tilt
 from .alt_settled import _AltSettled
 from .base import StabilizationStrategy
 from .station_keeper import StationKeeper
@@ -59,8 +60,14 @@ class _FlowDamper1D(StabilizationStrategy):
     """
     _axis = "roll"
     _cmd_mode = "rate"       # rate: c_* = цель скорости | pos: c_* = скорость уставки
+    # ЕДИНИЦЫ ВЫХОДА оси (перевод домена в СИ, 2026-09-30). True — наклон в РАДИАНАХ:
+    # kp/ki/kd/imax/max_out, И-член и выход в рад (гейны в профилях — градусы, _DEG),
+    # на носитель RcCommand — через units.rc_off_tilt. False — µs (PWM) как было: старые
+    # оси по потоку (DpRollHold/DpPitchHold/DpPitchBack/DpYawHold) не переводились, их
+    # выпилят. Рама станции и общий трим — в радианах, ось µs переводит на входе/выходе.
+    _TILT = False
 
-    def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_pwm=150.0,
+    def __init__(self, kp=8.0, ki=2.0, kd=0.0, imax=120.0, max_out=150.0,
                  conf_min=0.05, conf_full=0.20, osign=1.0, cmd_gain=10.0, stale_sec=0.5,
                  pos_kp=0.0, pos_vmax=1.0, pos_brake=0.0, pos_brake_vmax=0.0,
                  pos_acc=0.0, anti_windup=False, pos_brake_v=0.0, pos_alt_band=0.0,
@@ -74,7 +81,7 @@ class _FlowDamper1D(StabilizationStrategy):
         # Упор первого брейка копит ∫v со скоростью ki_trim — отрыв бит-в-бит как при
         # ki 60, пружина вне упора вдвое мягче. 0 = ki (прежнее поведение).
         self.ki_trim = ki_trim if ki_trim > 0.0 else ki
-        self.imax, self.max = imax, max_pwm
+        self.imax, self.max = imax, max_out
         self.conf_min, self.conf_full = conf_min, conf_full
         self.osign, self.cmd_gain, self.stale = osign, cmd_gain, stale_sec
         # --- СТАНЦИЯ-КИПИНГ поверх rate-оси (внешний P-контур по накопленному пути) ---
@@ -247,6 +254,18 @@ class _FlowDamper1D(StabilizationStrategy):
                              # порога, гвоздь не вяжется вовсе и станция вырождается
                              # в чистый демпфер: прогон 2026-08-18 — fence за 18 с)
 
+    def _us(self, v):
+        """Единицы выхода оси → µs (PWM-эквивалент: отладка, trim_pwm)."""
+        return us_from_tilt(v) if self._TILT else v
+
+    def _rad(self, v):
+        """Единицы выхода оси → рад (рама станции / общий трим)."""
+        return v if self._TILT else tilt_from_us(v)
+
+    def _own(self, rad):
+        """Рад (рама/общий трим) → единицы выхода оси."""
+        return rad if self._TILT else us_from_tilt(rad)
+
     def _signal(self, s): raise NotImplementedError
     def _cmd(self, sp): raise NotImplementedError
 
@@ -394,7 +413,7 @@ class _FlowDamper1D(StabilizationStrategy):
                     # оси = компонента мирового вектора трима вдоль оси ТЕКУЩЕГО курса
                     fr.advance(s)
                     fr.stick(self._axis, cmd != 0.0)
-                    self._i = fr.trim_body(self._axis, self.osign)
+                    self._i = self._own(fr.trim_body(self._axis, self.osign))
                 if pos is not None and cmd == 0.0:
                     # СТАНЦИЯ: «СНАЧАЛА ТОРМОЗИ, ПОТОМ ГВОЗДЬ» (механика LOITER,
                     # полёт 2026-08-18: точка в момент отпускания = «рулю против
@@ -439,7 +458,7 @@ class _FlowDamper1D(StabilizationStrategy):
                     self._i_frozen |= not brake_trim     # …или анти-виндап в упоре
             self._i = i_new
             if fr is not None:
-                fr.set_trim_body(self._axis, self._i, self.osign)   # компонента → мировой вектор
+                fr.set_trim_body(self._axis, self._rad(self._i), self.osign)   # компонента → мировой вектор
                 if fr.wind is not None and not self._trim_armed:
                     fr.wind.mark_learned(who=fr)  # первый брейк прошёл — ветер выучен для всех ярусов
             u = clamp(self.kp * self._soft ** self._SOFT_KP_EXP * err + self._i + d,
@@ -454,7 +473,7 @@ class _FlowDamper1D(StabilizationStrategy):
         # устаревшей команде.
         age = s.now_sim - self._last_ok_sim
         k = 1.0 if age < self.stale else clamp(2.0 - age / self.stale, 0.0, 1.0)
-        off = int(self._out * k)
+        off = rc_off_tilt(self._out * k) if self._TILT else int(self._out * k)
         rc = RcCommand(throttle=RC_CENTER)
         setattr(rc, self._axis, RC_CENTER + off)
         return rc
@@ -470,7 +489,7 @@ class _FlowDamper1D(StabilizationStrategy):
         return (self._sp, self._prev_err, self._sp_rate)
 
     def rate_dbg(self):
-        """(цель, ошибка до неё, PWM на выходе) для бэга — или None у pos-осей.
+        """(цель, ошибка до неё, выход в µs-экв.) для бэга — или None у pos-осей.
 
         Зеркало `hold_dbg` для осей по СКОРОСТИ. Нужен по той же причине, по какой
         рысканию понадобился /flow_dbg6: без записи команды сегмент приходится искать
@@ -479,7 +498,7 @@ class _FlowDamper1D(StabilizationStrategy):
         разброс гейна 26%, где часть сегментов была не командой."""
         if self._cmd_mode == "pos":
             return None
-        return (self._target, self._prev_err, self._out)
+        return (self._target, self._prev_err, self._us(self._out))
 
     # --- Станция: делегаты в StationKeeper --------------------------------------
     # Состояние станции живёт в self.station; исторические имена оставлены как

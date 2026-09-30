@@ -22,4 +22,4 @@
 #   провал — rs_mean > 1 м или vmax > 2.5 или размах в затишье > 2 м (качание) → ki 10
 #           не даст выигрыша (8.6), тогда путь — убрать лаг 0.35 с (twist VINS) и/или BRAKE.
 include baseline.txt
-BS_DPVINS_KI=15
+BS_DPVINS_KI_DEG=0.6

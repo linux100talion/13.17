@@ -8,6 +8,7 @@ import math
 from ..rc import RC_CENTER, RcCommand, clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
+from ..units import rc_off_tilt, tilt_from_us
 from .base import StabilizationStrategy
 
 
@@ -23,11 +24,15 @@ class VinsHold(StabilizationStrategy):
     _PRED_MAX = 0.3    # с: потолок мёртвого счисления предиктора (protухший
                        # отсчёт дальше не экстраполируем — честнее сырое)
 
-    def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
+    # ЕДИНИЦЫ (перевод домена в СИ, 2026-09-30): выход — наклон, рад; kp — рад на м, kd — рад
+    # на м/с, ki — рад на м·с, imax/max_tilt — рад (профили: градусы, ключи BS_GZ_*_DEG).
+    # Числа в комментариях — PWM-эквивалент прежнего домена (1 PWM = 0.04°: kd 80 = 3.2 °/(м/с)).
+    def __init__(self, kp=tilt_from_us(40.0), kd=tilt_from_us(120.0), ki=tilt_from_us(8.0),
+                 imax=tilt_from_us(100.0), max_tilt=tilt_from_us(150.0),
                  psign=1.0, rsign=1.0, cmd_gain=0.8, kd_err=False,
                  i_latch=False, pin_stop=False, predict=False, vsmooth=0.0):
         self.kp, self.kd, self.ki = kp, kd, ki
-        self.imax, self.max = imax, max_pwm
+        self.imax, self.max = imax, max_tilt
         self.psign, self.rsign = psign, rsign
         self.cmd_gain = cmd_gain
         # kd_err: D-член на ОШИБКЕ скорости (v − v_уставки), не на абсолютной v.
@@ -158,5 +163,5 @@ class VinsHold(StabilizationStrategy):
         ro = self.rsign * (self.kp * e_rgt + self.kd * v_rgt + self.ki * i_rgt)
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
-        return RcCommand(roll=RC_CENTER + int(ro), pitch=RC_CENTER + int(po),
+        return RcCommand(roll=RC_CENTER + rc_off_tilt(ro), pitch=RC_CENTER + rc_off_tilt(po),
                          throttle=RC_CENTER, yaw=RC_CENTER)

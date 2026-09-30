@@ -22,6 +22,7 @@ from control_pkg.domain.control.vins_hold import VinsHold                # noqa:
 from control_pkg.domain.rc import RC_CENTER                              # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                         # noqa: E402
 from control_pkg.domain.state import DroneState                          # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -39,7 +40,7 @@ GAINS = dict(kp=40.0, kd=0.0, ki=0.0, imax=100.0, max_pwm=150.0,
 
 def saw_run(predict, n=20, **kw):
     """Полёт точно по уставке; VINS шагает 10 Гц. Возвращает список pitch-PWM."""
-    vh = VinsHold(predict=predict, **{**GAINS, **kw})
+    vh = VinsHold(**si(predict=predict, **{**GAINS, **kw}))
     vh.enter(DroneState(now_sim=100.0, vins_x=0.0, vins_y=0.0))
     out = []
     for i in range(1, n + 1):
@@ -72,7 +73,7 @@ check("с предиктором: ошибка нулевая (выход = це
 
 # --- 3. свежий отсчёт (возраст 0): предиктор ничего не меняет ---
 def one(predict, age):
-    vh = VinsHold(predict=predict, **GAINS)
+    vh = VinsHold(**si(predict=predict, **GAINS))
     vh.enter(DroneState(now_sim=100.0, vins_x=0.0, vins_y=0.0))
     t = 100.0 + DT
     return vh.update(DroneState(now_sim=t, vins_x=1.0, vins_y=0.0,

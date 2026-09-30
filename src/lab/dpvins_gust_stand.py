@@ -75,7 +75,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from control_pkg.domain.control.vins_axes import DpVins      # noqa: E402
 from control_pkg.domain.rc import RC_CENTER                  # noqa: E402
 from control_pkg.domain.setpoint import Setpoint             # noqa: E402
-from control_pkg.domain.state import DroneState              # noqa: E402
+from control_pkg.domain.state import DroneState             # noqa: E402
+from control_pkg.domain.units import tilt_from_us              # noqa: E402
 
 DT = 0.05
 ALPHA = 0.01          # м/с² на PWM (100 PWM = 1 м/с², test_dpvins §13)
@@ -103,7 +104,9 @@ def gust_env(t):
 
 def run(ki, gust_pwm, kp_fwd=40.0, kp_lat=32.0, vsmooth=0.3, imax=120.0, cycles=6,
         brake=0.0, brake_v=0.25, brake_vmax=1.0, brake_t=0.0, trim0=None):
-    vh = DpVins(kp_fwd=kp_fwd, kp_lat=kp_lat, ki=ki, ki_trim=60.0, imax=imax, max_pwm=150.0,
+    u = tilt_from_us                       # гейны стенда — PWM-экв., DpVins в СИ (2026-09-30)
+    vh = DpVins(kp_fwd=u(kp_fwd), kp_lat=u(kp_lat), ki=u(ki), ki_trim=u(60.0), imax=u(imax),
+                max_tilt=u(150.0),
                 cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3, pos_acc=0.15, vsmooth=vsmooth,
                 i_latch=True, brake=brake, brake_v=brake_v, brake_vmax=brake_vmax,
                 brake_t=brake_t)
@@ -128,7 +131,7 @@ def run(ki, gust_pwm, kp_fwd=40.0, kp_lat=32.0, vsmooth=0.3, imax=120.0, cycles=
             v += 0.5
             kicked = True
         if trim0 is not None and 24.9 < t <= 24.95 and vh._pinx is not None:
-            vh._itx = trim0               # ОШИБОЧНЫЙ трим после гвоздя (запирание BRAKE)
+            vh._itx = u(trim0)              # ОШИБОЧНЫЙ трим после гвоздя (запирание BRAKE)
         if t >= GUST['at']:
             k = int((t - GUST['at']) // GUST['every'])
             if k != cyc:

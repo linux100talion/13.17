@@ -45,11 +45,10 @@ from ..domain.attitude import AttitudeCommand
 PARAMS = ('ATC_ANGLE_MAX', 'RC3_MIN', 'RC3_MAX', 'RC3_DZ',
           'THR_DZ', 'PILOT_SPD_UP', 'PILOT_SPD_DN', 'WP_SPD_UP', 'WP_SPD_DN')
 
-# ФИКСИРОВАННЫЙ МАСШТАБ домена (µs от центра 1500 → угол/темп), вариант A 2026-09-30
+# ФИКСИРОВАННЫЙ МАСШТАБ домена (µs от центра 1500 → угол/темп), вариант A 2026-09-30 —
+# одно число на весь домен, живёт в domain/units.py (им же стабилизаторы переводят СИ в µs)
+from ..domain.units import ANGLE_SPAN_DEG, PWM_SPAN, YAW_SPAN_DPS   # noqa: E402,F401
 PWM_CENTER = 1500
-PWM_SPAN = 500.0
-ANGLE_SPAN_DEG = 20.0      # 500 µs → 20° (0.040 °/µs)
-YAW_SPAN_DPS = 90.0        # 500 µs → 90 °/с
 
 
 class FcuStickParams:

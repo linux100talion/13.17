@@ -74,6 +74,7 @@ from control_pkg.domain.control.stabilization import DpRollRate, clamp   # noqa:
 from control_pkg.domain.rc import RC_CENTER                          # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -101,7 +102,7 @@ def axis(cls=DpRollRate, **kw):
     kw.setdefault('max_speed', 0.0)
     kw.setdefault('alt_band', 0.0)
     kw.setdefault('arm_frames', 0)
-    return cls(**kw)
+    return cls(**si(**kw))
 
 
 def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0, wind=WIND,
@@ -129,7 +130,7 @@ def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0, wind
         pwm = rc.roll - RC_CENTER
         pwm_act += (pwm - pwm_act) * (1.0 - math.exp(-DT / tau_a))   # привод (FCU по углу)
         v += (-ALPHA * pwm_act + wind) * DT
-        rows.append((t, v, vm, path, pwm, ax._i, ax._pos_brake,
+        rows.append((t, v, vm, path, pwm, us(ax._i), ax._pos_brake,
                      ax._pos_sp[0] if ax._pos_sp else None))   # [7] = гвоздь
     return rows
 
@@ -382,8 +383,8 @@ check("стик живой: цель = стик·cmd_gain (станция не �
 from control_pkg.domain.control.stabilization import DpPitchRate   # noqa: E402
 
 print("  тангаж: станция на установившейся высоте (pos_alt_band 0.2):")
-px = DpPitchRate(kp=90.0, ki=60.0, kd=0.0, imax=150.0, max_speed=0.0, alt_band=0.0,
-                 arm_frames=0, pos_alt_band=0.2, pos_alt_still=0.5, **BRAKE)
+px = DpPitchRate(**si(kp=90.0, ki=60.0, kd=0.0, imax=150.0, max_speed=0.0, alt_band=0.0,
+                 arm_frames=0, pos_alt_band=0.2, pos_alt_still=0.5, **BRAKE))
 px.enter(DroneState(flow_seq=-1))
 seq, t, path = 0, 0.0, 0.0
 

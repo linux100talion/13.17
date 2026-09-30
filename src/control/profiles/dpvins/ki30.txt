@@ -22,4 +22,4 @@
 #   провал — rs_mean > 1 м или vmax > 2.5 (перелёт/раскачка) → откат к ki 20 (стенд 4.09/0.13).
 # Плавность: σθ по /mavros/imu/data на висении — не хуже эталона 0.5°.
 include baseline.txt
-BS_DPVINS_KI=30
+BS_DPVINS_KI_DEG=1.2

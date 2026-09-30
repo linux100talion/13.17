@@ -26,15 +26,24 @@ from control_pkg.domain.control.stabilization import (
     DpHold, DpPitchBack, DpPitchHold, DpPitchRate, DpRollHold, DpRollRate, DpYawHold, GzHold, GzPitchHold,
     DpVins, GzPosHold, GzRollHold, GzYawHold, StationFrame, VinsHold)
 from control_pkg.domain.control.trajectory import RcTransmitter, Shuttle
+from control_pkg.domain.control.wind_trim import WindTrim
+from control_pkg.domain.units import us_from_tilt
 
 CONTROL_MODES = ("shuttle", "assisted", "manual", "flow_assist")
+rad = math.radians                      # ° профилей → рад домена (перевод в СИ, 2026-09-30)
 
 
 # ===================== ОРТОГОНАЛЬНЫЙ реестр стабилизаторов (BS_STAB) =====================
 
+def _gz_gains(cfg):
+    """kp, kd, ki, imax, max GzHold/VinsHold — ° профилей → рад."""
+    return (rad(cfg.gz_kp_deg), rad(cfg.gz_kd_deg), rad(cfg.gz_ki_deg),
+            rad(cfg.gz_imax_deg), rad(cfg.gz_max_deg))
+
+
 def _gz_alias(klass, cfg):
     """Gz*-алиас с gz-гейнами (ось задаёт сам алиас через kw['axes'])."""
-    return klass(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax, cfg.gz_max,
+    return klass(*_gz_gains(cfg),
                  cfg.gz_psign, cfg.gz_rsign, cmd_gain=cfg.gz_cmd_gain,
                  # темп разворота — из ОБЩЕГО yaw_rate_full, а не из класс-дефолта:
                  # иначе один токен yaw_l30 даёт разный угол под Gz и под Dp
@@ -56,13 +65,21 @@ def _station_frame(cfg):
     return StationFrame(heading=_HEADINGS[cfg.station_heading])
 
 
+def _us_deg(deg):
+    """° наклона → µs для ЛЕГАСИ-осей по потоку (не переводились в СИ, общие с rate-осями
+    потолки roll/pitch_imax/max — в градусах). Округление снимает шум деления: 6° = 150."""
+    return round(us_from_tilt(math.radians(deg)), 9)
+
+
 def _dp_roll(cfg):
-    return DpRollHold(cfg.roll_kp, cfg.roll_ki, cfg.roll_kd, cfg.roll_imax, cfg.roll_max,
+    return DpRollHold(cfg.roll_kp, cfg.roll_ki, cfg.roll_kd, _us_deg(cfg.roll_imax_deg),
+                      _us_deg(cfg.roll_max_deg),
                       cfg.roll_conf_min, cfg.roll_conf_full, cfg.roll_osign, cfg.roll_cmd_gain)
 
 
 def _dp_pitch(cfg, klass=DpPitchHold):
-    return klass(cfg.pitch_kp, cfg.pitch_ki, cfg.pitch_kd, cfg.pitch_imax, cfg.pitch_max,
+    return klass(cfg.pitch_kp, cfg.pitch_ki, cfg.pitch_kd, _us_deg(cfg.pitch_imax_deg),
+                 _us_deg(cfg.pitch_max_deg),
                  cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign, cfg.pitch_cmd_gain)
 
 
@@ -99,11 +116,23 @@ def _dp_yaw(cfg):
                      pilot_gain=cfg.yaw_pilot_gain, v_gate=cfg.yaw_v_gate)
 
 
+def build_wind_trim(cfg):
+    """Общий ветровой трим ярусов 0/1 (WindTrim) — или None (cfg.wind_trim 0). Валюта —
+    наклон каналов, рад; потолок — самый широкий из капов трима ярусов 0/1; поле wt=
+    статуса — в µs-эквиваленте."""
+    if cfg.wind_trim <= 0:
+        return None
+    return WindTrim(imax=math.radians(max(cfg.dpvins_imax_deg, cfg.roll_imax_deg,
+                                          cfg.pitch_imax_deg)),
+                    steady_sec=cfg.wind_steady_sec, steady_v=cfg.wind_steady_v,
+                    to_us=us_from_tilt)
+
+
 def _dpvins(cfg):
     """DpVins — velocity-каскад на опоре VINS (плавная замена VinsHold)."""
-    return DpVins(kp_fwd=cfg.dpvins_kp_fwd, kp_lat=cfg.dpvins_kp_lat,
-                  ki=cfg.dpvins_ki, ki_trim=cfg.dpvins_ki_trim,
-                  imax=cfg.dpvins_imax, max_pwm=cfg.gz_max,
+    return DpVins(kp_fwd=rad(cfg.dpvins_kp_fwd_deg), kp_lat=rad(cfg.dpvins_kp_lat_deg),
+                  ki=rad(cfg.dpvins_ki_deg), ki_trim=rad(cfg.dpvins_ki_trim_deg),
+                  imax=rad(cfg.dpvins_imax_deg), max_tilt=rad(cfg.gz_max_deg),
                   cmd_gain=cfg.dpvins_cmd_gain, pos_kp=cfg.dpvins_pos_kp,
                   pos_vmax=cfg.dpvins_pos_vmax, pos_acc=cfg.dpvins_pos_acc,
                   psign=cfg.gz_psign, rsign=cfg.gz_rsign,
@@ -114,7 +143,7 @@ def _dpvins(cfg):
                   brake_t=cfg.dpvins_pos_brake_t,
                   latch_axis=cfg.dpvins_latch_axis > 0,
                   pin_armed=cfg.dpvins_pin_armed > 0,
-                  ff=cfg.dpvins_ff, line_hold=cfg.dpvins_line_hold > 0,
+                  ff=rad(cfg.dpvins_ff_deg), line_hold=cfg.dpvins_line_hold > 0,
                   settle_brake=cfg.dpvins_settle_brake > 0, pin_t=cfg.dpvins_pin_t)
 
 
@@ -125,7 +154,7 @@ def build_vins_stab(cfg, wind=None):
         st = _dpvins(cfg)
         st.wind = wind
         return st
-    return VinsHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax, cfg.gz_max,
+    return VinsHold(*_gz_gains(cfg),
                     cfg.gz_psign, cfg.gz_rsign, cfg.gz_cmd_gain,
                     kd_err=cfg.vins_kd_err > 0, i_latch=cfg.vins_i_latch > 0,
                     pin_stop=cfg.vins_pin_stop > 0, predict=cfg.vins_predict > 0,
@@ -148,13 +177,13 @@ _STAB = {
     # Продольная ось по СКОРОСТИ (вид сверху), а не по положению — см. DpPitchRate.
     # Гейны у неё СВОИ (сигнал в м/с, а не в log): pitch_rate_*.
     "DpPitchRate": lambda cfg: DpPitchRate(
-        cfg.pitch_rate_kp, cfg.pitch_rate_ki, cfg.pitch_rate_kd, cfg.pitch_imax,
-        cfg.pitch_max, cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign,
+        rad(cfg.pitch_rate_kp_deg), rad(cfg.pitch_rate_ki_deg), rad(cfg.pitch_rate_kd_deg),
+        rad(cfg.pitch_imax_deg), rad(cfg.pitch_max_deg), cfg.pitch_conf_min, cfg.pitch_conf_full, cfg.pitch_osign,
         cfg.pitch_rate_cmd_gain, pos_kp=cfg.pitch_pos_kp,
         pos_vmax=cfg.pitch_pos_vmax, pos_brake=cfg.pitch_pos_brake,
         pos_brake_vmax=cfg.pitch_pos_brake_vmax, pos_acc=cfg.pitch_pos_acc,
         pos_brake_v=cfg.pitch_pos_brake_v, pos_alt_band=cfg.pitch_pos_alt_band,
-        pos_alt_still=cfg.ipm_alt_still, ki_trim=cfg.pitch_rate_ki_trim,
+        pos_alt_still=cfg.ipm_alt_still, ki_trim=rad(cfg.pitch_rate_ki_trim_deg),
         soft_alt=cfg.pitch_soft_alt, soft_noise=cfg.pitch_soft_noise,
         anti_windup=cfg.rate_anti_windup > 0.0,
         **_ipm_gates(cfg, cfg.ipm_alt_band_fwd)),
@@ -163,13 +192,13 @@ _STAB = {
                                   frame=_station_frame(cfg)),
     # Боковая ось тоже по МЕТРИЧЕСКОЙ скорости (гейны roll_rate_*), см. DpRollRate.
     "DpRollRate": lambda cfg: DpRollRate(
-        cfg.roll_rate_kp, cfg.roll_rate_ki, cfg.roll_rate_kd, cfg.roll_imax,
-        cfg.roll_max, cfg.roll_conf_min, cfg.roll_conf_full, cfg.roll_osign,
+        rad(cfg.roll_rate_kp_deg), rad(cfg.roll_rate_ki_deg), rad(cfg.roll_rate_kd_deg),
+        rad(cfg.roll_imax_deg), rad(cfg.roll_max_deg), cfg.roll_conf_min, cfg.roll_conf_full, cfg.roll_osign,
         cfg.roll_rate_cmd_gain, pos_kp=cfg.roll_pos_kp,
         pos_vmax=cfg.roll_pos_vmax, pos_brake=cfg.roll_pos_brake,
         pos_brake_vmax=cfg.roll_pos_brake_vmax, pos_acc=cfg.roll_pos_acc,
         pos_brake_v=cfg.roll_pos_brake_v, pos_alt_band=cfg.roll_pos_alt_band,
-        pos_alt_still=cfg.ipm_alt_still, ki_trim=cfg.roll_rate_ki_trim,
+        pos_alt_still=cfg.ipm_alt_still, ki_trim=rad(cfg.roll_rate_ki_trim_deg),
         soft_alt=cfg.roll_soft_alt, soft_noise=cfg.roll_soft_noise,
         anti_windup=cfg.rate_anti_windup > 0.0,
         **_ipm_gates(cfg, cfg.ipm_alt_band_lat)),
@@ -215,8 +244,7 @@ def build_stabilizers(cfg, spec, wind=None):
 
 def _gz(cfg):
     # горизонтальная позиция (roll+pitch), yaw — пилот; интегрирует стик-команду сам
-    return GzHold(cfg.gz_kp, cfg.gz_kd, cfg.gz_ki, cfg.gz_imax,
-                  cfg.gz_max, cfg.gz_psign, cfg.gz_rsign,
+    return GzHold(*_gz_gains(cfg), cfg.gz_psign, cfg.gz_rsign,
                   axes=frozenset({"roll", "pitch"}), cmd_gain=cfg.gz_cmd_gain)
 
 

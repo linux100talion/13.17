@@ -35,15 +35,31 @@ rate_full откалиброван по прогону: throttle 1800 (+300 PWM,
 from ..rc import RC_CENTER, clamp
 
 
+class ThrottleMap:
+    """Скорость набора, м/с → смещение газа, µs — карта ALT_HOLD полётника, как её видит домен.
+
+    Домен управления в СИ (перевод 2026-09-30): высотный контур и мягкая посадка считают
+    СКОРОСТЬ НАБОРА (м/с), а газ канала — её PWM-эквивалент на носителе RcCommand. Карта одна
+    на AltHold и SoftLand: мёртвая зона THR_DZ (dz) перескакивается разом, дальше линейно
+    rate_full м/с на span µs (калибровка замером — см. AltHold). Возвращает МОДУЛЬ смещения
+    (float, без округления): округление и знак у каждого потребителя свои, как было."""
+
+    def __init__(self, dz=100.0, span=400.0, rate_full=3.16):
+        self.dz = float(dz)                  # мёртвая зона стика (THR_DZ), µs
+        self.span = float(span)              # µs от края зоны до полного отклонения
+        self.rate_full = float(rate_full)    # vz при полном отклонении, м/с
+
+    def off(self, vz) -> float:
+        return self.dz + abs(vz) / self.rate_full * self.span
+
+
 class AltHold:
     def __init__(self, kp=0.6, rate_max=1.2, tol=0.10, dz=100.0, span=400.0,
                  rate_full=3.16, center=RC_CENTER, out_max=350.0):
         self.kp = float(kp)                  # м/с на метр ошибки
         self.rate_max = float(rate_max)      # потолок командной vz, м/с
         self.tol = float(tol)                # мёртвая зона ПО ОШИБКЕ, м
-        self.dz = float(dz)                  # мёртвая зона стика (THR_DZ), PWM
-        self.span = float(span)              # PWM от края зоны до полного отклонения
-        self.rate_full = float(rate_full)    # vz при полном отклонении, м/с
+        self.map = ThrottleMap(dz, span, rate_full)   # м/с → µs газа (PWM-эквивалент)
         self.center = int(center)
         self.out_max = float(out_max)
         self.target = None                   # уставка высоты, м (ставит шаг миссии)
@@ -51,15 +67,22 @@ class AltHold:
     def set_target(self, alt) -> None:
         self.target = None if alt is None else float(alt)
 
-    def throttle(self, s) -> int:
-        """PWM throttle для текущего состояния. Нет уставки/высоты → центр (как было)."""
+    def climb(self, s):
+        """Командная скорость набора, м/с (вверх +); 0.0 — держать (у цели в пределах tol);
+        None — контур молчит (нет уставки или высоты)."""
         if self.target is None or s.rel_alt is None:
-            return self.center
+            return None
         err = self.target - float(s.rel_alt)
         if abs(err) < self.tol:
+            return 0.0
+        return clamp(self.kp * err, -self.rate_max, self.rate_max)
+
+    def throttle(self, s) -> int:
+        """Газ, µs: PWM-эквивалент climb() по карте ThrottleMap. Молчит/держит → центр."""
+        vz = self.climb(s)
+        if not vz:
             return self.center
-        vz = clamp(self.kp * err, -self.rate_max, self.rate_max)
-        off = self.dz + abs(vz) / self.rate_full * self.span
+        off = self.map.off(vz)
         # округляем ВЕЛИЧИНУ, а знак ставим после: int() рубит к нулю, и «вверх» с
         # «вниз» разошлись бы на 1 PWM при одинаковой по модулю ошибке
         off = int(round(clamp(off, 0.0, self.out_max)))

@@ -5,25 +5,27 @@
 # цикл 0.8–1.5 м копится по ветру (в лоб на 10 м — 10 м за 2 мин). Формат — README.md.
 BS_STAB=DpHoldM
 
-# слой: env (freefly_lv.sh) — СКОРОСТНОЙ КОНТУР rate-осей, PWM на м/с ошибки скорости IPM.
-# kp 90: kp 30→90 убрал звон 10.7 с; ki 30 + ki_trim 60 до первого гвоздя (быстрый захват
-# ветра); cmd_gain 5 — м/с при полном стике.
-BS_ROLL_RATE_KP=90
-BS_PITCH_RATE_KP=90
-BS_ROLL_RATE_KI=30
-BS_PITCH_RATE_KI=30
-BS_ROLL_RATE_KI_TRIM=60
-BS_PITCH_RATE_KI_TRIM=60
+# слой: env (freefly_lv.sh) — СКОРОСТНОЙ КОНТУР rate-осей. ЕДИНИЦЫ СИ (с 2026-09-30, ключи
+# _DEG): kp — ° наклона на м/с ошибки скорости IPM, ki/ki_trim — ° на м, kd — ° на м/с²,
+# imax — °. Числа истории — PWM-экв. (1 PWM = 0.04°): kp 30→90 (1.2→3.6) убрал звон 10.7 с;
+# ki 30 (1.2) + ki_trim 60 (2.4) до первого гвоздя (быстрый захват ветра); cmd_gain 5 — м/с
+# при полном стике.
+BS_ROLL_RATE_KP_DEG=3.6
+BS_PITCH_RATE_KP_DEG=3.6
+BS_ROLL_RATE_KI_DEG=1.2
+BS_PITCH_RATE_KI_DEG=1.2
+BS_ROLL_RATE_KI_TRIM_DEG=2.4
+BS_PITCH_RATE_KI_TRIM_DEG=2.4
 BS_ROLL_RATE_CMD_GAIN=5
 BS_PITCH_RATE_CMD_GAIN=5
-BS_ROLL_IMAX=150
+BS_ROLL_IMAX_DEG=6
 BS_ROLL_OSIGN=1
 BS_PITCH_OSIGN=1
 BS_SLEW=300
-# слой: нода — D rate-осей выкл, потолок И-члена тангажа, анти-виндап И-члена
-BS_ROLL_RATE_KD=0
-BS_PITCH_RATE_KD=0
-BS_PITCH_IMAX=120
+# слой: нода — D rate-осей выкл, потолок И-члена тангажа (4.8° = 120 PWM), анти-виндап И-члена
+BS_ROLL_RATE_KD_DEG=0
+BS_PITCH_RATE_KD_DEG=0
+BS_PITCH_IMAX_DEG=4.8
 BS_RATE_ANTI_WINDUP=1
 
 # слой: env — СТАНЦИЯ (StationKeeper над псевдопозицией-интегралом пути): возврат

@@ -10,6 +10,6 @@
 # Стенд, боковая ось: путь 5.5/4.6 м, медиана висения 0.20, порывы 0.36, ×1.5 — 4.2 м / 0.29
 # (штат 0.7 м / 0.72); продольная (kp 40) ×1.5 — 4.0 / 0.42 (штат 0.6 / 0.81). kp не трогаем.
 include brake5_stop.txt
-BS_DPVINS_KI=3
+BS_DPVINS_KI_DEG=0.12
 BS_DPVINS_VSMOOTH=0
-BS_DPVINS_FF=30
+BS_DPVINS_FF_DEG=1.2

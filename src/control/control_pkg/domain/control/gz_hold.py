@@ -11,6 +11,7 @@ import math
 from ..rc import RC_CENTER, RcCommand, clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
+from ..units import rc_off_tilt, rc_off_yaw, tilt_from_us, us_from_tilt, yaw_from_us
 from .base import StabilizationStrategy
 
 
@@ -22,11 +23,17 @@ class GzHold(StabilizationStrategy):
     игнорирует, поэтому вычисляем все три, а axes лишь маркирует владение.
     """
 
-    def __init__(self, kp=40.0, kd=120.0, ki=8.0, imax=100.0, max_pwm=150.0,
+    # ЕДИНИЦЫ (перевод домена в СИ, 2026-09-30) — как VinsHold: крен/тангаж в рад (kp рад/м,
+    # kd рад/(м/с), ki рад/(м·с), imax/max_tilt рад). Курс — темп, рад/с: yaw_kp в 1/с
+    # (прежние 80 µs на рад ошибки = 0.2513 1/с при 90 °/с на 500 µs), потолок курса —
+    # прежний: тот же µs-потолок, что у наклона (150 µs = 27 °/с), в рад/с.
+    def __init__(self, kp=tilt_from_us(40.0), kd=tilt_from_us(120.0), ki=tilt_from_us(8.0),
+                 imax=tilt_from_us(100.0), max_tilt=tilt_from_us(150.0),
                  psign=1.0, rsign=1.0, axes=frozenset({"roll", "pitch"}),
-                 yaw_kp=80.0, yaw_sign=-1.0, cmd_gain=0.8, yaw_cmd_gain=0.5):
+                 yaw_kp=yaw_from_us(80.0), yaw_sign=-1.0, cmd_gain=0.8, yaw_cmd_gain=0.5):
         self.kp, self.kd, self.ki = kp, kd, ki
-        self.imax, self.max = imax, max_pwm
+        self.imax, self.max = imax, max_tilt
+        self.yaw_max = yaw_from_us(us_from_tilt(max_tilt))
         self.psign, self.rsign = psign, rsign
         self.axes = axes
         self.yaw_kp, self.yaw_sign = yaw_kp, yaw_sign
@@ -91,9 +98,9 @@ class GzHold(StabilizationStrategy):
         # DpYawHold по потоку) и до K1 в полёте не проверялась ни разу.
         eyaw = math.atan2(math.sin(self._yawsp - s.gt_yaw),
                           math.cos(self._yawsp - s.gt_yaw))
-        yo = clamp(self.yaw_sign * self.yaw_kp * eyaw, -self.max, self.max)
-        return RcCommand(roll=RC_CENTER + int(ro), pitch=RC_CENTER + int(po),
-                         throttle=RC_CENTER, yaw=RC_CENTER + int(yo))
+        yo = clamp(self.yaw_sign * self.yaw_kp * eyaw, -self.yaw_max, self.yaw_max)
+        return RcCommand(roll=RC_CENTER + rc_off_tilt(ro), pitch=RC_CENTER + rc_off_tilt(po),
+                         throttle=RC_CENTER, yaw=RC_CENTER + rc_off_yaw(yo))
 
 
 class GzPosHold(GzHold):

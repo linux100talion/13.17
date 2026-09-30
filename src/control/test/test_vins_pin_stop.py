@@ -25,6 +25,7 @@ from control_pkg.domain.control.vins_hold import VinsHold                # noqa:
 from control_pkg.domain.rc import RC_CENTER                              # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                         # noqa: E402
 from control_pkg.domain.state import DroneState                          # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -40,7 +41,7 @@ GAINS = dict(kp=40.0, kd=0.0, ki=0.0, imax=100.0, max_pwm=150.0,
 
 
 def make(pin_stop, **kw):
-    vh = VinsHold(pin_stop=pin_stop, **{**GAINS, **kw})
+    vh = VinsHold(**si(pin_stop=pin_stop, **{**GAINS, **kw}))
     vh.enter(DroneState(now_sim=100.0, vins_x=0.0, vins_y=0.0))
     return vh
 

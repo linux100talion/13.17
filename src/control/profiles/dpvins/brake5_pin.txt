@@ -13,7 +13,7 @@
 # порывы каждые 20 с от 30) — brake_phase.py: «set/set до него — 0.0 с», первый цикл
 # pk ≤ 3.5; провал — set/set на входе (посев не сработал → wns/трим 0 — смотреть seed).
 include baseline.txt
-BS_DPVINS_KI=8
+BS_DPVINS_KI_DEG=0.32
 BS_DPVINS_POS_BRAKE=5
 BS_DPVINS_POS_BRAKE_VMAX=2.0
 BS_DPVINS_POS_BRAKE_T=-1

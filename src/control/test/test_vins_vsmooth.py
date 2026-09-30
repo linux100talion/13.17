@@ -23,6 +23,7 @@ from control_pkg.domain.control.vins_hold import VinsHold                # noqa:
 from control_pkg.domain.rc import RC_CENTER                              # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                         # noqa: E402
 from control_pkg.domain.state import DroneState                          # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -42,7 +43,7 @@ def noisy_run(vsmooth, seed=1, n=60):
     """Борт идёт по уставке (e=0), скорость VINS зашумлена ±0.4 м/с 10 Гц."""
     import random
     rng = random.Random(seed)
-    vh = VinsHold(vsmooth=vsmooth, kd_err=True, **GAINS)
+    vh = VinsHold(**si(vsmooth=vsmooth, kd_err=True, **GAINS))
     vh.enter(DroneState(now_sim=100.0, vins_x=0.0, vins_y=0.0))
     out = []
     vnoise = 0.0
@@ -78,7 +79,7 @@ check("vsmooth=0 воспроизводимо бит-в-бит", noisy_run(0.0) 
 
 # --- 4. установившееся слежение без шума: ФНЧ не сдвигает постоянную ---
 def steady(vsmooth):
-    vh = VinsHold(vsmooth=vsmooth, kd_err=True, **GAINS)
+    vh = VinsHold(**si(vsmooth=vsmooth, kd_err=True, **GAINS))
     vh.enter(DroneState(now_sim=100.0, vins_x=0.0, vins_y=0.0))
     rc = None
     for i in range(1, 40):
@@ -93,7 +94,7 @@ check("слежение v=vsp: сглаж. и без — один выход (ц
       steady(0.3) == steady(0.0) == RC_CENTER)
 
 # --- 5. enter() сбрасывает фильтр (нет переноса) ---
-vh = VinsHold(vsmooth=0.3, kd_err=True, **GAINS)
+vh = VinsHold(**si(vsmooth=0.3, kd_err=True, **GAINS))
 vh.enter(DroneState(now_sim=100.0, vins_x=0.0, vins_y=0.0))
 vh.update(DroneState(now_sim=100.05, vins_x=0.2, vins_y=0.0, vins_vx=9.0,
                      vins_vy=0.0, vins_valid=True, vins_last_sim=100.05),

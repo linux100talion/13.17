@@ -26,7 +26,7 @@
 #   провал — качание (размах в затишье > 2 м, T 2–10 с) или σθ > 1° → кап 1.5 / brake 3
 #           (стенд 3.76/0.55), затем twist VINS (лаг 0.35 → 0.11) как запас по фазе.
 include baseline.txt
-BS_DPVINS_KI=15
+BS_DPVINS_KI_DEG=0.6
 # ФАЗА BRAKE станции: −brake·v при уходе от гвоздя быстрее brake_v, кап brake_vmax
 BS_DPVINS_POS_BRAKE=5
 BS_DPVINS_POS_BRAKE_VMAX=2.0

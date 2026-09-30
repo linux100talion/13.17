@@ -24,6 +24,7 @@ from control_pkg.domain.control.vins_axes import DpVins              # noqa: E40
 from control_pkg.domain.control.wind_trim import WindTrim            # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 DT = 0.05
 results = []
@@ -68,23 +69,24 @@ check("без ветра — старое хранилище в раме (бит
 
 # 3. DpVins на общем триме
 def make_vins(w):
-    vh = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, imax=120.0, max_pwm=150.0,
-                cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3, pos_acc=0.15, vsmooth=0.0, i_latch=True)
+    vh = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, imax=120.0, max_pwm=150.0,
+                cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3, pos_acc=0.15, vsmooth=0.0, i_latch=True))
     vh.wind = w
     vh.enter(DroneState(now_sim=100.0))
     return vh
-w = WindTrim(120.0)
+w = WindTrim(tilt_from_us(120.0))                    # трим — рад (СИ), ожидания в µs-экв.
 vh = make_vins(w)
 check("посев — no-op на общем триме", vh.seed_trim(-30.0, 10.0, st()) is False and w.magnitude() == 0.0)
 t = 100.05
 for i in range(20):                                   # снос вперёд 0.5 м/с, стики центр, гвоздя нет → ki_trim
     vh.update(st(vx=0.5, x=0.5 * DT * i, t=t), Setpoint(), DT); t += DT
-p0, r0 = w.channel(0.0)
+p0, r0 = (us(v) for v in w.channel(0.0))
 check(f"DpVins учит трим В ОБЩИЙ объект (pitch_off {p0:+.1f} ≠ 0; на входе «выучен» → ki 8)",
       abs(p0) > 2.0 and abs(r0) < 1e-6)
-check("trim_pwm DpVins = канал общего трима", vh.trim_pwm() == w.channel(0.0))
+check("trim_pwm DpVins = канал общего трима (µs-экв.)",
+      all(abs(a - us(b)) < 1e-9 for a, b in zip(vh.trim_pwm(), w.channel(0.0))))
 vh.reset_trim()
-check("reset_trim — no-op на общем триме (ветер физический)", abs(w.channel(0.0)[0] - p0) < 1e-9)
+check("reset_trim — no-op на общем триме (ветер физический)", abs(us(w.channel(0.0)[0]) - p0) < 1e-9)
 # проекция по att_yaw: борт развернулся на 90° — в теле тот же ветер стал боковым
 pf, pr = vh.trim_pwm(yaw=math.pi / 2)
 check("под курсом 90° трим в канале крена, тангаж ~0", abs(pf) < 1e-6 and abs(abs(pr) - abs(p0)) < 1e-9)
@@ -94,9 +96,9 @@ check("«выучен» — общий флаг (armed DpVins = wind.learned)", 
 # 4. обмен между ярусами: демпфер записал → DpVins видит; DpVins выучил → станция без захвата
 w = WindTrim(150.0)
 fr = StationFrame(wind=w); fr.psi = 0.0
-fr.set_trim_body("pitch", 25.0, sign=1.0)            # демпфер (osign +1) выучил 25 PWM «назад»
+fr.set_trim_body("pitch", tilt_from_us(25.0), sign=1.0)   # демпфер (osign +1) выучил 25 PWM «назад»
 vh = make_vins(w)
-check("DpVins читает трим демпфера тем же каналом", vh.trim_pwm(yaw=0.0)[0] == 25.0)
+check("DpVins читает трим демпфера тем же каналом", abs(vh.trim_pwm(yaw=0.0)[0] - 25.0) < 1e-9)
 w.learned = True
 sk = StationKeeper(kp=0.3, brake=3.0)
 class _Damper:                                        # минимум демпфера для enter-логики
@@ -172,9 +174,9 @@ check("status: устойчивость/вердикт/снимок/выучен
 
 # 7. DpVins наблюдает устойчивость сам (гвоздь на входе, висение)
 w = WindTrim(150.0, steady_sec=3.0, steady_v=0.5)
-vh = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, imax=120.0, max_pwm=150.0,
+vh = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, imax=120.0, max_pwm=150.0,
             cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3, pos_acc=0.15, vsmooth=0.0, i_latch=True,
-            pin_armed=True)
+            pin_armed=True))
 vh.wind = w
 vh.enter(DroneState(now_sim=100.0))
 t = 100.05

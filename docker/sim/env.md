@@ -13,7 +13,7 @@
 Слой 1 — `eval "$(python3 src/control/profiles/load.py …)"` под `set -a`
 (с 2026-09-07; include + дельта, дубль ключа между профилями = ошибка), поэтому
 для СВОИХ ключей профиль перекрывает и внешний env, и `.env`:
-`BS_ROLL_RATE_KP=50 bash cmd/bl/bl.sh` полетит с 90 из `dphold/baseline.txt`.
+`BS_ROLL_RATE_KP_DEG=2 bash cmd/bl/bl.sh` полетит с 3.6 из `dphold/baseline.txt`.
 С 2026-09-07 в профилях ВСЕ `BS_*` ноды, включая миссию/пилота (`mission/`) и
 легаси (`legacy/`) — под `cmd/*` слои 3–5 для `BS_*` затенены целиком. Env
 снаружи сильнее профиля только там, где скрипт cmd сам пишет `${X:-…}`

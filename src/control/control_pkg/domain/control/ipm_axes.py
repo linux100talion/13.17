@@ -6,6 +6,7 @@ DpPitchRate/DpRollRate — демпферы скорости в м/с (ipm_vfwd/
 """
 from ..rc import clamp
 from ..state import DroneState
+from ..units import tilt_from_us
 from .alt_settled import _AltSettled
 from .flow_damper import _FlowDamper1D
 
@@ -39,11 +40,20 @@ class _IpmGated(_FlowDamper1D):
     почти не задета (полоса не смещается вбок при смене высоты — замер: наклон +0.25
     против +0.67, насыщения крена нет ни в одном прогоне), а слепой крен на наборе
     отдаёт борт ветру на все 4 секунды. Дефолт для крена — 0 (выключено).
-    """
 
-    def __init__(self, *a, max_speed=0.0, alt_band=0.0, alt_still=0.5,
+    ЕДИНИЦЫ (перевод домена в СИ, 2026-09-30): выход — наклон, рад (_TILT); kp — рад на
+    м/с ошибки скорости, ki/ki_trim — рад на м, kd — рад на м/с², imax/max_out — рад;
+    в профилях градусы (ключи *_DEG). Числа в комментариях ниже — PWM-эквивалент
+    прежнего домена: 1 PWM = 0.04° (kp 90 PWM на м/с = 3.6 °/(м/с)).
+    """
+    _TILT = True
+
+    def __init__(self, kp=tilt_from_us(8.0), ki=tilt_from_us(2.0), kd=0.0,
+                 imax=tilt_from_us(120.0), max_out=tilt_from_us(150.0), *a,
+                 max_speed=0.0, alt_band=0.0, alt_still=0.5,
                  arm_frames=0, soft_alt=0.0, soft_min=0.1, soft_noise=0.0, **kw):
-        super().__init__(*a, **kw)
+        # дефолты базы (PWM-экв. 8/2/0/120/150) — в радианах: ось наклона
+        super().__init__(kp, ki, kd, imax, max_out, *a, **kw)
         self.max_speed = max_speed
         self.alt_band = alt_band
         self.arm_frames = arm_frames

@@ -38,6 +38,7 @@ from control_pkg.domain.control.stabilization import DpPitchRate            # no
 from control_pkg.domain.rc import RC_CENTER                                 # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                            # noqa: E402
 from control_pkg.domain.state import DroneState                             # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -88,7 +89,7 @@ def fly(ax, h, sec=40.0, tau_a=0.2, seed=1, tau_v=0.4):
         act += (pwm - act) * (1.0 - math.exp(-DT / tau_a))
         v += (-ALPHA * act + WIND) * DT
         x += v * DT
-        rows.append((t, v, vm, path, pwm, ax._i, ax._pos_brake, x, ax._soft, est))
+        rows.append((t, v, vm, path, pwm, us(ax._i), ax._pos_brake, x, ax._soft, est))
     return rows
 
 
@@ -111,7 +112,7 @@ print("   h    soft_alt soft_noise | soft  PWM σ   v σ   брейк>10с  ра
 res = {}
 for h in (0.4, 5.0, 8.3):
     for sa, sn in ((0.0, 0.0), (2.0, 0.0), (0.0, 0.02), (2.0, 0.02)):
-        rows = fly(DpPitchRate(**dict(FLIGHT, soft_alt=sa, soft_noise=sn)), h)
+        rows = fly(DpPitchRate(**si(**FLIGHT, soft_alt=sa, soft_noise=sn)), h)
         m = metrics(rows)
         res[(h, sa, sn)] = (m, rows)
         print("   %4.1f   %3.1f     %4.2f    | %.2f  %5.0f   %.2f    %4d      %5.2f   %3.0f  |   %.2f       %.3f (%.3f)"
@@ -132,7 +133,7 @@ for h in (5.0, 8.3):
     check(f"{h} м soft_alt=2: трим ветра цел (И-член {m2[4]:.0f} ≈ {WIND / ALPHA:.0f})",
           abs(m2[4] - WIND / ALPHA) < 15.0)
 # 4. soft по высоте
-ax = DpPitchRate(**dict(FLIGHT, soft_alt=2.0))
+ax = DpPitchRate(**si(**FLIGHT, soft_alt=2.0))
 sf = [ax._soft_factor(DroneState(rel_alt=h)) for h in (0.5, 2.0, 4.0, 8.0, 15.0, 40.0)]
 check("soft(h): 1, 1, 0.5, 0.25, 0.13, 0.1 (пол soft_min) на 0.5/2/4/8/15/40 м: "
       + ' '.join(f'{x:.2f}' for x in sf),

@@ -20,6 +20,7 @@ from control_pkg.domain.control.station_keeper import StationKeeper    # noqa: E
 from control_pkg.domain.control.vins_axes import DpVins                # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                       # noqa: E402
 from control_pkg.domain.state import DroneState                        # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 DT = 0.05
 results = []
@@ -36,9 +37,9 @@ def st(vx=0.0, vy=0.0, x=0.0, y=0.0, t=100.05):
 
 
 # 1. DpVins: до движения — set/set (гвоздя нет), трим учится (armed ещё нет: ki_trim)
-vh = DpVins(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, imax=120.0, max_pwm=150.0,
+vh = DpVins(**si(kp_fwd=40.0, kp_lat=32.0, ki=8.0, ki_trim=60.0, imax=120.0, max_pwm=150.0,
             cmd_gain=4.0, pos_kp=0.3, pos_vmax=0.3, pos_acc=0.15, vsmooth=0.0, i_latch=True,
-            brake=5.0, brake_vmax=2.0, brake_t=-1.0, latch_axis=True)
+            brake=5.0, brake_vmax=2.0, brake_t=-1.0, latch_axis=True))
 vh.enter(DroneState(now_sim=100.0))
 t = 100.05
 vh.update(st(t=t), Setpoint(), DT); t += DT

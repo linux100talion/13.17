@@ -8,8 +8,9 @@
 сбрасывал раму), после LOITER — тоже, перерождение VINS обнуляло трим DpVins
 (его рама умирала), а сам посев дал провал в 46 м (читал идле-копию, cmd/3).
 
-Здесь: мировой вектор в ВАЛЮТЕ PWM КАНАЛОВ (pitch_off, roll_off — то, что стаб
-добавляет в RcCommand, знаки уже применены: у демпфера osign, у DpVins psign/
+Здесь: мировой вектор в ВАЛЮТЕ КАНАЛОВ (pitch_off, roll_off — наклон, который стаб
+добавляет к команде, знаки уже применены; с перевода домена в СИ 2026-09-30 — РАДИАНЫ,
+до него µs; класс единиц не знает, кроме `to_us` для поля wt= статуса: у демпфера osign, у DpVins psign/
 rsign), в раме ENU по курсу AHRS att_yaw — он есть у обоих ярусов и не зависит
 от рамы VINS. (pitch_off, roll_off) поворачивается как вектор тела (вперёд,
 влево): физический наклон = (−pitch_off, −roll_off), а смена знака обеих
@@ -58,14 +59,17 @@ from ..rc import clamp
 
 
 class WindTrim:
-    def __init__(self, imax=150.0, steady_sec=3.0, steady_v=0.5):
+    def __init__(self, imax=150.0, steady_sec=3.0, steady_v=0.5, to_us=None):
         self.imax = float(imax)
+        # единицы вектора → µs для снимка в поле wt= (статус/HUD — PWM-эквивалент);
+        # None = вектор уже в µs (стенды, юнит-тест)
+        self.to_us = to_us if to_us is not None else (lambda v: v)
         self.steady_sec = float(steady_sec)   # серия устойчивого hold до снимка, с
         self.steady_v = float(steady_v)       # |v| «стоим», м/с (свой и чужой датчик)
         self.reset()
 
     def reset(self) -> None:
-        self.x = 0.0                 # мировые компоненты (ENU), PWM каналов — ЖИВОЙ трим
+        self.x = 0.0                 # мировые компоненты (ENU), валюта каналов — ЖИВОЙ трим
         self.y = 0.0
         self.learned = False         # ветер выучен (первый гвоздь / первый брейк прошёл)
         self.owner = None            # кто пишет: рама демпфера (ярус 0) | DpVins (ярус 1)
@@ -173,7 +177,7 @@ class WindTrim:
         return self.verdict
 
     def status(self, now) -> str:
-        """Поле `wt=` статуса: <устойчивость>/<вердикт>/<снимок PWM>/<выучен>.
+        """Поле `wt=` статуса: <устойчивость>/<вердикт>/<снимок, µs-экв.>/<выучен>.
         Устойчивость: S — серия набрана (снимок идёт), s — серия копится, - — нет."""
         if self.steady_now(now):
             st = "S"
@@ -181,5 +185,5 @@ class WindTrim:
             st = "s"
         else:
             st = "-"
-        snap = math.hypot(self.gx, self.gy) if self.has_good else -1.0
+        snap = self.to_us(math.hypot(self.gx, self.gy)) if self.has_good else -1.0
         return f"{st}/{self.verdict}/{snap:.0f}/{int(self.learned)}"

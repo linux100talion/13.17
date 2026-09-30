@@ -39,6 +39,7 @@ from control_pkg.domain.control.stabilization import (               # noqa: E40
 from control_pkg.domain.rc import RC_CENTER                          # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -79,7 +80,7 @@ def pitch(**kw):
     kw.setdefault('max_speed', 8.0)
     kw.setdefault('alt_band', 0.5)
     kw.setdefault('arm_frames', 0)
-    return DpPitchRate(kp=100.0, ki=0.0, kd=0.0, **kw)
+    return DpPitchRate(**si(kp=100.0, ki=0.0, kd=0.0, **kw))
 
 
 # --- 1. потолок правдоподобия: кадр выбрасывается, а не подрезается ---
@@ -107,7 +108,7 @@ check("набор 1 м/с: продольная ось молчит, хотя к
       run(p, f, 40, vz=1.0, ipm_vfwd=2.0) == RC_CENTER)
 check("набор: закрытые кадры посчитаны", p._alt_blocks > 0)
 
-r = DpRollRate(kp=30.0, ki=0.0, kd=0.0, max_speed=8.0, alt_band=0.0, arm_frames=0)
+r = DpRollRate(**si(kp=30.0, ki=0.0, kd=0.0, max_speed=8.0, alt_band=0.0, arm_frames=0))
 f = Fly()
 r.enter(DroneState(flow_seq=-1))
 check("набор 1 м/с: БОКОВАЯ ось продолжает демпфировать (гейт выключен)",
@@ -163,8 +164,8 @@ check("после провала ось оживает на 6-м хорошем 
 # --- 5. сценарий взлёта: фантом набора не доходит до рулей ---
 # Как в замере: отрыв, набор ~1.1 м/с, канал врёт про 4.5 м/с вперёд две секунды,
 # потом набор кончается и канал становится честным (0.2 м/с).
-p = DpPitchRate(kp=100.0, ki=100.0, kd=0.0, imax=120.0,
-                max_speed=8.0, alt_band=0.5, arm_frames=5)
+p = DpPitchRate(**si(kp=100.0, ki=100.0, kd=0.0, imax=120.0,
+                max_speed=8.0, alt_band=0.5, arm_frames=5))
 f = Fly(alt=0.3)
 p.enter(DroneState(flow_seq=-1))
 sat = 0
@@ -172,7 +173,7 @@ for _ in range(40):                                  # 2 с набора с фа
     rc = p.update(f.step(vz=1.1, ipm_vfwd=4.5), Setpoint(), f.dt)
     sat += int(abs(rc.pitch - RC_CENTER) >= 149)
 check("взлёт: насыщения тангажа НЕТ ни в одном кадре набора", sat == 0)
-check("взлёт: интегратор не заряжен фантомом", abs(p._i) < 1e-9)
+check("взлёт: интегратор не заряжен фантомом", abs(us(p._i)) < 1e-9)
 tail = [p.update(f.step(vz=0.0, wobble=0.2, ipm_vfwd=0.2), Setpoint(), f.dt).pitch
         for _ in range(40)]
 check("взлёт: после набора ось возвращается в работу (20 PWM на 0.2 м/с)",
@@ -184,8 +185,8 @@ check("взлёт: после набора ось возвращается в р
 # поэтому c_right>0 ставит ОТРИЦАТЕЛЬНУЮ цель и даёт PWM выше центра (крен вправо).
 # Без минуса в _cmd стик вправо вёз борт ВЛЕВО: контур сходился к цели идеально,
 # но зеркальной — поймано пилотом, не стендом.
-rs = DpRollRate(kp=30.0, ki=0.0, kd=0.0, cmd_gain=2.0,
-                max_speed=0.0, alt_band=0.0, arm_frames=0)
+rs = DpRollRate(**si(kp=30.0, ki=0.0, kd=0.0, cmd_gain=2.0,
+                max_speed=0.0, alt_band=0.0, arm_frames=0))
 f = Fly()
 rs.enter(DroneState(flow_seq=-1))
 rc = rs.update(f.step(ipm_vlat=0.0), Setpoint(c_right=0.5), f.dt)
@@ -197,8 +198,8 @@ check("знак команды: борт едет вправо 1 м/с по це
       rc.roll == RC_CENTER)
 
 # --- 7. СТАНЦИЯ-КИПИНГ (pos_kp): стик в центре держит точку, стик живой — скорость ---
-ps = DpPitchRate(kp=100.0, ki=0.0, kd=0.0, cmd_gain=2.0, pos_kp=0.5, pos_vmax=1.0,
-                 max_speed=0.0, alt_band=0.0, arm_frames=0)
+ps = DpPitchRate(**si(kp=100.0, ki=0.0, kd=0.0, cmd_gain=2.0, pos_kp=0.5, pos_vmax=1.0,
+                 max_speed=0.0, alt_band=0.0, arm_frames=0))
 f = Fly()
 ps.enter(DroneState(flow_seq=-1))
 ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=2.0, att_yaw=0.0), Setpoint(), f.dt)
@@ -218,8 +219,8 @@ ps.update(f.step(ipm_vfwd=0.2, ipm_fwd=5.0, att_yaw=0.0), Setpoint(), f.dt)
 check("станция: затормозил (<0.3 м/с) → гвоздь там, где остановился (5.0)",
       ps._pos_sp == (5.0, 0.0) and ps.rate_dbg()[0] == 0.0)
 # страховка: злая рампа не даёт затормозить → через _POS_PIN_T гвоздь принудительно
-pf = DpPitchRate(kp=100.0, ki=0.0, kd=0.0, cmd_gain=2.0, pos_kp=0.5, pos_vmax=1.0,
-                 max_speed=0.0, alt_band=0.0, arm_frames=0)
+pf = DpPitchRate(**si(kp=100.0, ki=0.0, kd=0.0, cmd_gain=2.0, pos_kp=0.5, pos_vmax=1.0,
+                 max_speed=0.0, alt_band=0.0, arm_frames=0))
 f2 = Fly()
 pf.enter(DroneState(flow_seq=-1))
 for _ in range(58):                    # 2.9 с на скорости — гвоздя ещё нет
@@ -233,8 +234,8 @@ check("станция: не затормозил за 3 с → гвоздь пр
 ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=6.0, att_yaw=0.4), Setpoint(), f.dt)
 check("станция: развернулись на 0.4 рад — точка перезахвачена (путь в body-осях)",
       ps._pos_sp == (6.0, 0.4) and ps.rate_dbg()[0] == 0.0)
-psat = DpPitchRate(kp=100.0, ki=0.0, kd=0.0, cmd_gain=2.0, pos_kp=0.5, pos_vmax=1.0,
-                   max_speed=0.0, alt_band=0.0, arm_frames=0)
+psat = DpPitchRate(**si(kp=100.0, ki=0.0, kd=0.0, cmd_gain=2.0, pos_kp=0.5, pos_vmax=1.0,
+                   max_speed=0.0, alt_band=0.0, arm_frames=0))
 f = Fly()
 psat.enter(DroneState(flow_seq=-1))
 psat.update(f.step(ipm_vfwd=0.0, ipm_fwd=0.0), Setpoint(), f.dt)
@@ -248,7 +249,7 @@ check("станция: далеко от точки → цель клампит�
 # выход до 0–50 PWM при ошибке +5.4 м/с — «борт не слушает стики у земли».
 # Авторитет IPM-осей = 1 (_IpmGated._authority); здоровье канала сторожат
 # ipm_ok + гейты секций 1–5 с hold+fade.
-au = DpRollRate(kp=30.0, ki=0.0, kd=0.0, max_speed=0.0, alt_band=0.0, arm_frames=0)
+au = DpRollRate(**si(kp=30.0, ki=0.0, kd=0.0, max_speed=0.0, alt_band=0.0, arm_frames=0))
 f = Fly()
 au.enter(DroneState(flow_seq=-1))
 check("авторитет: полнокадровый conf=0 НЕ душит IPM-ось (полный закон, +30)",

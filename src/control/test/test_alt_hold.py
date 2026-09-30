@@ -40,7 +40,7 @@ hi = a.throttle(DroneState(rel_alt=4.0))     # выше цели → снижа�
 check("ниже цели → команда выше центра", lo > RC_CENTER)
 check("выше цели → команда ниже центра", hi < RC_CENTER)
 check("команда перескакивает мёртвую зону (|off| ≥ dz)",
-      lo - RC_CENTER >= a.dz and RC_CENTER - hi >= a.dz)
+      lo - RC_CENTER >= a.map.dz and RC_CENTER - hi >= a.map.dz)
 check("симметрия вверх/вниз", (lo - RC_CENTER) == (RC_CENTER - hi))
 
 # монотонность и потолок: 1 м → 0.6 м/с, 2 м → 1.2 (потолок), 5 м → тот же потолок
@@ -51,8 +51,8 @@ check("больше ошибка → больше команда", c2 > c1)
 check("потолок rate_max держит команду (5 м и 2 м ошибки равны)", c3 == c2)
 
 # калибровка PWM→vz: полный размах span за rate_full м/с, зона сверху
-full = a.dz + a.span                        # +500 PWM = rate_full м/с
-mid = a.dz + a.span * (1.58 / a.rate_full)  # замер: +300 PWM ≈ +1.58 м/с
+full = a.map.dz + a.map.span                        # +500 PWM = rate_full м/с
+mid = a.map.dz + a.map.span * (1.58 / a.map.rate_full)  # замер: +300 PWM ≈ +1.58 м/с
 check(f"пересчёт совпадает с замером (+1.58 м/с → +{mid:.0f} PWM ≈ 300)",
       abs(mid - 300) < 5)
 check("полное отклонение = dz+span (500)", abs(full - 500) < 1e-9)

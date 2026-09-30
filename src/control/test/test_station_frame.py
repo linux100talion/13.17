@@ -38,6 +38,7 @@ from control_pkg.domain.control.stabilization import (                  # noqa: 
 from control_pkg.domain.rc import RC_CENTER, RcCommand                # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                      # noqa: E402
 from control_pkg.domain.state import DroneState                       # noqa: E402
+from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -63,7 +64,7 @@ class _YawStub:
 
 
 def stack(frame):
-    return DpHold(DpRollRate(**FLIGHT), DpPitchRate(**FLIGHT), _YawStub(), frame=frame)
+    return DpHold(DpRollRate(**si(**FLIGHT)), DpPitchRate(**si(**FLIGHT)), _YawStub(), frame=frame)
 
 
 def fly(st, sec=30.0, psi=lambda t: 0.0, wind=(0.65, 0.0), stick_f=None, stick_r=None,
@@ -105,7 +106,7 @@ def fly(st, sec=30.0, psi=lambda t: 0.0, wind=(0.65, 0.0), stick_f=None, stick_r
         Vy += (a_f * si + a_l * c + wind[1]) * DT
         X += Vx * DT
         Y += Vy * DT
-        rows.append((t, X, Y, p, v_f, v_l, pwm_p, pwm_r, ax_p._i, ax_r._i,
+        rows.append((t, X, Y, p, v_f, v_l, pwm_p, pwm_r, us(ax_p._i), us(ax_r._i),
                      ax_p._pos_sp is not None, ax_r._pos_sp is not None))
     return rows
 
@@ -141,7 +142,7 @@ i_p_before = next(r[8] for r in yawf if r[0] >= 9.9)
 i_p_after = yawf[-1][8]
 check(f"оси курса: трим тангажа сменил знак сам ({i_p_before:+.0f} → {i_p_after:+.0f} PWM, "
       f"трим ветра {0.65 / ALPHA:.0f})", abs(i_p_before - 52.0) < 8.0 and abs(i_p_after + 52.0) < 8.0)
-tw = fr.trim
+tw = [us(v) for v in fr.trim]
 check(f"оси курса: вектор трима в мире ≈ (52, 0): ({tw[0]:.0f}, {tw[1]:.0f})",
       abs(tw[0] - 52.0) < 8.0 and abs(tw[1]) < 8.0)
 check("оси курса: гвоздь не сброшен разворотом (обе оси в станции всё время после 10 с)",
