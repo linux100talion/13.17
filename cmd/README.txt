@@ -48,6 +48,8 @@ world/ (ветер). Аргументы прогона — не параметр
                                  спавна (east / SPAWN_POSE=diagonal). Отличие сторон —
                                  РОВНО один ключ BS_EKF_YAW_SRC из 238. Судья —
                                  src/lab/yaw_ab.py (таблица по четырём прогонам).
+  cmd/dpv_board/               — DpVins ПОД ОТКЛИК БОРТА (2026-09-30): dpvins/board1 (ki 3,
+                                 vsmooth 0, ff 30) против brake5_stop на канале углов.
   cmd/att_out/                 — ВЫХОД В УГЛАХ (2026-09-30): A/B override против
                                  SET_ATTITUDE_TARGET; ALT_HOLD — только пилот по RC-входу,
                                  нода — GUIDED_NOGPS; отличие сторон — BS_ATT_OUT.
