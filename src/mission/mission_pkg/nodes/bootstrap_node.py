@@ -827,9 +827,14 @@ class BootstrapArch2Node(Node):
                     s.wind_src = ('vins' if getattr(st_, 'seed_trim', None)
                                   is not None else 'ipm')
                 # фаза станции того же стаба (brk=/ifz= — см. hud._station_fields)
+                # Четвёрка (тангаж, крен, заморозка ×2) — только у стабов крена/
+                # тангажа (DpHold, DpVins). Одноосевые (yaw_sub композита — в
+                # стеке яруса 1 с 5e4253e) отдают пару (фаза, заморозка) своей оси:
+                # их фаза в brk=/ifz= не идёт (полёт rcrev_pitch_20260930_124427 —
+                # IndexError на входе в VinsHold, лётная нода упала).
                 sph = getattr(st_, 'station_phase', None)
                 ph = sph() if sph is not None else None
-                if ph is not None:
+                if ph is not None and len(ph) == 4:
                     s.st_phase = f"{ph[0]}/{ph[1]}"
                     s.st_ifz = f"{int(ph[2])}/{int(ph[3])}"
         # общий трим WindTrim: устойчивость/вердикт входа/снимок/выучен — во ВСЕХ
