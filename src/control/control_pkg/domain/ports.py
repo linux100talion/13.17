@@ -58,6 +58,16 @@ class SetpointOutput(Protocol):
 
 
 @runtime_checkable
+class AttitudeOutput(Protocol):
+    # ПОТОК УГЛОВ GUIDED_NOGPS (переезд с override, laptop_move.md §5.7): крен/тангаж,
+    # темп курса, скорость набора — domain/attitude.py (СИ, оси ArduPilot). Полётник
+    # принимает его ТОЛЬКО в GUIDED/GUIDED_NOGPS; обрыв дольше GUID_TIMEOUT → сам
+    # выравнивается и держит высоту. Потолок наклона ATC_ANGLE_MAX к этому каналу
+    # полётник НЕ применяет — ограничивает адаптер.
+    def publish_attitude(self, cmd) -> None: ...
+
+
+@runtime_checkable
 class PilotInput(Protocol):
     def sticks(self) -> RcCommand: ...   # сырой PWM с /mavros/rc/in (радио ИЛИ SITL)
     def mode_switch(self) -> int: ...    # тумблер авто/ручной — для арбитража
