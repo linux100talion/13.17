@@ -48,9 +48,9 @@ KEY_RE = re.compile(r'^([A-Z][A-Z0-9_]*)=(.*)$')
 INCLUDE_RE = re.compile(r'^include\s+(\S+)\s*$')
 
 # Эталонный стек = то, чем летает cmd/bl (WT=1). Менять вместе с cmd/bl/bl.sh.
-BASELINE_STACK = ['dphold/baseline', 'dpvins/brake5_stop', 'vinshold/baseline',
+BASELINE_STACK = ['dphold/baseline', 'dpvins/board1', 'vinshold/baseline',
                   'vins/scale25', 'loiter/guard', 'wind/trim',
-                  'mission/baseline', 'legacy/baseline', 'world/wind2_gust5']
+                  'mission/att_out', 'legacy/baseline', 'world/wind2_gust5']
 
 
 class ProfileError(SystemExit):

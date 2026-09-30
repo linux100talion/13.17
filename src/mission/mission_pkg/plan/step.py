@@ -1097,8 +1097,11 @@ class SoftLand(Step):
     КАСАНИЕ, ветка alt — МЯГКИЙ ГАЗ ДО РЕАЛЬНОГО КОНТАКТА (2026-09-30): баро/gt ≤ ground_z
     — лишь «у земли» (land_state near), спуск −rate продолжается; газ в пол — только по
     КОНТАКТУ: детектор посадки FCU (ON_GROUND, свежий — нода сама просит
-    EXTENDED_SYS_STATE, ros_telemetry) ИЛИ баро встало при команде вниз (наклон rel_alt
-    за STALL_SEC меньше STALL_V) ИЛИ NEAR_MAX с после «у земли» (страховка). До этого
+    EXTENDED_SYS_STATE, ros_telemetry) ИЛИ NEAR_MAX с после «у земли» (страховка).
+    Признак «баро встало» (наклон rel_alt за 1.5 с) пробовали и убрали (bl2_att0_
+    20260930_225934): у земли баро подскакивает от потока винтов (0.30 → 0.50 при
+    истине 0.49 → 0.43), наклон выходит пологим — «касание» на истинных 0.35 м, падение
+    с пиком 1.1 м/с. До этого
     газ в пол давался на баро 0.3 м: последние ~0.25 м борт падал с пиком 0.5–0.7 м/с
     (thrbsa_* 2026-09-30, детектор FCU до ноды не доходил вовсе). Детектор FCU остаётся
     касанием и выше ground_z: баро после касания застревает на 1.4-1.5 м (урок
@@ -1122,9 +1125,8 @@ class SoftLand(Step):
     полу, борт на земле — только предупреждение."""
 
     TOUCH_FRESH_SEC = 3.0        # свежесть extended_state для детекта FCU
-    STALL_SEC = 1.5              # окно «баро встало»: наклон rel_alt за это время…
-    STALL_V = 0.05               # …медленнее этого (м/с) при команде −rate = стоим на земле
-    NEAR_MAX = 4.0               # с после «у земли» без подтверждения — контакт (страховка)
+    NEAR_MAX = 4.0               # с после «у земли» без детектора FCU — контакт (страховка:
+                                 # с 0.3 м по баро ±0.2 на 0.15 м/с земля за ≤ 3.3 с)
 
     def __init__(self, name, stack, ground_z, budget, pilot_stabs=None, handover=None,
                  rate=0.15, fresh_sec=2.0, keep="ALT_HOLD", throttle_hold=RC_CENTER,
@@ -1152,7 +1154,6 @@ class SoftLand(Step):
         self._pos_latched = False
         self._touch_t = None         # sim-время касания
         self._near_t = None          # sim-время «у земли» (ветка alt: баро/gt ≤ ground_z)
-        self._alts = []              # (t, rel_alt) ветки alt — окно детекта «баро встало»
         self._disarm_warned = False
         # кнопка, нажатая на входе (тот же фронт, что запустил посадку) — не отмена
         self._land_prev = bool(getattr(s, 'pilot_land', False)) if s is not None else True
@@ -1187,33 +1188,16 @@ class SoftLand(Step):
         """Касание ветки pos (и детектор FCU в любой ветке)."""
         return self._near(s) or self._fcu_ground(s)
 
-    def _stalled(self, s) -> bool:
-        """Баро встало при команде вниз: МНК-наклон rel_alt за STALL_SEC > −STALL_V."""
-        if s.rel_alt is not None:
-            self._alts.append((s.now_sim, float(s.rel_alt)))
-        self._alts = [(t, a) for t, a in self._alts if s.now_sim - t <= self.STALL_SEC]
-        if len(self._alts) < 5 or self._alts[-1][0] - self._alts[0][0] < 0.9 * self.STALL_SEC:
-            return False
-        n = len(self._alts)
-        mt = sum(t for t, _ in self._alts) / n
-        ma = sum(a for _, a in self._alts) / n
-        den = sum((t - mt) ** 2 for t, _ in self._alts)
-        slope = sum((t - mt) * (a - ma) for t, a in self._alts) / den if den > 0 else 0.0
-        return slope > -self.STALL_V
-
     def _contact(self, ctx, s):
         """Ветка alt: причина реального контакта или None (см. docstring класса)."""
         if self._fcu_ground(s):
             return "детектор FCU ON_GROUND"
-        stalled = self._stalled(s)
         if self._near_t is None:
             if not self._near(s):
                 return None
             self._near_t = s.now_sim
             ctx.log.info(f"    {self.name}: у земли (rel_alt={s.rel_alt}) — дожимаем "
                          f"{self.descent:+.2f} м/с до контакта")
-        if stalled:
-            return "баро встало"
         if s.now_sim - self._near_t > self.NEAR_MAX:
             return f"{self.NEAR_MAX:g} с у земли"
         return None

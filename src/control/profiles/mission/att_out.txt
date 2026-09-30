@@ -1,0 +1,9 @@
+# ВЫХОД В УГЛАХ для живого пилота — штатный с 2026-09-30 (cmd/bl). Всё = mission/baseline.txt;
+# отличие одно: BS_ATT_OUT=1 — нода override не шлёт; SF вверх → GUIDED_NOGPS + SET_ATTITUDE_TARGET
+# (команда домена в СИ: углы, темп курса, скорость набора → thrust), арм и дизарм — нодой по жесту
+# пилота (полётнику ARMING_RUDDER 0 ставит sitl_lv_profile.py); SF не вверх → ALT_HOLD «только
+# пилот» по RC-входу (в симе — мост /joy → RC SITL); LOITER/LAND/RTL — штатные режимы полётника,
+# нода молчит. Доказательства и полёты — cmd/att_out/README.txt. Под реплеем — mission/att_out_replay.
+# Выход override (ALT_HOLD, как летали до 2026-09-30) — mission/baseline.txt (ATT=0 bash cmd/bl/bl.sh).
+include baseline.txt
+BS_ATT_OUT=1

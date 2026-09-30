@@ -10,8 +10,8 @@ cmd/ — команды запуска полётов и кампаний
 
 Скрипты не зависят от текущего каталога (корень репы вычисляется от своего
 расположения) и ДЕРЖАТ ТОЛЬКО СПИСОК профилей — ни eval, ни export ручек:
-    export PROFILES="dphold/baseline dpvins/brake5_stop vinshold/baseline vins/scale25
-                     loiter/guard wind/trim mission/baseline legacy/baseline world/wind2_gust5"
+    export PROFILES="dphold/baseline dpvins/board1 vinshold/baseline vins/scale25
+                     loiter/guard wind/trim mission/att_out legacy/baseline world/wind2_gust5"
     exec bash src/lab/freefly_lv.sh "$@"
 (с 2026-09-07). Список собирает freefly_lv.sh на хосте (мета, eeprom, ветер compose) и
 bootstrap_arch2.sh в контейнере (env ноды) — один load.py, строго по схеме
@@ -24,10 +24,13 @@ world/ (ветер). Аргументы прогона — не параметр
 
 Раскладка (с 2026-09-06):
 
-  cmd/bl/bl.sh                 — ТЕКУЩИЙ BASELINE: то, чем летаем по умолчанию (сейчас —
-                                 бывший cmd/11: cmd/10 + WindTrim, плечо WT=0|1). Новый
-                                 кандидат делается копией bl → cmd/<имя>/, доказанный
-                                 кандидат становится новым bl.
+  cmd/bl/bl.sh                 — ТЕКУЩИЙ BASELINE: то, чем летаем по умолчанию. С 2026-09-30 —
+                                 ВЫХОД В УГЛАХ (GUIDED_NOGPS, арм нодой, mission/att_out) +
+                                 DpVins под отклик борта (dpvins/board1); варианты одним
+                                 скриптом: ATT=0 — выход override (ALT_HOLD), WT=0 — свой трим
+                                 ярусов. Новый кандидат делается копией bl → cmd/<имя>/,
+                                 доказанный кандидат становится новым bl, прежний — в
+                                 cmd/history/bl/<n>/.
   cmd/rth/, cmd/smart_rth/     — ВОЗВРАТ ДОМОЙ (кампания 2026-09-07): тот же шаг Rth
                                  плана freefly, режим выбирает топик — RTL (прямая на
                                  home, `make rth`) и SMART_RTL (по крошкам пройденного
@@ -57,6 +60,8 @@ world/ (ветер). Аргументы прогона — не параметр
                                  компенсации 5780d48 реплеем rc_rev.json на трёх
                                  сторонах none/pitch/all — отличие только
                                  RCn_REVERSED в eeprom SITL (BS_FCU_PARAMS, loiter/).
+  cmd/history/bl/1/            — ПРЕЖНИЙ BASELINE 2026-09-06…09-30 (бывш. cmd/11): выход override,
+                                 dpvins/brake5_stop, WindTrim (плечо WT); запускается как есть.
   cmd/history/<кампания>/<n>/  — архив отлетавших скриптов как есть (README с результатом);
                                  ссылки «cmd/<n>» в доках/памяти/профилях = сюда
                                  (wind/1…11 — кампания ветра/станции 2026-09-05…06).

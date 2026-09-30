@@ -24,14 +24,16 @@ bootstrap_arch2.sh   load.py $PROFILES → env BS_* → ros2 run mission_pkg boo
 | `vins/` | ярусы 1 и 2 — опора VINS: СЕЛЕКТОР `BS_VINS_STAB` (dpvins \| vinshold, откат — `vins/vinshold.txt`), защёлка трима, хэндовер и зрелость, свежесть, гейт здоровья (три канала), мост VINS→EKF |
 | `loiter/` | ярус 2 — штатный LOITER на EKF-от-VINS: гейты миссии, TrackHold/YawBankLimit, GPS-denied/origin/EKF (LV=2 запечён здесь), `BS_EKF_DRAG` и `BS_FCU_PARAMS` для SITL (`rth.txt` = guard + параметры возврата RTL в eeprom, cmd/rth; `smart_rth.txt` — то же + `SRTL_ACCURACY` для возврата по следу, cmd/smart_rth) |
 | `wind/` | ярусы 0 и 1 — сквозной ветровой трим `WindTrim` |
-| `mission/` | миссия и пилот: `BS_PILOT`/`BS_MISSION`, SF-мастер, кнопка SA, знаки/зона стиков, высота и контур AltHold, бюджеты фаз, геозабор, мягкая посадка, скриптовые миссии; `replay.txt` — реплей пульта |
+| `mission/` | миссия и пилот (`baseline` — выход override, `att_out` — выход в углах, штатный с 2026-09-30; `replay`/`att_out_replay` — то же под реплеем пульта): `BS_PILOT`/`BS_MISSION`, SF-мастер, кнопка SA, знаки/зона стиков, высота и контур AltHold, бюджеты фаз, геозабор, мягкая посадка, скриптовые миссии; `replay.txt` — реплей пульта |
 | `legacy/` | поля ноды ВНЕ активного стека (control_mode/gz-shuttle, DpRollHold/DpPitchHold, старый flow-путь, KF-высота) значениями = прежние дефолты ноды. Кандидат на вычистку из кода вместе с файлом |
 | `world/` | ветер Gazebo (`WIND_SPD/DIR_DEG/FACTOR/GUST`) — не ручки ноды (`EXTRA_KEYS`), применяет compose/`capture_scene.sh`; `baseline` = 5 м/с без порывов, `wind2_gust5` (cmd/bl), `wind1_gust8` (history 1…9) |
 
-Эталонный стек (`load.BASELINE_STACK`, = `cmd/bl/bl.sh` WT=1, `check.sh` без
-аргументов, тесты `BootstrapConfig.baseline()`): `dphold/baseline dpvins/brake5_stop
-vinshold/baseline vins/scale25 loiter/guard wind/trim mission/baseline legacy/baseline
-world/wind2_gust5` → 217 ключей (211 полей + 6 внешних).
+Эталонный стек (`load.BASELINE_STACK`, = `cmd/bl/bl.sh` ATT=1 WT=1, `check.sh` без
+аргументов, тесты `BootstrapConfig.baseline()`; с 2026-09-30 — выход в углах + DpVins под
+отклик борта): `dphold/baseline dpvins/board1 vinshold/baseline vins/scale25 loiter/guard
+wind/trim mission/att_out legacy/baseline world/wind2_gust5` → 237 ключей. Выход override —
+`mission/baseline` вместо `mission/att_out` (`ATT=0 bash cmd/bl/bl.sh`); прежний эталон
+(override + `dpvins/brake5_stop`) — `cmd/history/bl/1/`.
 
 ## Формат
 
