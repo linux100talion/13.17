@@ -26,6 +26,7 @@ from std_msgs.msg import Bool, Empty
 
 from control_pkg.application.arbiter import PILOT_MANUAL, Arbiter
 from control_pkg.application.att_mode import GUIDED_NOGPS, AttModeProxy
+from control_pkg.application.node_arm import ArmGesture, ready_reasons
 from control_pkg.domain.control.wind_trim import WindTrim
 from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
@@ -222,9 +223,14 @@ class BootstrapArch2Node(Node):
         self._att_out = cfg.att_out > 0
         self._fcu_mode = None
         self._mode_proxy = AttModeProxy(self.actuator) if self._att_out else None
+        # арм/дизарм НОДОЙ по жесту пилота (application/node_arm.py): полётнику арм со
+        # стиков запрещён (ARMING_RUDDER 0), армим сервисом только готовые
+        self._arm_gesture = ArmGesture()
+        self._flow_seq_seen, self._flow_seq_t = None, -1e9
         if self._att_out:
-            self.logger.warn("ВЫХОД В УГЛАХ: override не шлю; ALT_HOLD — только пилот по "
-                             "RC-входу, в воздухе GUIDED_NOGPS + SET_ATTITUDE_TARGET")
+            self.logger.warn("ВЫХОД В УГЛАХ: override не шлю; SF не вверх — ALT_HOLD только "
+                             "пилот по RC-входу, иначе GUIDED_NOGPS + SET_ATTITUDE_TARGET; "
+                             "арм и дизарм — нодой по жесту пилота")
         self.runner = PlanRunner(plan, self.clock,
                                  self._mode_proxy or self.actuator, self.logger,
                                  perception=self.perception,
@@ -761,6 +767,8 @@ class BootstrapArch2Node(Node):
         self._fcu_mode = s.mode
         if self._mode_proxy is not None:
             self._mode_proxy.update(s, s.pilot_switch == PILOT_MANUAL)
+        if self._att_out:
+            self._node_arm(s)
         rc = self.runner.tick(s)
         # восстановление после разноса: гейт здоровья демотнул ярус → /restart VINS
         # (переинициализация), с кулдауном (сброс окна VINS сам занимает время)
@@ -1109,6 +1117,27 @@ class BootstrapArch2Node(Node):
                 if fn is not None and fn() is not None:
                     return fn()
         return None
+
+    def _node_arm(self, s) -> None:
+        """Арм/дизарм нодой по жесту пилота (выход в углах). Армим только готовые:
+        телеметрия, EKF, параметры углов, кадры камеры (ready_reasons)."""
+        if s.flow_seq != self._flow_seq_seen:
+            self._flow_seq_seen, self._flow_seq_t = s.flow_seq, s.now_sim
+        landed = ((s.rel_alt is not None and s.rel_alt <= 0.3)
+                  or (s.gt_valid and s.gt_z <= 0.3))
+        ev = self._arm_gesture.update(s.now_sim, s.pilot_throttle, s.pilot_yaw,
+                                      s.armed, landed)
+        if ev == 'arm':
+            why = ready_reasons(s, self.actuator.att_ready(),
+                                s.now_sim - self._flow_seq_t < 1.0)
+            if why:
+                self.logger.error("АРМ ОТКЛОНЁН нодой: " + "; ".join(why))
+            else:
+                self.logger.warn("арм нодой по жесту пилота (готовность ОК)")
+                self.actuator.arm(True)
+        elif ev == 'disarm':
+            self.logger.warn("дизарм нодой по жесту пилота")
+            self.actuator.arm(False)
 
     def _publish(self, rc: RcCommand):
         if self.runner.finished:          # план завершён — override не нужен

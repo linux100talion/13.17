@@ -115,7 +115,9 @@ class AwaitMode(Step):
     def tick(self, ctx, s) -> StepResult:
         rc = RcCommand(throttle=self.throttle)
         ctx.try_cmd(lambda: ctx.mode.set_mode(self.mode))
-        if s.mode == self.mode:
+        # выход в углах: заявленный ALT_HOLD может значить GUIDED_NOGPS (att_mode)
+        want = getattr(ctx.mode, 'effective', lambda m: m)(self.mode)
+        if s.mode == want:
             return _next(rc)
         if ctx.elapsed() > self.budget:
             ctx.log.warn(f"⚠️ {self.mode} не залатчился (mode={s.mode}) — пробуем дальше")

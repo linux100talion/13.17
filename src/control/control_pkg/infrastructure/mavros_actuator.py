@@ -153,6 +153,10 @@ class MavrosActuator:
         self._yaw_now = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                                    1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
+    def att_ready(self) -> bool:
+        """Параметры пересчёта в углы прочитаны (готовность к арму нодой)."""
+        return self._att.ready()
+
     def publish_rc_as_attitude(self, rc: RcCommand) -> None:
         """Шаг 1 переезда: домен ещё в PWM — пересчёт так же, как ALT_HOLD (att_convert)."""
         if not self._att.ready():

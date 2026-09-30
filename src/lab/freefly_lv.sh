@@ -214,7 +214,7 @@ wait_sitl || echo "freefly_lv: 5762 так и не открылся — проб
 # BS_FCU_PARAMS («NAME=VALUE …», loiter/) — параметры самого полётника в eeprom: там,
 # где командует FCU, а не нода (возврат домой RTL, cmd/rth). Стоковые значения стоят в
 # loiter/baseline.txt явно — иначе кандидат остался бы в eeprom у соседних прогонов.
-EEPROM_CMD="PYTHONPATH=/root/ardupilot/modules/mavlink BS_EKF_DRAG='$BS_EKF_DRAG' BS_FCU_PARAMS='$BS_FCU_PARAMS' python3 /scripts/sitl_lv_profile.py $LV"
+EEPROM_CMD="PYTHONPATH=/root/ardupilot/modules/mavlink BS_EKF_DRAG='$BS_EKF_DRAG' BS_FCU_PARAMS='$BS_FCU_PARAMS' BS_ATT_OUT='${BS_ATT_OUT:-0}' python3 /scripts/sitl_lv_profile.py $LV"
 if ! docker exec "$SIM" bash -lc "$EEPROM_CMD"; then
     # SITL часто мёртв после аварийно размотанного прогона (краш физики/зависший
     # арм) при живых контейнерах — лечится полным рестартом стека, делаем сами.

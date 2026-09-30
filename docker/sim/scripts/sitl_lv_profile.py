@@ -133,6 +133,11 @@ def main():
     want.update(RC_REVERSE)  # реверс каналов — сток, пока BS_FCU_PARAMS не скажет иначе
     want.update(RANGEFINDER)  # фантомный дальномер SITL — выкл (см. RANGEFINDER)
     want.update(BOARD_ATTITUDE)  # отклик на угол как на борту (см. BOARD_ATTITUDE)
+    # АРМ СО СТИКОВ: при выходе в углах (BS_ATT_OUT=1) армит только лётная нода по жесту
+    # пилота и своей готовности (control_pkg/application/node_arm.py) — полётнику руддер-арм
+    # запрещён (ARMING_RUDDER 0); иначе сток 2 (арм и дизарм руддером — сторона override).
+    att = (os.environ.get('BS_ATT_OUT', '0') or '0').strip() not in ('0', '0.0', '')
+    want['ARMING_RUDDER'] = 0.0 if att else 2.0
     # BS_EKF_DRAG — drag-фьюжн ветра EKF3 (BCOEF, кг/м²; 0 = выкл). Наблюдаемость
     # на VINS-external-nav доказана Ф0 (ветер сошёлся к истине 10 м/с). Даёт
     # стрелку ветра HUD во ВСЕХ режимах (windspeed.md). ⚠️ МЕНЯЕТ EKF (добавляет

@@ -7,21 +7,15 @@
 штатные режимы полётника, нода в них молчит (в LOITER пилот ведёт стиками с RC-входа).
 
 План миссии по-прежнему заявляет режим «держать» = ALT_HOLD (keep); этот модуль решает,
-что это значит в воздухе:
-  * пилот держит SF не вверх (Арбитр — MANUAL) или борт не заармлен → ALT_HOLD:
-    руддер-арм, взлёт газом, полёт руками — всё по радио;
-  * заармлен, SF вверх, высота ≥ ALT_ON → GUIDED_NOGPS и держим его до касания и
-    дизарма (на земле полётник сам глушит моторы по детектору посадки; руддер-дизарм
-    ArduCopter разрешает в любом режиме при land_complete — AP_Arming_Copter::disarm);
-    обратно в ALT_HOLD — после дизарма или по SF.
+что он значит:
+  * пилот держит SF не вверх (Арбитр — MANUAL) → ALT_HOLD «только пилот» по радио;
+  * иначе → GUIDED_NOGPS ВСЕГДА — и на земле: арм НОДОЙ (application/node_arm.py, жест
+    пилота + готовность ноды), взлёт газом пилота (набор > 0 раскручивает моторы,
+    mode_guided.cpp angle_control_run), посадка до касания; дизарм — нодой по жесту
+    (полётник по GCS дизармит только при land_complete). Арм со стиков у полётника
+    запрещён (ARMING_RUDDER 0) — борт не взлетит без готовой ноды.
 Прочие заявленные режимы проходят как есть.
-
-Почему GUIDED_NOGPS только с высоты: на земле полётник в GUIDED_NOGPS не раскрутит
-моторы, пока набор ≤ 0 (mode_guided.cpp angle_control_run), а руддер-арм в GUIDED
-запрещён (allows_arming) — взлёт по радио в ALT_HOLD надёжнее. Взлёт и арм нодой — отдельный
-следующий шаг.
 """
-ALT_ON = 0.7                # м (высота перцепции, иначе rel_alt): с неё — GUIDED_NOGPS
 GUIDED_NOGPS = "GUIDED_NOGPS"
 KEEP = "ALT_HOLD"
 
@@ -30,12 +24,7 @@ def effective_mode(requested, s, manual: bool) -> str:
     """Какой режим FCU на самом деле держать вместо заявленного планом."""
     if requested != KEEP:
         return requested
-    if manual or not s.armed:
-        return KEEP
-    if s.mode == GUIDED_NOGPS:
-        return GUIDED_NOGPS                  # уже в воздухе под нами — до дизарма
-    alt = s.perc_alt if s.perc_alt is not None else s.rel_alt
-    return GUIDED_NOGPS if alt is not None and alt >= ALT_ON else KEEP
+    return KEEP if manual else GUIDED_NOGPS
 
 
 class AttModeProxy:
