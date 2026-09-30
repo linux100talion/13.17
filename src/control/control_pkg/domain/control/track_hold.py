@@ -5,7 +5,9 @@
 """
 import math
 
-from ..rc import RC_CENTER, RcCommand, clamp
+from ..attitude import AttitudeCommand
+from ..rc import RC_CENTER, clamp
+from ..units import tilt_of_pwm
 from ..setpoint import Setpoint
 from ..state import DroneState
 from .base import StabilizationStrategy
@@ -58,8 +60,8 @@ class TrackHold(StabilizationStrategy):
     def enter(self, s: DroneState) -> None:
         self._psi0 = None       # вход в ярус = рама с первого нажатия
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
-        rc = RcCommand(throttle=RC_CENTER)
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand:
+        rc = AttitudeCommand()
         f, r = float(sp.c_fwd), float(sp.c_right)
         if abs(f) < self.dz and abs(r) < self.dz:
             self._psi0 = None   # центр = «стоять» (держит FCU), рама сброшена
@@ -70,8 +72,9 @@ class TrackHold(StabilizationStrategy):
         c, si = math.cos(d), math.sin(d)
         f2 = f * c - r * si     # мировой вектор рамы латча в осях ТЕКУЩЕГО носа
         r2 = f * si + r * c
-        rc.roll = int(clamp(RC_CENTER + r2 * _SPAN,
-                            RC_CENTER - _SPAN, RC_CENTER + _SPAN))
-        rc.pitch = int(clamp(RC_CENTER + _PITCH_RC_SIGN * f2 * _SPAN,
-                             RC_CENTER - _SPAN, RC_CENTER + _SPAN))
+        # стик-вектор в µs (конвенция стека, ±_SPAN) → наклон носителя тем же масштабом
+        rc.roll = tilt_of_pwm(int(clamp(RC_CENTER + r2 * _SPAN,
+                                        RC_CENTER - _SPAN, RC_CENTER + _SPAN)))
+        rc.pitch = tilt_of_pwm(int(clamp(RC_CENTER + _PITCH_RC_SIGN * f2 * _SPAN,
+                                         RC_CENTER - _SPAN, RC_CENTER + _SPAN)))
         return rc

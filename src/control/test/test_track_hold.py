@@ -27,6 +27,7 @@ from control_pkg.domain.control.trajectory import ConstProfile           # noqa:
 from control_pkg.domain.rc import RC_CENTER                              # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                         # noqa: E402
 from control_pkg.domain.state import DroneState                          # noqa: E402
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 results = []
 
@@ -47,7 +48,7 @@ DT = 0.05
 th = TrackHold()
 th.enter(state())
 for f, r in ((0.5, -0.25), (1.0, 0.0), (-0.7, 0.33)):
-    rc = th.update(state(yaw=0.7), Setpoint(f, r, 0.0), DT)   # yaw≠0, но Δψ=0
+    rc = rc_of(th.update(state(yaw=0.7), Setpoint(f, r, 0.0), DT))   # yaw≠0, но Δψ=0
     base_roll = int(RC_CENTER + r * 400)
     base_pitch = int(RC_CENTER - f * 400)
     check(f"Δψ=0 (f={f}, r={r}): roll/pitch = база passthrough",
@@ -60,17 +61,17 @@ for f, r in ((0.5, -0.25), (1.0, 0.0), (-0.7, 0.33)):
 th = TrackHold()
 th.enter(state())
 th.update(state(yaw=0.0), Setpoint(1.0, 0.0, 0.0), DT)        # латч ψ0=0
-rc = th.update(state(yaw=math.pi / 2), Setpoint(1.0, 0.0, 0.0), DT)
+rc = rc_of(th.update(state(yaw=math.pi / 2), Setpoint(1.0, 0.0, 0.0), DT))
 check("нос +90°: полный вперёд → полный вправо (roll 1900)", rc.roll == 1900)
 check("нос +90°: продольная компонента ушла (pitch 1500)", rc.pitch == 1500)
 
 # --- 3. нос 180° → «назад» (мировой вектор всё ещё тот же) ---
-rc = th.update(state(yaw=math.pi), Setpoint(1.0, 0.0, 0.0), DT)
+rc = rc_of(th.update(state(yaw=math.pi), Setpoint(1.0, 0.0, 0.0), DT))
 check("нос 180°: вперёд стал назад (pitch 1900)", rc.pitch == 1900)
 check("нос 180°: боковой centre (roll 1500)", rc.roll == 1500)
 
 # --- 4. промежуточный угол: модуль вектора сохраняется ---
-rc = th.update(state(yaw=math.pi / 4), Setpoint(1.0, 0.0, 0.0), DT)
+rc = rc_of(th.update(state(yaw=math.pi / 4), Setpoint(1.0, 0.0, 0.0), DT))
 mag = math.hypot(rc.roll - RC_CENTER, rc.pitch - RC_CENTER)
 check("нос +45°: |вектор| = 400 (пифагор по осям)", abs(mag - 400) < 1.5)
 
@@ -78,17 +79,17 @@ check("нос +45°: |вектор| = 400 (пифагор по осям)", abs(m
 th = TrackHold()
 th.enter(state())
 th.update(state(yaw=0.0), Setpoint(0.0, 0.0, 0.0), DT)        # центр: рамы нет
-rc = th.update(state(yaw=1.2), Setpoint(1.0, 0.0, 0.0), DT)   # нажали ПОСЛЕ разворота
+rc = rc_of(th.update(state(yaw=1.2), Setpoint(1.0, 0.0, 0.0), DT))   # нажали ПОСЛЕ разворота
 check("латч по нажатию: «вперёд = куда сейчас смотрю» (pitch 1100)",
       (rc.roll, rc.pitch) == (1500, 1100))
 # отпустили → рама сброшена → новое нажатие с нового курса снова чистое
 th.update(state(yaw=1.2), Setpoint(0.0, 0.0, 0.0), DT)
-rc = th.update(state(yaw=-2.0), Setpoint(1.0, 0.0, 0.0), DT)
+rc = rc_of(th.update(state(yaw=-2.0), Setpoint(1.0, 0.0, 0.0), DT))
 check("сброс в центре: повторное нажатие чистое с нового курса",
       (rc.roll, rc.pitch) == (1500, 1100))
 
 # --- 6. центр = «стоять»: выход центр (держит FCU) ---
-rc = th.update(state(yaw=-2.0), Setpoint(0.0, 0.0, 0.0), DT)
+rc = rc_of(th.update(state(yaw=-2.0), Setpoint(0.0, 0.0, 0.0), DT))
 check("центр стиков → центр PWM (позицию держит FCU)",
       (rc.roll, rc.pitch) == (1500, 1500))
 
@@ -98,7 +99,7 @@ th.enter(state())
 th.update(state(yaw=0.0), Setpoint(1.0, 1.0, 0.0), DT)
 ok = True
 for yaw in (0.3, 0.79, 1.5, 2.5):
-    rc = th.update(state(yaw=yaw), Setpoint(1.0, 1.0, 0.0), DT)
+    rc = rc_of(th.update(state(yaw=yaw), Setpoint(1.0, 1.0, 0.0), DT))
     ok = ok and 1100 <= rc.roll <= 1900 and 1100 <= rc.pitch <= 1900
 check("диагональ в упоре: PWM в границах ±400 при любом Δψ", ok)
 
@@ -106,15 +107,15 @@ check("диагональ в упоре: PWM в границах ±400 при л
 th = TrackHold()
 th.enter(state())
 th.update(state(yaw=3.0), Setpoint(1.0, 0.0, 0.0), DT)        # латч у границы
-rc_a = th.update(state(yaw=3.14), Setpoint(1.0, 0.0, 0.0), DT)
-rc_b = th.update(state(yaw=-3.14), Setpoint(1.0, 0.0, 0.0), DT)  # перескок ±π
+rc_a = rc_of(th.update(state(yaw=3.14), Setpoint(1.0, 0.0, 0.0), DT))
+rc_b = rc_of(th.update(state(yaw=-3.14), Setpoint(1.0, 0.0, 0.0), DT))  # перескок ±π
 check("wrap ±π: команда непрерывна (скачок PWM < 8)",
       abs(rc_a.roll - rc_b.roll) < 8 and abs(rc_a.pitch - rc_b.pitch) < 8)
 
 # --- 9. att_yaw молчит (всегда 0.0) → чистый passthrough, как без TrackHold ---
 th = TrackHold()
 th.enter(state())
-rc = th.update(state(yaw=0.0), Setpoint(0.6, -0.4, 0.0), DT)
+rc = rc_of(th.update(state(yaw=0.0), Setpoint(0.6, -0.4, 0.0), DT))
 check("нет IMU (att_yaw=0): passthrough (roll 1340, pitch 1260)",
       (rc.roll, rc.pitch) == (1340, 1260))
 
@@ -125,7 +126,7 @@ s = state(yaw=0.0)
 stack.enter(s)
 stack.update(s)                                    # латч ψ0=0 (стик жив)
 s2 = state(yaw=math.pi / 2, t=0.10)
-rc = stack.update(s2)
+rc = rc_of(stack.update(s2))
 check("стек: roll/pitch у TrackHold (повёрнуты: roll 1900, pitch 1500)",
       (rc.roll, rc.pitch) == (1900, 1500))
 check("стек: yaw не занят → открытый контур профиля (1600)", rc.yaw == 1600)

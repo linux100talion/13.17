@@ -56,10 +56,11 @@ BRAKE — пока уходим от гвоздя быстрее brake_v, цел
 """
 import math
 
-from ..rc import RC_CENTER, RcCommand, clamp
+from ..attitude import AttitudeCommand
+from ..rc import clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
-from ..units import rc_off_tilt, tilt_from_us, us_from_tilt
+from ..units import q_tilt, tilt_from_us, us_from_tilt
 from .base import StabilizationStrategy
 from .station_keeper import StationKeeper
 
@@ -313,7 +314,7 @@ class DpVins(StabilizationStrategy):
             mag = min(mag, math.sqrt(2.0 * self.pos_acc * abs(e)))
         return math.copysign(mag, e)
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand:
         c = math.cos(s.vins_yaw)
         sn = math.sin(s.vins_yaw)
         self._last_yaw = s.vins_yaw        # кэш для trim_pwm() (пулл без снапшота)
@@ -537,5 +538,4 @@ class DpVins(StabilizationStrategy):
             self.wind.observe(now, steady, who=self)
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
-        return RcCommand(roll=RC_CENTER + rc_off_tilt(ro), pitch=RC_CENTER + rc_off_tilt(po),
-                         throttle=RC_CENTER, yaw=RC_CENTER)
+        return AttitudeCommand(roll=q_tilt(ro), pitch=q_tilt(po))

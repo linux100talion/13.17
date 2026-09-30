@@ -29,7 +29,7 @@ from control_pkg.domain.control.vins_axes import DpVins                    # noq
 from control_pkg.domain.rc import RC_CENTER                                # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                           # noqa: E402
 from control_pkg.domain.state import DroneState                            # noqa: E402
-from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
+from pwm_eq import cmd_pwm, rc_of, si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -61,34 +61,34 @@ def st(vx=0.0, vy=0.0, x=0.0, y=0.0, yaw=0.0, t=100.05):
 # торможение движения вперёд → +po. err = v − цель.
 # --- 1. velocity-семантика: стик вперёд, борт стоит → разгон вперёд (−150) ---
 # err_fwd = 0 − 4 = −4 м/с; kp·−4 = −800 → упор −150
-rc = make().update(st(vx=0.0), Setpoint(c_fwd=1.0), DT)
+rc = rc_of(make().update(st(vx=0.0), Setpoint(c_fwd=1.0), DT))
 check("стик вперёд, v=0: цель 4 м/с, разгон вперёд (−150)",
       rc.pitch == RC_CENTER - 150)
 
 # --- 2. на цели (v = v_цель): выход ноль (НЕ долг позиции) ---
-rc = make().update(st(vx=4.0), Setpoint(c_fwd=1.0), DT)
+rc = rc_of(make().update(st(vx=4.0), Setpoint(c_fwd=1.0), DT))
 check("v=v_цель=4: ошибка скорости 0 → выход центр (нет долга)",
       rc.pitch == RC_CENTER)
 
 # --- 3. знак: слишком быстро → тормоз (+150) ---
-rc = make().update(st(vx=5.0), Setpoint(c_fwd=1.0), DT)   # err=+1 → +200 → +150
+rc = rc_of(make().update(st(vx=5.0), Setpoint(c_fwd=1.0), DT))   # err=+1 → +200 → +150
 check("v > цель (5>4): тормоз (+150)", rc.pitch == RC_CENTER + 150)
 
 # --- 4. стик отпущен на ходу, точки нет: тормозим к нулю (+150) ---
-rc = make().update(st(vx=3.0), Setpoint(), DT)            # цель 0, err +3 → +150
+rc = rc_of(make().update(st(vx=3.0), Setpoint(), DT))            # цель 0, err +3 → +150
 check("стик отпущен, v=3, гвоздя нет: тормоз к нулю (+150)",
       rc.pitch == RC_CENTER + 150)
 
 # --- 5. ГВОЗДЬ по остановке + внешний контур ---
 vh = make()
 vh.update(st(vx=3.0), Setpoint(c_fwd=1.0), DT)            # стик жил → pin_pending
-rc = vh.update(st(vx=0.0, x=6.0), Setpoint(), DT)         # встал в x=6 → гвоздь тут
+rc = rc_of(vh.update(st(vx=0.0, x=6.0), Setpoint(), DT))         # встал в x=6 → гвоздь тут
 check("встал (v=0): гвоздь в точке стопа → ошибка позиции 0 → центр",
       rc.pitch == RC_CENTER)
 # уехал на 6.5 от гвоздя 6.0: e_fwd = pin−pos = −0.5, цель назад
 # = −min(0.3·0.5, 0.3, √(2·0.15·0.5)) = −0.15 м/с; err = v−цель = 0−(−0.15)
 # = +0.15 → kp·0.15 = +30 (тянет назад к гвоздю)
-rc = vh.update(st(vx=0.0, x=6.5), Setpoint(), DT)
+rc = rc_of(vh.update(st(vx=0.0, x=6.5), Setpoint(), DT))
 check("уход 0.5 м вперёд от гвоздя: возврат назад (+30 PWM)",
       rc.pitch == RC_CENTER + 30)
 
@@ -96,7 +96,7 @@ check("уход 0.5 м вперёд от гвоздя: возврат назад
 vh = make()
 vh.update(st(vx=3.0), Setpoint(c_fwd=1.0), DT)
 vh.update(st(vx=0.1, x=10.0), Setpoint(), DT)             # гвоздь в 10
-rc = vh.update(st(vx=0.0, x=0.0), Setpoint(), DT)         # борт в 0, гвоздь в 10
+rc = rc_of(vh.update(st(vx=0.0, x=0.0), Setpoint(), DT))         # борт в 0, гвоздь в 10
 # e_fwd = pin−pos = +10: цель вперёд min(0.3·10,0.3,√3)=0.3 (vmax); err = v−цель
 # = 0−0.3 = −0.3 → kp·−0.3 = −60 (разгон вперёд к гвоздю)
 check("уход 10 м назад от гвоздя: цель vmax вперёд → −60 PWM",
@@ -106,7 +106,7 @@ check("уход 10 м назад от гвоздя: цель vmax вперёд �
 vh = make(ki=20.0)
 r1 = None
 for i in range(20):
-    r1 = vh.update(st(vx=4.0, t=100.05 + i * DT), Setpoint(c_fwd=1.0), DT)
+    r1 = rc_of(vh.update(st(vx=4.0, t=100.05 + i * DT), Setpoint(c_fwd=1.0), DT))
 check("живой стик, v=цель: И-член заморожен (выход центр)",
       r1.pitch == RC_CENTER)
 
@@ -118,7 +118,7 @@ vh = make(ki=20.0, kp_fwd=40.0)
 vh.update(st(vx=1.0, t=100.05), Setpoint(c_fwd=1.0), DT)   # живой стик → pin_pending
 r0 = None
 for i in range(30):                          # отпустили, ПЕРВОЕ торможение (не armed)
-    r0 = vh.update(st(vx=1.0, t=100.1 + i * DT), Setpoint(), DT)
+    r0 = rc_of(vh.update(st(vx=1.0, t=100.1 + i * DT), Setpoint(), DT))
 check("первое торможение (не armed): трим ИНТЕГРИРУЕТ (выход > чистый kp·v 40)",
       r0.pitch > RC_CENTER + 40)
 vh.update(st(vx=0.0, x=1.0, t=102.0), Setpoint(), DT)      # встал → гвоздь, armed
@@ -154,18 +154,18 @@ tx = us(vh._itx)
 check("трим набран в мировом +x (itx > 0)", tx > 0.5)
 # теперь борт на КУРСЕ 90° держит ту же точку: мировой +x трим = боковой у тела
 # → должен пойти в КРЕН (roll), тангаж почти чист
-rc = vh.update(st(vx=0.0, x=0.5, yaw=math.pi / 2, t=102.05), Setpoint(), DT)
+rc = rc_of(vh.update(st(vx=0.0, x=0.5, yaw=math.pi / 2, t=102.05), Setpoint(), DT))
 check("на курсе 90°: мировой трим +x → в КРЕН (roll ≠ центр)",
       abs(rc.roll - RC_CENTER) > 5)
 
 # --- 7b. знак крена: правый стик → вправо (+ro), как VinsHold ---
-rc = make(ki=0.0).update(st(vx=0.0, vy=0.0, yaw=0.0), Setpoint(c_right=1.0), DT)
+rc = rc_of(make(ki=0.0).update(st(vx=0.0, vy=0.0, yaw=0.0), Setpoint(c_right=1.0), DT))
 check("правый стик, v=0: разгон вправо (+150, как VinsHold)",
       rc.roll == RC_CENTER + 150)
 
 # --- 8. геометрия: курс 90° — «вперёд» = мировая Y ---
 yaw = math.pi / 2
-rc = make().update(st(vy=4.0, yaw=yaw), Setpoint(c_fwd=1.0), DT)
+rc = rc_of(make().update(st(vy=4.0, yaw=yaw), Setpoint(c_fwd=1.0), DT))
 check("yaw=90°: цель вперёд = мировая Y, v_y=4=цель → центр",
       rc.pitch == RC_CENTER)
 
@@ -179,7 +179,7 @@ def noisy(vsmooth, seed=1, n=40):
     for i in range(1, n + 1):
         if i % 2 == 1:
             vn = rng.uniform(-0.4, 0.4)
-        rc = vh.update(st(vx=4.0 + vn, t=100.05 + i * DT), Setpoint(c_fwd=1.0), DT)
+        rc = rc_of(vh.update(st(vx=4.0 + vn, t=100.05 + i * DT), Setpoint(c_fwd=1.0), DT))
         out.append(rc.pitch - RC_CENTER)
     return out
 raw = noisy(0.0)
@@ -241,7 +241,7 @@ def carry(**kw):
     x = v = 0.0
     t = 100.05
     for _ in range(4000):                     # 200 сим-секунд
-        rc = vh.update(st(vx=v, x=x, t=t), Setpoint(), DT)
+        rc = rc_of(vh.update(st(vx=v, x=x, t=t), Setpoint(), DT))
         v += (1.0 - (rc.pitch - RC_CENTER) / 100.0) * DT      # ветер − управление
         x += v * DT
         t += DT
@@ -284,7 +284,7 @@ def hover_lag(**kw):
     t = 100.05
     tail = []
     for _ in range(int(80.0 / DT)):            # 80 сим-секунд висения
-        rc = vh.update(st(vx=v, x=x, t=t), Setpoint(), DT)
+        rc = rc_of(vh.update(st(vx=v, x=x, t=t), Setpoint(), DT))
         cmd = -(rc.pitch - RC_CENTER) / 100.0  # PWM → м/с² (100 PWM = 1 м/с²)
         a += (DT / 0.5) * (cmd - a)            # лаг наклона τ = 0.5 с
         v += (0.5 + a) * DT                    # «ветер 5» ≈ 0.5 м/с²
@@ -306,7 +306,7 @@ check(f"хвост висения (40-80 с) спокоен: max|v| < 0.3 (по�
 vh16 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
 check("посев принят (девственный трим)",
       vh16.seed_trim(-40.0, 10.0, st(t=100.0)))
-rc = vh16.update(st(vx=0.0, t=100.05), Setpoint(), DT)
+rc = rc_of(vh16.update(st(vx=0.0, t=100.05), Setpoint(), DT))
 check("v=0: выход = ровно посеянные каналы (тангаж −40, крен +10)",
       rc.pitch == RC_CENTER - 40 and rc.roll == RC_CENTER + 10)
 check("трим уже нажит (≥1 PWM) → повторный посев отказан",
@@ -320,7 +320,7 @@ check("ветер выучен (armed) → посев отказан (своё �
 # в другие оси тела (ветер не вращается вместе с бортом)
 vh17 = make(kp_fwd=40.0, kp_lat=32.0, ki=6.0, ki_trim=60.0)
 vh17.seed_trim(-40.0, 10.0, st(t=100.0))
-rc = vh17.update(st(vx=0.0, yaw=math.pi / 2, t=100.05), Setpoint(), DT)
+rc = rc_of(vh17.update(st(vx=0.0, yaw=math.pi / 2, t=100.05), Setpoint(), DT))
 # допуск ±1 PWM: cos(π/2)=6e-17 даёт 9.999…, int() срезает вниз
 check("разворот 90° после посева: трим следует за курсом (каналы ≈ +10, +40)",
       abs(rc.pitch - (RC_CENTER + 10)) <= 1
@@ -338,7 +338,7 @@ def carry_seed(seed, **kw):
     x = v = 0.0
     t = 100.05
     for _ in range(4000):
-        rc = vh.update(st(vx=v, x=x, t=t), Setpoint(), DT)
+        rc = rc_of(vh.update(st(vx=v, x=x, t=t), Setpoint(), DT))
         v += (1.0 - (rc.pitch - RC_CENTER) / 100.0) * DT
         x += v * DT
         t += DT
@@ -399,7 +399,7 @@ def hover_then_push(brake, v_push=0.6, n_push=20, **kw):
     x = 0.5
     for i in range(n_push):                           # унос от гвоздя (порыв)
         x += v_push * DT
-        rc = vh.update(st(vx=v_push, x=x, t=t), Setpoint(), DT); t += DT
+        rc = rc_of(vh.update(st(vx=v_push, x=x, t=t), Setpoint(), DT)); t += DT
         outs.append(rc.pitch - RC_CENTER)
     return vh, outs, x, t
 
@@ -419,7 +419,7 @@ check("brake=3: знак выхода — против уноса (тормож�
 vh_c, _, xc, tc = hover_then_push(3.0)
 for i in range(10):
     xc -= 0.4 * DT
-    rc = vh_c.update(st(vx=-0.4, x=xc, t=tc), Setpoint(), DT); tc += DT
+    rc = rc_of(vh_c.update(st(vx=-0.4, x=xc, t=tc), Setpoint(), DT)); tc += DT
 check("разворот к гвоздю: BRAKE погашен (RETURN)", not vh_c.braking)
 # 18. трим на торможении после первого гвоздя ЗАМОРОЖЕН (как _BRAKE_TRIM демпфера)
 vh_d = make(kp_fwd=40.0, kp_lat=32.0, ki=30.0, brake=3.0)
@@ -577,9 +577,9 @@ check("line_hold=1: гвоздь остаётся на плече", vh25b._pinx 
 # RETURN: kp_pos 0.3·(−1) = −0.3, √-кап 0.15 → −0.55 → −0.3
 ph = vh25b.station_phase()
 check(f"line_hold=1: фаза rel/hold (движимая rel, свободная hold) — {ph[:2]}", ph[:2] == ('rel', 'hold'))
-ro_b = vh25b.update(st(vx=2.0, vy=0.0, x=3.0, y=1.0, t=t25), Setpoint(c_fwd=-0.5), DT).roll - RC_CENTER
+ro_b = rc_of(vh25b.update(st(vx=2.0, vy=0.0, x=3.0, y=1.0, t=t25), Setpoint(c_fwd=-0.5), DT)).roll - RC_CENTER
 vh25c, t25c = leg(False, y=1.0)
-ro_c = vh25c.update(st(vx=2.0, vy=0.0, x=3.0, y=1.0, t=t25c), Setpoint(c_fwd=-0.5), DT).roll - RC_CENTER
+ro_c = rc_of(vh25c.update(st(vx=2.0, vy=0.0, x=3.0, y=1.0, t=t25c), Setpoint(c_fwd=-0.5), DT)).roll - RC_CENTER
 check(f"line_hold=1: слева от линии в покое поперёк — крен К линии ({ro_b:+d}), старое — 0 ({ro_c:+d})",
       ro_b != 0 and ro_c == 0)
 vh25d, _ = leg(True, vy=0.6, y=0.0, n=20)          # уход влево 0.6 м/с от линии → BRAKE боковой
@@ -599,19 +599,19 @@ check("line_hold=1: по стопу — новый гвоздь в точке с
 vh26a = make(kp_fwd=40.0, kp_lat=32.0, ki=0.0, ff=10.0)
 vh26b = make(kp_fwd=40.0, kp_lat=32.0, ki=0.0, ff=0.0)
 sp26 = Setpoint(c_fwd=-0.5)                          # цель −2 м/с (назад? знак: c_fwd·gain = −2)
-pa = vh26a.update(st(vx=-2.0, t=100.05), sp26, DT).pitch - RC_CENTER
-pb = vh26b.update(st(vx=-2.0, t=100.05), sp26, DT).pitch - RC_CENTER
-p_lag = vh26b.update(st(vx=-1.5, t=100.10), sp26, DT).pitch - RC_CENTER   # v медленнее цели → P
+pa = rc_of(vh26a.update(st(vx=-2.0, t=100.05), sp26, DT)).pitch - RC_CENTER
+pb = rc_of(vh26b.update(st(vx=-2.0, t=100.05), sp26, DT)).pitch - RC_CENTER
+p_lag = rc_of(vh26b.update(st(vx=-1.5, t=100.10), sp26, DT)).pitch - RC_CENTER   # v медленнее цели → P
 check(f"ff=10: на цели ±2 м/с выход {pa:+d} (ff·2 = 20 PWM), без ff {pb:+d}; знак как у P при v<цели ({p_lag:+d})",
       pb == 0 and abs(abs(pa) - 20) <= 1 and (pa * p_lag > 0))
 vh26c = make(kp_fwd=40.0, kp_lat=32.0, ki=0.0, ff=10.0, pin_armed=True)
 vh26c.seed_trim(0.0, 0.0, st()); vh26c._trim_armed = True
 vh26c.update(st(vx=0.05, t=100.05), Setpoint(), DT)
-pc = vh26c.update(st(vx=0.0, x=0.5, t=100.10), Setpoint(), DT).pitch - RC_CENTER   # RETURN-цель, стик центр
+pc = rc_of(vh26c.update(st(vx=0.0, x=0.5, t=100.10), Setpoint(), DT)).pitch - RC_CENTER   # RETURN-цель, стик центр
 vh26d = make(kp_fwd=40.0, kp_lat=32.0, ki=0.0, ff=0.0, pin_armed=True)
 vh26d.seed_trim(0.0, 0.0, st()); vh26d._trim_armed = True
 vh26d.update(st(vx=0.05, t=100.05), Setpoint(), DT)
-pd = vh26d.update(st(vx=0.0, x=0.5, t=100.10), Setpoint(), DT).pitch - RC_CENTER
+pd = rc_of(vh26d.update(st(vx=0.0, x=0.5, t=100.10), Setpoint(), DT)).pitch - RC_CENTER
 check(f"ff не действует на цель станции (висение): {pc:+d} == {pd:+d}", pc == pd)
 
 # 27. ТОРМОЗ С ОТПУСКАНИЯ (settle_brake) и ГВОЗДЬ ПО ТАЙМАУТУ (pin_t), полёт 160730
@@ -623,14 +623,14 @@ def released(settle_brake, pin_t=0.0):
         vh.update(st(vx=3.0, x=3.0 * DT * i, t=t), Setpoint(c_fwd=-0.6), DT); t += DT
     return vh, t
 vh27a, t27 = released(False)
-pa = vh27a.update(st(vx=3.0, x=1.0, t=t27), Setpoint(), DT).pitch - RC_CENTER
+pa = rc_of(vh27a.update(st(vx=3.0, x=1.0, t=t27), Setpoint(), DT)).pitch - RC_CENTER
 vh27b, t27b = released(True)
-pb = vh27b.update(st(vx=3.0, x=1.0, t=t27b), Setpoint(), DT).pitch - RC_CENTER
+pb = rc_of(vh27b.update(st(vx=3.0, x=1.0, t=t27b), Setpoint(), DT)).pitch - RC_CENTER
 check(f"отпущен на 3 м/с: settle_brake=0 → P·v = 120 ({pa:+d}); =1 → цель −2 (кап), упор 150 ({pb:+d})",
       abs(pa) == 120 and abs(pb) == 150 and pa * pb > 0)
 check("settle_brake: фаза set/set (гвоздя нет), станция не задействована",
       vh27b.station_phase()[:2] == ('set', 'set') and vh27b._pinx is None)
-pc = vh27b.update(st(vx=0.2, x=2.0, t=t27b + DT), Setpoint(), DT)
+pc = rc_of(vh27b.update(st(vx=0.2, x=2.0, t=t27b + DT), Setpoint(), DT))
 check("settle_brake: скорость упала < pin_v → гвоздь по стопу", vh27b._pinx is not None)
 # pin_t: под ветром |v| держится 0.5 > pin_v — без таймаута гвоздя нет 10 с, с pin_t 3 — есть
 vh27c, t27c = released(False, pin_t=0.0); vh27d, t27d = released(False, pin_t=3.0)

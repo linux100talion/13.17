@@ -20,6 +20,8 @@ from mission_pkg.config import BootstrapConfig                        # noqa: E4
 from mission_pkg.plan.bootstrap_plan import build_bootstrap_plan      # noqa: E402
 from mission_pkg.plan.runner import PlanRunner                        # noqa: E402
 from mission_pkg.recipes import build_control_stack                   # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "control", "test"))  # pwm_eq
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 
 class FakeWorld:
@@ -87,8 +89,8 @@ def run(mode, script, switch=None):
             st.roll, st.pitch, st.throttle, st.yaw
         s.pilot_switch = pilot.mode_switch()
         step_name = runner.steps[runner.i].name
-        rc = runner.tick(s)
-        rc = arb.resolve(s, rc)
+        rc = rc_of(runner.tick(s))
+        rc = rc_of(arb.resolve(s, rc))
         seen.add(step_name)
         if step_name == "control":
             if rc.roll != 1500 or rc.pitch != 1500:

@@ -2,7 +2,7 @@
 """Контракты трёх ролей управления (Strategy). Чистый домен.
 
 Trajectory  — выдаёт НАМЕРЕНИЕ (смещение уставки), не знает про PWM.
-Stabilization — намерение + обратная связь → RC по регулируемым осям.
+Stabilization — намерение + обратная связь → команда домена (СИ) по регулируемым осям.
 Excitation  — экзогенный зонд для system-ID с политикой осей (ADDITIVE/REPLACE).
 
 Три роли, а не две: движение и стабилизация комбинируются тремя разными способами
@@ -10,7 +10,7 @@ Excitation  — экзогенный зонд для system-ID с политик
 """
 from abc import ABC, abstractmethod
 
-from ..rc import RcCommand
+from ..attitude import AttitudeCommand
 from ..setpoint import AxisPolicy, MotionIntent, Setpoint
 from ..state import DroneState
 
@@ -31,13 +31,13 @@ class StabilizationStrategy(ABC):
         """Сброс внутреннего состояния (интеграторы) при switch. По умолч. — ничего."""
 
     @abstractmethod
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand: ...
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand: ...
 
 
 class ExcitationStrategy(ABC):
     @abstractmethod
     def offset(self, s: DroneState, t: float) -> dict:
-        """ось → (PWM-offset от центра, AxisPolicy). Пусто = ничего не подмешивать."""
+        """ось → (смещение в СИ — рад наклона / рад/с курса, AxisPolicy). Пусто = ничего."""
 
     def done(self, t: float) -> bool:
         return False   # excite_total → триггер land

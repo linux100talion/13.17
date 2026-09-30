@@ -24,6 +24,8 @@ from control_pkg.domain.control.flow_axes import DpYawHold               # noqa:
 from control_pkg.domain.rc import RC_CENTER, RcCommand                   # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                         # noqa: E402
 from control_pkg.domain.state import DroneState                          # noqa: E402
+from control_pkg.domain.units import yaw_from_us                      # noqa: E402
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 results = []
 
@@ -46,8 +48,8 @@ class FixedYaw:
         self.enters += 1
 
     def update(self, s, sp, dt):
-        rc = RcCommand(throttle=RC_CENTER)
-        rc.yaw = RC_CENTER + self.off
+        rc = cmd_pwm(throttle=RC_CENTER)
+        rc.yaw_rate = yaw_from_us(self.off)          # команда домена: темп, рад/с
         return rc
 
 
@@ -64,29 +66,29 @@ def state(**kw):
 # --- 1. закон капа: v=5 м/с, φ_max=8° → ω_max=15.8°/с → 31 PWM ---
 # g·tan(8°)/5 = 0.2757 рад/с; /(202.5/400 °/с на PWM) = 31.2 → int 31
 bl = YawBankLimit(FixedYaw(130), bank_max_deg=8.0)
-rc = bl.update(state(ipm_ok=True, ipm_vfwd=5.0, ipm_vlat=0.0), SP, DT)
+rc = rc_of(bl.update(state(ipm_ok=True, ipm_vfwd=5.0, ipm_vlat=0.0), SP, DT))
 check("v=5, φ=8°: полный стик 130 → кап 31 PWM", rc.yaw == RC_CENTER + 31)
-rc = bl.update(state(ipm_ok=True, ipm_vfwd=3.0, ipm_vlat=4.0), SP, DT)
+rc = rc_of(bl.update(state(ipm_ok=True, ipm_vfwd=3.0, ipm_vlat=4.0), SP, DT))
 check("v=hypot(3,4)=5: тот же кап (модуль скорости)", rc.yaw == RC_CENTER + 31)
 
 # --- 2. знак сохраняется; команда под капом не тронута ---
 bl = YawBankLimit(FixedYaw(-130), bank_max_deg=8.0)
-rc = bl.update(state(ipm_ok=True, ipm_vfwd=5.0), SP, DT)
+rc = rc_of(bl.update(state(ipm_ok=True, ipm_vfwd=5.0), SP, DT))
 check("знак: −130 → −31", rc.yaw == RC_CENTER - 31)
 bl = YawBankLimit(FixedYaw(20), bank_max_deg=8.0)
-rc = bl.update(state(ipm_ok=True, ipm_vfwd=5.0), SP, DT)
+rc = rc_of(bl.update(state(ipm_ok=True, ipm_vfwd=5.0), SP, DT))
 check("малая команда 20 < капа 31 — не тронута", rc.yaw == RC_CENTER + 20)
 
 # --- 3. висение/малый ход: капа нет (v ≤ v_floor или кап шире команды) ---
 bl = YawBankLimit(FixedYaw(130), bank_max_deg=8.0)
-rc = bl.update(state(ipm_ok=True, ipm_vfwd=0.05), SP, DT)
+rc = rc_of(bl.update(state(ipm_ok=True, ipm_vfwd=0.05), SP, DT))
 check("висение (v=0.05 ≤ floor): полный темп", rc.yaw == RC_CENTER + 130)
-rc = bl.update(state(ipm_ok=True, ipm_vfwd=1.0), SP, DT)
+rc = rc_of(bl.update(state(ipm_ok=True, ipm_vfwd=1.0), SP, DT))
 check("v=1: кап 156 PWM шире команды — не режет", rc.yaw == RC_CENTER + 130)
 
 # --- 4. масштаб с φ_max: 20° на 5 м/с → g·tan20°/5 = 40.9°/с = 80 PWM ---
 bl = YawBankLimit(FixedYaw(130), bank_max_deg=20.0)
-rc = bl.update(state(ipm_ok=True, ipm_vfwd=5.0), SP, DT)
+rc = rc_of(bl.update(state(ipm_ok=True, ipm_vfwd=5.0), SP, DT))
 check("φ=20°, v=5: кап 80 PWM", rc.yaw == RC_CENTER + 80)
 
 # --- 5. приоритет источников: IPM → свежий VINS → gt → нет капа ---
@@ -94,18 +96,18 @@ bl = YawBankLimit(FixedYaw(130), bank_max_deg=8.0)
 s = state(ipm_ok=True, ipm_vfwd=5.0, vins_valid=True, vins_vx=1.0,
           vins_last_sim=100.0, gt_valid=True, gt_vx=0.1)
 check("IPM жив: скорость из IPM (кап 31)",
-      bl.update(s, SP, DT).yaw == RC_CENTER + 31)
+      rc_of(bl.update(s, SP, DT)).yaw == RC_CENTER + 31)
 s = state(ipm_ok=False, vins_valid=True, vins_vx=5.0, vins_last_sim=99.5,
           gt_valid=True, gt_vx=0.1)
 check("IPM слеп, VINS свеж: скорость из VINS (кап 31)",
-      bl.update(s, SP, DT).yaw == RC_CENTER + 31)
+      rc_of(bl.update(s, SP, DT)).yaw == RC_CENTER + 31)
 s = state(ipm_ok=False, vins_valid=True, vins_vx=5.0, vins_last_sim=90.0,
           gt_valid=True, gt_vx=5.0)
 check("VINS протух (10 с > fresh): скорость из gt (кап 31)",
-      bl.update(s, SP, DT).yaw == RC_CENTER + 31)
+      rc_of(bl.update(s, SP, DT)).yaw == RC_CENTER + 31)
 s = state(ipm_ok=False, vins_valid=False, gt_valid=False)
 check("ни одного источника: капа нет (полный темп)",
-      bl.update(s, SP, DT).yaw == RC_CENTER + 130)
+      rc_of(bl.update(s, SP, DT)).yaw == RC_CENTER + 130)
 
 # --- 6. прозрачность декоратора: enter делегируется, атрибуты inner видны ---
 inner = FixedYaw(50)
@@ -119,9 +121,9 @@ check("оси декоратора = yaw", bl.axes == frozenset({"yaw"}))
 dp = DpYawHold(pilot_gain=130.0, leak_sec=0.0, arm_frames=0)
 bl = YawBankLimit(dp, bank_max_deg=8.0)
 bl.enter(state())
-rc = bl.update(state(ipm_ok=True, ipm_vfwd=5.0), Setpoint(0.0, 0.0, 1.0), DT)
+rc = rc_of(bl.update(state(ipm_ok=True, ipm_vfwd=5.0), Setpoint(0.0, 0.0, 1.0), DT))
 check("DpYawHold прямая передача: 130 → кап 31", rc.yaw == RC_CENTER + 31)
-rc = bl.update(state(ipm_ok=True, ipm_vfwd=0.0), Setpoint(0.0, 0.0, 0.0), DT)
+rc = rc_of(bl.update(state(ipm_ok=True, ipm_vfwd=0.0), Setpoint(0.0, 0.0, 0.0), DT))
 check("стик отпущен на висении: демпфер молчит, центр", rc.yaw == RC_CENTER)
 
 ok_all = all(ok for _, ok in results)

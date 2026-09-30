@@ -18,6 +18,7 @@ from control_pkg.domain.control.stabilization import DpRollHold, DpYawHold  # no
 from control_pkg.domain.control.trajectory import (                       # noqa: E402
     ConstProfile, RcTransmitter, StaticSetpoint)
 from control_pkg.domain.state import DroneState                          # noqa: E402
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 results = []
 
@@ -39,7 +40,7 @@ def state(**kw):
 stack = ControlStack([], ConstProfile(10, c_fwd=0.5, c_right=-0.25, c_yaw=0.1), NoExcitation())
 s = state()
 stack.enter(s)
-rc = stack.update(s)
+rc = rc_of(stack.update(s))
 check("[]+профиль → pitch = −c_fwd·span (1300, вперёд = ниже центра)", rc.pitch == 1300)
 check("[]+профиль → roll = c_right·span (1400)", rc.roll == 1400)
 check("[]+профиль → yaw = c_yaw·span (1540)", rc.yaw == 1540)
@@ -50,7 +51,7 @@ stack = ControlStack([DpRollHold(), DpYawHold(leak_sec=0.0, arm_frames=0)],
                      ConstProfile(10, c_fwd=0.5), NoExcitation())
 s = state(flow_seq=1, flow_lateral=5.0, flow_yaw=3.0, flow_conf=0.5, flow_dt=0.05)
 stack.enter(s)
-rc = stack.update(s)
+rc = rc_of(stack.update(s))
 check("частичные: pitch НЕЗАНЯТ → профиль-оператор (−c_fwd·span=1300)", rc.pitch == 1300)
 check("частичные: roll занят DpRollHold (перезаписан)", rc.roll == 1540)
 check("частичные: yaw занят DpYawHold (перезаписан)", rc.yaw == 1518)
@@ -59,7 +60,7 @@ check("частичные: yaw занят DpYawHold (перезаписан)", r
 stack = ControlStack([DpRollHold()], StaticSetpoint(), NoExcitation())
 s = state(flow_seq=1, flow_lateral=5.0, flow_conf=0.5, flow_dt=0.05)
 stack.enter(s)
-rc = stack.update(s)
+rc = rc_of(stack.update(s))
 check("StaticSetpoint: roll регулируется, pitch/yaw = центр",
       rc.roll == 1540 and rc.pitch == 1500 and rc.yaw == 1500)
 
@@ -69,7 +70,7 @@ check("StaticSetpoint: roll регулируется, pitch/yaw = центр",
 stack = ControlStack([], RcTransmitter(), NoExcitation())
 s = state(pilot_roll=1400, pilot_pitch=1580, pilot_yaw=1450)
 stack.enter(s)
-rc = stack.update(s)
+rc = rc_of(stack.update(s))
 check("RcTransmitter: pitch pass-through (стик назад 1580 → PWM >центр)", rc.pitch > 1500)
 check("RcTransmitter: roll влево (<центр)", rc.roll < 1500)
 check("RcTransmitter: yaw (<центр)", rc.yaw < 1500)

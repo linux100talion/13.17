@@ -76,7 +76,7 @@ from control_pkg.domain.control.vins_axes import DpVins      # noqa: E402
 from control_pkg.domain.rc import RC_CENTER                  # noqa: E402
 from control_pkg.domain.setpoint import Setpoint             # noqa: E402
 from control_pkg.domain.state import DroneState             # noqa: E402
-from control_pkg.domain.units import tilt_from_us              # noqa: E402
+from control_pkg.domain.units import tilt_from_us, us_from_tilt  # noqa: E402
 
 DT = 0.05
 ALPHA = 0.01          # м/с² на PWM (100 PWM = 1 м/с², test_dpvins §13)
@@ -121,7 +121,7 @@ def run(ki, gust_pwm, kp_fwd=40.0, kp_lat=32.0, vsmooth=0.3, imax=120.0, cycles=
         s = DroneState(now_sim=t, vins_valid=True, vins_x=x, vins_y=0.0, vins_yaw=0.0,
                        vins_vx=v_meas, vins_vy=0.0, pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER)
         rc = vh.update(s, Setpoint(), DT)
-        cmd = rc.pitch - RC_CENTER
+        cmd = us_from_tilt(rc.pitch)       # команда СИ → µs-экв. (плант в PWM)
         f_act += (cmd - f_act) * (1 - math.exp(-DT / TAU_ACT))
         wind = BASE_PWM + gust_pwm * gust_env(t)
         v += (wind - f_act) * ALPHA * DT

@@ -22,7 +22,7 @@ from control_pkg.domain.control.vins_hold import VinsHold                # noqa:
 from control_pkg.domain.rc import RC_CENTER                              # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                         # noqa: E402
 from control_pkg.domain.state import DroneState                          # noqa: E402
-from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
+from pwm_eq import cmd_pwm, rc_of, si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -48,10 +48,10 @@ def saw_run(predict, n=20, **kw):
         # последний отсчёт VINS — на сетке 0.1 с; поза заморожена на нём
         t_smp = 100.0 + int(i * DT / 0.10) * 0.10
         x_smp = (t_smp - 100.0) * VSP        # истинная поза в момент отсчёта
-        rc = vh.update(DroneState(now_sim=t, vins_x=x_smp, vins_y=0.0,
+        rc = rc_of(vh.update(DroneState(now_sim=t, vins_x=x_smp, vins_y=0.0,
                                   vins_vx=VSP, vins_valid=True,
                                   vins_last_sim=t_smp),
-                       Setpoint(c_fwd=1.0), DT)
+                       Setpoint(c_fwd=1.0), DT))
         out.append(rc.pitch - RC_CENTER)
     return out
 
@@ -76,10 +76,10 @@ def one(predict, age):
     vh = VinsHold(**si(predict=predict, **GAINS))
     vh.enter(DroneState(now_sim=100.0, vins_x=0.0, vins_y=0.0))
     t = 100.0 + DT
-    return vh.update(DroneState(now_sim=t, vins_x=1.0, vins_y=0.0,
+    return rc_of(vh.update(DroneState(now_sim=t, vins_x=1.0, vins_y=0.0,
                                 vins_vx=2.0, vins_valid=True,
                                 vins_last_sim=t - age),
-                     Setpoint(), DT).pitch
+                     Setpoint(), DT)).pitch
 
 check("возраст 0: predict on == off", one(True, 0.0) == one(False, 0.0))
 

@@ -28,6 +28,8 @@ from mission_pkg.plan.runner import PlanRunner                         # noqa: E
 from mission_pkg.plan.step import (FINISH, NEXT, RUN, Land, LoiterHold,  # noqa: E402
                                    WaitEkfPos)
 from mission_pkg.recipes import build_stabilizers                     # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "control", "test"))  # pwm_eq
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 
 class FakeWorld:
@@ -79,7 +81,7 @@ def run_plan(cfg, steps):
         s = DroneState(mode=w.mode, armed=w.armed, rel_alt=w.rel_alt,
                        gt_valid=True, now_sim=clock.now_sim())
         name = runner.steps[runner.i].name
-        rc = runner.tick(s)
+        rc = rc_of(runner.tick(s))
         seen.add(name)
         if name.startswith(("mv_", "hover")) and (rc.roll != 1500 or rc.pitch != 1500
                                                    or rc.yaw != 1500):
@@ -193,8 +195,8 @@ def main():
         def elapsed(self): return 0.0
     land = Land("land", 1500, 0.3, 45.0)   # ground_z=0.3, budget=45
     land.enter(_Ctx(), None)
-    r_air = land.tick(_Ctx(), DroneState(rel_alt=5.0, gt_valid=True, gt_z=5.0, now_sim=1.0))
-    r_touch = land.tick(_Ctx(), DroneState(rel_alt=5.0, gt_valid=True, gt_z=0.2, now_sim=1.1))
+    r_air = rc_of(land.tick(_Ctx(), DroneState(rel_alt=5.0, gt_valid=True, gt_z=5.0, now_sim=1.0)))
+    r_touch = rc_of(land.tick(_Ctx(), DroneState(rel_alt=5.0, gt_valid=True, gt_z=0.2, now_sim=1.1)))
     checks.append(("land: в воздухе (баро+gt высоко) → RUN", r_air.status == RUN))
     checks.append(("land: gt_z<порог при завышенном баро → FINISH (касание по факту)",
                    r_touch.status == FINISH))
@@ -319,16 +321,16 @@ def main():
     ffs.enter(fctx, None)
     s_pre = DroneState(armed=False, pilot_roll=1600, pilot_pitch=1400,
                        pilot_yaw=1900, pilot_throttle=1100, now_sim=1.0)
-    r_pre = ffs.tick(fctx, s_pre)
+    r_pre = rc_of(ffs.tick(fctx, s_pre))
     checks.append(("freefly: до арма сырые оси + сырой газ (руддер-арм возможен)",
                    r_pre.status == RUN and r_pre.rc.yaw == 1900
                    and r_pre.rc.throttle == 1100 and r_pre.rc.roll == 1600))
     s_fly = DroneState(armed=True, pilot_throttle=1650, now_sim=2.0, flow_seq=1)
-    r_fly = ffs.tick(fctx, s_fly)
+    r_fly = rc_of(ffs.tick(fctx, s_fly))
     checks.append(("freefly: после арма газ сырой, полёт продолжается",
                    r_fly.status == RUN and r_fly.rc.throttle == 1650))
     s_dis = DroneState(armed=False, pilot_throttle=1100, now_sim=99.0, flow_seq=2)
-    r_dis = ffs.tick(fctx, s_dis)
+    r_dis = rc_of(ffs.tick(fctx, s_dis))
     checks.append(("freefly: дизарм после арма → FINISH FREEFLY_DONE",
                    r_dis.status == FINISH and r_dis.result == "FREEFLY_DONE"))
 
@@ -366,32 +368,32 @@ def main():
     lh.enter(lctx, None)
     s_wait = DroneState(mode="ALT_HOLD", armed=True, rel_alt=3.0, extnav_ready=False,
                         vins_odom_count=80, vins_last_sim=9.9, now_sim=10.0)
-    r_w = lh.tick(lctx, s_wait)
+    r_w = rc_of(lh.tick(lctx, s_wait))
     checks.append(("loiter: гейт закрыт (нет extnav) → RUN в ALT_HOLD, LOITER не шлётся",
                    r_w.status == RUN and "LOITER" not in lctx.modes
                    and lctx.kept == "ALT_HOLD"))
     s_gate = DroneState(mode="ALT_HOLD", armed=True, rel_alt=3.0, extnav_ready=True,
                         vins_odom_count=80, vins_last_sim=10.0, now_sim=10.1)
     lh.tick(lctx, s_gate)                      # WAIT: гейт открылся (_gated)
-    r_l = lh.tick(lctx, s_gate)                # LATCH: команда LOITER пошла
+    r_l = rc_of(lh.tick(lctx, s_gate))                # LATCH: команда LOITER пошла
     checks.append(("loiter: гейт открыт → шлётся set_mode LOITER (FCU ещё ALT_HOLD)",
                    r_l.status == RUN and "LOITER" in lctx.modes))
     s_hold = DroneState(mode="LOITER", armed=True, rel_alt=3.0, extnav_ready=True,
                         vins_odom_count=90, vins_last_sim=10.2, now_sim=10.2)
-    r_h = lh.tick(lctx, s_hold)
+    r_h = rc_of(lh.tick(lctx, s_hold))
     checks.append(("loiter: LOITER залатчен → все стики центр (держит FCU)",
                    r_h.status == RUN and r_h.rc.roll == 1500 and r_h.rc.pitch == 1500
                    and r_h.rc.yaw == 1500 and r_h.rc.throttle == 1500))
     s_done = DroneState(mode="LOITER", armed=True, rel_alt=3.0, extnav_ready=True,
                         vins_odom_count=900, vins_last_sim=50.1, now_sim=50.3)
-    r_d = lh.tick(lctx, s_done)
+    r_d = rc_of(lh.tick(lctx, s_done))
     checks.append(("loiter: отлетали sec → NEXT LOITER_DONE",
                    r_d.status == NEXT and r_d.result == "LOITER_DONE"))
     # гейт не открылся за бюджет → пропуск (безопасная деградация, миссия идёт дальше)
     lctx2 = _LCtx(); lctx2.t = 61.0
     lh2 = LoiterHold("loiter", 40.0, 1500, 60.0)
     lh2.enter(lctx2, None)
-    r_s = lh2.tick(lctx2, s_wait)
+    r_s = rc_of(lh2.tick(lctx2, s_wait))
     checks.append(("loiter: гейт не открылся за бюджет → NEXT LOITER_SKIP",
                    r_s.status == NEXT and r_s.result == "LOITER_SKIP"))
     # FCU сам выпал из LOITER (failsafe) → уважаем, выходим
@@ -402,7 +404,7 @@ def main():
     lh3.tick(lctx3, s_hold)                    # вошли в HOLD
     s_eject = DroneState(mode="LAND", armed=True, rel_alt=3.0, extnav_ready=True,
                          vins_odom_count=95, vins_last_sim=11.0, now_sim=11.0)
-    r_e = lh3.tick(lctx3, s_eject)
+    r_e = rc_of(lh3.tick(lctx3, s_eject))
     checks.append(("loiter: FCU выпал из LOITER → NEXT LOITER_EJECT (не ре-ассертим)",
                    r_e.status == NEXT and r_e.result == "LOITER_EJECT"))
 
@@ -417,13 +419,13 @@ def main():
     we = WaitEkfPos("ekf_warmup", 1000, budget=120.0, fresh_sec=2.0)
     s_noekf = DroneState(mode="ALT_HOLD", now_sim=10.0)          # ekf_pos_last_sim=-1e9
     checks.append(("ekf_warmup: позиции нет → RUN (ждём)",
-                   we.tick(wctx, s_noekf).status == RUN))
+                   rc_of(we.tick(wctx, s_noekf)).status == RUN))
     s_ekf = DroneState(mode="ALT_HOLD", now_sim=11.0, ekf_pos_last_sim=10.5)
     checks.append(("ekf_warmup: свежий local_position → NEXT (к арму)",
-                   we.tick(wctx, s_ekf).status == NEXT))
+                   rc_of(we.tick(wctx, s_ekf)).status == NEXT))
     wctx2 = _LCtx(); wctx2.t = 121.0
     checks.append(("ekf_warmup: бюджет вышел → NEXT с warn (миссия не блокируется)",
-                   we.tick(wctx2, s_noekf).status == NEXT))
+                   rc_of(we.tick(wctx2, s_noekf)).status == NEXT))
 
     # --- freefly + BS_FF_LOITER: центр CH6 = штатный LOITER (гейт + гистерезис) ---
     checks.append(("freefly: без BS_FF_LOITER центр = чистый ALT_HOLD (как раньше)",

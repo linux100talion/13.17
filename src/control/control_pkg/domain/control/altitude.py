@@ -52,6 +52,24 @@ class ThrottleMap:
     def off(self, vz) -> float:
         return self.dz + abs(vz) / self.rate_full * self.span
 
+    def pwm(self, climb, center=RC_CENTER) -> int:
+        """Скорость набора → газ канала, µs: 0 = центр («держать»), иначе центр ± округлённое
+        смещение за мёртвой зоной (как считали AltHold и SoftLand)."""
+        if climb == 0.0:
+            return int(center)
+        off = int(round(self.off(climb)))
+        return int(center) + (off if climb > 0 else -off)
+
+    def climb(self, pwm, center=RC_CENTER) -> float:
+        """Газ канала, µs → скорость набора, м/с (обратная к pwm): внутри мёртвой зоны — 0
+        (полётник там высоту держит сам), за ней линейно. pwm → climb → pwm точен вне зоны."""
+        e = float(pwm) - float(center)
+        if abs(e) < self.dz:
+            return 0.0
+        # ровно на краю зоны — исчезающе малая скорость со знаком: pwm() вернёт тот же край
+        v = max((abs(e) - self.dz) / self.span * self.rate_full, 1e-12)
+        return v if e > 0 else -v
+
 
 class AltHold:
     def __init__(self, kp=0.6, rate_max=1.2, tol=0.10, dz=100.0, span=400.0,
@@ -76,6 +94,11 @@ class AltHold:
         if abs(err) < self.tol:
             return 0.0
         return clamp(self.kp * err, -self.rate_max, self.rate_max)
+
+    def climb_cmd(self, s) -> float:
+        """Скорость набора для носителя команды (м/с) — на сетке газа: climb() после
+        потолка out_max и округления до µs, как ушло бы в провод. 0.0 — держать."""
+        return self.map.climb(self.throttle(s), self.center)
 
     def throttle(self, s) -> int:
         """Газ, µs: PWM-эквивалент climb() по карте ThrottleMap. Молчит/держит → центр."""

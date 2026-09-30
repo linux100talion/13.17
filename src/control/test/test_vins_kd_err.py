@@ -23,7 +23,7 @@ from control_pkg.domain.control.vins_hold import VinsHold                # noqa:
 from control_pkg.domain.rc import RC_CENTER                              # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                         # noqa: E402
 from control_pkg.domain.state import DroneState                          # noqa: E402
-from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
+from pwm_eq import cmd_pwm, rc_of, si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -50,47 +50,47 @@ def st(x=0.0, y=0.0, vx=0.0, vy=0.0, yaw=0.0, t=100.05):
 
 
 # --- 1. висение, стик в центре: оба закона идентичны (v_уставки = 0) ---
-rc_a = make(False).update(st(vx=0.3), Setpoint(), DT)
-rc_b = make(True).update(st(vx=0.3), Setpoint(), DT)
+rc_a = rc_of(make(False).update(st(vx=0.3), Setpoint(), DT))
+rc_b = rc_of(make(True).update(st(vx=0.3), Setpoint(), DT))
 check("висение: kd_err не меняет выход (бит-в-бит)",
       (rc_a.pitch, rc_a.roll) == (rc_b.pitch, rc_b.roll))
 
 # --- 2. старый закон в движении: kd·v пробивает потолок ---
 # стик вперёд, борт уже летит 4 м/с в ноль ошибки: kd·4 = 480 → кламп 150
-rc = make(False).update(st(vx=4.0), Setpoint(c_fwd=1.0), DT)
+rc = rc_of(make(False).update(st(vx=4.0), Setpoint(c_fwd=1.0), DT))
 check("старый закон: в полёте 4 м/с D-член в упоре (+150)",
       rc.pitch == RC_CENTER + 150)
 
 # --- 3. kd_err: установившееся слежение (v == v_уставки) → D = 0 ---
 # уставка сдвинулась на vsp·dt = 0.2 м, борт в 0 → kp·e = 40·(−0.2) = −8
-rc = make(True).update(st(vx=4.0), Setpoint(c_fwd=1.0), DT)
+rc = rc_of(make(True).update(st(vx=4.0), Setpoint(c_fwd=1.0), DT))
 check("kd_err: v = v_уставки → остаётся только kp по свежему сдвигу (−8)",
       rc.pitch == RC_CENTER - 8)
 
 # --- 4. знак D вокруг движущегося равновесия ---
-rc_fast = make(True).update(st(vx=5.0), Setpoint(c_fwd=1.0), DT)
-rc_slow = make(True).update(st(vx=3.0), Setpoint(c_fwd=1.0), DT)
+rc_fast = rc_of(make(True).update(st(vx=5.0), Setpoint(c_fwd=1.0), DT))
+rc_slow = rc_of(make(True).update(st(vx=3.0), Setpoint(c_fwd=1.0), DT))
 check("быстрее уставки (+1 м/с) → тормоз (kd·1 − 8 = +112)",
       rc_fast.pitch == RC_CENTER + 112)
 check("медленнее уставки (−1 м/с) → подгон (−kd·1 − 8 = −128)",
       rc_slow.pitch == RC_CENTER - 128)
 
 # --- 5. отпустили стик на ходу: оба закона снова идентичны ---
-rc_a = make(False).update(st(vx=4.0), Setpoint(), DT)
-rc_b = make(True).update(st(vx=4.0), Setpoint(), DT)
+rc_a = rc_of(make(False).update(st(vx=4.0), Setpoint(), DT))
+rc_b = rc_of(make(True).update(st(vx=4.0), Setpoint(), DT))
 check("стик отпущен на ходу: торможение не изменилось (бит-в-бит)",
       (rc_a.pitch, rc_a.roll) == (rc_b.pitch, rc_b.roll))
 
 # --- 6. геометрия: курс 90° — «вперёд» = мировая Y ---
 yaw = math.pi / 2
-rc = make(True, yaw=yaw).update(st(vy=4.0, yaw=yaw), Setpoint(c_fwd=1.0), DT)
+rc = rc_of(make(True, yaw=yaw).update(st(vy=4.0, yaw=yaw), Setpoint(c_fwd=1.0), DT))
 check("yaw=90°: v_y = v_уставки → тот же чистый kp (−8)",
       rc.pitch == RC_CENTER - 8)
 
 # --- 7. интегратор уставки не тронут: долг позиции копится как раньше ---
 vh = make(True)
 for i in range(20):                      # 1 с полного стика, борт стоит
-    rc = vh.update(st(t=100.05 + i * DT), Setpoint(c_fwd=1.0), DT)
+    rc = rc_of(vh.update(st(t=100.05 + i * DT), Setpoint(c_fwd=1.0), DT))
 # уставка убежала на 4 м/с × 1 с = 4 м; kp·4 = 160 → кламп 150
 check("борт стоит, уставка бежит: через 1 с kp-долг в упоре (−150)",
       rc.pitch == RC_CENTER - 150)

@@ -2,7 +2,7 @@
 """Step — примитивы фаз полётного задания (декларативные кирпичи плана).
 
 Полётное задание = список Step'ов; `PlanRunner` гоняет их по порядку. Каждый Step —
-маленькое поведение: на тик отдаёт RcCommand + статус (продолжать / следующий / прыжок
+маленькое поведение: на тик отдаёт команду домена (AttitudeCommand, СИ) + статус (продолжать / следующий / прыжок
 по имени / финиш). Логика фаз перенесена дословно из бывшего MissionRunner FSM.
 
 Step зависит только от портов через `ctx` (PlanRunner): ctx.mode (FlightMode), ctx.log,
@@ -16,7 +16,10 @@ from control_pkg.domain.control.altitude import ThrottleMap
 from control_pkg.domain.control.bank_limit import YawBankLimit
 from control_pkg.domain.control.throttle_latch import ThrottleLatch
 from control_pkg.domain.modes import matches as mode_matches
-from control_pkg.domain.rc import RC_CENTER, RC_MIN_THR, RcCommand
+from control_pkg.application.command_wire import DEFAULT_THR
+from control_pkg.domain.attitude import AttitudeCommand
+from control_pkg.domain.rc import RC_CENTER, RC_MIN_THR
+from control_pkg.domain.units import tilt_of_pwm, yaw_of_pwm
 
 # статусы результата шага
 RUN, NEXT, GOTO, FINISH = "run", "next", "goto", "finish"
@@ -28,6 +31,18 @@ class StepResult:
         self.status = status
         self.goto = goto          # имя целевого шага (для GOTO)
         self.result = result      # метка исхода (накапливается в runner.result)
+
+
+def _thr(ctx):
+    """Карта газа µs ↔ м/с (ThrottleMap) прогона: ставит нода в runner (из alt_* конфига),
+    стенды без неё — эталонная (100/400/3.16)."""
+    return getattr(ctx, "thr", None) or DEFAULT_THR
+
+
+def _gas(ctx, pwm) -> AttitudeCommand:
+    """Команда «только газ»: газ канала (µs — константы плана, сырой газ пилота, AltHold)
+    → скорость набора носителя; наклон и курс — ноль (центр)."""
+    return AttitudeCommand(climb=_thr(ctx).climb(pwm))
 
 
 def _run(rc): return StepResult(rc, RUN)
@@ -114,7 +129,7 @@ class AwaitMode(Step):
         self.budget = budget
 
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=self.throttle)
+        rc = _gas(ctx, self.throttle)
         ctx.try_cmd(lambda: ctx.mode.set_mode(self.mode))
         # выход в углах: заявленный ALT_HOLD может значить GUIDED_NOGPS (att_mode)
         want = getattr(ctx.mode, 'effective', lambda m: m)(self.mode)
@@ -136,7 +151,7 @@ class Arm(Step):
         self.keep = keep
 
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=self.throttle)
+        rc = _gas(ctx, self.throttle)
         ctx.keep_mode(s, self.keep)
         ctx.try_cmd(ctx.mode.arm)
         if s.armed:
@@ -174,7 +189,7 @@ class Climb(Step):
 
     def tick(self, ctx, s) -> StepResult:
         thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
-        rc = RcCommand(throttle=thr)
+        rc = _gas(ctx, thr)
         ctx.keep_mode(s, self.keep)
         _overlay_stack(self, ctx, s, rc)   # набор стабилизирован: горизонт держит стек с отрыва
         # С контуром цель считается достигнутой по ДОПУСКУ, а не по «перешли черту»:
@@ -260,7 +275,7 @@ class Control(Step):
                 if self.alt_hold is not None and s.rel_alt is not None:
                     self.alt_hold.set_target(s.rel_alt)
                     ctx.log.info(f"    газ отпущен — держим {s.rel_alt:.1f}м")
-        rc = RcCommand(throttle=thr)
+        rc = _gas(ctx, thr)
         ctx.keep_mode(s, self.keep)
         if not self._entered_stack:
             if self.wait_gt and not s.gt_valid:
@@ -324,7 +339,7 @@ class WaitEkfPos(Step):
         self._tel_warned = -1e9      # elapsed последнего предупреждения о телеметрии
 
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=self.throttle)
+        rc = _gas(ctx, self.throttle)
         ctx.keep_mode(s, self.keep)
         if (s.now_sim - s.ekf_pos_last_sim) < self.fresh_sec:
             ctx.log.info(f"    {self.name}: EKF держит позицию — к арму")
@@ -413,7 +428,7 @@ class LoiterHold(Step):
                 self._t_loiter = s.now_sim
                 ctx.log.info(f"    {self.name}: LOITER залатчен — стики центр, "
                              f"позицию держит FCU (extnav)")
-            rc = RcCommand()                       # всё в центре = «стоять»
+            rc = AttitudeCommand()                 # всё в центре = «стоять»
             if s.mode != "LOITER":
                 ctx.log.warn(f"    {self.name}: FCU вышел из LOITER (mode={s.mode}) "
                              f"— уважаем, дальше")
@@ -427,7 +442,7 @@ class LoiterHold(Step):
             return _run(rc)
         # --- WAIT / LATCH: стабилизированный hover в семантике ALT_HOLD ---
         thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
-        rc = RcCommand(throttle=thr)
+        rc = _gas(ctx, thr)
         if not self._gated:
             ctx.keep_mode(s, self.keep)
             _overlay_stack(self, ctx, s, rc)
@@ -871,7 +886,7 @@ class Freefly(Step):
         return track + yaw
 
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=s.pilot_throttle)
+        rc = _gas(ctx, s.pilot_throttle)
         if not self._greeted:
             self._greeted = True
             ctx.log.info(f"    {self.name}: борт у пилота — арм руддером (газ вниз + "
@@ -895,7 +910,8 @@ class Freefly(Step):
                               "в mavros.log)")
                 return _finish(rc, "FREEFLY_NOARM")
             ctx.keep_mode(s, self.keep)
-            rc.roll, rc.pitch, rc.yaw = s.pilot_roll, s.pilot_pitch, s.pilot_yaw
+            rc.roll, rc.pitch = tilt_of_pwm(s.pilot_roll), tilt_of_pwm(s.pilot_pitch)
+            rc.yaw_rate = yaw_of_pwm(s.pilot_yaw)
             return _run(rc)
         if self._pilot_stabs is not None and self.sf_master:
             self._ladder_select(ctx, s)          # потолок SC + выход из MANUAL
@@ -922,7 +938,7 @@ class Freefly(Step):
             if s.now_sim < self._land_exit_until:
                 # ещё в LAND после отмены: стек молчит (в position-LAND стик =
                 # уставка скорости), газ центр — ждём выход в keep
-                rc = RcCommand(throttle=RC_CENTER)
+                rc = _gas(ctx, RC_CENTER)
             elif not self._land_exit_warned:
                 self._land_exit_warned = True
                 ctx.log.error(f"    freefly: FCU не вышел из LAND за "
@@ -1019,7 +1035,7 @@ class Land(Step):
         self._entered_stack = False
 
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=self.throttle)
+        rc = _gas(ctx, self.throttle)
         ctx.try_cmd(lambda: ctx.mode.set_mode("LAND"))
         _overlay_stack(self, ctx, s, rc)   # сброс стабилизирован: горизонт держит стек до касания
         # касание по ФАКТУ: баро ИЛИ истинная высота (ловит посадку за краем сцены)
@@ -1166,11 +1182,11 @@ class SoftLand(Step):
     def tick(self, ctx, s) -> StepResult:
         if self._branch is None:
             self._decide(ctx, s)
-        rc = RcCommand(throttle=self.throttle_hold)
+        rc = _gas(ctx, self.throttle_hold)
         if not s.armed:
             ctx.log.info(f"    {self.name}: дизарм — посадка завершена "
                          f"(rel_alt={s.rel_alt}, ветка {self._branch})")
-            return _finish(RcCommand(throttle=RC_MIN_THR), "LAND_DONE")
+            return _finish(_gas(ctx, RC_MIN_THR), "LAND_DONE")
         if self._cancel_press(s):
             if self._touch_t is not None:
                 if not self._cancel_warned:
@@ -1182,7 +1198,7 @@ class SoftLand(Step):
                              f"{self._branch}, rel_alt={s.rel_alt}) → {self.resume}")
                 if self._branch == "pos":
                     ctx.mode.set_mode(self.keep)      # из LAND — сразу, без лимита
-                return _goto(RcCommand(throttle=s.pilot_throttle), self.resume,
+                return _goto(_gas(ctx, s.pilot_throttle), self.resume,
                              "LAND_CANCEL")
             elif not self._cancel_warned:
                 self._cancel_warned = True
@@ -1218,11 +1234,11 @@ class SoftLand(Step):
                     self.stack.enter(s)
                 ctx.log.warn(f"    {self.name}: VINS протух — ярус ДЕМПФЕР")
             if self._touch_t is None:
-                rc = RcCommand(throttle=self.descent)
+                rc = _gas(ctx, self.descent)
                 ctrl = self.stack.update(s)
                 rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
         if self._touch_t is not None:
-            rc = RcCommand(throttle=RC_MIN_THR)       # стики центр, газ в пол
+            rc = _gas(ctx, RC_MIN_THR)       # стики центр, газ в пол
             held = s.now_sim - self._touch_t
             # ветка alt дизармим сами (1 с / force 5 с); pos — LAND сам, страховка 8/12
             t_arm, t_force = (1.0, 5.0) if self._branch == "alt" else (8.0, 12.0)
@@ -1343,20 +1359,20 @@ class Rth(Step):
                          f"(стек пуст, стики в центре); повторный импульс отменит")
 
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=self.throttle_hold)
+        rc = _gas(ctx, self.throttle_hold)
         if not s.armed:
             ctx.log.info(f"    {self.name}: дизарм — возврат завершён "
                          f"(rel_alt={s.rel_alt})")
-            return _finish(RcCommand(throttle=RC_MIN_THR), "RTH_DONE")
+            return _finish(_gas(ctx, RC_MIN_THR), "RTH_DONE")
         if getattr(s, 'pilot_rth', False):
             ctx.log.warn(f"    {self.name}: повторный импульс — ВОЗВРАТ ОТМЕНЁН "
                          f"(rel_alt={s.rel_alt}) → {self.resume}")
             ctx.mode.set_mode(self.keep)
-            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_CANCEL")
+            return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_CANCEL")
         if s.pilot_switch == 1:
             ctx.log.warn(f"    {self.name}: пилот забрал борт (MANUAL) → {self.resume}")
             ctx.mode.set_mode(self.keep)
-            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_MANUAL")
+            return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_MANUAL")
         sick = self._nav_sick(s)
         if sick is not None:
             if self._sick_since is None:
@@ -1366,7 +1382,7 @@ class Rth(Step):
                              f"цифрам EKF, которые больше нечем подтягивать) → "
                              f"{self.resume}")
                 ctx.mode.set_mode(self.keep)
-                return _goto(RcCommand(throttle=s.pilot_throttle), self.resume,
+                return _goto(_gas(ctx, s.pilot_throttle), self.resume,
                              "RTH_GUARD")
         else:
             self._sick_since = None
@@ -1380,12 +1396,12 @@ class Rth(Step):
         elif self._latched:
             ctx.log.warn(f"    {self.name}: FCU вышел из {self._mode} (mode={s.mode}) "
                          f"— уважаем → {self.resume}")
-            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_EJECT")
+            return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_EJECT")
         elif ctx.elapsed() > self.LATCH_SEC:
             ctx.log.error(f"    {self.name}: {self._mode} не залатчился за "
                           f"{self.LATCH_SEC:g} с (mode={s.mode}) — нет позиции EKF "
                           f"(requires position?) или home не задан → {self.resume}")
-            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_REFUSED")
+            return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_REFUSED")
         else:
             ctx.try_cmd(lambda: ctx.mode.set_mode(self._mode))
         if ctx.elapsed() > self.budget:
@@ -1507,25 +1523,25 @@ class RthTrack(Step):
 
     # --- тик ------------------------------------------------------------------
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=self.throttle_hold)
+        rc = _gas(ctx, self.throttle_hold)
         if not s.armed:
             ctx.log.info(f"    {self.name}: дизарм — возврат завершён")
-            return _finish(RcCommand(throttle=RC_MIN_THR), "RTH_DONE")
+            return _finish(_gas(ctx, RC_MIN_THR), "RTH_DONE")
         if getattr(s, 'pilot_rth', False):
             ctx.log.warn(f"    {self.name}: повторный импульс — ВОЗВРАТ ОТМЕНЁН → "
                          f"{self.resume}")
             ctx.mode.set_mode(self.keep)
-            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_CANCEL")
+            return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_CANCEL")
         if s.pilot_switch == 1:
             ctx.log.warn(f"    {self.name}: пилот забрал борт (MANUAL) → {self.resume}")
             ctx.mode.set_mode(self.keep)
-            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_MANUAL")
+            return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_MANUAL")
         if not self._track or getattr(s, 'rth_state', '') != 'ready':
             ctx.log.error(f"    {self.name}: ОТКАЗ — "
                           f"{'трека нет' if not self._track else 'rth=' + str(getattr(s, 'rth_state', '?'))}"
                           f" (возвращаться некуда) → {self.resume}")
             ctx.mode.set_mode(self.keep)
-            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_REFUSED")
+            return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_REFUSED")
         sick = self._nav_sick(s)
         if sick is not None:
             if self._sick_since is None:
@@ -1534,7 +1550,7 @@ class RthTrack(Step):
                 ctx.log.warn(f"    {self.name}: {sick} — ВОЗВРАТ ОТМЕНЁН (цифры EKF "
                              f"больше нечем подтягивать) → {self.resume}")
                 ctx.mode.set_mode(self.keep)
-                return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_GUARD")
+                return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_GUARD")
         else:
             self._sick_since = None
         # --- режим ---
@@ -1545,11 +1561,11 @@ class RthTrack(Step):
         elif self._latched:
             ctx.log.warn(f"    {self.name}: FCU вышел из GUIDED (mode={s.mode}) — "
                          f"уважаем → {self.resume}")
-            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_EJECT")
+            return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_EJECT")
         elif ctx.elapsed() > self.LATCH_SEC:
             ctx.log.error(f"    {self.name}: GUIDED не залатчился за {self.LATCH_SEC:g} с "
                           f"(mode={s.mode}) — нет позиции EKF? → {self.resume}")
-            return _goto(RcCommand(throttle=s.pilot_throttle), self.resume, "RTH_REFUSED")
+            return _goto(_gas(ctx, s.pilot_throttle), self.resume, "RTH_REFUSED")
         else:
             ctx.try_cmd(lambda: ctx.mode.set_mode("GUIDED"))
         # --- уставка (шлём ВСЕГДА, в т.ч. до латча: GUIDED без цели висит) ---
@@ -1590,6 +1606,6 @@ class Hover(Step):
         self.keep = keep
 
     def tick(self, ctx, s) -> StepResult:
-        rc = RcCommand(throttle=self.throttle)
+        rc = _gas(ctx, self.throttle)
         ctx.keep_mode(s, self.keep)
         return _next(rc) if ctx.elapsed() > self.sec else _run(rc)

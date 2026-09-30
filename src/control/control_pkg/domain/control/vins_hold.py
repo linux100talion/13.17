@@ -5,10 +5,11 @@
 """
 import math
 
-from ..rc import RC_CENTER, RcCommand, clamp
+from ..attitude import AttitudeCommand
+from ..rc import clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
-from ..units import rc_off_tilt, tilt_from_us
+from ..units import q_tilt, tilt_from_us
 from .base import StabilizationStrategy
 
 
@@ -95,7 +96,7 @@ class VinsHold(StabilizationStrategy):
         self._vfx = self._vfy = 0.0
         self._vf_init = False
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand:
         # проекция стик-команды по ТЕКУЩЕМУ vins-курсу (тело) — как в GzHold:
         # «вперёд» = куда сейчас смотрит нос, а не куда смотрел на входе в фазу
         c0 = math.cos(s.vins_yaw)
@@ -163,5 +164,4 @@ class VinsHold(StabilizationStrategy):
         ro = self.rsign * (self.kp * e_rgt + self.kd * v_rgt + self.ki * i_rgt)
         po = clamp(po, -self.max, self.max)
         ro = clamp(ro, -self.max, self.max)
-        return RcCommand(roll=RC_CENTER + rc_off_tilt(ro), pitch=RC_CENTER + rc_off_tilt(po),
-                         throttle=RC_CENTER, yaw=RC_CENTER)
+        return AttitudeCommand(roll=q_tilt(ro), pitch=q_tilt(po))

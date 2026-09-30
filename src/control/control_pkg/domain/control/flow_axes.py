@@ -8,8 +8,10 @@ ipm_axes.py. Выделен из stabilization.py (там — реэкспорт
 """
 import math
 
-from ..rc import RC_CENTER, RcCommand, clamp
+from ..attitude import AttitudeCommand
+from ..rc import clamp
 from ..setpoint import Setpoint
+from ..units import tilt_from_us, us_from_tilt
 from ..state import DroneState
 from .base import StabilizationStrategy
 from .station_keeper import HOLD
@@ -115,10 +117,10 @@ class DpPitchBack(DpPitchHold):
 
     is_probe = True        # НЕ удержание: план не ставит зонд на набор/посадку (_hold_stack)
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
-        rc = super().update(s, sp, dt)
-        rc.pitch = RC_CENTER - abs(rc.pitch - RC_CENTER)
-        return rc
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand:
+        cmd = super().update(s, sp, dt)
+        cmd.pitch = -tilt_from_us(abs(round(us_from_tilt(cmd.pitch))))
+        return cmd
 
 
 class DpYawHold(_FlowDamper1D):
@@ -215,15 +217,12 @@ class DpYawHold(_FlowDamper1D):
         self._rejects = 0
         self._gated = 0
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand:
         # ПРЯМАЯ ПЕРЕДАЧА (см. docstring): стик жив → PWM со стика, контур обнулён.
         # c_yaw=0.0 гарантирован мёртвой зоной траектории (PilotTrajectory._norm_axis).
         if self.pilot_gain > 0.0 and sp.c_yaw != 0.0:
             self.enter(s)
-            off = int(clamp(self.pilot_gain * sp.c_yaw, -self.max, self.max))
-            rc = RcCommand(throttle=RC_CENTER)
-            setattr(rc, self._axis, RC_CENTER + off)
-            return rc
+            return self._axis_cmd(clamp(self.pilot_gain * sp.c_yaw, -self.max, self.max))
         return super().update(s, sp, dt)
 
     def _signal_ok(self, s) -> bool:
@@ -378,8 +377,8 @@ class DpHold(StabilizationStrategy):
         pp = ph.get("pitch", ("-", False)); rr = ph.get("roll", ("-", False))
         return (pp[0], rr[0], pp[1], rr[1])
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
-        rc = RcCommand(throttle=RC_CENTER)
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand:
+        rc = AttitudeCommand()
         for x in self._subs:
             out = x.update(s, sp, dt)
             for ax in x.axes:

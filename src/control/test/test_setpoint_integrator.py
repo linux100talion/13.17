@@ -30,6 +30,7 @@ from control_pkg.domain.control.stabilization import (               # noqa: E40
 from control_pkg.domain.rc import RC_CENTER                          # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 results = []
 
@@ -58,20 +59,20 @@ check("тангаж читает команду как СКОРОСТЬ УСТА
 # тогда же, этот — пропущен.
 dr = DpRollHold(kp=8.0, ki=0.0, kd=0.0, cmd_gain=10.0, osign=1.0)
 dr.enter(DroneState(flow_seq=-1))
-rc = dr.update(frame(1, 0.05, flow_lateral=5.0), Setpoint(c_right=-0.5), 0.05)
+rc = rc_of(dr.update(frame(1, 0.05, flow_lateral=5.0), Setpoint(c_right=-0.5), 0.05))
 check("крен: сигнал = заданной скорости → команды нет (1500)", rc.roll == RC_CENTER)
 # ...и стик В ТУ ЖЕ сторону, что снос, обязан ошибку УДВОИТЬ, а не обнулить: иначе
 # проверка выше проходила бы на любом знаке (при нулевой цели ошибка тоже 5, а не 0).
 dr2 = DpRollHold(kp=8.0, ki=0.0, kd=0.0, cmd_gain=10.0, osign=1.0)
 dr2.enter(DroneState(flow_seq=-1))
-rc2 = dr2.update(frame(1, 0.05, flow_lateral=5.0), Setpoint(c_right=0.5), 0.05)
+rc2 = rc_of(dr2.update(frame(1, 0.05, flow_lateral=5.0), Setpoint(c_right=0.5), 0.05))
 check("крен: стик ПРОТИВ знака цели → ошибка удваивается (8·10 = 80)",
       rc2.roll - RC_CENTER == 80)
 
 # --- 2. тангаж без команды = прежнее поведение (уставка 0) ---
 dp = DpPitchHold(kp=1500.0, ki=0.0, kd=0.0, cmd_gain=0.029)
 dp.enter(DroneState(flow_seq=-1))
-rc = dp.update(frame(1, 0.05, kf_logs=-0.02), Setpoint(), 0.05)
+rc = rc_of(dp.update(frame(1, 0.05, kf_logs=-0.02), Setpoint(), 0.05))
 check("тангаж, стик в центре: чистое удержание (1500 + 1500·(−0.02) = 1470)",
       rc.pitch == 1470)
 check("тангаж, стик в центре: уставка стоит на нуле", dp.hold_dbg()[0] == 0.0)
@@ -87,7 +88,7 @@ sp = dp.hold_dbg()[0]
 check(f"полный стик 0.5 с → уставка уехала на {sp:.4f} log ≈ 1 м (0.0145)",
       abs(sp - 0.0145) < 1e-6)
 # борт на месте, уставка впереди → err<0 → нос ВНИЗ (летим вперёд, за уставкой)
-rc = dp.update(frame(11, 0.55, kf_logs=0.0), Setpoint(c_fwd=1.0), 0.05)
+rc = rc_of(dp.update(frame(11, 0.55, kf_logs=0.0), Setpoint(c_fwd=1.0), 0.05))
 check("уставка впереди борта → нос вниз (команда ниже центра)", rc.pitch < RC_CENTER)
 
 # борт, ИДУЩИЙ ровно с командной скоростью, догоняет уставку → возражений нет
@@ -96,7 +97,7 @@ dp2.enter(DroneState(flow_seq=-1))
 pos = 0.0
 for i in range(10):
     pos += 0.029 * 0.05                       # борт едет с заданной скоростью
-    rc = dp2.update(frame(i + 1, 0.05 * (i + 1), kf_logs=pos), Setpoint(c_fwd=1.0), 0.05)
+    rc = rc_of(dp2.update(frame(i + 1, 0.05 * (i + 1), kf_logs=pos), Setpoint(c_fwd=1.0), 0.05))
 check("борт идёт с командной скоростью → kp-член ≈ 0 (|off| ≤ 1)",
       abs(rc.pitch - RC_CENTER) <= 1)
 
@@ -106,10 +107,10 @@ check("борт идёт с командной скоростью → kp-чле�
 # ВПЕРЁД, помогая команде). Прямая проверка — борт ИДЁТ с командной скоростью:
 dv = DpPitchHold(kp=0.0, ki=0.0, kd=5000.0, cmd_gain=0.029)
 dv.enter(DroneState(flow_seq=-1))
-rc = dv.update(frame(1, 0.05, kf_logs=0.0, kf_vel=0.029), Setpoint(c_fwd=1.0), 0.05)
+rc = rc_of(dv.update(frame(1, 0.05, kf_logs=0.0, kf_vel=0.029), Setpoint(c_fwd=1.0), 0.05))
 check("борт идёт с командной скоростью → D молчит (1500)", rc.pitch == RC_CENTER)
 # а лишняя скорость сверх командной — гасится
-rc = dv.update(frame(2, 0.10, kf_logs=0.0, kf_vel=0.029 + 0.0145), Setpoint(c_fwd=1.0), 0.05)
+rc = rc_of(dv.update(frame(2, 0.10, kf_logs=0.0, kf_vel=0.029 + 0.0145), Setpoint(c_fwd=1.0), 0.05))
 check("перебор скорости на 1 м/с сверх команды → торможение (1500+72)",
       rc.pitch == 1500 + int(5000 * 0.0145))
 # и БЕЗ вычитания та же команда упёрлась бы в потолок: 5000·0.029 = 145 при max 150

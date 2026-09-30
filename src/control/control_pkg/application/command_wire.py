@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""command_wire — AttitudeCommand (СИ) ↔ RcCommand (µs каналов): единственный переход домена
+в провод и обратно (фаза A переезда носителя в СИ, 2026-09-30).
+
+Туда (to_rc): наклон и курс — фиксированным масштабом domain/units.py (20° и 90 °/с на
+500 µs, усечение к целому µs, как прежнее int() стабилизаторов), газ — картой ThrottleMap
+(domain/control/altitude.py). Им пользуются адаптеры: override шлёт эти µs (реверс каналов
+— в адаптере), канал углов в фазе A пересчитывает их в углы и thrust прежним путём
+(att_convert.rc_to_attitude) — обе стороны получают ровно прежние числа.
+
+Обратно (from_rc): стики пилота (DroneState.pilot_*, сырой PWM входа) → команда домена —
+арбитр в MANUAL, проход стиков шагами плана (Freefly до арма, LOITER, отмены возврата).
+Круг pwm → СИ → pwm точен для наклона и курса; газ — вне мёртвой зоны карты (внутри —
+центр: полётник в ALT_HOLD там всё равно держит высоту сам).
+"""
+from ..domain.attitude import AttitudeCommand
+from ..domain.control.altitude import ThrottleMap
+from ..domain.rc import RC_CENTER, RcCommand
+from ..domain.units import rc_off_tilt, rc_off_yaw, tilt_of_pwm, yaw_of_pwm
+
+DEFAULT_THR = ThrottleMap()
+
+
+def to_rc(cmd: AttitudeCommand, thr: ThrottleMap = DEFAULT_THR) -> RcCommand:
+    return RcCommand(roll=RC_CENTER + rc_off_tilt(cmd.roll),
+                     pitch=RC_CENTER + rc_off_tilt(cmd.pitch),
+                     throttle=thr.pwm(cmd.climb),
+                     yaw=RC_CENTER + rc_off_yaw(cmd.yaw_rate))
+
+
+def from_rc(roll, pitch, throttle, yaw, thr: ThrottleMap = DEFAULT_THR) -> AttitudeCommand:
+    """Сырые PWM стиков (roll, pitch, throttle, yaw) → команда домена."""
+    return AttitudeCommand(roll=tilt_of_pwm(roll), pitch=tilt_of_pwm(pitch),
+                           yaw_rate=yaw_of_pwm(yaw), climb=thr.climb(throttle))
+
+
+def pilot_cmd(s, thr: ThrottleMap = DEFAULT_THR) -> AttitudeCommand:
+    """Все четыре стика пилота как есть → команда домена."""
+    return from_rc(s.pilot_roll, s.pilot_pitch, s.pilot_throttle, s.pilot_yaw, thr)

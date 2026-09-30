@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "mission"))
 from control_pkg.domain.rc import RC_CENTER                          # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
+from control_pkg.domain.units import us_from_tilt                    # noqa: E402
 from mission_pkg.config import BootstrapConfig                       # noqa: E402
 from mission_pkg.recipes import build_vins_stab, build_wind_trim      # noqa: E402
 
@@ -98,7 +99,7 @@ def run(overrides, plant, gust_pwm=0.0, base_pwm=BASE_PWM, tau_meas=TAU_MEAS):
                        att_yaw=0.0, vins_vx=0.0, vins_vy=vm,
                        pilot_roll=RC_CENTER, pilot_pitch=RC_CENTER)
         rc = st.update(s, Setpoint(c_right=c), DT)
-        queue.append(float(rc.roll - RC_CENTER))
+        queue.append(us_from_tilt(rc.roll))   # команда СИ → µs-экв. (модель борта в PWM)
         u = queue.pop(0)                   # чистое запаздывание команды
         f += (u - f) * (1 - math.exp(-DT / p['tau_act']))
         w = base_pwm + gust_pwm * gust_env(t)

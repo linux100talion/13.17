@@ -32,6 +32,8 @@ from control_pkg.domain.rc import RC_CENTER, RC_MIN_THR, RcCommand     # noqa: E
 from control_pkg.domain.state import DroneState                        # noqa: E402
 from mission_pkg.plan.runner import PlanRunner                         # noqa: E402
 from mission_pkg.plan.step import Freefly, SoftLand, ground_speed      # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "control", "test"))  # pwm_eq
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 results = []
 
@@ -59,7 +61,7 @@ class FakeStack:
         self.enters += 1
 
     def update(self, s):
-        return RcCommand(roll=1520, pitch=1480, yaw=1500)
+        return cmd_pwm(roll=1520, pitch=1480, yaw=1500)
 
     def switch_stabilization(self, stabs):
         self.stabs = list(stabs)
@@ -156,7 +158,7 @@ def tick_until(runner, clock, dur, dt=0.05, **kw):
     while clock.t < t_end and not runner.finished:
         clock.t += dt
         s = snap(clock.t, **kw)
-        rc = runner.tick(s)
+        rc = rc_of(runner.tick(s))
     return rc, s
 
 

@@ -39,7 +39,7 @@ from control_pkg.domain.control.stabilization import (               # noqa: E40
 from control_pkg.domain.rc import RC_CENTER                          # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
-from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
+from pwm_eq import cmd_pwm, rc_of, si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -72,7 +72,7 @@ def run(ax, fly, n, vz=0.0, wobble=0.0, **kw):
     """n кадров подряд; вернуть последнюю команду по оси стратегии."""
     rc = None
     for _ in range(n):
-        rc = ax.update(fly.step(vz=vz, wobble=wobble, **kw), Setpoint(), fly.dt)
+        rc = rc_of(ax.update(fly.step(vz=vz, wobble=wobble, **kw), Setpoint(), fly.dt))
     return getattr(rc, next(iter(ax.axes)))
 
 
@@ -170,11 +170,11 @@ f = Fly(alt=0.3)
 p.enter(DroneState(flow_seq=-1))
 sat = 0
 for _ in range(40):                                  # 2 с набора с фантомом
-    rc = p.update(f.step(vz=1.1, ipm_vfwd=4.5), Setpoint(), f.dt)
+    rc = rc_of(p.update(f.step(vz=1.1, ipm_vfwd=4.5), Setpoint(), f.dt))
     sat += int(abs(rc.pitch - RC_CENTER) >= 149)
 check("взлёт: насыщения тангажа НЕТ ни в одном кадре набора", sat == 0)
 check("взлёт: интегратор не заряжен фантомом", abs(us(p._i)) < 1e-9)
-tail = [p.update(f.step(vz=0.0, wobble=0.2, ipm_vfwd=0.2), Setpoint(), f.dt).pitch
+tail = [rc_of(p.update(f.step(vz=0.0, wobble=0.2, ipm_vfwd=0.2), Setpoint(), f.dt)).pitch
         for _ in range(40)]
 check("взлёт: после набора ось возвращается в работу (20 PWM на 0.2 м/с)",
       tail[-1] != RC_CENTER)
@@ -189,11 +189,11 @@ rs = DpRollRate(**si(kp=30.0, ki=0.0, kd=0.0, cmd_gain=2.0,
                 max_speed=0.0, alt_band=0.0, arm_frames=0))
 f = Fly()
 rs.enter(DroneState(flow_seq=-1))
-rc = rs.update(f.step(ipm_vlat=0.0), Setpoint(c_right=0.5), f.dt)
+rc = rc_of(rs.update(f.step(ipm_vlat=0.0), Setpoint(c_right=0.5), f.dt))
 # цель = −0.5·2 = −1.0 (лево-полож. единицы) → err = 0 − (−1) = +1 → kp·err = +30
 check("знак команды: стик ВПРАВО → цель отрицательна, PWM выше центра (крен вправо)",
       rs.rate_dbg()[0] == -1.0 and rc.roll == RC_CENTER + 30)
-rc = rs.update(f.step(ipm_vlat=-1.0), Setpoint(c_right=0.5), f.dt)
+rc = rc_of(rs.update(f.step(ipm_vlat=-1.0), Setpoint(c_right=0.5), f.dt))
 check("знак команды: борт едет вправо 1 м/с по цели → ошибка 0, roll в центре",
       rc.roll == RC_CENTER)
 
@@ -205,10 +205,10 @@ ps.enter(DroneState(flow_seq=-1))
 ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=2.0, att_yaw=0.0), Setpoint(), f.dt)
 check("станция: первый кадр с центральным стиком захватил точку (цель 0)",
       ps.rate_dbg()[0] == 0.0 and ps._pos_sp == (2.0, 0.0))
-rc = ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=3.0, att_yaw=0.0), Setpoint(), f.dt)
+rc = rc_of(ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=3.0, att_yaw=0.0), Setpoint(), f.dt))
 check("станция: снесло на метр → цель −0.5 м/с (назад к точке), PWM тормозит",
       ps.rate_dbg()[0] == -0.5 and rc.pitch == RC_CENTER + 50)
-rc = ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=3.0, att_yaw=0.0), Setpoint(c_fwd=0.5), f.dt)
+rc = rc_of(ps.update(f.step(ipm_vfwd=0.0, ipm_fwd=3.0, att_yaw=0.0), Setpoint(c_fwd=0.5), f.dt))
 check("станция: стик живой → точка отпущена, цель = стик·cmd_gain (+1.0)",
       ps._pos_sp is None and ps.rate_dbg()[0] == 1.0)
 # «СНАЧАЛА ТОРМОЗИ, ПОТОМ ГВОЗДЬ»: отпустили на скорости → гвоздя нет, цель 0

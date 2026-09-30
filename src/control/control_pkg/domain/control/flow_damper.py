@@ -9,10 +9,11 @@ StationKeeper (station_keeper.py), демпфер держит его в `self.s
 (полнокадровый поток) и ipm_axes.py (канал вида сверху).
 Выделен из stabilization.py (там — реэкспорт).
 """
-from ..rc import RC_CENTER, RcCommand, clamp
+from ..attitude import AttitudeCommand
+from ..rc import clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
-from ..units import rc_off_tilt, tilt_from_us, us_from_tilt
+from ..units import q_tilt, tilt_from_us, us_from_tilt, yaw_from_us
 from .alt_settled import _AltSettled
 from .base import StabilizationStrategy
 from .station_keeper import StationKeeper
@@ -266,6 +267,18 @@ class _FlowDamper1D(StabilizationStrategy):
         """Рад (рама/общий трим) → единицы выхода оси."""
         return rad if self._TILT else us_from_tilt(rad)
 
+    def _axis_cmd(self, off) -> AttitudeCommand:
+        """Выход оси (её единицы) → команда домена: ось наклона — рад на сетке µs; старая
+        ось в µs — целое µs (усечение, как прежнее int()) → рад наклона или рад/с курса."""
+        cmd = AttitudeCommand()
+        if self._TILT:
+            setattr(cmd, self._axis, q_tilt(off))
+        elif self._axis == "yaw":
+            cmd.yaw_rate = yaw_from_us(int(off))
+        else:
+            setattr(cmd, self._axis, tilt_from_us(int(off)))
+        return cmd
+
     def _signal(self, s): raise NotImplementedError
     def _cmd(self, sp): raise NotImplementedError
 
@@ -372,7 +385,7 @@ class _FlowDamper1D(StabilizationStrategy):
             return max(1e-3, s.flow_dt)
         return clamp(s.now_sim - self._last_frame_sim, 1e-3, self.stale)
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand:
         if s.flow_seq != self._last_seq and not self._signal_ok(s):
             # сигнал негоден (у опоры — ушла высота): PID не двигаем и забываем
             # производную, иначе на возврате она даст пинок на всю накопленную разницу.
@@ -473,10 +486,7 @@ class _FlowDamper1D(StabilizationStrategy):
         # устаревшей команде.
         age = s.now_sim - self._last_ok_sim
         k = 1.0 if age < self.stale else clamp(2.0 - age / self.stale, 0.0, 1.0)
-        off = rc_off_tilt(self._out * k) if self._TILT else int(self._out * k)
-        rc = RcCommand(throttle=RC_CENTER)
-        setattr(rc, self._axis, RC_CENTER + off)
-        return rc
+        return self._axis_cmd(self._out * k)
 
     def hold_dbg(self):
         """(уставка, ошибка до неё, скорость уставки) для бэга — или None у rate-осей.

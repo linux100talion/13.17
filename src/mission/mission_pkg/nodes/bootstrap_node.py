@@ -26,13 +26,16 @@ from std_msgs.msg import Bool, Empty
 
 from control_pkg.application.arbiter import PILOT_MANUAL, Arbiter
 from control_pkg.application.att_mode import GUIDED_NOGPS, AttModeProxy
+from control_pkg.application.command_wire import to_rc
+from control_pkg.domain.attitude import AttitudeCommand
+from control_pkg.domain.control.altitude import ThrottleMap
 from control_pkg.application.node_arm import ArmGesture, ready_reasons
 from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
 from control_pkg.application.rth_ready import RthReadiness
 from control_pkg.domain.control.stabilization import VinsHold
 from control_pkg.domain.pilot_link import PilotLink
-from control_pkg.domain.rc import RC_CENTER, RcCommand
+from control_pkg.domain.rc import RC_CENTER
 
 from control_pkg.infrastructure.mavros_actuator import MavrosActuator
 from control_pkg.infrastructure.ros_clock import RosClock
@@ -117,7 +120,9 @@ class BootstrapArch2Node(Node):
         if self.link.enabled:
             self.logger.info(f"сторож пульта: тишина {cfg.pilot_stale:g} с → "
                              f"override ОТПУСКАЕТСЯ (ch1..4 → 0)")
-        self.arbiter = Arbiter()
+        # карта газа µs ↔ м/с — одна на ноду: шаги плана (runner.thr), арбитр, провод (to_rc)
+        self._thr = ThrottleMap(cfg.alt_dz, cfg.alt_span, cfg.alt_rate_full)
+        self.arbiter = Arbiter(thr=self._thr)
 
         # Путь: заданный mission → ОРТОГОНАЛЬНЫЙ (stab+mission); иначе ЛЕГАСИ (control_mode).
         use_mission = bool(cfg.mission)
@@ -231,7 +236,7 @@ class BootstrapArch2Node(Node):
         self.runner = PlanRunner(plan, self.clock,
                                  self._mode_proxy or self.actuator, self.logger,
                                  perception=self.perception,
-                                 setpoints=self.actuator)
+                                 setpoints=self.actuator, thr=self._thr)
 
         # --- отдача скорости+позиции IPM в EKF (vision_vel, см. config) ---
         self._vision_pub = None
@@ -431,7 +436,7 @@ class BootstrapArch2Node(Node):
                 self._on_gp_origin, 1)
             self.logger.info("set_origin: шлю SET_GPS_GLOBAL_ORIGIN до подтверждения")
 
-        self._last_rc = RcCommand()
+        self._last_cmd = AttitudeCommand()
         self._arb_seized = False
         # «хватит летать»: make pilot-done → one-shot в снапшот (завершает бессрочный
         # pilot-сегмент). Слать ВО ВРЕМЯ pilot-сегмента: в других фазах тик его съест.
@@ -766,7 +771,7 @@ class BootstrapArch2Node(Node):
             self._mode_proxy.update(s, s.pilot_switch == PILOT_MANUAL)
         if self._att_out:
             self._node_arm(s)
-        rc = self.runner.tick(s)
+        cmd = self.runner.tick(s)             # команда домена, СИ
         # восстановление после разноса: гейт здоровья демотнул ярус → /restart VINS
         # (переинициализация), с кулдауном (сброс окна VINS сам занимает время)
         if (self._restart_diverge and self._vins_restart_pub is not None
@@ -779,13 +784,14 @@ class BootstrapArch2Node(Node):
             self.telemetry.reset_vins_stream()   # зрелость потока — заново, ярус вниз сразу
             self.logger.warn("гейт здоровья: VINS разнёсся → демоут на демпфер + "
                              "/restart (переинициализация)")
-        rc = self.arbiter.resolve(s, rc)          # safety-seize: MANUAL → сырые стики
+        cmd = self.arbiter.resolve(s, cmd)        # safety-seize: MANUAL → сырые стики
         if self.arbiter.last_manual != self._arb_seized:
             self._arb_seized = self.arbiter.last_manual
             self.logger.warn("ПИЛОТ ВЗЯЛ УПРАВЛЕНИЕ (MANUAL)" if self._arb_seized
                              else "возврат в АВТО")
-        self._last_rc = rc
-        self._publish(rc)
+        self._last_cmd = cmd
+        self._publish(cmd)
+        rc = to_rc(cmd, self._thr)       # PWM-эквивалент — отладочным топикам и статусу
         self._vision_feed(s)             # скорость IPM → EKF (если vision_vel включён)
         self.debug.publish_axes(s, rc)   # флоу-дамп в bag: /flow_dbg + /flow_dbg2 (sim-штамп)
         self.debug.publish_hold(self._hold_dbg('pitch'))       # /flow_dbg5: уставка тангажа
@@ -1138,9 +1144,10 @@ class BootstrapArch2Node(Node):
             self.logger.warn("дизарм нодой по жесту пилота")
             self.actuator.arm(False)
 
-    def _publish(self, rc: RcCommand):
+    def _publish(self, cmd: AttitudeCommand):
         if self.runner.finished:          # план завершён — override не нужен
             return
+        rc = to_rc(cmd, self._thr)        # команда домена (СИ) → µs каналов
         # СТОРОЖ СВЕЖЕСТИ ПУЛЬТА (PilotLink). Зовётся здесь, а не в тике, чтобы
         # накрыть ОБА писателя override: sim-тик и wall-цикл main (тот держит
         # свежесть override на FCU и без сторожа продолжал бы лить замороженную
@@ -1212,7 +1219,7 @@ def main():
             now = time.monotonic()
             if now - last_pub >= 0.05:
                 last_pub = now
-                node._publish(node._last_rc)
+                node._publish(node._last_cmd)
     except KeyboardInterrupt:
         node.logger.info("Прервано — садимся вручную (make land).")
     finally:

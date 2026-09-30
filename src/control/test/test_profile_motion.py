@@ -20,6 +20,7 @@ from control_pkg.domain.control.stabilization import GzHold          # noqa: E40
 from control_pkg.domain.control.trajectory import (                  # noqa: E402
     ProfileTrajectory, Shuttle, StaticSetpoint)
 from control_pkg.domain.state import DroneState                      # noqa: E402
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 results = []
 
@@ -41,7 +42,7 @@ stack = ControlStack([GzHold()], ProfileTrajectory([(100.0, 1500, 1100, 1500)]),
 stack.enter(gt(now=0.0))
 pitches = []
 for k in range(1, 6):
-    rc = stack.update(gt(now=k * 0.1))    # дрон стоит в опоре, уставка уезжает вперёд
+    rc = rc_of(stack.update(gt(now=k * 0.1)))    # дрон стоит в опоре, уставка уезжает вперёд
     pitches.append(rc.pitch)
 mono = all(pitches[i] < pitches[i - 1] for i in range(1, len(pitches)))
 check("постоянный форвард-профиль → pitch уходит от центра ВНИЗ", pitches[-1] < 1500)
@@ -50,7 +51,7 @@ check("отклик растёт монотонно (уставка интегр
 # --- 2. Нулевой профиль + дрон в опоре → держит (центр) ---
 stack2 = ControlStack([GzHold()], StaticSetpoint(), NoExcitation())
 stack2.enter(gt(now=0.0))
-rc = stack2.update(gt(now=0.1))
+rc = rc_of(stack2.update(gt(now=0.1)))
 check("нулевой профиль + дрон в опоре → центр (держит)", rc.roll == 1500 and rc.pitch == 1500)
 
 # --- 3. Симметричный челнок → интеграл уставки возвращается к опоре ---

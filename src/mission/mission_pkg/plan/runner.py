@@ -4,20 +4,22 @@
 Заменяет захардкоженный MissionRunner FSM: bootstrap теперь просто ОДИН план (список
 шагов). Новое задание = данные, а не новый класс. Переходы: NEXT (следующий), GOTO
 (прыжок по имени — напр. аборт climb → land), FINISH (конец). Зависит только от портов
-(Clock/FlightMode/Logger) — ни строчки rclpy. Возвращает RcCommand, публикует нода.
+(Clock/FlightMode/Logger) — ни строчки rclpy. Возвращает AttitudeCommand (СИ), публикует нода.
 
 ctx-хелперы (шаги их зовут): elapsed() — sim-время в текущем шаге (ленивое базирование);
 try_cmd(fn) — троттлинг сервис-вызовов ~1/sim-сек; keep_mode() — ре-ассерт режима.
 """
-from control_pkg.domain.rc import RcCommand
+from control_pkg.application.command_wire import DEFAULT_THR
+from control_pkg.domain.attitude import AttitudeCommand
 
 from .step import FINISH, GOTO, NEXT
 
 
 class PlanRunner:
     def __init__(self, steps, clock, flight_mode, log, perception=None,
-                 setpoints=None):
+                 setpoints=None, thr=DEFAULT_THR):
         self.steps = steps
+        self.thr = thr                  # карта газа µs ↔ м/с (шаги: ctx.thr)
         self.clock = clock
         self.mode = flight_mode
         self.log = log
@@ -79,9 +81,9 @@ class PlanRunner:
     def _end(self):
         self.finished = True
 
-    def tick(self, s) -> RcCommand:
+    def tick(self, s) -> AttitudeCommand:
         if self.finished:
-            return RcCommand()
+            return AttitudeCommand()
         st = self.steps[self.i]
         if not self._entered:
             self.log.info(f">>> шаг {self.i} · {st.name}")

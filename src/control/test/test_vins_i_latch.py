@@ -23,7 +23,7 @@ from control_pkg.domain.control.vins_hold import VinsHold                # noqa:
 from control_pkg.domain.rc import RC_CENTER                              # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                         # noqa: E402
 from control_pkg.domain.state import DroneState                          # noqa: E402
-from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
+from pwm_eq import cmd_pwm, rc_of, si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -49,7 +49,7 @@ def run(vh, n, sp, x=0.0, vx=0.0, t0=100.0):
     for i in range(n):
         s = DroneState(now_sim=t0 + (i + 1) * DT, vins_x=x, vins_y=0.0,
                        vins_vx=vx, vins_valid=True)
-        rc = vh.update(s, sp, DT)
+        rc = rc_of(vh.update(s, sp, DT))
     return rc
 
 

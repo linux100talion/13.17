@@ -38,7 +38,7 @@ from control_pkg.domain.control.stabilization import (                  # noqa: 
 from control_pkg.domain.rc import RC_CENTER, RcCommand                # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                      # noqa: E402
 from control_pkg.domain.state import DroneState                       # noqa: E402
-from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
+from pwm_eq import cmd_pwm, rc_of, si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -60,7 +60,7 @@ class _YawStub:
 
     def enter(self, s): pass
 
-    def update(self, s, sp, dt): return RcCommand(throttle=RC_CENTER)
+    def update(self, s, sp, dt): return cmd_pwm(throttle=RC_CENTER)
 
 
 def stack(frame):
@@ -96,7 +96,7 @@ def fly(st, sec=30.0, psi=lambda t: 0.0, wind=(0.65, 0.0), stick_f=None, stick_r
         s = DroneState(flow_seq=k + 1, now_sim=t, flow_dt=DT, rel_alt=0.3, ipm_ok=True,
                        flow_conf=0.5, ipm_vlat=vm_l, ipm_lat=path_l, ipm_vfwd=vm_f,
                        ipm_fwd=path_f, att_yaw=p)
-        rc = st.update(s, sp, DT)
+        rc = rc_of(st.update(s, sp, DT))
         pwm_p, pwm_r = rc.pitch - RC_CENTER, rc.roll - RC_CENTER
         b = 1.0 - math.exp(-DT / tau_a)
         act_p += (pwm_p - act_p) * b

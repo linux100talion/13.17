@@ -6,7 +6,9 @@
 """
 import math
 
-from ..rc import RC_CENTER, RcCommand, clamp
+from ..attitude import AttitudeCommand
+from ..rc import clamp
+from ..units import rc_off_yaw, yaw_from_us
 from ..setpoint import Setpoint
 from ..state import DroneState
 from .base import StabilizationStrategy
@@ -74,12 +76,13 @@ class YawBankLimit(StabilizationStrategy):
             return math.hypot(s.gt_vx, s.gt_vy)
         return None
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand:
         rc = self.inner.update(s, sp, dt)
         v = self._speed(s)
         if v is None or v <= self.v_floor:
             return rc
         w_max = math.degrees(_G * math.tan(self.bank) / v)   # °/с
         cap = w_max / self.pwm_rate                          # PWM от центра
-        rc.yaw = RC_CENTER + int(clamp(rc.yaw - RC_CENTER, -cap, cap))
+        # потолок — в µs канала курса (pwm_rate — толкование стика FCU в LOITER)
+        rc.yaw_rate = yaw_from_us(int(clamp(rc_off_yaw(rc.yaw_rate), -cap, cap)))
         return rc

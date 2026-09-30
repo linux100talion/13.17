@@ -21,6 +21,7 @@ from control_pkg.domain.rc import RcCommand                            # noqa: E
 from control_pkg.domain.setpoint import Setpoint                       # noqa: E402
 from control_pkg.domain.state import DroneState                        # noqa: E402
 from control_pkg.infrastructure.ros_pilot import joy_sticks            # noqa: E402
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 results = []
 
@@ -58,7 +59,7 @@ check("RcTransmitter мёртвая зона держит 0", approx(intent.c_fw
 # --- PilotPassthrough: 1:1 ---
 pp = PilotPassthrough()
 s3 = DroneState(pilot_roll=1400, pilot_pitch=1600, pilot_yaw=1550, pilot_throttle=1700)
-rc = pp.update(s3, Setpoint(), 0.05)
+rc = rc_of(pp.update(s3, Setpoint(), 0.05))
 check("PilotPassthrough roll 1:1", rc.roll == 1400)
 check("PilotPassthrough pitch 1:1", rc.pitch == 1600)
 check("PilotPassthrough yaw 1:1", rc.yaw == 1550)
@@ -77,31 +78,31 @@ check("ThrottleLatch reset снова запирает", tl.pass_through(1900) i
 
 # --- Arbiter (газ — через ThrottleLatch: seize с отклонённым стиком безопасен) ---
 arb = Arbiter()
-auto_cmd = RcCommand(roll=1600, pitch=1400, throttle=1500, yaw=1520)
+auto_cmd = cmd_pwm(roll=1600, pitch=1400, throttle=1500, yaw=1520)
 # AUTO (switch=0): автономная команда без изменений
 sA = DroneState(pilot_switch=0, pilot_roll=1111, pilot_pitch=1222,
                 pilot_throttle=1333, pilot_yaw=1444)
-out = arb.resolve(sA, auto_cmd)
-check("Arbiter AUTO → автономная команда", out == auto_cmd and not arb.last_manual)
+out = rc_of(arb.resolve(sA, auto_cmd))
+check("Arbiter AUTO → автономная команда", out == rc_of(auto_cmd) and not arb.last_manual)
 # MANUAL (switch=1) с ОТКЛОНЁННЫМ газом: r/p/y сырые сразу, газ ЗАПЕРТ (центр)
 sM = DroneState(pilot_switch=1, pilot_roll=1111, pilot_pitch=1222,
                 pilot_throttle=1333, pilot_yaw=1444)
-out = arb.resolve(sM, auto_cmd)
+out = rc_of(arb.resolve(sM, auto_cmd))
 check("Arbiter MANUAL → сырые стики (roll)", out.roll == 1111)
 check("Arbiter MANUAL: газ отклонён при seize → заперт (центр)", out.throttle == 1500)
 check("Arbiter MANUAL → last_manual=True", arb.last_manual)
 # газ побывал в центре → защёлка открыта → дальше проходит сырым
 arb.resolve(DroneState(pilot_switch=1, pilot_throttle=1500), auto_cmd)
-out = arb.resolve(DroneState(pilot_switch=1, pilot_throttle=1333), auto_cmd)
+out = rc_of(arb.resolve(DroneState(pilot_switch=1, pilot_throttle=1333), auto_cmd))
 check("Arbiter MANUAL: после центра газ проходит пилоту", out.throttle == 1333)
 # возврат в AUTO и новый seize → защёлка взводится заново
 arb.resolve(DroneState(pilot_switch=0), auto_cmd)
-out = arb.resolve(DroneState(pilot_switch=1, pilot_throttle=1900), auto_cmd)
+out = rc_of(arb.resolve(DroneState(pilot_switch=1, pilot_throttle=1900), auto_cmd))
 check("Arbiter: каждый новый seize запирает газ заново", out.throttle == 1500)
 # позиция −1 (наш стабилизатор) — НЕ manual: Арбитр отдаёт автономную команду
-out = arb.resolve(DroneState(pilot_switch=-1, pilot_throttle=1900), auto_cmd)
+out = rc_of(arb.resolve(DroneState(pilot_switch=-1, pilot_throttle=1900), auto_cmd))
 check("Arbiter: тумблер −1 (стабилизатор) → автономная команда",
-      out == auto_cmd and not arb.last_manual)
+      out == rc_of(auto_cmd) and not arb.last_manual)
 
 # --- joy_sticks: ядро JoyPilot (оси /joy → PWM, тумблер) ---
 # полный ход осей: +1 → 1900, −1 → 1100; тумблер CH6 (axes[5]) > 0.5 → MANUAL

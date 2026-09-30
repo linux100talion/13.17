@@ -15,21 +15,25 @@ docstring защёлки — случай полёта 2026-08-16). Подпру
 от сима, где мы его обнулили), чтобы пилот мог сорвать наш override и на уровне FCU.
 Arbiter — верхний, программный слой той же гарантии.
 """
+from ..domain.attitude import AttitudeCommand
 from ..domain.control.throttle_latch import ThrottleLatch
-from ..domain.rc import RC_CENTER, RcCommand
+from ..domain.rc import RC_CENTER
 from ..domain.state import DroneState
+from .command_wire import DEFAULT_THR, from_rc
 
 PILOT_AUTO = 0
 PILOT_MANUAL = 1
 
 
 class Arbiter:
-    def __init__(self, manual_value: int = PILOT_MANUAL, thr_deadzone: int = 30):
+    def __init__(self, manual_value: int = PILOT_MANUAL, thr_deadzone: int = 30,
+                 thr=DEFAULT_THR):
         self.manual_value = manual_value
+        self.thr = thr                  # карта газа µs ↔ м/с (ThrottleMap)
         self.last_manual = False        # для лога смены авто↔ручной (снаружи)
         self._latch = ThrottleLatch(thr_deadzone)
 
-    def resolve(self, s: DroneState, autonomous: RcCommand) -> RcCommand:
+    def resolve(self, s: DroneState, autonomous: AttitudeCommand) -> AttitudeCommand:
         manual = (s.pilot_switch == self.manual_value)
         if manual and not self.last_manual:
             self._latch.reset()         # каждый щелчок в MANUAL — газ снова заперт
@@ -37,7 +41,6 @@ class Arbiter:
         if manual:
             # Полная власть пилоту; газ — через защёлку (None = держим центр).
             thr = self._latch.pass_through(s.pilot_throttle)
-            return RcCommand(roll=s.pilot_roll, pitch=s.pilot_pitch,
-                             throttle=RC_CENTER if thr is None else thr,
-                             yaw=s.pilot_yaw)
+            return from_rc(s.pilot_roll, s.pilot_pitch,
+                           RC_CENTER if thr is None else thr, s.pilot_yaw, self.thr)
         return autonomous

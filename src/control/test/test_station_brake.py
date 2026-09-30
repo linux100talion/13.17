@@ -74,7 +74,7 @@ from control_pkg.domain.control.stabilization import DpRollRate, clamp   # noqa:
 from control_pkg.domain.rc import RC_CENTER                          # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
-from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
+from pwm_eq import cmd_pwm, rc_of, si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -124,9 +124,9 @@ def fly(ax, sec=20.0, tau_s=0.3, tau_a=0.2, gain=1.0, stick=None, bias=0.0, wind
         sp = Setpoint()
         if stick is not None:
             sp.c_right = stick(t)
-        rc = ax.update(DroneState(flow_seq=k + 1, now_sim=t, flow_dt=DT, rel_alt=0.3,
+        rc = rc_of(ax.update(DroneState(flow_seq=k + 1, now_sim=t, flow_dt=DT, rel_alt=0.3,
                                   ipm_ok=True, flow_conf=0.5, ipm_vlat=vm, ipm_lat=path),
-                       sp, DT)
+                       sp, DT))
         pwm = rc.roll - RC_CENTER
         pwm_act += (pwm - pwm_act) * (1.0 - math.exp(-DT / tau_a))   # привод (FCU по углу)
         v += (-ALPHA * pwm_act + wind) * DT
@@ -395,8 +395,8 @@ def pframe(alt, vf, dpath):
     seq += 1
     t += DT
     path += dpath
-    rc = px.update(DroneState(flow_seq=seq, now_sim=t, flow_dt=DT, rel_alt=alt, ipm_ok=True,
-                              flow_conf=0.5, ipm_vfwd=vf, ipm_fwd=path), Setpoint(), DT)
+    rc = rc_of(px.update(DroneState(flow_seq=seq, now_sim=t, flow_dt=DT, rel_alt=alt, ipm_ok=True,
+                              flow_conf=0.5, ipm_vfwd=vf, ipm_fwd=path), Setpoint(), DT))
     return rc.pitch - RC_CENTER
 
 

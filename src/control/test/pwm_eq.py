@@ -33,3 +33,27 @@ def si(**kw):
 def us(rad):
     """Наклон/трим, рад → µs (для ожиданий в PWM-эквиваленте)."""
     return us_from_tilt(rad)
+
+
+# ── носитель команды в СИ (фаза A, 2026-09-30) ────────────────────────────────────────
+# Выход стабилизаторов/стека/шагов/арбитра — AttitudeCommand (СИ). Ожидания тестов в µs:
+# rc_of() переводит выход в RcCommand тем же путём, что нода отдаёт в провод
+# (command_wire.to_rc, эталонная карта газа); не-команды проходят как есть (обёртка
+# безопасна вокруг любого .update()/.tick()). cmd_pwm() — заглушкам и входам тестов:
+# PWM каналов → команда домена.
+from control_pkg.application.command_wire import from_rc, to_rc   # noqa: E402
+from control_pkg.domain.attitude import AttitudeCommand             # noqa: E402
+from control_pkg.domain.rc import RC_CENTER                         # noqa: E402
+
+
+def rc_of(x):
+    if isinstance(x, AttitudeCommand):
+        return to_rc(x)
+    inner = getattr(x, "rc", None)            # StepResult: команда шага → µs на месте
+    if isinstance(inner, AttitudeCommand):
+        x.rc = to_rc(inner)
+    return x
+
+
+def cmd_pwm(roll=RC_CENTER, pitch=RC_CENTER, throttle=RC_CENTER, yaw=RC_CENTER):
+    return from_rc(roll, pitch, throttle, yaw)

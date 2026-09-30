@@ -38,7 +38,7 @@ from control_pkg.domain.control.stabilization import DpPitchRate            # no
 from control_pkg.domain.rc import RC_CENTER                                 # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                            # noqa: E402
 from control_pkg.domain.state import DroneState                             # noqa: E402
-from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
+from pwm_eq import cmd_pwm, rc_of, si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -81,10 +81,10 @@ def fly(ax, h, sec=40.0, tau_a=0.2, seed=1, tau_v=0.4):
             vraw = sum((a - tm) * (b - pm) for a, b in zip(tc, pc)) / den
         vm += (vraw - vm) * (1.0 - math.exp(-DT / tau_v))
         est += (1.0 - math.exp(-DT / 2.0)) * (abs(inc - vm_prev * DT) - est)
-        rc = ax.update(DroneState(flow_seq=k + 1, now_sim=t, flow_dt=DT, rel_alt=h,
+        rc = rc_of(ax.update(DroneState(flow_seq=k + 1, now_sim=t, flow_dt=DT, rel_alt=h,
                                   ipm_ok=True, flow_conf=0.5, ipm_vfwd=vm, ipm_fwd=path,
                                   ipm_noise_fwd=est),
-                       Setpoint(), DT)
+                       Setpoint(), DT))
         pwm = rc.pitch - RC_CENTER
         act += (pwm - act) * (1.0 - math.exp(-DT / tau_a))
         v += (-ALPHA * act + WIND) * DT

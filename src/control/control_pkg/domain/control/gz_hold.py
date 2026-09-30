@@ -8,10 +8,11 @@ GzRollHold/GzPitchHold/GzYawHold. Арифметика roll/pitch выверен
 """
 import math
 
-from ..rc import RC_CENTER, RcCommand, clamp
+from ..attitude import AttitudeCommand
+from ..rc import clamp
 from ..setpoint import Setpoint
 from ..state import DroneState
-from ..units import rc_off_tilt, rc_off_yaw, tilt_from_us, us_from_tilt, yaw_from_us
+from ..units import q_tilt, q_yaw, tilt_from_us, us_from_tilt, yaw_from_us
 from .base import StabilizationStrategy
 
 
@@ -49,7 +50,7 @@ class GzHold(StabilizationStrategy):
         self._spx, self._spy = s.gt_x, s.gt_y   # уставка стартует в опоре (gt на входе)
         self._yawsp = s.gt_yaw
 
-    def update(self, s: DroneState, sp: Setpoint, dt: float) -> RcCommand:
+    def update(self, s: DroneState, sp: Setpoint, dt: float) -> AttitudeCommand:
         # Стик-команду интегрируем в движущуюся уставку. Проекция — по ТЕКУЩЕМУ
         # курсу (тело): «стик от себя» = туда, куда СЕЙЧАС смотрит нос/камера, как
         # в Loiter реального ArduPilot. Была по курсу ВХОДА в фазу — после разворота
@@ -99,8 +100,7 @@ class GzHold(StabilizationStrategy):
         eyaw = math.atan2(math.sin(self._yawsp - s.gt_yaw),
                           math.cos(self._yawsp - s.gt_yaw))
         yo = clamp(self.yaw_sign * self.yaw_kp * eyaw, -self.yaw_max, self.yaw_max)
-        return RcCommand(roll=RC_CENTER + rc_off_tilt(ro), pitch=RC_CENTER + rc_off_tilt(po),
-                         throttle=RC_CENTER, yaw=RC_CENTER + rc_off_yaw(yo))
+        return AttitudeCommand(roll=q_tilt(ro), pitch=q_tilt(po), yaw_rate=q_yaw(yo))
 
 
 class GzPosHold(GzHold):

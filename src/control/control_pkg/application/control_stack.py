@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ControlStack — композиция ролей (Trajectory→[Stabilization…]→Excitation) в RcCommand.
+"""ControlStack — композиция ролей (Trajectory→[Stabilization…]→Excitation) в AttitudeCommand (СИ).
 
 PER-AXIS модель (срез 3): стабилизаторов может быть НЕСКОЛЬКО, каждый владеет своими
 осями (`axes`). Композиция:
@@ -17,8 +17,10 @@ PER-AXIS модель (срез 3): стабилизаторов может бы
 (тело), стек собирает абсолютную world-уставку + прокидывает скорость-команду в Setpoint.
 Самодостаточен — работает и без MissionRunner.
 """
-from ..domain.rc import RC_CENTER, RcCommand, clamp
+from ..domain.attitude import AttitudeCommand
+from ..domain.rc import RC_CENTER, clamp
 from ..domain.setpoint import AxisPolicy, Setpoint
+from ..domain.units import rc_off_tilt, rc_off_yaw, tilt_from_us, tilt_of_pwm, yaw_from_us, yaw_of_pwm
 
 _STICK_SPAN = 400   # PWM от центра при полном стике (c=±1) — конвенция pilot_full
 
@@ -74,17 +76,25 @@ def shared_axes(stabs):
     return dup
 
 
-def _compose(rc: RcCommand, axis: str, off: int, policy: AxisPolicy) -> RcCommand:
+def _compose(rc: AttitudeCommand, axis: str, off: float, policy: AxisPolicy) -> AttitudeCommand:
     cur = getattr(rc, axis)
     if policy is AxisPolicy.ADDITIVE:
         setattr(rc, axis, cur + off)          # зонд ПОВЕРХ выхода стабилизатора
     elif policy is AxisPolicy.REPLACE:
-        setattr(rc, axis, RC_CENTER + off)    # зонд ВЫТЕСНЯЕТ стабилизатор
+        setattr(rc, axis, off)                # зонд ВЫТЕСНЯЕТ стабилизатор
     return rc
 
 
+# ось → (СИ → целые µs, целые µs → СИ): ограничитель скорости живёт на сетке µs (фаза A)
+_GRID = {"roll": (rc_off_tilt, tilt_from_us), "pitch": (rc_off_tilt, tilt_from_us),
+         "yaw": (rc_off_yaw, yaw_from_us)}
+
+
 class ControlStack:
-    """slew: ограничение СКОРОСТИ ИЗМЕНЕНИЯ выхода, PWM/сек (0 = выключено).
+    """slew: ограничение СКОРОСТИ ИЗМЕНЕНИЯ выхода, µs канала в секунду (0 = выключено):
+    для наклона 300 µs/с = 12 °/с, для курса та же ручка = 54 °/с² (масштаб units.py).
+    Считается на сетке целых µs, как до переезда носителя в СИ (фаза A).
+
 
     Зачем. `OverrideRCIn` — это положение стика, то есть ЗАКАЗАННЫЙ УГОЛ, и борт выходит
     на него не мгновенно: измерено `τ = 0.27 ± 0.03 с` (шесть ступеней в A1/A2). Команда,
@@ -130,7 +140,7 @@ class ControlStack:
         for st in self.stabs:
             st.enter(s)
 
-    def update(self, s) -> RcCommand:
+    def update(self, s) -> AttitudeCommand:
         if self._t0 is None:
             self.enter(s)
         t = s.now_sim - self._t0
@@ -140,11 +150,12 @@ class ControlStack:
         sp = Setpoint(intent.c_fwd, intent.c_right, intent.c_yaw)   # стик-команда → стабилизаторам
         # БАЗА — намерение траектории (оператор): c_*→PWM. Незанятая ось = открытый контур
         # (наклон оператора). throttle держит миссия. Живой пилот входит через RcTransmitter.
-        rc = RcCommand(roll=_cmd_to_pwm(intent.c_right),
-                       pitch=_cmd_to_pwm(_PITCH_RC_SIGN * intent.c_fwd),
-                       throttle=RC_CENTER, yaw=_cmd_to_pwm(intent.c_yaw))
-        # ⚠️ Стабилизаторы (Gz*/Dp*) пишут PWM НАПРЯМУЮ, минуя этот перевод: их знаки
-        # (gz_psign, pitch_osign) заданы уже в проводной конвенции и здесь не участвуют.
+        # c_* → µs стика (конвенция pilot_full ±400) → СИ тем же масштабом (±16°, ±72 °/с)
+        rc = AttitudeCommand(roll=tilt_of_pwm(_cmd_to_pwm(intent.c_right)),
+                             pitch=tilt_of_pwm(_cmd_to_pwm(_PITCH_RC_SIGN * intent.c_fwd)),
+                             yaw_rate=yaw_of_pwm(_cmd_to_pwm(intent.c_yaw)))
+        # ⚠️ Стабилизаторы (Gz*/Dp*) пишут выход НАПРЯМУЮ, минуя этот перевод: их знаки
+        # (gz_psign, pitch_osign) заданы уже в конвенции ArduPilot и здесь не участвуют.
         # каждый стабилизатор перезаписывает СВОИ оси
         for st in self.stabs:
             out = st.update(s, sp, dt)
@@ -154,16 +165,18 @@ class ControlStack:
             rc = _compose(rc, axis, off, pol)
         return self._limit(rc, dt)
 
-    def _limit(self, rc: RcCommand, dt: float) -> RcCommand:
-        """Ограничить скорость изменения roll/pitch/yaw (см. docstring класса)."""
+    def _limit(self, rc: AttitudeCommand, dt: float) -> AttitudeCommand:
+        """Ограничить скорость изменения roll/pitch/yaw (см. docstring класса). На сетке
+        целых µs: µs = центр + смещение, int() — как до переезда носителя в СИ."""
         if self.slew <= 0 or dt <= 0:
             self._prev_rc = rc
             return rc
         if self._prev_rc is not None:
             step = self.slew * dt
-            for ax in ("roll", "pitch", "yaw"):
-                prev = getattr(self._prev_rc, ax)
-                setattr(rc, ax, int(clamp(getattr(rc, ax), prev - step, prev + step)))
+            for ax, (to_us, from_us) in _GRID.items():
+                prev = RC_CENTER + to_us(getattr(self._prev_rc, ax))
+                cur = RC_CENTER + to_us(getattr(rc, ax))
+                setattr(rc, ax, from_us(int(clamp(cur, prev - step, prev + step)) - RC_CENTER))
         self._prev_rc = rc
         return rc
 

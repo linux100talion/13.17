@@ -21,6 +21,7 @@ from control_pkg.domain.control.trajectory import ConstProfile, StaticSetpoint  
 from control_pkg.domain.rc import RC_CENTER                           # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                     # noqa: E402
 from control_pkg.domain.state import DroneState                      # noqa: E402
+from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 results = []
 
@@ -39,7 +40,7 @@ check("GzYawHold владеет только yaw", GzYawHold().axes == frozenset
 # --- GzHold yaw-курс-холд: ошибка курса → yaw≠центр ---
 gy = GzYawHold()
 gy.enter(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.05))
-rc = gy.update(DroneState(gt_valid=True, gt_yaw=0.2, now_sim=0.10), Setpoint(), 0.05)
+rc = rc_of(gy.update(DroneState(gt_valid=True, gt_yaw=0.2, now_sim=0.10), Setpoint(), 0.05))
 check("GzYawHold: увод курса → yaw корректирует (≠1500)", rc.yaw != 1500)
 
 # --- per-axis: GzRollHold в стеке держит roll, pitch/yaw = профиль-оператор ---
@@ -47,7 +48,7 @@ check("GzYawHold: увод курса → yaw корректирует (≠1500)
 stack = ControlStack([GzRollHold()], ConstProfile(10, c_fwd=0.2, c_yaw=-0.125), NoExcitation())
 s0 = DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.0, now_sim=0.05)
 stack.enter(s0)
-rc = stack.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=1.0, gt_yaw=0.0, now_sim=0.10))
+rc = rc_of(stack.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=1.0, gt_yaw=0.0, now_sim=0.10)))
 check("GzRollHold в стеке: roll держит позицию (≠1500)", rc.roll != 1500)
 check("GzRollHold в стеке: pitch НЕЗАНЯТ → профиль-оператор (1420)", rc.pitch == 1420)
 check("GzRollHold в стеке: yaw НЕЗАНЯТ → профиль-оператор (1450)", rc.yaw == 1450)
@@ -55,12 +56,12 @@ check("GzRollHold в стеке: yaw НЕЗАНЯТ → профиль-опер�
 # --- GzYawHold: ЗНАК курс-холда (K1_slope: при +1 борт раскрутило на 439°) ---
 gy = GzYawHold()
 gy.enter(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.0, now_sim=0.0))
-rc = gy.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.2, now_sim=0.1),
-               Setpoint(), 0.1)
+rc = rc_of(gy.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=0.2, now_sim=0.1),
+               Setpoint(), 0.1))
 # борт довернулся на +0.2 рад → гасить надо командой ВЫШЕ центра
 check("GzYawHold: уход в +yaw → команда выше центра", rc.yaw > RC_CENTER)
-rc = gy.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=-0.2, now_sim=0.2),
-               Setpoint(), 0.1)
+rc = rc_of(gy.update(DroneState(gt_valid=True, gt_x=0.0, gt_y=0.0, gt_yaw=-0.2, now_sim=0.2),
+               Setpoint(), 0.1))
 check("GzYawHold: уход в −yaw → команда ниже центра", rc.yaw < RC_CENTER)
 
 # --- GzYawHold: ЗНАК yaw-КОМАНДЫ (mv_cw/mv_ccw обязаны значить одно и то же
@@ -69,11 +70,11 @@ check("GzYawHold: уход в −yaw → команда ниже центра", 
 # c_yaw>0 обязан вести _yawsp в −yaw и выдавать команду ТОЖЕ выше центра.
 open_loop = ControlStack([], ConstProfile(10, c_yaw=0.3), NoExcitation())
 open_loop.enter(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.0))
-rc_open = open_loop.update(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.1))
+rc_open = rc_of(open_loop.update(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.1)))
 gy = GzYawHold()
 gy.enter(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.0))
-rc_hold = gy.update(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.1),
-                    Setpoint(c_yaw=0.3), 0.1)
+rc_hold = rc_of(gy.update(DroneState(gt_valid=True, gt_yaw=0.0, now_sim=0.1),
+                    Setpoint(c_yaw=0.3), 0.1))
 check("yaw-команда: открытый контур на c_yaw>0 → выше центра", rc_open.yaw > RC_CENTER)
 check("yaw-команда: GzYawHold на c_yaw>0 → ТУДА ЖЕ (выше центра)", rc_hold.yaw > RC_CENTER)
 check("yaw-команда: GzYawHold ведёт уставку в −yaw (вправо)", gy._yawsp < 0.0)
@@ -86,15 +87,15 @@ dp = DpPitchHold(kp=2000.0, ki=0.0, kd=1000.0)
 dp.enter(DroneState(flow_seq=-1))
 back = DroneState(flow_seq=1, kf_logs=-0.02, kf_valid=True, flow_conf=0.5, flow_dt=0.05, now_sim=0.05)
 dp.update(back, Setpoint(), 0.05)
-rc = dp.update(DroneState(flow_seq=2, kf_logs=-0.02, kf_valid=True, flow_conf=0.5,
-                          flow_dt=0.05, now_sim=0.10), Setpoint(), 0.05)
+rc = rc_of(dp.update(DroneState(flow_seq=2, kf_logs=-0.02, kf_valid=True, flow_conf=0.5,
+                          flow_dt=0.05, now_sim=0.10), Setpoint(), 0.05))
 # уехали назад (масштаб меньше) → нос ВНИЗ → летим к опоре: 1500 + 2000·(−0.02) = 1460
 check("DpPitchHold: ушли назад → нос вниз (pitch=1460)", rc.pitch == 1460)
 check("DpPitchHold владеет только pitch (roll/yaw центр)", rc.roll == 1500 and rc.yaw == 1500)
 fwd = DroneState(flow_seq=3, kf_logs=+0.02, kf_valid=True, flow_conf=0.5, flow_dt=0.05, now_sim=0.15)
 dp.update(fwd, Setpoint(), 0.05)
-rc = dp.update(DroneState(flow_seq=4, kf_logs=+0.02, kf_valid=True, flow_conf=0.5,
-                          flow_dt=0.05, now_sim=0.20), Setpoint(), 0.05)
+rc = rc_of(dp.update(DroneState(flow_seq=4, kf_logs=+0.02, kf_valid=True, flow_conf=0.5,
+                          flow_dt=0.05, now_sim=0.20), Setpoint(), 0.05))
 check("DpPitchHold: ушли вперёд → нос вверх (pitch=1540)", rc.pitch == 1540)
 
 # Опора протухла (ушла высота — оценщик снял kf_valid): PID СТОИТ — kd не берёт
@@ -102,12 +103,12 @@ check("DpPitchHold: ушли вперёд → нос вверх (pitch=1540)", r
 # входе в висение, 1.5 м/с, оказалась самодельной). Выход при этом ДЕРЖИТСЯ, а не
 # рубится в ноль (hold+fade, см. _FlowDamper1D.update): сигнал протухшего кадра
 # нарочно перевёрнут (−0.02 дал бы 1460) — видно, что новой команды он не родил.
-rc = dp.update(DroneState(flow_seq=5, kf_logs=-0.02, kf_valid=False, flow_conf=0.5,
-                          flow_dt=0.05, now_sim=0.25), Setpoint(), 0.05)
+rc = rc_of(dp.update(DroneState(flow_seq=5, kf_logs=-0.02, kf_valid=False, flow_conf=0.5,
+                          flow_dt=0.05, now_sim=0.25), Setpoint(), 0.05))
 check("DpPitchHold: опора протухла → новой команды нет, держится старая (1540)",
       rc.pitch == 1540)
-rc = dp.update(DroneState(flow_seq=6, kf_logs=-0.02, kf_valid=False, flow_conf=0.5,
-                          flow_dt=0.05, now_sim=1.25), Setpoint(), 0.05)
+rc = rc_of(dp.update(DroneState(flow_seq=6, kf_logs=-0.02, kf_valid=False, flow_conf=0.5,
+                          flow_dt=0.05, now_sim=1.25), Setpoint(), 0.05))
 check("DpPitchHold: протухла дольше 2·stale → команда угасла в центр",
       rc.pitch == RC_CENTER)
 
@@ -117,12 +118,12 @@ check("DpPitchHold: протухла дольше 2·stale → команда у
 # положении едущий вперёд борт тормозится, (2) разность кадров больше НЕ участвует.
 dv = DpPitchHold(kp=1500.0, ki=0.0, kd=5000.0)
 dv.enter(DroneState(flow_seq=-1))
-rc = dv.update(DroneState(flow_seq=1, kf_logs=0.0, kf_vel=+0.011, kf_valid=True,
-                          flow_conf=0.5, flow_dt=0.05, now_sim=0.05), Setpoint(), 0.05)
+rc = rc_of(dv.update(DroneState(flow_seq=1, kf_logs=0.0, kf_vel=+0.011, kf_valid=True,
+                          flow_conf=0.5, flow_dt=0.05, now_sim=0.05), Setpoint(), 0.05))
 # едем вперёд 1 м/с (kf_vel=+0.011) при нулевой ошибке → 1500 + 5000·0.011 = 1555
 check("DpPitchHold: ход вперёд при нулевой ошибке → торможение (pitch=1555)", rc.pitch == 1555)
-rc = dv.update(DroneState(flow_seq=2, kf_logs=+0.02, kf_vel=0.0, kf_valid=True,
-                          flow_conf=0.5, flow_dt=0.05, now_sim=0.10), Setpoint(), 0.05)
+rc = rc_of(dv.update(DroneState(flow_seq=2, kf_logs=+0.02, kf_vel=0.0, kf_valid=True,
+                          flow_conf=0.5, flow_dt=0.05, now_sim=0.10), Setpoint(), 0.05))
 # положение прыгнуло на +0.02 за кадр, но kf_vel=0 → чистое kp: 1500 + 1500·0.02 = 1530
 check("DpPitchHold: скачок положения БЕЗ скорости → kd молчит (pitch=1530)", rc.pitch == 1530)
 
@@ -133,9 +134,9 @@ check("DpPitchHold: скачок положения БЕЗ скорости → 
 dh = DpHold()
 dh.enter(DroneState(flow_seq=-1))
 for k in range(1, 8):
-    rc = dh.update(DroneState(flow_seq=k, flow_lateral=5.0, kf_logs=-0.02, kf_valid=True,
+    rc = rc_of(dh.update(DroneState(flow_seq=k, flow_lateral=5.0, kf_logs=-0.02, kf_valid=True,
                               flow_yaw=3.0, flow_conf=0.5, flow_dt=0.05, now_sim=0.05 * k),
-                   Setpoint(), 0.05)
+                   Setpoint(), 0.05))
 check("DpHold командует roll+pitch+yaw", rc.roll != 1500 and rc.pitch != 1500 and rc.yaw != 1500)
 
 # --- проекция стик-команды по ТЕКУЩЕМУ курсу: «вперёд» = куда смотрит нос СЕЙЧАС ---

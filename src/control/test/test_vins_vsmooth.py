@@ -23,7 +23,7 @@ from control_pkg.domain.control.vins_hold import VinsHold                # noqa:
 from control_pkg.domain.rc import RC_CENTER                              # noqa: E402
 from control_pkg.domain.setpoint import Setpoint                         # noqa: E402
 from control_pkg.domain.state import DroneState                          # noqa: E402
-from pwm_eq import si, tilt_from_us, us                  # noqa: E402,F401
+from pwm_eq import cmd_pwm, rc_of, si, tilt_from_us, us                  # noqa: E402,F401
 
 results = []
 
@@ -53,10 +53,10 @@ def noisy_run(vsmooth, seed=1, n=60):
         if i % 2 == 1:
             vnoise = rng.uniform(-0.4, 0.4)
         x = (t - 100.0) * VSP          # позиция точно по уставке
-        rc = vh.update(DroneState(now_sim=t, vins_x=x, vins_y=0.0,
+        rc = rc_of(vh.update(DroneState(now_sim=t, vins_x=x, vins_y=0.0,
                                   vins_vx=VSP + vnoise, vins_vy=0.0,
                                   vins_valid=True, vins_last_sim=t),
-                       Setpoint(c_fwd=1.0), DT)
+                       Setpoint(c_fwd=1.0), DT))
         out.append(rc.pitch - RC_CENTER)
     return out
 
@@ -85,9 +85,9 @@ def steady(vsmooth):
     for i in range(1, 40):
         t = 100.0 + i * DT
         x = (t - 100.0) * VSP
-        rc = vh.update(DroneState(now_sim=t, vins_x=x, vins_y=0.0,
+        rc = rc_of(vh.update(DroneState(now_sim=t, vins_x=x, vins_y=0.0,
                                   vins_vx=VSP, vins_vy=0.0, vins_valid=True,
-                                  vins_last_sim=t), Setpoint(c_fwd=1.0), DT)
+                                  vins_last_sim=t), Setpoint(c_fwd=1.0), DT))
     return rc.pitch
 
 check("слежение v=vsp: сглаж. и без — один выход (центр)",
@@ -101,9 +101,9 @@ vh.update(DroneState(now_sim=100.05, vins_x=0.2, vins_y=0.0, vins_vx=9.0,
           Setpoint(c_fwd=1.0), DT)                       # накачали фильтр 9 м/с
 vh.enter(DroneState(now_sim=200.0, vins_x=0.0, vins_y=0.0))
 # первый апдейт после enter: фильтр стартует с текущей v (5), не с 9
-rc = vh.update(DroneState(now_sim=200.05, vins_x=0.2, vins_y=0.0, vins_vx=VSP,
+rc = rc_of(vh.update(DroneState(now_sim=200.05, vins_x=0.2, vins_y=0.0, vins_vx=VSP,
                           vins_vy=0.0, vins_valid=True, vins_last_sim=200.05),
-               Setpoint(c_fwd=1.0), DT)
+               Setpoint(c_fwd=1.0), DT))
 check("после enter(): фильтр сброшен (v=vsp → около центра)",
       abs(rc.pitch - RC_CENTER) <= 8)
 
