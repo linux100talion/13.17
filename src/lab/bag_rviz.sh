@@ -7,7 +7,8 @@
 #   bash src/lab/bag_rviz.sh <прогон>/bag  [доп. аргументы ros2 bag play]
 #   RATE=2 LOOP=1 START=30 bash src/lab/bag_rviz.sh <прогон>
 #
-# Что поднимает (всё в ОТДЕЛЬНОМ ROS-домене, см. ниже) и гасит по Ctrl+C:
+# Что поднимает (всё в ОТДЕЛЬНОМ ROS-домене, см. ниже) и гасит по Ctrl+C ИЛИ при
+# закрытии окна RViz (раньше — только Ctrl+C, и закрытое окно оставляло реплей):
 #   1. static_transform_publisher world→map (identity) — /mavros/local_position/pose
 #      живёт во frame 'map', истина Gazebo и VINS — в 'world'; TF в bag не пишется.
 #   2. bag_path_pub.py — Odometry/PoseStamped → nav_msgs/Path (/truth/path,
@@ -87,7 +88,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "=== bag_rviz: $BAG (ROS_DOMAIN_ID=$DOMAIN, rate $RATE, start ${START}s${LOOP:+, loop=$LOOP}) ==="
-echo "    сим в домене 0 не мешает; выйти — Ctrl+C здесь (гасит rviz и помощников)"
+echo "    сим в домене 0 не мешает; выйти — закрыть окно RViz или Ctrl+C здесь"
 
 # 1. TF world→map (identity): EKF-поза MAVROS во frame 'map'.
 #    Бинарник напрямую, не `ros2 run`: TERM python-обёртке до её ребёнка не
@@ -112,6 +113,20 @@ sleep 3
 PLAY=(ros2 bag play "$BAG" --rate "$RATE")
 [ "$START" != "0" ] && PLAY+=(--start-offset "$START")
 [ "$LOOP" = "1" ] && PLAY+=(--loop)
-"${PLAY[@]}" "${PLAY_EXTRA[@]}"
-echo "=== реплей закончен; rviz открыт — Ctrl+C или закрыть окно ==="
-wait "$RVIZ_PID" 2>/dev/null || true
+# Плеер — в фоне, чтобы скрипт следил за окном RViz: закрыли окно → выход, trap
+# гасит плеер и помощников. Клавиатура плеера (SPACE пауза, стрелки) живёт, если
+# скрипт запущен из терминала: stdin фонового процесса — тот же tty (без job control
+# процесс в группе переднего плана, чтение разрешено). Без терминала — как раньше.
+if [ -t 0 ]; then "${PLAY[@]}" "${PLAY_EXTRA[@]}" < /dev/tty &
+else "${PLAY[@]}" "${PLAY_EXTRA[@]}" & fi
+PLAY_PID=$!
+PIDS+=("$PLAY_PID")
+announced=0
+while kill -0 "$RVIZ_PID" 2>/dev/null; do
+    if [ "$announced" = 0 ] && ! kill -0 "$PLAY_PID" 2>/dev/null; then
+        echo "=== реплей закончен; rviz открыт — закрыть окно или Ctrl+C ==="
+        announced=1
+    fi
+    sleep 0.5
+done
+echo "=== окно RViz закрыто — гашу реплей и помощников ==="
