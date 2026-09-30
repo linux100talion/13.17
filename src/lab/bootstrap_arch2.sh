@@ -87,11 +87,15 @@ if [ "${BS_PILOT:-}" = "replay" ]; then
         fi
     done
     [ -n "${BS_JOY_SIGNS:-}" ]    && RARGS+=("--signs=$BS_JOY_SIGNS")
-    # кнопка возврата (SD) реплею — из того же ключа, что читает нода: сценарий
-    # {"rth": 1} обязан жать ТОТ индекс, который слушает JoyPilot (у --land-btn
-    # такой синхронизации нет исторически, см. scenarios/memory/CLAUDE.md)
+    # кнопки возврата (SD) и посадки (SA) реплею — из тех же ключей, что читает нода:
+    # сценарий {"rth": 1} / {"land": 1} обязан жать ТОТ индекс, который слушает JoyPilot.
+    # SA до 2026-09-30 не синхронизировалась: реплей жал b0 при BS_LAND_JOY=b1, и
+    # {"land": 1} нода не видела (sa=0 в статусе, прогон thrbsa_att_20260930_214835)
     case "${BS_RTH_JOY:-}" in
         b[0-9]*) RARGS+=(--rth-btn "${BS_RTH_JOY#b}") ;;
+    esac
+    case "${BS_LAND_JOY:-}" in
+        b[0-9]*) RARGS+=(--land-btn "${BS_LAND_JOY#b}") ;;
     esac
     [ -n "${BS_REPLAY_FENCE:-}" ] && RARGS+=(--fence "$BS_REPLAY_FENCE")
     python3 /lab/joystick/joy_replay.py "${RARGS[@]}" \
