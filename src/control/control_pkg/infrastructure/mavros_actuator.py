@@ -7,13 +7,24 @@ call_async — как в монолите). SetpointOutput → /mavros/setpoint_
 (PositionTarget: позиция + курс в локальной раме EKF) — им шаг RthTrack ведёт борт
 домой по своему треку в GUIDED. Один адаптер держит все три порта: у них одна шина
 MAVROS.
+
+Реверс каналов ПОЛЁТНИКА (`RCn_REVERSED`) применяется и к override (как к приёмнику),
+а домен говорит в стандартной конвенции ArduPilot — адаптер читает `RC1..4_REVERSED`
+(+ `TRIM`) у FCU и зеркалит реверсные каналы (`rc_reverse.py`, разбор — laptop_move.md
+§5.7). Пока реверс не прочитан — override НЕ шлём, отпускаем каналы (release): на
+борту управление остаётся у физического приёмника, а не у канала с неизвестным знаком.
 """
-from mavros_msgs.msg import OverrideRCIn, PositionTarget
+from mavros_msgs.msg import OverrideRCIn, ParamEvent, PositionTarget
 from mavros_msgs.srv import CommandBool, CommandLong, SetMode
 
 from ..domain.modes import to_fcu
 
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rcl_interfaces.msg import ParameterType
+from rcl_interfaces.srv import GetParameters
+
 from ..domain.rc import RC_NOCHANGE, RC_RELEASE, RcCommand
+from .rc_reverse import PARAMS as _REV_PARAMS, RcReverse
 
 
 class MavrosActuator:
@@ -23,16 +34,73 @@ class MavrosActuator:
         self._arm_cli = node.create_client(CommandBool, '/mavros/cmd/arming')
         self._cmd_cli = node.create_client(CommandLong, '/mavros/cmd/command')
         self._sp_pub = node.create_publisher(PositionTarget, '/mavros/setpoint_raw/local', 10)
+        # реверс каналов FCU: событие MAVROS на каждый PARAM_VALUE (ловит и живую
+        # правку параметра) + опрос get_parameters раз в секунду, пока не прочитан
+        # (нода могла подняться ПОСЛЕ того, как MAVROS вытянул параметры — событий
+        # тогда не будет). BEST_EFFORT: совместим с любым QoS издателя (подписка
+        # RELIABLE на BEST_EFFORT молчит без ошибки — память mavros-qos-silent).
+        self._log = node.get_logger()
+        self._clock = node.get_clock()
+        self._rev = RcReverse()
+        self._rev_warn_t = None
+        node.create_subscription(
+            ParamEvent, '/mavros/param/event', self._on_param_event,
+            QoSProfile(depth=50, reliability=ReliabilityPolicy.BEST_EFFORT))
+        self._param_get = node.create_client(GetParameters, '/mavros/param/get_parameters')
+        self._rev_timer = node.create_timer(1.0, self._poll_reverse)
+
+    # --- реверс каналов FCU ---
+    def _learn(self, name, value) -> None:
+        was_ready = self._rev.ready()
+        if self._rev.on_param(name, value) and (was_ready or self._rev.ready()):
+            (self._log.error if self._rev.throttle_reversed() else self._log.info)(
+                f"реверс каналов FCU: {self._rev.describe()}")
+
+    def _on_param_event(self, m: ParamEvent) -> None:
+        v = m.value
+        if v.type == ParameterType.PARAMETER_INTEGER:
+            self._learn(m.param_id, v.integer_value)
+        elif v.type == ParameterType.PARAMETER_DOUBLE:
+            self._learn(m.param_id, v.double_value)
+
+    def _poll_reverse(self) -> None:
+        if self._rev.ready():
+            return
+        if not self._param_get.service_is_ready():
+            return
+        names = list(_REV_PARAMS)
+        req = GetParameters.Request()
+        req.names = names
+
+        def done(fut):
+            try:
+                vals = fut.result().values
+            except Exception:
+                return
+            for name, v in zip(names, vals):
+                if v.type == ParameterType.PARAMETER_INTEGER:
+                    self._learn(name, v.integer_value)
+                elif v.type == ParameterType.PARAMETER_DOUBLE:
+                    self._learn(name, v.double_value)
+        self._param_get.call_async(req).add_done_callback(done)
 
     # --- RcOutput ---
     def publish(self, cmd: RcCommand) -> None:
+        ch4 = self._rev.apply([int(cmd.roll), int(cmd.pitch),
+                               int(cmd.throttle), int(cmd.yaw)])
+        if ch4 is None:
+            # реверс не прочитан (или перевёрнут газ) — знак канала неизвестен:
+            # не оверрайдим, отпускаем к приёмнику; лог раз в 5 с
+            now = self._clock.now().nanoseconds * 1e-9
+            if self._rev_warn_t is None or now - self._rev_warn_t > 5.0:
+                self._rev_warn_t = now
+                why = (self._rev.describe() if self._rev.throttle_reversed()
+                       else "не прочитаны " + " ".join(self._rev.missing()))
+                self._log.warn(f"override не шлю (release): реверс каналов FCU — {why}")
+            self.release()
+            return
         msg = OverrideRCIn()
-        ch = [RC_NOCHANGE] * 18
-        ch[0] = int(cmd.roll)
-        ch[1] = int(cmd.pitch)
-        ch[2] = int(cmd.throttle)
-        ch[3] = int(cmd.yaw)
-        msg.channels = ch
+        msg.channels = ch4 + [RC_NOCHANGE] * 14
         self._rc_pub.publish(msg)
 
     def release(self) -> None:
