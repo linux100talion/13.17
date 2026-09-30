@@ -51,8 +51,10 @@ class MavrosActuator:
 
     # --- реверс каналов FCU ---
     def _learn(self, name, value) -> None:
-        was_ready = self._rev.ready()
-        if self._rev.on_param(name, value) and (was_ready or self._rev.ready()):
+        before = self._rev.describe() if self._rev.ready() else None
+        self._rev.on_param(name, value)
+        # лог — когда реверс впервые прочитан или ПОМЕНЯЛСЯ (TRIM и повторы молчат)
+        if self._rev.ready() and self._rev.describe() != before:
             (self._log.error if self._rev.throttle_reversed() else self._log.info)(
                 f"реверс каналов FCU: {self._rev.describe()}")
 
