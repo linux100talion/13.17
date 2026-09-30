@@ -12,7 +12,7 @@ import math
 
 from control_pkg.application.control_stack import yaw_stabs
 from control_pkg.application.hud import LadderState
-from control_pkg.domain.control.altitude import ThrottleMap
+from control_pkg.domain.control.altitude import CLIMB_FLOOR
 from control_pkg.domain.control.bank_limit import YawBankLimit
 from control_pkg.domain.control.throttle_latch import ThrottleLatch
 from control_pkg.domain.modes import matches as mode_matches
@@ -34,15 +34,23 @@ class StepResult:
 
 
 def _thr(ctx):
-    """Карта газа µs ↔ м/с (ThrottleMap) прогона: ставит нода в runner (из alt_* конфига),
-    стенды без неё — эталонная (100/400/3.16)."""
+    """Карта газа µs ↔ м/с (ThrottleMap — ALT_HOLD полётника по его параметрам): ставит нода
+    в runner, стенды без неё — эталонная (параметры SITL сима)."""
     return getattr(ctx, "thr", None) or DEFAULT_THR
 
 
 def _gas(ctx, pwm) -> AttitudeCommand:
-    """Команда «только газ»: газ канала (µs — константы плана, сырой газ пилота, AltHold)
-    → скорость набора носителя; наклон и курс — ноль (центр)."""
-    return AttitudeCommand(climb=_thr(ctx).climb(pwm))
+    """Команда «только газ» по газу КАНАЛА (µs: сырой газ пилота, константы плана) → скорость
+    набора картой полётника; RC_MIN_THR и ниже — «газ в пол» (CLIMB_FLOOR); наклон/курс — 0."""
+    return AttitudeCommand(climb=CLIMB_FLOOR if pwm <= RC_MIN_THR else _thr(ctx).climb(pwm))
+
+
+def _step_climb(ctx, s, alt_hold, throttle) -> float:
+    """Скорость набора шага: контур высоты AltHold (м/с) — или постоянный газ канала шага
+    (µs, константа плана) картой полётника."""
+    if alt_hold is not None:
+        return alt_hold.climb_cmd(s)
+    return _gas(ctx, throttle).climb
 
 
 def _run(rc): return StepResult(rc, RUN)
@@ -188,8 +196,7 @@ class Climb(Step):
             self.alt_hold.set_target(self.alt)
 
     def tick(self, ctx, s) -> StepResult:
-        thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
-        rc = _gas(ctx, thr)
+        rc = AttitudeCommand(climb=_step_climb(ctx, s, self.alt_hold, self.throttle))
         ctx.keep_mode(s, self.keep)
         _overlay_stack(self, ctx, s, rc)   # набор стабилизирован: горизонт держит стек с отрыва
         # С контуром цель считается достигнутой по ДОПУСКУ, а не по «перешли черту»:
@@ -262,11 +269,11 @@ class Control(Step):
         self._stab_pos = None
 
     def tick(self, ctx, s) -> StepResult:
-        thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
+        climb = _step_climb(ctx, s, self.alt_hold, self.throttle)
         if self._latch is not None:
             p = self._latch.pass_through(s.pilot_throttle)
             if p is not None:
-                thr = p                          # пилот командует вертикалью
+                climb = _gas(ctx, p).climb       # пилот командует вертикалью (его газ → м/с)
                 self._pilot_flying_thr = True
             elif self._pilot_flying_thr:
                 self._pilot_flying_thr = False
@@ -275,7 +282,7 @@ class Control(Step):
                 if self.alt_hold is not None and s.rel_alt is not None:
                     self.alt_hold.set_target(s.rel_alt)
                     ctx.log.info(f"    газ отпущен — держим {s.rel_alt:.1f}м")
-        rc = _gas(ctx, thr)
+        rc = AttitudeCommand(climb=climb)
         ctx.keep_mode(s, self.keep)
         if not self._entered_stack:
             if self.wait_gt and not s.gt_valid:
@@ -441,8 +448,7 @@ class LoiterHold(Step):
                 return _next(rc, "LOITER_DONE")
             return _run(rc)
         # --- WAIT / LATCH: стабилизированный hover в семантике ALT_HOLD ---
-        thr = self.alt_hold.throttle(s) if self.alt_hold is not None else self.throttle
-        rc = _gas(ctx, thr)
+        rc = AttitudeCommand(climb=_step_climb(ctx, s, self.alt_hold, self.throttle))
         if not self._gated:
             ctx.keep_mode(s, self.keep)
             _overlay_stack(self, ctx, s, rc)
@@ -1101,8 +1107,7 @@ class SoftLand(Step):
     TOUCH_FRESH_SEC = 3.0        # свежесть extended_state для детекта FCU
 
     def __init__(self, name, stack, ground_z, budget, pilot_stabs=None, handover=None,
-                 rate=0.15, alt_dz=100.0, alt_span=400.0, alt_rate_full=3.16,
-                 fresh_sec=2.0, keep="ALT_HOLD", throttle_hold=RC_CENTER,
+                 rate=0.15, fresh_sec=2.0, keep="ALT_HOLD", throttle_hold=RC_CENTER,
                  cancel=True, resume="freefly"):
         self.name = name
         self.cancel = cancel          # второе нажатие SA отменяет посадку
@@ -1115,8 +1120,9 @@ class SoftLand(Step):
         self.fresh_sec = fresh_sec
         self.keep = keep
         self.throttle_hold = throttle_hold
-        # газ снижения ветки alt: скорость rate (м/с) → µs той же картой, что у AltHold
-        self.descent = int(round(RC_CENTER - ThrottleMap(alt_dz, alt_span, alt_rate_full).off(rate)))
+        # снижение ветки alt: скорость набора −rate, м/с — в провод картой ALT_HOLD полётника
+        # (override) или прямо в thrust (углы): полётник исполняет ровно rate
+        self.descent = -float(rate)
         self.enter(None, None)
 
     def enter(self, ctx, s) -> None:
@@ -1165,7 +1171,7 @@ class SoftLand(Step):
             self.stack.switch_stabilization(stabs)
         ctx.reset_keyframe()
         self.stack.enter(s)
-        ctx.log.info("    {}: {} — снижение в ALT_HOLD под {} (газ {}), стик = наклон"
+        ctx.log.info("    {}: {} — снижение в ALT_HOLD под {} ({:+.2f} м/с), стик = наклон"
                      .format(self.name, why, "VINS" if self._tier == 1 else "ДЕМПФЕРОМ",
                              self.descent))
 
@@ -1186,7 +1192,7 @@ class SoftLand(Step):
         if not s.armed:
             ctx.log.info(f"    {self.name}: дизарм — посадка завершена "
                          f"(rel_alt={s.rel_alt}, ветка {self._branch})")
-            return _finish(_gas(ctx, RC_MIN_THR), "LAND_DONE")
+            return _finish(AttitudeCommand(climb=CLIMB_FLOOR), "LAND_DONE")
         if self._cancel_press(s):
             if self._touch_t is not None:
                 if not self._cancel_warned:
@@ -1234,11 +1240,11 @@ class SoftLand(Step):
                     self.stack.enter(s)
                 ctx.log.warn(f"    {self.name}: VINS протух — ярус ДЕМПФЕР")
             if self._touch_t is None:
-                rc = _gas(ctx, self.descent)
+                rc = AttitudeCommand(climb=self.descent)
                 ctrl = self.stack.update(s)
                 rc.roll, rc.pitch, rc.yaw = ctrl.roll, ctrl.pitch, ctrl.yaw
         if self._touch_t is not None:
-            rc = _gas(ctx, RC_MIN_THR)       # стики центр, газ в пол
+            rc = AttitudeCommand(climb=CLIMB_FLOOR)       # стики центр, газ в пол
             held = s.now_sim - self._touch_t
             # ветка alt дизармим сами (1 с / force 5 с); pos — LAND сам, страховка 8/12
             t_arm, t_force = (1.0, 5.0) if self._branch == "alt" else (8.0, 12.0)
@@ -1363,7 +1369,7 @@ class Rth(Step):
         if not s.armed:
             ctx.log.info(f"    {self.name}: дизарм — возврат завершён "
                          f"(rel_alt={s.rel_alt})")
-            return _finish(_gas(ctx, RC_MIN_THR), "RTH_DONE")
+            return _finish(AttitudeCommand(climb=CLIMB_FLOOR), "RTH_DONE")
         if getattr(s, 'pilot_rth', False):
             ctx.log.warn(f"    {self.name}: повторный импульс — ВОЗВРАТ ОТМЕНЁН "
                          f"(rel_alt={s.rel_alt}) → {self.resume}")
@@ -1526,7 +1532,7 @@ class RthTrack(Step):
         rc = _gas(ctx, self.throttle_hold)
         if not s.armed:
             ctx.log.info(f"    {self.name}: дизарм — возврат завершён")
-            return _finish(_gas(ctx, RC_MIN_THR), "RTH_DONE")
+            return _finish(AttitudeCommand(climb=CLIMB_FLOOR), "RTH_DONE")
         if getattr(s, 'pilot_rth', False):
             ctx.log.warn(f"    {self.name}: повторный импульс — ВОЗВРАТ ОТМЕНЁН → "
                          f"{self.resume}")

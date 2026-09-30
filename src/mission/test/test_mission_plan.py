@@ -276,8 +276,8 @@ def main():
     checks.append(("freefly: стек и pilot_stabs — ОДНИ объекты (посев трима читает живой демпфер)",
                    len(ffs.stack.stabs) == len(ffs._pilot_stabs)
                    and all(a is b for a, b in zip(ffs.stack.stabs, ffs._pilot_stabs))))
-    checks.append(("freefly: газ снижения SoftLand = центр − dz − 0.15/3.16·span = 1381",
-                   ff[2].descent == 1381))
+    checks.append(("freefly: снижение SoftLand = climb −land_rate (−0.15 м/с)",
+                   ff[2].descent == -0.15))
     checks.append(("freefly: дефолт гейта SA = 5 м / 1 м/с, снижение 0.15 м/с",
                    (cfg.land_alt_max, cfg.land_v_max, cfg.land_rate) == (5.0, 1.0, 0.15)))
     checks.append(("freefly: бюджет SoftLand = max(land_budget, 2·alt_max/rate) ≈ 66.7 с",

@@ -116,5 +116,31 @@ check("диагональ: направление вектора тяги сох
       abs(math.atan2(y0, x0) - math.atan2(y1, x1)) < 1e-9
       and abs(deg(math.atan(math.hypot(x1, y1))) - 20) < 1e-6)
 
+# ФАЗА B: канал углов берёт команду домена напрямую (cmd_to_attitude) — наклон и курс ровно
+# как прежний круг через µs (rc_to_attitude ∘ to_rc), climb — без круга через газ
+import random                                                        # noqa: E402
+from control_pkg.application.command_wire import to_rc             # noqa: E402
+from control_pkg.domain.units import tilt_from_us, yaw_from_us     # noqa: E402
+from control_pkg.infrastructure.att_convert import cmd_to_attitude  # noqa: E402
+rng = random.Random(3)
+worst = 0.0
+for _ in range(5000):
+    c = AttitudeCommand(roll=tilt_from_us(rng.randint(-500, 500)),
+                        pitch=tilt_from_us(rng.randint(-500, 500)),
+                        yaw_rate=yaw_from_us(rng.randint(-500, 500)),
+                        climb=rng.uniform(-2.0, 2.0))
+    a1, a0 = cmd_to_attitude(c, SIM), rc_to_attitude(to_rc(c), SIM)
+    worst = max(worst, abs(a1.roll - a0.roll), abs(a1.pitch - a0.pitch),
+                abs(a1.yaw_rate - a0.yaw_rate))
+    if a1.climb != c.climb:
+        worst = 1.0
+check(f"cmd_to_attitude = rc_to_attitude∘to_rc по углам (макс {worst:.1e} рад), climb напрямую",
+      worst < 1e-12)
+big = cmd_to_attitude(AttitudeCommand(roll=1.0, pitch=-1.0, yaw_rate=5.0), SIM)
+check("за пределами хода: как стик в упор (наклон ≤ 20°, курс ≤ 90 °/с)",
+      abs(deg(big.yaw_rate) - 90.0) < 1e-9
+      and deg(math.atan(math.hypot(math.tan(big.pitch),
+                                   math.tan(big.roll) / math.cos(big.pitch)))) <= 20.0 + 1e-9)
+
 print("ИТОГ:", "✅ ATT CONVERT OK" if ok else "❌ ПРОВАЛ")
 sys.exit(0 if ok else 1)

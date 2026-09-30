@@ -28,7 +28,7 @@ from control_pkg.application.arbiter import PILOT_MANUAL, Arbiter
 from control_pkg.application.att_mode import GUIDED_NOGPS, AttModeProxy
 from control_pkg.application.command_wire import to_rc
 from control_pkg.domain.attitude import AttitudeCommand
-from control_pkg.domain.control.altitude import ThrottleMap
+from control_pkg.domain.control.altitude import PARAMS as THR_PARAMS, ThrottleMap
 from control_pkg.application.node_arm import ArmGesture, ready_reasons
 from control_pkg.application.handover import VinsHandover
 from control_pkg.application.hud import hud_status, wind_from_ekf
@@ -120,8 +120,10 @@ class BootstrapArch2Node(Node):
         if self.link.enabled:
             self.logger.info(f"сторож пульта: тишина {cfg.pilot_stale:g} с → "
                              f"override ОТПУСКАЕТСЯ (ch1..4 → 0)")
-        # карта газа µs ↔ м/с — одна на ноду: шаги плана (runner.thr), арбитр, провод (to_rc)
-        self._thr = ThrottleMap(cfg.alt_dz, cfg.alt_span, cfg.alt_rate_full)
+        # карта газа µs ↔ м/с — ALT_HOLD САМОГО ПОЛЁТНИКА по его параметрам (живой словарь
+        # адаптера): одна на шаги плана (runner.thr), арбитр и провод override (to_rc)
+        self._thr = ThrottleMap(self.actuator.fcu_params)
+        self._thr_warn_t = -1e9
         self.arbiter = Arbiter(thr=self._thr)
 
         # Путь: заданный mission → ОРТОГОНАЛЬНЫЙ (stab+mission); иначе ЛЕГАСИ (control_mode).
@@ -1173,8 +1175,20 @@ class BootstrapArch2Node(Node):
         if self._att_out:
             # углы — ТОЛЬКО в GUIDED_NOGPS; в прочих режимах нода молчит (ALT_HOLD —
             # пилот по RC-входу, LOITER/LAND/RTL ведёт полётник). Override не шлём никогда.
+            # Команда уходит напрямую: наклон/курс в углы, climb прямо в thrust.
             if self._fcu_mode == GUIDED_NOGPS:
-                self.actuator.publish_rc_as_attitude(rc)
+                self.actuator.publish_cmd(cmd)
+            return
+        if not self._thr.ready():
+            # газ override = обратная карта ALT_HOLD полётника: без его параметров газ
+            # неизвестен — не оверрайдим, каналы у приёмника (как при непрочитанном реверсе)
+            now = time.monotonic()
+            if now - self._thr_warn_t > 5.0:
+                self._thr_warn_t = now
+                self.logger.warn("override не шлю (release): карта газа — не прочитаны "
+                                 + " ".join(k for k in THR_PARAMS
+                                            if k not in self._thr.params))
+            self.actuator.release()
             return
         self.actuator.publish(rc)
 

@@ -16,6 +16,7 @@ from control_pkg.domain.rc import RcCommand                            # noqa: E
 from mission_pkg.plan.runner import PlanRunner                         # noqa: E402
 from mission_pkg.plan.step import Step, _finish, _goto, _next, _run    # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "control", "test"))  # pwm_eq
+from control_pkg.domain.control.altitude import ThrottleMap          # noqa: E402
 from pwm_eq import cmd_pwm, rc_of                                # noqa: E402,F401
 
 results = []
@@ -155,7 +156,7 @@ class SP(S):
 class AltHoldMock:
     def __init__(self): self.target = None
     def set_target(self, a): self.target = a
-    def throttle(self, s): return 1650        # «контур что-то командует» (вне мёртвой зоны газа: там газ = центр)
+    def climb_cmd(self, s): return 0.8        # «контур что-то командует», м/с
 
 
 ctx = Ctx()
@@ -179,7 +180,8 @@ c2.tick(ctx, SP(1500))                       # защёлка открыта
 rc = rc_of(c2.tick(ctx, SP(1800, alt=4.6))).rc      # пилот набирает
 check("Control+alt_hold: газ пилота вытесняет контур", rc.throttle == 1800)
 rc = rc_of(c2.tick(ctx, SP(1500, alt=5.2))).rc      # отпустил на 5.2 м
-check("Control+alt_hold: отпустил → контур снова в проводе", rc.throttle == 1650)
+check("Control+alt_hold: отпустил → контур снова в проводе (0.8 м/с картой полётника)",
+      rc.throttle == ThrottleMap().pwm(0.8))
 check("Control+alt_hold: контур перецелен на текущую высоту", ah.target == 5.2)
 
 # --- 6. Control + pilot_stabs: трёхпозиционник выбирает стабилизацию на лету ---

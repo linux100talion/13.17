@@ -186,9 +186,7 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
                               2.0 * cfg.land_alt_max / max(cfg.land_rate, 1e-3))
             plan.append(SoftLand("land", stack, cfg.ground_z, soft_budget,
                                  pilot_stabs=pilot_stabs, handover=handover,
-                                 rate=cfg.land_rate, alt_dz=cfg.alt_dz,
-                                 alt_span=cfg.alt_span,
-                                 alt_rate_full=cfg.alt_rate_full,
+                                 rate=cfg.land_rate,
                                  fresh_sec=cfg.vins_fresh_sec, keep=keep,
                                  throttle_hold=cfg.throttle_hold,
                                  cancel=cfg.ff_land_cancel > 0))
@@ -217,8 +215,7 @@ def compile_mission(cfg, mission, stab_spec, handover=None, keep="ALT_HOLD",
     # ОДИН контур высоты на всё задание: набор и удержание должны говорить с FCU одним
     # законом, иначе на стыке шагов высота прыгает (замер J1b: набор отдавал стик в
     # центр с vz=+1.6 м/с → перелёт 2.2 м, и висение узаконивало этот перелёт).
-    alt_hold = AltHold(kp=cfg.alt_kp, rate_max=cfg.alt_rate_max, tol=cfg.alt_tol,
-                       dz=cfg.alt_dz, span=cfg.alt_span, rate_full=cfg.alt_rate_full)
+    alt_hold = AltHold(kp=cfg.alt_kp, rate_max=cfg.alt_rate_max, tol=cfg.alt_tol)
     alt_target = [None]        # высота последнего climb — уставка для Control-шагов
     steps = [AwaitMode("prearm", keep, RC_MIN_THR, cfg.mode_budget)]
     # loiter в миссии = профиль «взлёт на GPS → Loiter»: перед армом ждём, пока

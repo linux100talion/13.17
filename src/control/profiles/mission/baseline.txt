@@ -105,11 +105,8 @@ BS_ALT=3
 BS_ALT_KP=0.6
 BS_ALT_RATE_MAX=1.2
 BS_ALT_TOL=0.10
-# слой: нода (2026-09-07 — до этого без проводки BS_, только дефолт в коде): пересчёт
-# «PWM → командная vz» для ALT_HOLD (dz/span/rate_full: +300 PWM = +1.58 м/с по замеру)
-BS_ALT_DZ=100
-BS_ALT_SPAN=400
-BS_ALT_RATE_FULL=3.16
+# Своя карта «PWM → vz» (BS_ALT_DZ/SPAN/RATE_FULL: 100/400/3.16) убрана 2026-09-30 (фаза B
+# носителя в СИ): контур отдаёт м/с, газ считается картой ALT_HOLD самого полётника.
 
 # слой: нода — бюджеты фаз, sim-с (mode_budget — в loiter/: латч режима 80 с)
 BS_ARM_BUDGET=40

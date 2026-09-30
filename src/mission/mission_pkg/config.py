@@ -88,14 +88,13 @@ class BootstrapConfig:
     #   rate_max=1.2 → набор 3 м занимает ~3 с (бюджет climb 120 с — с запасом);
     #   tol=0.10 → у цели контур МОЛЧИТ (отдаёт центр): в ALT_HOLD центр = «держи», и
     #              давить в край мёртвой зоны у самой цели значит гнать дрожь;
-    #   dz/span/rate_full — пересчёт «PWM → командная vz» для ALT_HOLD, откалиброван
-    #              по замеру: +300 PWM давали +1.58 м/с.
+    # Выход контура — скорость набора, м/с (носитель команды в СИ). Прежние dz/span/
+    # rate_full (своя карта «PWM → vz», 3.16 м/с на ход) убраны 2026-09-30 (фаза B): газ
+    # в провод считается обратной картой ALT_HOLD самого полётника по его параметрам
+    # (domain/control/altitude.py ThrottleMap), канал углов — climb прямо в thrust.
     alt_kp: float
     alt_rate_max: float
     alt_tol: float
-    alt_dz: float
-    alt_span: float
-    alt_rate_full: float
     ground_z: float
     mode_budget: float
     arm_budget: float
@@ -1269,9 +1268,9 @@ class BootstrapConfig:
                                      # доступности: IPM → VINS → gt; нет ни одного
                                      # → пускаем с предупреждением).
                                      # BS_LAND_V_MAX / --land-v-max
-    land_rate: float          # скорость снижения ветки ALT_HOLD, м/с (PWM
-                                     # газа считается по alt_dz/alt_span/
-                                     # alt_rate_full — той же формулой, что AltHold).
+    land_rate: float          # скорость снижения ветки ALT_HOLD, м/с (команда
+                                     # climb = −land_rate; в провод — картой ALT_HOLD
+                                     # полётника, как выход AltHold).
                                      # Ветка LAND — LAND_SPD_MS в sitl-extra.parm
                                      # (0.15 = как здесь; ×2 пробовали 2026-09-06,
                                      # пилот вернул).

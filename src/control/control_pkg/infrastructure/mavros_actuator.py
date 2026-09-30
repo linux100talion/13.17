@@ -38,7 +38,7 @@ from rcl_interfaces.msg import ParameterType
 from rcl_interfaces.srv import GetParameters
 
 from ..domain.rc import RC_NOCHANGE, RC_RELEASE, RcCommand
-from .att_convert import (FcuStickParams, limit_tilt, rc_to_attitude,
+from .att_convert import (FcuStickParams, cmd_to_attitude, limit_tilt, rc_to_attitude,
                           thrust_from_climb)
 from .rc_reverse import PARAMS as _REV_PARAMS, RcReverse
 
@@ -163,6 +163,20 @@ class MavrosActuator:
         после взлёта полётник разворачивал нос в наборе (attout_rcrev 161302/163209:
         DesYaw 117° при курсе 87° на входе в полёт — боковой унос на демпфере)."""
         self._yaw_tgt = None
+
+    @property
+    def fcu_params(self) -> dict:
+        """ЖИВОЙ словарь прочитанных параметров полётника (опрос + события): его же держит
+        карта газа домена (ThrottleMap), чтобы домен и провод говорили одной картой."""
+        return self._att.p
+
+    def publish_cmd(self, cmd) -> None:
+        """Команда домена (СИ) → SET_ATTITUDE_TARGET напрямую (фаза B): наклон в форму вектора
+        тяги, climb прямо в thrust (att_convert.cmd_to_attitude)."""
+        if not self._att.ready():
+            self._att_not_ready()
+            return
+        self.publish_attitude(cmd_to_attitude(cmd, self._att.p))
 
     def publish_rc_as_attitude(self, rc: RcCommand) -> None:
         """Шаг 1 переезда: домен ещё в PWM — пересчёт так же, как ALT_HOLD (att_convert)."""

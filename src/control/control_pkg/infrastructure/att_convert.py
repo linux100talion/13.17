@@ -40,6 +40,7 @@ DZ 20), реверс в канал углов не входит вовсе (SET_
 import math
 
 from ..domain.attitude import AttitudeCommand
+from ..domain.control.altitude import ThrottleMap
 
 # что нужно прочитать у полётника; RC3_DZ — мёртвая зона у НИЗА канала газа (pwm_to_range)
 PARAMS = ('ATC_ANGLE_MAX', 'RC3_MIN', 'RC3_MAX', 'RC3_DZ',
@@ -90,21 +91,9 @@ def _spd_dn(p) -> float:
 
 
 def climb_from_throttle(pwm, p) -> float:
-    """Copter::get_pilot_desired_climb_rate_ms: PWM газа → м/с (вверх +)."""
-    lo, hi, dz3 = p['RC3_MIN'], p['RC3_MAX'], p['RC3_DZ']
-    low = lo + dz3
-    r_in = max(lo, min(hi, pwm))
-    ctrl = 1000.0 * (r_in - low) / (hi - low) if r_in > low else 0.0
-    ctrl = max(0.0, min(1000.0, ctrl))
-    r_mid, lo_i = int(lo + hi) // 2, int(low)                 # get_control_mid: int16, как в C
-    mid = float(int(1000 * (r_mid - lo_i) / (int(hi) - lo_i)))
-    dz = max(0.0, min(400.0, p['THR_DZ']))
-    top, bot = mid + dz, mid - dz
-    if ctrl < bot:
-        return _spd_dn(p) * (ctrl - bot) / bot
-    if ctrl > top:
-        return p['PILOT_SPD_UP'] * (ctrl - top) / (1000.0 - top)
-    return 0.0
+    """Copter::get_pilot_desired_climb_rate_ms: PWM газа → м/с (вверх +). Сама карта — одна
+    на домен и провод: domain/control/altitude.py ThrottleMap (фаза B, 2026-09-30)."""
+    return ThrottleMap(p).climb(pwm)
 
 
 def thrust_from_climb(climb, p) -> float:
@@ -128,6 +117,20 @@ def rc_to_attitude(rc, p) -> AttitudeCommand:
                           yaw_rate=math.radians(YAW_SPAN_DPS) * ny,
                           climb=climb_from_throttle(rc.throttle, p))
     return limit_tilt(cmd, p)
+
+
+def cmd_to_attitude(cmd, p) -> AttitudeCommand:
+    """Команда домена (СИ, фаза B) → углы SET_ATTITUDE_TARGET: наклон «как у стика ALT_HOLD»
+    (линейный, ±ANGLE_SPAN_DEG) в форму вектора тяги rc_input_to_roll_pitch_rad, темп курса
+    с потолком ±YAW_SPAN_DPS, climb как есть; потолок наклона ATC_ANGLE_MAX. То же, что
+    rc_to_attitude, но без круга через µs."""
+    a = math.radians(ANGLE_SPAN_DEG)
+    pitch = max(-a, min(a, cmd.pitch))
+    roll = math.atan(math.cos(pitch) * math.tan(max(-a, min(a, cmd.roll))))
+    ymax = math.radians(YAW_SPAN_DPS)
+    return limit_tilt(AttitudeCommand(roll=roll, pitch=pitch,
+                                      yaw_rate=max(-ymax, min(ymax, cmd.yaw_rate)),
+                                      climb=cmd.climb), p)
 
 
 def limit_tilt(cmd, p) -> AttitudeCommand:

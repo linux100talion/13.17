@@ -9,9 +9,8 @@
   тик) — тот же фронт;
 - ветка pos (FCU в LOITER): LAND шлётся, стек ПУСТ, касание → газ в пол,
   самодизарм FCU → LAND_DONE; LAND не залатчился за 3 с / VINS протух → ветка alt;
-- ветка alt (ALT_HOLD, «сесть до VINS»): LAND НЕ шлётся, газ снижения = центр −
-  dz − rate/rate_full·span (в тесте rate 0.3 явно → 1362; дефолт конфига 0.15 →
-  1381, это проверяет test_mission_plan), стек = демпфер (VinsHold при
+- ветка alt (ALT_HOLD, «сесть до VINS»): LAND НЕ шлётся, команда снижения climb = −rate
+  (в тесте rate 0.3 явно; в провод — картой ALT_HOLD полётника: DESC µs), стек = демпфер (VinsHold при
   готовности, вниз при протухании), опора пересеяна; касание (баро | gt |
   детектор FCU) → газ в пол, дизарм сервисом через 1 с, force через 5 с;
   дизарм → LAND_DONE; бюджет → LAND_TIMEOUT; 30 с без дизарма → LAND_STUCK.
@@ -28,7 +27,10 @@ sys.path.insert(0, os.path.join(_here, ".."))
 sys.path.insert(0, os.path.join(_here, "..", ".."))
 
 from control_pkg.application.handover import VinsHandover              # noqa: E402
-from control_pkg.domain.rc import RC_CENTER, RC_MIN_THR, RcCommand     # noqa: E402
+from control_pkg.domain.rc import RC_CENTER, RC_MIN_THR, RcCommand     # noqa: E402,F401
+from control_pkg.domain.control.altitude import CLIMB_FLOOR, ThrottleMap  # noqa: E402
+FLOOR = ThrottleMap().pwm(CLIMB_FLOOR)   # газ в пол в проводе = RC3_MIN полётника (сим 1100)
+DESC = ThrottleMap().pwm(-0.3)           # снижение 0.3 м/с картой ALT_HOLD полётника
 from control_pkg.domain.state import DroneState                        # noqa: E402
 from mission_pkg.plan.runner import PlanRunner                         # noqa: E402
 from mission_pkg.plan.step import Freefly, SoftLand, ground_speed      # noqa: E402
@@ -257,7 +259,7 @@ check("LAND залатчен: ветка pos держится (в alt не уш�
 rc, _ = tick_until(r, clock, 0.5, alt=0.2, odom=700, vins_age=0.1, extnav=True,
                    lvl=2, mode="LAND")
 check("касание по баро (0.2 ≤ 0.3): land_state=touch, газ в пол",
-      land.land_state() == "touch" and rc.throttle == RC_MIN_THR)
+      land.land_state() == "touch" and rc.throttle == FLOOR)
 check("ветка pos сразу после касания: дизарм сервисом НЕ шлём (LAND сам)",
       mode.arms == [])
 tick_until(r, clock, 0.5, alt=0.2, odom=700, vins_age=0.1, extnav=True, lvl=2,
@@ -274,9 +276,9 @@ tick_until(r, clock, 0.2, alt=0.9, ipm=(0.0, 0.0), odom=700, vins_age=0.1,
            extnav=True, lvl=2, mode="LOITER", sa=True)
 rc, _ = tick_until(r, clock, 4.0, alt=0.9, odom=700, vins_age=0.1, extnav=True,
                    lvl=2, mode="LOITER")                    # FCU так и не в LAND
-check("LAND не латчится 3 с: ветка alt, VinsHold (VINS готов), газ снижения 1362",
+check("LAND не латчится 3 с: ветка alt, VinsHold (VINS готов), газ снижения −0.3 м/с",
       land.land_state() == "vinshold" and names(stack) == ['yawd', 'vins']
-      and rc.throttle == 1362)
+      and rc.throttle == DESC)
 check("ветка alt: ре-ассерт ALT_HOLD пошёл", "ALT_HOLD" in mode.modes)
 
 # --- 9. ветка alt с нуля («сесть до VINS»): демпфер, опора пересеяна ---
@@ -289,13 +291,13 @@ rc, _ = tick_until(r, clock, 0.5, alt=0.8, ipm=(0.05, 0.0))
 check("ветка alt: LAND НЕ послан, land_state=damper, стек демпфер",
       "LAND" not in mode.modes and land.land_state() == "damper"
       and names(stack) == ['damper', 'yawd'])
-check("ветка alt: газ 1362, крен/тангаж от стека (стик = наклон)",
-      (rc.throttle, rc.roll, rc.pitch) == (1362, 1520, 1480))
+check(f"ветка alt: газ {DESC} (−0.3 м/с), крен/тангаж от стека (стик = наклон)",
+      (rc.throttle, rc.roll, rc.pitch) == (DESC, 1520, 1480))
 check("ветка alt: опора пересеяна на входе (stack.enter)", stack.enters > enters0)
 # касание по детектору FCU (баро «застрял» на 1.4 м — урок 2026-08-23)
 rc, _ = tick_until(r, clock, 0.3, alt=1.4, ipm=(0.05, 0.0), fcu_landed=1)
 check("касание по детектору FCU при баро 1.4 м: touch, газ в пол, стики центр",
-      land.land_state() == "touch" and rc.throttle == RC_MIN_THR
+      land.land_state() == "touch" and rc.throttle == FLOOR
       and rc.roll == RC_CENTER)
 tick_until(r, clock, 1.5, alt=1.4, fcu_landed=1)
 check("ветка alt: через 1 с после касания — дизарм сервисом", False in mode.arms)
@@ -371,7 +373,7 @@ tick_until(r, clock, 0.2, alt=0.8, ipm=(0.05, 0.0), sa=True)           # вто�
 check("отмена (ветка alt): второй фронт → шаг freefly, результат LAND_CANCEL",
       cur(r) == "freefly" and r.result == "LAND_CANCEL")
 rc, _ = tick_until(r, clock, 0.5, alt=0.8, ipm=(0.05, 0.0), sa=True)
-check("после отмены: стек демпфер, газ = стик пилота (не 1362), «возврат» в логе",
+check("после отмены: стек демпфер, газ = стик пилота (не снижение), «возврат» в логе",
       names(stack) == ['damper', 'yawd'] and rc.throttle == RC_CENTER
       and any("возврат в свободный полёт" in ln for ln in log.lines))
 tick_until(r, clock, 0.3, alt=0.8, ipm=(0.05, 0.0), sa=False)
