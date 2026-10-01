@@ -747,6 +747,11 @@ class BootstrapArch2Node(Node):
                 if z0 is not None:
                     self.logger.info(f"высота перцепции: ноль земли z0={z0:+.2f} м "
                                      f"(латч по арму)")
+                b = self.perception.latch_ground()
+                if b is not None:
+                    self.logger.info("ориентация канала (свой фильтр): ноль гироскопа "
+                                     f"{math.degrees(b[0]):+.3f}/{math.degrees(b[1]):+.3f}/"
+                                     f"{math.degrees(b[2]):+.3f} °/с (латч по арму)")
             self.perception.merge(s)          # камера → flow_* в снапшот
         # пилот → в снапшот (домен читает pilot_* как телеметрию)
         sticks = self.pilot.sticks()

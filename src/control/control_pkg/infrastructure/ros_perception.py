@@ -96,7 +96,17 @@ class RosPerception:
         # (vision_vel) — петля; оракул проверяет, рвёт ли её честная ориентация канала.
         # ω для деротации — по-прежнему гироскоп MAVROS (он EKF не испорчен).
         self._att_src = str(att_src)
-        self._truth = []                     # (t, pitch, roll) истины Gazebo
+        self._truth = []                     # (t, pitch, roll): истина Gazebo | свой фильтр
+        if self._att_src == 'own':
+            # СВОЙ ФИЛЬТР по сырому IMU (perception/tilt_filter.py, 2026-10-01): гироскоп +
+            # медленная поправка по акселерометру (τ 15 с), ноль гироскопа — средний за 3 с
+            # до арма (latch_ground). Офлайн по vins_init_5: ≤0.6° против истины весь полёт
+            # (EKF — до 7.7°), канал IPM на 5 м идёт за истиной как с оракулом.
+            from ..perception.tilt_filter import TiltFilter
+            self._tilt = TiltFilter(tau=15.0)
+            self._gyro_hist = []             # (t, gx, gy, gz) — последние ~3 с для нуля
+            node.create_subscription(Imu, '/mavros/imu/data_raw', self._on_raw_imu,
+                                     qos_profile_sensor_data)
         if self._att_src == 'truth':
             from nav_msgs.msg import Odometry
             node.create_subscription(Odometry, '/model/iris_cam/odometry',
@@ -362,6 +372,28 @@ class RosPerception:
         if len(self._truth) > 400:
             del self._truth[:-400]
 
+    def _on_raw_imu(self, m):
+        t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        w, a = m.angular_velocity, m.linear_acceleration
+        self._gyro_hist.append((t, w.x, w.y, w.z))
+        while self._gyro_hist and t - self._gyro_hist[0][0] > 3.0:
+            self._gyro_hist.pop(0)
+        self._tilt.update(t, w.x, w.y, w.z, a.x, a.y, a.z)
+        if self._tilt.ready():
+            pitch, roll = self._tilt.pitch_roll()
+            self._truth.append((t, pitch, roll))
+            if len(self._truth) > 400:
+                del self._truth[:-400]
+
+    def latch_ground(self):
+        """Фронт armed (зовёт нода рядом с latch_alt_zero): ноль гироскопа своего фильтра
+        ориентации = средний гироскоп за последние ~3 с на земле. No-op для ekf/truth."""
+        if self._att_src != 'own' or len(self._gyro_hist) < 10:
+            return None
+        a = np.asarray(self._gyro_hist)[:, 1:4].mean(axis=0)
+        self._tilt.seed_bias(*a)
+        return a
+
     def _truth_for(self, stamp):
         a = np.asarray(self._truth)
         return (float(np.interp(stamp, a[:, 0], a[:, 1])),
@@ -372,9 +404,9 @@ class RosPerception:
             return
         gray = np.frombuffer(m.data, dtype=np.uint8).reshape(m.height, m.width)
         stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
-        if self._att_src == 'truth':
+        if self._att_src in ('truth', 'own'):
             if not self._truth:
-                return                       # истины ещё нет — кадр пропускаем
+                return                       # ориентации ещё нет — кадр пропускаем
             pitch, roll = self._truth_for(stamp)
             self._process(gray, stamp, pitch, roll)
             return
