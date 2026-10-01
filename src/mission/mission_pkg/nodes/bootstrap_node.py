@@ -246,6 +246,8 @@ class BootstrapArch2Node(Node):
         self._vis_pose_pub = None
         self._vis_pos = [0.0, 0.0]       # интеграл фида → относительная ENU-позиция
         self._vis_pos_t = None
+        self._boot_pos = [0.0, 0.0]      # мост бута (boot_pose_src='ipm'): интеграл скорости IPM, ENU
+        self._boot_pos_t = None          # sim-время последнего шага интеграла
         # EK3-источники ставятся ПАРОЙ: прогон C (2026-08-18) показал, что без
         # позиционного источника EK3 вовсе не начинает aiding — фид честно говорил
         # «летишь 15 м/с» (corr +0.96, наклон +0.95 с истинной world-скоростью),
@@ -1013,6 +1015,14 @@ class BootstrapArch2Node(Node):
         m.twist.linear.y = vn
         m.twist.linear.z = 0.0           # вертикаль не меряем: EK3_SRC1_VELZ не наш
         self._vision_pub.publish(m)
+        # мост позы бута на интеграле скорости IPM (boot_pose_src='ipm'): ШАГ ПО SIM-ВРЕМЕНИ
+        # (скорость IPM — в метрах за sim-секунду; wall при RTF<1 занижал бы путь)
+        if self.cfg.boot_pose_src == 'ipm' and not self._pose_bridge_done:
+            if self._boot_pos_t is not None:
+                dts = min(0.2, max(0.0, s.now_sim - self._boot_pos_t))
+                self._boot_pos[0] += ve * dts
+                self._boot_pos[1] += vn * dts
+            self._boot_pos_t = s.now_sim
         # Позиция = интеграл фида (относительная ENU, старт в нуле). Дрейфует —
         # и пусть: EKF нужен ХОТЬ КАКОЙ-ТО позиционный источник, чтобы вообще
         # начать aiding (прогон C: без позиции скоростной источник игнорируется).
@@ -1075,7 +1085,7 @@ class BootstrapArch2Node(Node):
             self.get_logger().info(
                 "мост позы бута передал эстафету ray_tracer (мост VINS→EKF открыт)")
             return
-        if self._rth.dist > self._rth.radius:
+        if self.cfg.boot_pose_src == 'zero' and self._rth.dist > self._rth.radius:
             self._pose_bridge_done = True
             self.get_logger().warn(
                 f"мост позы бута ЗАМОЛК: ушли на {self._rth.dist:.1f} м по счислению "
@@ -1088,6 +1098,12 @@ class BootstrapArch2Node(Node):
         pm.header.stamp.sec = int(wall)
         pm.header.stamp.nanosec = int((wall % 1.0) * 1e9)
         pm.header.frame_id = 'map'
+        if self.cfg.boot_pose_src == 'ipm':
+            # позиция из интеграла скорости IPM (ENU от точки старта): борт ушёл —
+            # EKF получает, КУДА ушёл, а не «стоим в нуле» (нули при уходе на 4–9 м
+            # испортили крен EKF до 9° — attoracle_own_20261001_175215)
+            pm.pose.position.x = self._boot_pos[0]
+            pm.pose.position.y = self._boot_pos[1]
         pm.pose.position.z = float(s.rel_alt or 0.0)
         pm.pose.orientation.z = math.sin(0.5 * s.att_yaw)
         pm.pose.orientation.w = math.cos(0.5 * s.att_yaw)

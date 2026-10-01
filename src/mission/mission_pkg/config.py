@@ -867,6 +867,14 @@ class BootstrapConfig:
                                      # на земле для арма. Два издателя позы недопустимы —
                                      # поэтому взаимоисключение здесь.
                                      # BS_VISION_POSE_SRC / --vision-pose-src
+    # ПОЗА МОСТА БУТА (gps_denied, до открытия моста VINS→EKF): 'zero' — (0,0,баро), мост
+    # глушится, когда счисление IPM ушло дальше круга лечения (rth_radius) — как было;
+    # 'ipm' — (интеграл скорости IPM в ENU, баро): правда о том, куда ушёл борт, круга нет —
+    # мост держится до открытия моста VINS. Зачем (2026-10-01): нули при уходе на 4–9 м на
+    # наборе испортили крен EKF до 9° (attoracle_own_20261001_175215) — полётник выставлял
+    # угол по испорченной ориентации, демпфер (потолок 6°) не перебарывал. Честный интеграл —
+    # после фильтра ориентации канала (perc_att_src=own) скорость IPM точна. BS_BOOT_POSE_SRC
+    boot_pose_src: str
     gps_disable: float         # SIM-ONLY: профиль «GPS теряется В ПОЛЁТЕ» —
                                      # SIM_GPS1_ENABLE=0 через очередь параметров, но
                                      # ТОЛЬКО когда VINS публикует одометрию (>50 сообщ.)
@@ -1522,6 +1530,7 @@ CHOICES = {
     'alt_src': ('global', 'baro'),
     'perc_alt_src': ('global', 'local', 'baro'),
     'perc_att_src': ('ekf', 'truth', 'own'),
+    'boot_pose_src': ('zero', 'ipm'),
     'station_frame': ('body', 'yaw'),
     'station_heading': ('fcu',),
     'vins_vel_src': ('diff', 'twist'),

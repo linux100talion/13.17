@@ -20,6 +20,8 @@ BS_LOITER_GATE_BUDGET=60
 # слой: env — GPS-DENIED (LV=2): GPS нет с бута, origin ставит нода (Киев), высота
 # миссии — баро
 BS_GPS_DENIED=1
+# поза моста бута до моста VINS: zero — (0,0,баро) до ухода на rth_radius; ipm — интеграл скорости IPM
+BS_BOOT_POSE_SRC=zero
 BS_GPS_DISABLE=0
 BS_SET_ORIGIN=1
 BS_ALT_SRC=baro
