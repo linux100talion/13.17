@@ -48,8 +48,8 @@ KEY_RE = re.compile(r'^([A-Z][A-Z0-9_]*)=(.*)$')
 INCLUDE_RE = re.compile(r'^include\s+(\S+)\s*$')
 
 # Эталонный стек = то, чем летает cmd/bl (WT=1). Менять вместе с cmd/bl/bl.sh.
-BASELINE_STACK = ['dphold/baseline', 'dpvins/board1', 'vinshold/baseline',
-                  'vins/scale25', 'loiter/guard', 'wind/trim',
+BASELINE_STACK = ['dphold/att_own', 'dpvins/board1', 'vinshold/baseline',
+                  'vins/scale25', 'loiter/boot_ipm', 'wind/trim',
                   'mission/att_out', 'legacy/baseline', 'world/wind2_gust5']
 
 

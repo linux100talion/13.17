@@ -10,8 +10,8 @@ cmd/ — команды запуска полётов и кампаний
 
 Скрипты не зависят от текущего каталога (корень репы вычисляется от своего
 расположения) и ДЕРЖАТ ТОЛЬКО СПИСОК профилей — ни eval, ни export ручек:
-    export PROFILES="dphold/baseline dpvins/board1 vinshold/baseline vins/scale25
-                     loiter/guard wind/trim mission/att_out legacy/baseline world/wind2_gust5"
+    export PROFILES="dphold/att_own dpvins/board1 vinshold/baseline vins/scale25
+                     loiter/boot_ipm wind/trim mission/att_out legacy/baseline world/wind2_gust5"
     exec bash src/lab/freefly_lv.sh "$@"
 (с 2026-09-07). Список собирает freefly_lv.sh на хосте (мета, eeprom, ветер compose) и
 bootstrap_arch2.sh в контейнере (env ноды) — один load.py, строго по схеме
@@ -24,7 +24,9 @@ world/ (ветер). Аргументы прогона — не параметр
 
 Раскладка (с 2026-09-06):
 
-  cmd/bl/bl.sh                 — ТЕКУЩИЙ BASELINE: то, чем летаем по умолчанию. С 2026-09-30 —
+  cmd/bl/bl.sh                 — ТЕКУЩИЙ BASELINE: то, чем летаем по умолчанию. С 2026-10-01 —
+                                 + свой фильтр ориентации канала вида сверху (dphold/att_own) и
+                                 мост позы бута на интеграле IPM (loiter/boot_ipm). С 2026-09-30 —
                                  ВЫХОД В УГЛАХ (GUIDED_NOGPS, арм нодой, mission/att_out) +
                                  DpVins под отклик борта (dpvins/board1); варианты одним
                                  скриптом: ATT=0 — выход override (ALT_HOLD), WT=0 — свой трим
@@ -60,6 +62,8 @@ world/ (ветер). Аргументы прогона — не параметр
                                  компенсации 5780d48 реплеем rc_rev.json на трёх
                                  сторонах none/pitch/all — отличие только
                                  RCn_REVERSED в eeprom SITL (BS_FCU_PARAMS, loiter/).
+  cmd/history/bl/2/            — ПРЕЖНИЙ BASELINE 2026-09-30…10-01: углы + board1, ориентация канала
+                                 вида сверху от EKF, мост бута нулями; запускается как есть.
   cmd/history/bl/1/            — ПРЕЖНИЙ BASELINE 2026-09-06…09-30 (бывш. cmd/11): выход override,
                                  dpvins/brake5_stop, WindTrim (плечо WT); запускается как есть.
   cmd/history/<кампания>/<n>/  — архив отлетавших скриптов как есть (README с результатом);

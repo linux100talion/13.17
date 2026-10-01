@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# cmd/bl/bl.sh — ТЕКУЩИЙ BASELINE с 2026-10-01: ВЫХОД В УГЛАХ (GUIDED_NOGPS, SET_ATTITUDE_TARGET,
-# арм нодой) + DpVins под отклик борта (dpvins/board1) + СВОЙ ФИЛЬТР ОРИЕНТАЦИИ канала вида сверху
-# по сырому IMU (dphold/att_own) + МОСТ ПОЗЫ БУТА НА ИНТЕГРАЛЕ IPM (loiter/boot_ipm); vinshold/baseline,
-# vins/scale25, WindTrim; ветер 2 м/с + порывы 5 каждые 20 с.
-# Прежние: cmd/history/bl/2/ (углы + board1, ориентация EKF, нули бута), cmd/history/bl/1/ (override).
-# Зачем и что меняет — README.txt.
+# cmd/history/bl/2/bl.sh — АРХИВ: baseline 2026-09-30…2026-10-01 (заменён cmd/bl: свой фильтр ориентации
+# канала вида сверху + мост бута на интеграле IPM). Был: ВЫХОД В УГЛАХ (GUIDED_NOGPS, SET_ATTITUDE_TARGET,
+# арм нодой) + DpVins под отклик борта (dpvins/board1), поверх прежнего стека: dphold/baseline,
+# vinshold/baseline, vins/scale25, loiter/guard, WindTrim; ветер 2 м/с + порывы 5 каждые 20 с.
+# Прежний baseline (override + brake5_stop) — cmd/history/bl/1/. Зачем и что меняет — README.txt.
 #
 #   bash cmd/bl/bl.sh             # выход в углах (mission/att_out)
 #   ATT=0 bash cmd/bl/bl.sh       # вариант: выход override, ALT_HOLD — как летали до 2026-09-30
@@ -15,12 +14,12 @@
 # src/control/profiles, собирает их load.py строго по схеме BootstrapConfig. Список = load.BASELINE_STACK
 # (тесты BootstrapConfig.baseline(), check.sh без аргументов) при ATT=1 WT=1 без реплея — менять вместе.
 set -euo pipefail
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$REPO"
 
 ATT="${ATT:-1}"
 WT="${WT:-1}"
-P="dphold/att_own dpvins/board1 vinshold/baseline vins/scale25 loiter/boot_ipm"
+P="dphold/baseline dpvins/board1 vinshold/baseline vins/scale25 loiter/guard"
 if [ "$WT" = "0" ]; then P="$P wind/baseline"; else P="$P wind/trim"; fi
 if [ "${BS_PILOT:-}" = "replay" ]; then
     if [ "$ATT" = "0" ]; then P="$P mission/replay"; else P="$P mission/att_out_replay"; fi
