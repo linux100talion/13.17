@@ -151,6 +151,7 @@ class BootstrapArch2Node(Node):
                                             att_interp=cfg.att_interp,
                                             att_latency=cfg.att_latency,
                                             att_wait_max=cfg.att_wait_max,
+                                            att_src=cfg.perc_att_src,
                                             ipm_model=cfg.ipm_model,
                                             ipm_derot=cfg.ipm_derot,
                                             ipm_wz_tau=cfg.ipm_wz_tau,

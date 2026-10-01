@@ -925,6 +925,11 @@ class BootstrapConfig:
                                      # «демпфер не ставит гвозди». Протухла — отдаём None
                                      # (гейт земли IPM честно закрывается, palt=-- и
                                      # красный ALT GATE). BS_PERC_ALT_STALE
+    # источник КРЕНА/ТАНГАЖА канала вида сверху: 'ekf' — ориентация полётника
+    # (/mavros/imu/data), штатно; 'truth' — СИМ-ОРАКУЛ, истина Gazebo (опыт 2026-10-01:
+    # петля «EKF врёт наклоном → IPM занижает → vision_vel кормит EKF заниженной
+    # скоростью» на 5 м, vins_init_5.json). На борту только 'ekf'. BS_PERC_ATT_SRC
+    perc_att_src: str
     perc_alt_src: str     # источник ВЫСОТЫ ПЕРЦЕПЦИИ (масштаб IPM +
                                      # гейты опоры; НЕ alt_src миссии!):
                                      # 'global' — rel_alt EKF (дефолт, GPS-
@@ -1514,6 +1519,7 @@ CHOICES = {
     'vision_pose_src': ('integral', 'extern'),
     'alt_src': ('global', 'baro'),
     'perc_alt_src': ('global', 'local', 'baro'),
+    'perc_att_src': ('ekf', 'truth'),
     'station_frame': ('body', 'yaw'),
     'station_heading': ('fcu',),
     'vins_vel_src': ('diff', 'twist'),

@@ -241,7 +241,11 @@ fi
 # PointCloud 10 sim-Гц — копейки против /image_color.
 # /mavros/rc/override — что нода ФАКТИЧЕСКИ шлёт полётнику (после компенсации реверса
 # каналов FCU, rc_reverse.py): без него зеркало канала в bag не видно (cmd/rc_rev).
-export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/rc/override /mavros/state /mission/status /feature /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /flow_dbg10 /mavros/imu/data /nn1/bridge /vins/sane /vins/bridge_ok /mavros/vision_pose/pose /mavros/vision_speed/speed_twist}"
+# /mavros/setpoint_raw/attitude — то же для выхода в углах (углы + thrust, что ушло в FCU).
+# /mavros/imu/data_raw — СЫРОЙ IMU (гироскоп + акселерометр, ~80 sim-Гц): ориентация для
+# канала вида сверху в обход EKF (2026-10-01: EKF на мосту позы бута врал до 10° по
+# тангажу — разнос демпфера на 5 м, vins_init_5.json); офлайн-фильтр против истины по bag.
+export TOPICS_EXTRA="${TOPICS_EXTRA:-/joy /mavros/rc/override /mavros/setpoint_raw/attitude /mavros/state /mission/status /feature /odometry /model/iris_cam/odometry /flow_dbg /flow_dbg2 /flow_dbg6 /flow_dbg7 /flow_dbg8 /flow_dbg9 /flow_dbg10 /mavros/imu/data /mavros/imu/data_raw /nn1/bridge /vins/sane /vins/bridge_ok /mavros/vision_pose/pose /mavros/vision_speed/speed_twist}"
 export GDRIVE_UP="${GDRIVE_UP:-0}"
 export MP4="${MP4:-1}"
 export FRAMES="${FRAMES:-0}"    # JPEG-кадры не нужны (просьба 2026-08-22): только mp4

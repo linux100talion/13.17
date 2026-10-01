@@ -71,7 +71,7 @@ class RosPerception:
                  alt_stale=2.0,
                  alt_zero=False, ipm_wz_gate=None, ipm_wz_bias_max=None,
                  att_interp=False, att_latency=0.0,
-                 att_wait_max=0.15):
+                 att_wait_max=0.15, att_src='ekf'):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -89,6 +89,18 @@ class RosPerception:
         from rclpy.qos import qos_profile_sensor_data
         from sensor_msgs.msg import Image, Imu
         from std_msgs.msg import Float64
+        # ИСТОЧНИК КРЕНА/ТАНГАЖА ДЛЯ КАНАЛА (att_src, 2026-10-01). 'ekf' — ориентация
+        # полётника (/mavros/imu/data), как было. 'truth' — СИМ-ОРАКУЛ: истина Gazebo
+        # (/model/iris_cam/odometry) на штамп кадра. Опыт: EKF на 5 м врал до 10° по
+        # тангажу, а скорость IPM, посчитанная по этим углам, сама уходит в EKF
+        # (vision_vel) — петля; оракул проверяет, рвёт ли её честная ориентация канала.
+        # ω для деротации — по-прежнему гироскоп MAVROS (он EKF не испорчен).
+        self._att_src = str(att_src)
+        self._truth = []                     # (t, pitch, roll) истины Gazebo
+        if self._att_src == 'truth':
+            from nav_msgs.msg import Odometry
+            node.create_subscription(Odometry, '/model/iris_cam/odometry',
+                                     self._on_truth_att, 10)
         fx = fy = cam_w / 2.0          # pinhole 90° hfov
         cx, cy = cam_w / 2.0, cam_h / 2.0
         # Затвор опоры по высоте — две ручки, обе наружу (свип E1, разбор в ToDo5.md):
@@ -341,11 +353,31 @@ class RosPerception:
         self._alt = float(alt)
         self._alt_wall = time.time()
 
+    def _on_truth_att(self, m):
+        q = m.pose.pose.orientation
+        t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        pitch = math.asin(max(-1.0, min(1.0, 2.0 * (q.w * q.y - q.z * q.x))))
+        roll = math.atan2(2.0 * (q.w * q.x + q.y * q.z), 1.0 - 2.0 * (q.x * q.x + q.y * q.y))
+        self._truth.append((t, pitch, roll))
+        if len(self._truth) > 400:
+            del self._truth[:-400]
+
+    def _truth_for(self, stamp):
+        a = np.asarray(self._truth)
+        return (float(np.interp(stamp, a[:, 0], a[:, 1])),
+                float(np.interp(stamp, a[:, 0], a[:, 2])))
+
     def _on_image(self, m):
         if m.encoding not in ('mono8', '8UC1'):
             return
         gray = np.frombuffer(m.data, dtype=np.uint8).reshape(m.height, m.width)
         stamp = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        if self._att_src == 'truth':
+            if not self._truth:
+                return                       # истины ещё нет — кадр пропускаем
+            pitch, roll = self._truth_for(stamp)
+            self._process(gray, stamp, pitch, roll)
+            return
         if not self._att_interp:
             pitch, roll = self._att_for(stamp)
             self._process(gray, stamp, pitch, roll)
