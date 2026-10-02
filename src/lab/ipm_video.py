@@ -13,10 +13,14 @@
 как у `hud_video.py`), с ЛЁТНЫМ конфигом прогона (`BootstrapConfig` + `BS_*`
 того же окружения, которым летели) и ЛЁТНОЙ высотой перцепции. Поэтому:
 
-  * УГЛЫ И ω — ИСТИНА GAZEBO (`/model/iris_cam/odometry`): в freefly-бэгах
-    `/mavros/imu/data` не пишется. Реплей чуть ОПТИМИСТИЧНЕЕ полёта по
-    ориентации (нет ступеньки ATTITUDE 12.5 Гц и лага) — картинка полосы точнее,
-    чем было в воздухе;
+  * УГЛЫ И ω (`IPM_ATT_SRC`, default auto): в симе — ИСТИНА GAZEBO
+    (`/model/iris_cam/odometry`; в freefly-бэгах `/mavros/imu/data` не пишется).
+    Реплей чуть ОПТИМИСТИЧНЕЕ полёта по ориентации (нет ступеньки ATTITUDE
+    12.5 Гц и лага) — картинка полосы точнее, чем было в воздухе. На РЕАЛЬНОМ
+    БОРТУ истины нет — `imu`: кватернион и ω_z `/mavros/imu/data` (AHRS полётника,
+    ENU/FLU — та же конвенция, что у Gazebo; борт пишет его 200 Гц, auto_bag_m.sh).
+    Нода при `dphold/att_own` летит СВОИМ фильтром по сырому IMU — `imu` ему близок,
+    но не тождествен (строка `att src:` в кадре);
   * коды брака и скорости РЕПЛЕЯ могут разойтись с лётными. Поэтому в кадре
     рисуются ОБЕ пары: `ipm` — реплей, `rec` — что канал выдал В ПОЛЁТЕ
     (`/flow_dbg8`, `/flow_dbg9`), плюс `true` — истина Gazebo. Расхождение
@@ -29,7 +33,10 @@
     ekf    — max(0, z) без латча (`perc_alt_zero=0`);
     status — `palt=` из `/mission/status` (ровно лётное значение, но округлённое
              до 0.1 м — запасной путь для `perc_alt_src=global|baro`);
-    true   — истинная AGL Gazebo (последний запасной путь; это уже НЕ полёт).
+    true   — истинная AGL Gazebo (запасной путь сима; это уже НЕ полёт);
+    baro   — барометр полётника (`/mavros/imu/static_pressure`), ноль = медиана
+             первой секунды bag (борт стоит на земле): реальный борт без EKF/ноды,
+             прогоны «в руках». Тоже НЕ лётная формула — подпись в кадре.
 Что выбрано — написано в кадре строкой `alt src:`, чтобы архивное видео нельзя
 было прочитать не так.
 
@@ -40,7 +47,10 @@
 Env: SCENE_BAG (…/output/scene_bag), SCENE_IPM_MP4 (…/output/scene_img/scene_ipm.mp4),
 SCENE_TOPIC (/image_color), SCENE_FPS (0 = авто по кадрам), IPM_ZOOM (3),
 IPM_PAD (3 с запаса вокруг окна «в армии»), IPM_ALL (1 = писать весь bag),
-IPM_ALT_SRC (auto|latch|ekf|status|true) + весь лётный BS_IPM_*/BS_PERC_ALT_*.
+IPM_ALT_SRC (auto|latch|ekf|status|true|baro), IPM_ATT_SRC (auto|truth|imu)
++ весь лётный BS_IPM_*/BS_PERC_ALT_*.
+Бортовой bag (2026-10-02): истины нет → углы imu, высота — EKF/статус ноды, иначе baro;
+`BS_*` — из `bs.env` рядом с bag или PROFILES (как у сима).
 
 Пересборка по архивному прогону: `BS_*` подхватываются из его меты
 `joystick/<NAME>/<NAME>.env` (рядом с bag) — иначе старое видео пересчиталось бы
@@ -83,6 +93,8 @@ ZOOM = int(os.environ.get('IPM_ZOOM', '3'))
 PAD = float(os.environ.get('IPM_PAD', '3'))
 ALL_FRAMES = os.environ.get('IPM_ALL', '0') == '1'
 ALT_SRC = os.environ.get('IPM_ALT_SRC', 'auto')
+ATT_SRC = os.environ.get('IPM_ATT_SRC', 'auto')
+TRUTH = '/model/iris_cam/odometry'
 FPS_PROBE_N = 60                 # кадров на авто-оценку fps
 # ручки канала, которые кладёт в оценщик bootstrap_node (те же BS_-имена)
 IPM_KNOBS = ('ipm_model', 'ipm_derot', 'ipm_wz_tau', 'ipm_wz_gate', 'ipm_win', 'ipm_adapt',
@@ -100,15 +112,20 @@ def env_from_archive(bag):
     d = os.path.dirname(os.path.abspath(bag.rstrip('/')))
     metas = [f for f in sorted(os.listdir(d)) if f.endswith('.env')] \
         if os.path.isdir(d) else []
+    if not metas and os.path.isfile(os.path.join(bag, 'bs.env')):   # бортовой bag
+        d, metas = bag, ['bs.env']
     if not metas:
         return None
     path = os.path.join(d, metas[0])
     n = 0
     for line in open(path):
         line = line.strip()
+        if line.startswith('export '):          # формат load.py / bs.env борта
+            line = line[7:]
         if not line.startswith('BS_') or '=' not in line:
             continue
         k, v = line.split('=', 1)
+        v = v.strip("'")
         if k not in os.environ:
             os.environ[k] = v
             n += 1
@@ -162,17 +179,20 @@ def read_refs(bag, have):
 
     Кадры тут НЕ грузим (их тысячи) — только опоры, по которым потом кормится
     оценщик и подписывается картинка."""
-    topics = [t for t in ('/model/iris_cam/odometry', '/mavros/local_position/pose',
+    topics = [t for t in (TRUTH, '/mavros/local_position/pose',
                           '/mavros/state', '/flow_dbg8', '/flow_dbg9',
-                          '/mission/status') if t in have]
+                          '/mission/status', '/mavros/imu/data',
+                          '/mavros/imu/static_pressure') if t in have]
     r = SequentialReader()
     r.open(StorageOptions(uri=bag, storage_id='sqlite3'), ConverterOptions('cdr', 'cdr'))
     r.set_filter(StorageFilter(topics=topics))
-    od, lp, d8, d9, st = [], [], [], [], []
+    od, lp, d8, d9, st, im, pr = [], [], [], [], [], [], []
     t_arm, t_disarm, now = None, None, 0.0
     State = None
     if '/mavros/state' in topics:
         from mavros_msgs.msg import State                       # noqa: F811
+    from sensor_msgs.msg import FluidPressure, Imu
+    imu_last = -1.0
     while r.has_next():
         topic, raw, _ = r.read_next()
         if topic == '/model/iris_cam/odometry':
@@ -180,6 +200,17 @@ def read_refs(bag, have):
             now = stamp(m)
             p, v, w = m.pose.pose.position, m.twist.twist.linear, m.twist.twist.angular
             od.append((now, p.z) + euler(m.pose.pose.orientation) + (v.x, v.y, w.z))
+        elif topic == '/mavros/imu/data':
+            m = deserialize_message(raw, Imu)
+            now = stamp(m)
+            if now - imu_last >= 0.01:           # 200 Гц → 100 Гц: кадров 15 Гц хватит
+                imu_last = now
+                im.append((now,) + euler(m.orientation) + (m.angular_velocity.z,))
+        elif topic == '/mavros/imu/static_pressure':
+            m = deserialize_message(raw, FluidPressure)
+            now = stamp(m)
+            if not pr or now - pr[-1][0] >= 0.05:
+                pr.append((now, m.fluid_pressure))
         elif topic == '/mavros/local_position/pose':
             m = deserialize_message(raw, PoseStamped)
             now = stamp(m)
@@ -202,11 +233,12 @@ def read_refs(bag, have):
                 if kv.startswith('palt=') and kv[5:] != '--':
                     st.append((now, float(kv[5:])))
     return (np.array(od), np.array(lp), np.array(d8), np.array(d9),
-            np.array(st), t_arm, t_disarm)
+            np.array(st), t_arm, t_disarm, np.array(im), np.array(pr))
 
 
-def pick_alt_src(base, have, lp, st, t_arm):
-    """Какой высотой кормить оценщик — восстанавливаем лётную формулу."""
+def pick_alt_src(base, have, lp, st, t_arm, od, pr):
+    """Какой высотой кормить оценщик — восстанавливаем лётную формулу; без неё
+    (реальный борт без EKF-позиции и без ноды) — истина сима или барометр."""
     if ALT_SRC != 'auto':
         return ALT_SRC
     src = base.perc_alt_src
@@ -215,7 +247,18 @@ def pick_alt_src(base, have, lp, st, t_arm):
         return 'latch' if zero > 0 and t_arm is not None else 'ekf'
     if len(st):
         return 'status'
-    return 'true'
+    if len(od):
+        return 'true'
+    if len(pr):
+        return 'baro'
+    raise SystemExit('⚠️ высоту взять неоткуда: нет EKF-позиции, palt= статуса, истины '
+                     'и /mavros/imu/static_pressure')
+
+
+def baro_agl(pr):
+    """Высота по барометру над стартом: ноль = медиана первой секунды (борт на земле)."""
+    p0 = float(np.median(pr[pr[:, 0] <= pr[0, 0] + 1.0, 1]))
+    return pr[:, 0], 44330.0 * (1.0 - (pr[:, 1] / p0) ** 0.1903)
 
 
 def main():
@@ -225,17 +268,25 @@ def main():
     have = {t.name for t in r.get_all_topics_and_types()}
     if TOPIC not in have:
         raise SystemExit(f'⚠️ в bag нет {TOPIC} — нечего рисовать')
-    if '/model/iris_cam/odometry' not in have:
-        raise SystemExit('⚠️ в bag нет /model/iris_cam/odometry — нечем взять углы '
-                         'и ω (в freefly-бэгах /mavros/imu/data не пишется)')
-    od, lp, d8, d9, st, t_arm, t_disarm = read_refs(BAG, have)
-    if not len(od):
-        raise SystemExit('⚠️ /model/iris_cam/odometry пуст')
+    od, lp, d8, d9, st, t_arm, t_disarm, im, pr = read_refs(BAG, have)
+    att = ATT_SRC if ATT_SRC != 'auto' else ('truth' if len(od) else 'imu')
+    if att == 'truth' and not len(od):
+        raise SystemExit(f'⚠️ IPM_ATT_SRC=truth, а {TRUTH} в bag нет/пуст')
+    if att == 'imu' and not len(im):
+        raise SystemExit('⚠️ углы взять неоткуда: нет ни истины Gazebo, ни /mavros/imu/data')
+    # углы/ω: столбцы t, roll, pitch, wz — из истины или из AHRS полётника
+    A = od[:, [0, 2, 3, 7]] if att == 'truth' else im[:, [0, 1, 2, 4]]
     meta = env_from_archive(BAG)
     base, cfg, defaulted = flight_cfg()
-    t0 = od[0, 0]
-    ground = float(np.median(od[:60, 1]))          # борт стоит на земле
-    src = pick_alt_src(base, have, lp, st, t_arm)
+    t0 = A[0, 0]
+    ground = float(np.median(od[:60, 1])) if len(od) else 0.0   # борт стоит на земле
+    src = pick_alt_src(base, have, lp, st, t_arm, od, pr)
+    if src == 'true' and not len(od):
+        raise SystemExit('⚠️ IPM_ALT_SRC=true, а истины Gazebo в bag нет')
+    if src == 'baro':
+        if not len(pr):
+            raise SystemExit('⚠️ IPM_ALT_SRC=baro, а /mavros/imu/static_pressure в bag нет')
+        bt, bh = baro_agl(pr)
     z0 = 0.0
     if src == 'latch':
         # НОДА латчит последнее пришедшее z на переходе armed (не медиану) —
@@ -253,7 +304,8 @@ def main():
     print(f'bag {BAG}')
     if meta:
         print(f'  мета прогона: {meta}')
-    print(f'  высота перцепции: {src}' + (f' (z₀={z0:+.3f} м на арме)' if src == 'latch' else ''))
+    print(f'  высота перцепции: {src}' + (f' (z₀={z0:+.3f} м на арме)' if src == 'latch' else '')
+          + f'; углы и ω: {att}')
     print('  конфиг канала: ' + ' '.join(
         f'{k.replace("ipm_", "")}={v}' + ('*' if k in defaulted else '')
         for k, v in cfg.items()))
@@ -301,12 +353,14 @@ def main():
                                 FLOW_R, FLOW_ROTSIGN, cam_tilt=CAM_TILT, **cfg)
             print(f'  кадр {msg.width}×{msg.height} → fx/fy={fx:.0f}/{fy:.0f} '
                   f'cx={cx:.0f} cy={cy:.0f}')
-        roll = float(np.interp(t, od[:, 0], od[:, 2]))
-        pitch = float(np.interp(t, od[:, 0], od[:, 3]))
-        wz = float(np.interp(t, od[:, 0], od[:, 7]))
-        agl = float(np.interp(t, od[:, 0], od[:, 1])) - ground
+        roll = float(np.interp(t, A[:, 0], A[:, 1]))
+        pitch = float(np.interp(t, A[:, 0], A[:, 2]))
+        wz = float(np.interp(t, A[:, 0], A[:, 3]))
+        agl = float(np.interp(t, od[:, 0], od[:, 1])) - ground if len(od) else None
         if src == 'true':
             alt = max(0.0, agl)
+        elif src == 'baro':
+            alt = max(0.0, float(np.interp(t, bt, bh)))
         elif src == 'status':
             alt = float(np.interp(t, st[:, 0], st[:, 1]))
         else:
@@ -328,9 +382,10 @@ def main():
         img = warp_panel(
             gray, est, alt, pitch, roll, t - t0, zoom=ZOOM, agl=agl,
             extra=(f'ipm {est.ipm_vfwd:+.2f}/{est.ipm_vlat:+.2f}  {rec}  '
-                   f'true {float(np.interp(t, od[:,0], od[:,5])):+.2f}/'
-                   f'{float(np.interp(t, od[:,0], od[:,6])):+.2f} m/s (fwd/lat)',
-                   f'alt src: {src}   {cfg_line}'))
+                   + (f'true {float(np.interp(t, od[:,0], od[:,5])):+.2f}/'
+                      f'{float(np.interp(t, od[:,0], od[:,6])):+.2f} m/s (fwd/lat)'
+                      if len(od) else 'true -- (no truth)'),
+                   f'alt src: {src}  att src: {att}   {cfg_line}'))
         n_drawn += 1
         if writer is None:
             probe.append(img); probe_t.append(t)

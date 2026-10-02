@@ -193,6 +193,27 @@ index»), и `ros2 bag record` из auto-bag не мог стартовать. �
 Проверено 2026-10-02: 37.5 с → 2.0 ГБ, камера 15.1 Гц без потерь, IMU 200 Гц. Таблица ниже —
 разбор СТАРОЙ схемы (2026-09-07), для истории.
 
+**Видео из бортового bag на ноуте** (`scene_hud.mp4`, `scene_ipm.mp4` — тот же код, что в симе).
+bag — на ноут в `docker/sim/output/board/<bag>/` (rsync по Wi-Fi ~1.8 МБ/с через телефон:
+10 с записи ≈ 0.6 ГБ ≈ 6 мин), рендер — одноразовый контейнер `sim-nav` (стек сима не нужен):
+
+```
+R=$PWD; B=$R/docker/sim/output/board/<bag>
+docker run --rm --entrypoint bash -v $R:/root/repo:ro -v $R/src/lab:/lab:ro \
+  -v $R/src/nav:/root/sim_ws/src/nav:ro -v $R/src/control:/root/sim_ws/src/control:ro \
+  -v $R/src/mission:/root/sim_ws/src/mission:ro -v sim_nav_colcon_install:/root/sim_ws/install:ro \
+  -v $B:/data -e SCENE_BAG=/data -e SCENE_HUD_MP4=/data/scene_hud.mp4 -e SCENE_IPM_MP4=/data/scene_ipm.mp4 \
+  -e REPO_ROOT=/root/repo -e CAM_CFG=distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml \
+  -e PROFILES="dphold/att_own dpvins/board1 vinshold/baseline vins/scale25 loiter/boot_ipm wind/trim mission/board legacy/baseline" \
+  sim-nav:latest -c 'source /opt/ros/humble/setup.bash; source /opt/overlay/install/setup.bash; \
+  source /root/sim_ws/install/setup.bash; cd /root/repo; python3 /lab/hud_video.py; python3 /lab/ipm_video.py'
+```
+
+На борту истины Gazebo нет — `ipm_video.py` (с 2026-10-02) берёт углы и ω из `/mavros/imu/data`
+(`IPM_ATT_SRC=imu`), высоту — EKF/статус ноды, иначе БАРОМЕТР от старта (`IPM_ALT_SRC=baro`);
+источники подписаны в кадре. Каталог bag монтировать НЕ в `/run` и не `:ro` (SQLite не откроется).
+⚠️ `BS_IPM_GROUND_CLEAR` профиля = 0.195 — значение СИМА; борт не измерен (память ipm-ground-clearance).
+
 Разбор 2026-09-07. Две пары «юнит + скрипт» на хосте Jetson (не в контейнере),
 обе вызывают `ros2 bag record`; во всём остальном подходы расходятся.
 
