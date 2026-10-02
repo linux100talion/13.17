@@ -440,8 +440,12 @@ class RosPerception:
     def _process(self, gray, stamp, pitch, roll):
         omega = self._omega_for(stamp)
         self._prev_img_stamp = stamp
-        res = self._est.process(gray, stamp, omega, pitch, self._alt,
-                                roll=roll)
+        # протухшая высота — НЕИЗВЕСТНАЯ и для оценщика, не только для гейтов: иначе канал
+        # выпрямлял землю по застывшему значению (lever1_20261002_081136: EKF потерял
+        # позицию на 64 с, высота застыла на 0.9 м при борте на 0.5 м, ipm=1 до посадки).
+        # None закрывает гейт высоты канала (код 1). Тест test_alt_stale_frozen.py.
+        alt = self._alt if self._alt_fresh() else None
+        res = self._est.process(gray, stamp, omega, pitch, alt, roll=roll)
         if res is None:
             return
         self._lateral = res['lateral']
