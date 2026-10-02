@@ -1,0 +1,5 @@
+# A/B ФАНТОМА НАБОРА (cmd/vz_phantom, 2026-10-02): штатный att_own + ход по сетке IPM в метрах
+# каждого кадра своей геометрией (BS_IPM_SCALE_EXACT=1). Синтетика: +0.45 → −0.02 м пути на метр набора.
+# С 2026-10-02 = штатный att_own (BS_IPM_SCALE_EXACT=1 ушёл в baseline); файл — для истории A/B.
+include att_own.txt
+BS_IPM_SCALE_EXACT=1

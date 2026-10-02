@@ -1,0 +1,4 @@
+# A/B ФАНТОМА НАБОРА (cmd/vz_phantom): штатный att_own, но ПРЕЖНИЙ учёт хода по сетке IPM
+# (BS_IPM_SCALE_EXACT=0 — вычитается лишь сдвиг начала окна; синтетика +0.45 м на метр набора).
+include att_own.txt
+BS_IPM_SCALE_EXACT=0
