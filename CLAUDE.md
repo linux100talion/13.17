@@ -480,7 +480,11 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 обоих контейнеров). Из его `extrinsicRotation/Translation` вычисляются
 (`control_pkg/perception/camera_mount.py`, тест `test_camera_mount.py`): поза
 camera_link в Gazebo (`sim_up.sh`), экстринсики VINS сима (`sim_nav.launch.py`),
-`FLOW_R`/`CAM_TILT` демпфера (`bootstrap_node`), плечо `ray_tracer`. Значения в
+`FLOW_R`/`CAM_TILT` демпфера (`bootstrap_node`), плечо `ray_tracer`, ВЫНОС камеры в
+канале вида сверху (`BS_IPM_LEVER`, штат с 2026-10-02: высота геометрии = высота камеры,
+из хода кадра вычитается ход выноса при развороте/наклоне; тест `test_ipm_lever.py`; работает только
+вместе со штатным `BS_IPM_ACC_WORLD=1` — ФВЧ ветрового наклона в осях курса, без него канал на
+развороте врал вбок ∝ ω_z·ветер; разбор и пары на 24/60 °/с — `cmd/ipm_lever/README.txt`). Значения в
 `model.sdf`/`sim.yaml` — заглушки. С 2026-10-01 камера как на борту: `0.14 0 -0.06`,
 горизонтально (до того concept `0.15 0 0.05`, наклон 0.26). Прикреплена к
 `iris_with_standoffs::base_link`, публикует gz-топик `camera/image_raw`.

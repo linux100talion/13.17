@@ -1,0 +1,5 @@
+# A/B ВЫНОСА КАМЕРЫ (cmd/ipm_lever): dphold/att_own + учёт выноса в канале вида сверху (BS_IPM_LEVER=1).
+# Штатный (att_own) с 2026-10-02 — без учёта: серия показала ω-ошибку канала обратного знака (README кампании).
+# С 2026-10-02 = штатный att_own (BS_IPM_LEVER=1 ушёл в baseline); файл — для истории A/B.
+include att_own.txt
+BS_IPM_LEVER=1

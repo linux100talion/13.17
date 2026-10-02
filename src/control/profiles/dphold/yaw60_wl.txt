@@ -1,0 +1,3 @@
+# cmd/ipm_lever, пара «разворот 60 °/с» (2026-10-02): yaw60_w + учёт выноса камеры (BS_IPM_LEVER=1).
+include yaw60_w.txt
+BS_IPM_LEVER=1

@@ -1,0 +1,4 @@
+# A/B (cmd/ipm_lever, 2026-10-02): att_own_accw + учёт выноса камеры (BS_IPM_LEVER=1). Реплей серии:
+# боковая ошибка по ω_z −0.07…0.00 м (ожидание 0).
+include att_own_accw.txt
+BS_IPM_LEVER=1
