@@ -5,14 +5,16 @@
 #
 #   bash cmd/vz_phantom/vz_phantom.sh 0
 #   bash cmd/vz_phantom/vz_phantom.sh 1
+#   bash cmd/vz_phantom/vz_phantom.sh c      # + клиренс корпуса (BS_IPM_GROUND_CLEAR 0.195)
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
 SIDE="${1:-1}"
 case "$SIDE" in
     0) DP=dphold/att_own_oldscale ;;   # прежний учёт (BS_IPM_SCALE_EXACT=0)
-    1) DP=dphold/scale_exact ;;
-    *) echo "vz_phantom.sh: сторона 0|1, дано '$SIDE'" >&2; exit 2 ;;
+    1) DP=dphold/scale_exact ;;          # = штат att_own (клиренс 0)
+    c) DP=dphold/ground_clear ;;         # штат + клиренс корпуса 0.195 в геометрии
+    *) echo "vz_phantom.sh: сторона 0|1|c, дано '$SIDE'" >&2; exit 2 ;;
 esac
 export BS_PILOT=replay
 export BS_REPLAY_SCENARIO="${BS_REPLAY_SCENARIO:-/lab/joystick/scenarios/vz_phantom.json}"

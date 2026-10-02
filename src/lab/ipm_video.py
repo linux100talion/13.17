@@ -87,7 +87,7 @@ FPS_PROBE_N = 60                 # кадров на авто-оценку fps
 # ручки канала, которые кладёт в оценщик bootstrap_node (те же BS_-имена)
 IPM_KNOBS = ('ipm_model', 'ipm_derot', 'ipm_wz_tau', 'ipm_wz_gate', 'ipm_win', 'ipm_adapt',
              'ipm_vel_tau', 'ipm_alt_floor', 'ipm_scale_ref', 'ipm_acc_tau', 'ipm_acc_world',
-             'ipm_scale_exact')
+             'ipm_scale_exact', 'ipm_ground_clear')
 
 
 def env_from_archive(bag):
@@ -113,7 +113,7 @@ def env_from_archive(bag):
             os.environ[k] = v
             n += 1
     # прогоны до 2026-10-02 летели без учёта выноса камеры — ключа в их мете нет
-    for k in ('BS_IPM_LEVER', 'BS_IPM_ACC_WORLD', 'BS_IPM_SCALE_EXACT'):   # ручки 2026-10-02: старые прогоны без них
+    for k in ('BS_IPM_LEVER', 'BS_IPM_ACC_WORLD', 'BS_IPM_SCALE_EXACT', 'BS_IPM_GROUND_CLEAR'):   # ручки 2026-10-02: старые прогоны без них
         if k not in os.environ:
             os.environ[k] = '0'
             n += 1

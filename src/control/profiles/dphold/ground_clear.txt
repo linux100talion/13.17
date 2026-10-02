@@ -1,0 +1,5 @@
+# A/B (cmd/vz_phantom, 2026-10-02): штатный att_own + клиренс корпуса над землёй стоя в геометрии
+# канала вида сверху (BS_IPM_GROUND_CLEAR 0.195 — сим iris). Реплей: наклон фантома набора −0.185 → +0.003.
+# С 2026-10-02 = штатный att_own (BS_IPM_GROUND_CLEAR 0.195 ушёл в baseline); файл — для истории A/B.
+include att_own.txt
+BS_IPM_GROUND_CLEAR=0.195

@@ -55,7 +55,7 @@ from mission_pkg.config import BootstrapConfig                           # noqa:
 
 IPM_KNOBS = ('ipm_model', 'ipm_derot', 'ipm_wz_tau', 'ipm_wz_gate', 'ipm_win', 'ipm_adapt',
              'ipm_vel_tau', 'ipm_alt_floor', 'ipm_scale_ref', 'ipm_acc_tau', 'ipm_wz_bias_max',
-             'ipm_acc_world')
+             'ipm_acc_world', 'ipm_scale_exact', 'ipm_ground_clear')
 ALL = ('flight', 'truth', 'pt', 'noderot', 'w110', 'lagp', 'lagm', 'raw', 'lever',
        'rawlever', 'nowzp', 'acc0', 'noacc', 'accw', 'accwlever', 'accwneg', 'accw2')
 LAG = float(os.environ.get('IY_LAG', '0.03'))
@@ -83,6 +83,7 @@ def load_meta(run):
     m.setdefault('BS_IPM_LEVER', '0')
     m.setdefault('BS_IPM_ACC_WORLD', '0')
     m.setdefault('BS_IPM_SCALE_EXACT', '0')
+    m.setdefault('BS_IPM_GROUND_CLEAR', '0')
     return BootstrapConfig.from_mapping(m, 'meta')
 
 
