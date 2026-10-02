@@ -26,7 +26,8 @@ NetworkManager, скрипты, бинарники, всё вне контейн
 - `deploy.sh` без `--delete`: лишнее на борту не трогает, удаление файла — руками
   через `-X 'rm …'` и из `distro/` одновременно.
 
-**Доступ.** Юзер `andriy`. С 2026-09-21 **основной путь — Wi-Fi через встроенный
+**Доступ.** Юзер `andriy`. С 2026-10-02 `ssh jetson` → `jetson.local` (mDNS, любая общая
+сеть; в поле — раздача с телефона `Redmi_Note_14`, ноут и борт оба в ней). С 2026-09-21 **основной путь — Wi-Fi через встроенный
 адаптер** `wlP1p1s0` (MAC `f8:3d:c6:57:34:65`; в TP-Link_6611 — `192.168.0.104`, DHCP):
 на ноуте `ssh jetson` (алиас в `~/.ssh/config` → `192.168.0.104`), `deploy.sh` без `-H`
 сам пробует `192.168.0.104` → `jetson.local` → `192.168.55.1`. USB-линк `192.168.55.1`
@@ -62,15 +63,31 @@ micro-USB 2.0 кабель в USB 3.0 micro-B гнезде даёт `error -71`,
 | `control_pkg`, `mission_pkg`, `nav_pkg` — нет вообще | `src/control`, `src/mission`, `src/nav` |
 | `~/workspaces/isaac_ros-dev` (166 МБ) — остатки; образы isaac_ros 40 ГБ **удалены 2026-09-16** | — |
 
-Шаги деплоя кода (TODO, по порядку): секция `src/` в deploy.sh под bind mount →
-`docker/orin/` вместо `vins_ws/{Dockerfile,compose}` + пересборка образа → клон форка
-`1317_debug` → актуальные `vins_service*.sh` → `colcon build` в контейнере.
+Шаги деплоя кода (ветка `orin_deploy`, начат 2026-10-02):
+1. ✅ секция `code` в deploy.sh: рабочая копия `src/{camera,vins,nav,control,mission}` +
+   `docker/orin/` → `/home/andriy/13.17/` (раскладка репо, compose монтирует `../../src/*`);
+2. ✅ `docker/orin/docker-compose.yml`: + `control`, `mission`, форк, бортовой конфиг VINS в
+   `/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config` (путь `camera_mount.BOARD_CFG`),
+   тома `vins_build`/`vins_install`; базовый образ `dustynv/ros:humble-ros-base-l4t-r36.3.0`
+   — `docker pull` на борту (лог `~/pull_dustynv.log`);
+3. ✅ форк `1317_debug` склонирован на ХОСТ борта: `/home/andriy/VINS-MONO-ROS2` (как в симе,
+   вне репо; `VINS_SRC` переопределяет);
+4. ⬜ сборка образа, снос старого контейнера `vins_project_13_7` (образ `vins_ws-vins_core`
+   оставить откатом), `colcon build`;
+5. ⬜ актуальные `vins_service*.sh` (C++ `camera_node` + `openhd_streamer`, гашение нод
+   изнутри контейнера), затем камера → VINS → лётная нода по одной.
+
+Старый клон апстрима на борту (`~/vins_ws/src/VINS-MONO-ROS2`, `4c3cf08`) хранил ручные
+незакоммиченные правки 5 файлов — сохранены до деплоя в `doc/vins_board_old_upstream.diff`.
+С 2026-10-02 бортовой `config.yaml` лежит в этом каталоге (секция home).
 
 ## Что где лежит
 
 ```
-deploy.sh                    — rsync секций home/ etc/ usr/ на Jetson: -n dry-run, -r reload
-                               NM/systemd, -x/-X команда после деплоя (andriy/root); шапка = usage
+deploy.sh                    — rsync секций home/ etc/ usr/ на Jetson + `code` (код стека из
+                               рабочей копии репо → ~/13.17/, с --delete, без игнорируемого git):
+                               -n dry-run, -r reload NM/systemd, -x/-X команда после деплоя
+                               (andriy/root); шапка = usage
 etc/NetworkManager/system-connections/ — Wi-Fi-профили (600 root, см. «Wi-Fi» выше)
 etc/systemd/system/          — юниты: mavros, vins / vins_m, auto-bag / auto-bag-m, orin-shutdown
 home/andriy/hw_check.sh      — проверка железа через полётник (MAVLink, только чтение):

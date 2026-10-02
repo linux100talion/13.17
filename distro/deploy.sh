@@ -3,7 +3,7 @@
 #
 #   ./deploy.sh [-H host] [-n] [-r] [-x 'cmd'] [-X 'cmd'] [секция ...]
 #
-#   секции   home | etc | usr        по умолчанию — все три
+#   секции   home | etc | usr | code  по умолчанию — все четыре
 #   -H host  адрес Jetson            умолч. $JETSON_HOST; иначе первый отвечающий из
 #            192.168.0.104 (Wi-Fi, встроенный) → jetson.local → 192.168.55.1 (USB)
 #   -n       dry-run: показать, что изменится, ничего не писать
@@ -17,6 +17,12 @@
 #   home/andriy/ → /home/andriy/   от пользователя (права/владелец andriy)
 #   etc/         → /etc/           через `sudo rsync`, root:root
 #   usr/         → /usr/           через `sudo rsync`, root:root
+#   code: КОД СТЕКА из рабочей копии репо (не из distro/) → /home/andriy/13.17/ с той же
+#         раскладкой: src/{camera,vins,nav,control,mission}/ и docker/orin/ — compose
+#         монтирует ../../src/* как есть. Зеркало С --delete (удалённое в репо уходит и
+#         с борта), но игнорируемое git (__pycache__, build/, install/, log/, *.raw,
+#         docker/orin/output/) не едет и на борту не трогается. Едут и незакоммиченные
+#         правки — это цикл итерации; коммит — после проверки на борту.
 # doc/ (заметки, ssh-ключ, wifi.txt) — НЕ деплоится.
 #
 # Вывод rsync — itemize (-i): печатаются ТОЛЬКО изменённые файлы
@@ -61,10 +67,10 @@ while getopts "H:nrx:X:h" o; do
 done
 shift $((OPTIND - 1))
 SECTIONS=("$@")
-[ ${#SECTIONS[@]} -eq 0 ] && SECTIONS=(home etc usr)
+[ ${#SECTIONS[@]} -eq 0 ] && SECTIONS=(home etc usr code)
 
 for s in "${SECTIONS[@]}"; do
-    case $s in home|etc|usr) ;; *) echo "неизвестная секция: $s" >&2; usage 1 ;; esac
+    case $s in home|etc|usr|code) ;; *) echo "неизвестная секция: $s" >&2; usage 1 ;; esac
 done
 
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new)
@@ -89,6 +95,11 @@ echo "== Jetson $T $( [ -n "$DRY" ] && echo '(DRY-RUN)' )"
 RS=(rsync -a -z -i -O $DRY -e "${SSH[*]}")
 SUDO=(--rsync-path="sudo rsync" --chown=root:root --no-perms --chmod=Dgo-w)
 NMC=etc/NetworkManager/system-connections
+REPO=..                                   # корень репо (скрипт делает cd в distro/)
+CODE_DST=/home/andriy/13.17               # куда на борту ложится код стека
+CODE_DIRS=(src/camera src/vins src/nav src/control src/mission docker/orin)
+CODE_EXCL=(--exclude=__pycache__/ --exclude='*.pyc' --exclude='*.raw' --exclude=/build/
+           --exclude=/install/ --exclude=/log/ --exclude=output/ --filter=':- .gitignore')
 changed=0
 
 sync_section() {   # <секция> <src/> <dst/> [доп. опции rsync...]
@@ -110,6 +121,10 @@ for s in "${SECTIONS[@]}"; do
         etc)  sync_section etc  ./etc/ /etc/ "${SUDO[@]}" --exclude="/${NMC#etc/}/"
               sync_section etc/nm ./$NMC/ /$NMC/ "${SUDO[@]}" --chmod=D700,F600 ;;
         usr)  sync_section usr  ./usr/ /usr/ "${SUDO[@]}" ;;
+        code) [ -n "$DRY" ] || as_user "mkdir -p $CODE_DST/src $CODE_DST/docker"
+              for d in "${CODE_DIRS[@]}"; do
+                  sync_section "code/$d" "$REPO/$d/" "$CODE_DST/$d/" --delete "${CODE_EXCL[@]}"
+              done ;;
     esac
 done
 

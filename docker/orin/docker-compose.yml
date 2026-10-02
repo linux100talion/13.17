@@ -1,32 +1,51 @@
 version: '3.8'
 
+# Бортовой стек на Jetson. Каталог едет на борт секцией `code` (distro/deploy.sh) в
+# /home/andriy/13.17/docker/orin/ — рядом с /home/andriy/13.17/src/, поэтому пути
+# ../../src/* те же, что в репо. Подъём: cd ~/13.17/docker/orin && docker compose up -d --build
+
 services:
   vins_core:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     container_name: vins_project_13_7
     restart: unless-stopped
-    
+
     # КРИТИЧНО ДЛЯ ROS 2:
-    # network_mode: host убирает изоляцию сети. 
+    # network_mode: host убирает изоляцию сети.
     # Контейнер получает прямой доступ к Wi-Fi адаптеру дрона и DDS мультикасту.
     network_mode: host
     ipc: host
     pid: host
-    
+
     # Проброс камеры ArduCam
     devices:
       - /dev/video0:/dev/video0
-    
+
     # Даем права для работы с видеоустройствами
     privileged: true
     runtime: nvidia
 
-    # Монтируем исходники. build/ и install/ не монтируем —
-    # собираются внутри контейнера через colcon build.
+    # Монтируем исходники. build/ и install/ — именованные тома: собираются внутри
+    # контейнера colcon'ом и переживают пересоздание контейнера (down/up).
     volumes:
       - ../../src/vins:/root/vins_ws/src/vins
+      # Форк linux100talion/VINS-MONO-ROS2, ветка 1317_debug — клон на ХОСТЕ борта,
+      # вне репо (как в симе). Путь переопределяется VINS_SRC.
+      - ${VINS_SRC:-/home/andriy/VINS-MONO-ROS2}:/root/vins_ws/src/vins_oss
       - ../../src/camera:/root/vins_ws/src/camera
       - ../../src/nav:/root/vins_ws/src/nav
+      - ../../src/control:/root/vins_ws/src/control    # control_pkg — стабилизаторы, арбитр, гейты
+      - ../../src/mission:/root/vins_ws/src/mission    # mission_pkg — лётная нода bootstrap_arch2
+      # Бортовой конфиг VINS (положение/интринсики камеры): в репо — distro/home/andriy/
+      # vins_ws/src/VINS-MONO-ROS2/config_pkg/config/, на борт его кладёт секция home.
+      # Путь в контейнере — тот, что ждут camera_mount.BOARD_CFG и geo.BOARD_CAM_CFG.
+      - /home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config:/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config:ro
+      - vins_build:/root/vins_ws/build
+      - vins_install:/root/vins_ws/install
       - ./output:/root/vins_ws/output
+
+volumes:
+  vins_build:
+  vins_install:

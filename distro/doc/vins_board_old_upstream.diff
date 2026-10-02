@@ -1,0 +1,80 @@
+diff --git a/ar_demo/src/ar_demo_node.cpp b/ar_demo/src/ar_demo_node.cpp
+index d21dee3..dc4bb06 100755
+--- a/ar_demo/src/ar_demo_node.cpp
++++ b/ar_demo/src/ar_demo_node.cpp
+@@ -68,7 +68,7 @@ void axis_generate(visualization_msgs::msg::Marker &line_list, Vector3d &origin,
+     line_list.type = visualization_msgs::msg::Marker::LINE_LIST;
+     line_list.scale.x = 0.1;
+     line_list.color.a = 1.0;
+-    line_list.lifetime = rclcpp::Duration(0);
++    line_list.lifetime = rclcpp::Duration(0, 0);
+     
+     line_list.pose.orientation.w = 1.0;
+     line_list.color.b = 1.0;
+@@ -124,7 +124,7 @@ void cube_generate(visualization_msgs::msg::Marker &marker, Vector3d &origin, in
+     marker.color.b = 0.0f;
+     marker.color.a = 1.0;
+ 
+-    marker.lifetime = rclcpp::Duration(0);  
++    marker.lifetime = rclcpp::Duration(0, 0);  
+     geometry_msgs::msg::Point p;
+     p.x = origin.x();
+     p.y = origin.y();
+diff --git a/pose_graph/src/pose_graph_node.cpp b/pose_graph/src/pose_graph_node.cpp
+index 7653afa..1f6683b 100755
+--- a/pose_graph/src/pose_graph_node.cpp
++++ b/pose_graph/src/pose_graph_node.cpp
+@@ -238,7 +238,7 @@ void vio_callback(const nav_msgs::msg::Odometry::ConstPtr pose_msg)
+     key_odometrys.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+     key_odometrys.action = visualization_msgs::msg::Marker::ADD;
+     key_odometrys.pose.orientation.w = 1.0;
+-    key_odometrys.lifetime = rclcpp::Duration(0);
++    key_odometrys.lifetime = rclcpp::Duration(0, 0);
+ 
+     //static int key_odometrys_id = 0;
+     key_odometrys.id = 0; //key_odometrys_id++;
+diff --git a/pose_graph/src/utility/CameraPoseVisualization.cpp b/pose_graph/src/utility/CameraPoseVisualization.cpp
+index 7932d37..8738a5d 100755
+--- a/pose_graph/src/utility/CameraPoseVisualization.cpp
++++ b/pose_graph/src/utility/CameraPoseVisualization.cpp
+@@ -83,7 +83,7 @@ void CameraPoseVisualization::add_loopedge(const Eigen::Vector3d& p0, const Eige
+     //  tmp_loop_edge_num = 1;
+     marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+     marker.action = visualization_msgs::msg::Marker::ADD;
+-    marker.lifetime = rclcpp::Duration(0);
++    marker.lifetime = rclcpp::Duration(0, 0);
+     //marker.scale.x = 0.4;
+     marker.scale.x = 0.02;
+     marker.color.r = 1.0f;
+diff --git a/vins_estimator/src/estimator_node.cpp b/vins_estimator/src/estimator_node.cpp
+index f3479dd..a353cb3 100755
+--- a/vins_estimator/src/estimator_node.cpp
++++ b/vins_estimator/src/estimator_node.cpp
+@@ -354,10 +354,10 @@ int main(int argc, char **argv)
+ 
+     registerPub(n);
+ 
+-    auto sub_imu = n->create_subscription<sensor_msgs::msg::Imu>(IMU_TOPIC, rclcpp::QoS(rclcpp::KeepLast(2000)), imu_callback);
+-    auto sub_image = n->create_subscription<sensor_msgs::msg::PointCloud>("/feature_tracker/feature", rclcpp::QoS(rclcpp::KeepLast(2000)), feature_callback);
+-    auto sub_restart = n->create_subscription<std_msgs::msg::Bool>("/feature_tracker/restart", rclcpp::QoS(rclcpp::KeepLast(2000)), restart_callback);
+-    auto sub_relo_points = n->create_subscription<sensor_msgs::msg::PointCloud>("/pose_graph/match_points", rclcpp::QoS(rclcpp::KeepLast(2000)), relocalization_callback);
++    auto sub_imu = n->create_subscription<sensor_msgs::msg::Imu>(IMU_TOPIC, rclcpp::QoS(rclcpp::KeepLast(2000)).best_effort(), imu_callback);
++    auto sub_image = n->create_subscription<sensor_msgs::msg::PointCloud>("/feature_tracker/feature", rclcpp::QoS(rclcpp::KeepLast(2000)).best_effort(), feature_callback);
++    auto sub_restart = n->create_subscription<std_msgs::msg::Bool>("/feature_tracker/restart", rclcpp::QoS(rclcpp::KeepLast(2000)).best_effort(), restart_callback);
++    auto sub_relo_points = n->create_subscription<sensor_msgs::msg::PointCloud>("/pose_graph/match_points", rclcpp::QoS(rclcpp::KeepLast(2000)).best_effort(), relocalization_callback);
+ 
+     std::thread measurement_process{process};
+     rclcpp::spin(n);
+diff --git a/vins_estimator/src/utility/visualization.cpp b/vins_estimator/src/utility/visualization.cpp
+index cca0815..52d537d 100755
+--- a/vins_estimator/src/utility/visualization.cpp
++++ b/vins_estimator/src/utility/visualization.cpp
+@@ -192,7 +192,7 @@ void pubKeyPoses(const Estimator &estimator, const std_msgs::msg::Header &header
+     key_poses.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+     key_poses.action = visualization_msgs::msg::Marker::ADD;
+     key_poses.pose.orientation.w = 1.0;
+-    key_poses.lifetime = rclcpp::Duration(0);
++    key_poses.lifetime = rclcpp::Duration(0, 0);
+ 
+     //static int key_poses_id = 0;
+     key_poses.id = 0; //key_poses_id++;
