@@ -72,10 +72,26 @@ micro-USB 2.0 кабель в USB 3.0 micro-B гнезде даёт `error -71`,
    — `docker pull` на борту (лог `~/pull_dustynv.log`);
 3. ✅ форк `1317_debug` склонирован на ХОСТ борта: `/home/andriy/VINS-MONO-ROS2` (как в симе,
    вне репо; `VINS_SRC` переопределяет);
-4. ⬜ сборка образа, снос старого контейнера `vins_project_13_7` (образ `vins_ws-vins_core`
-   оставить откатом), `colcon build`;
-5. ⬜ актуальные `vins_service*.sh` (C++ `camera_node` + `openhd_streamer`, гашение нод
-   изнутри контейнера), затем камера → VINS → лётная нода по одной.
+4. ✅ образ `orin-vins_core` собран на борту (Dockerfile под базу dustynv: без `ros-humble-*`
+   из apt, `mavros_msgs` 2.14.0 из исходников, `LD_LIBRARY_PATH` без `cuda/compat` — см.
+   Dockerfile), старый контейнер снесён (образ `vins_ws-vins_core` — откат), `colcon build`
+   10 пакетов за 7 мин (`--packages-ignore ar_demo --parallel-workers 2`, лог `~/colcon_build.log`);
+5. ✅ `vins_service*.sh` + общий `vins_nodes.sh`: C++ `camera_node` (`stream_openhd:=false`),
+   `feature_tracker`, `vins_estimator` (бортовой `config.yaml`), `openhd_streamer`; останов —
+   pkill ИЗНУТРИ контейнера. Проверено `vins_m` на земле: `/image_mono` 15 Гц,
+   `/image_color` 13, `/feature` 15, IMU 200; стоп 4 с, нод не осталось. `/odometry` нет —
+   VINS на неподвижном борте не инициализируется (норма). Служба `vins` (по армингу) НЕ
+   включена — включать вместе с лётной нодой;
+6. ⬜ лётная нода `bootstrap_arch2` + `ray_tracer` (мост VINS→EKF), `crsf_joy`; bag с
+   топиками сима; дамп `BS_*` рядом с bag'ом.
+
+**Грабли этапа (2026-10-02):**
+- У контейнера `pid: host` — `pkill -f`/`pgrep -f` ИЗНУТРИ видят и хост, в т.ч. собственный
+  клиент `docker exec … pkill -f <шаблон>`: шаблон пишется как `lib/camera_pk[g]/…`.
+- База dustynv кладёт `/usr/local/cuda/compat` первым в `LD_LIBRARY_PATH`: старая libcuda
+  (CUDA 12.2) перекрывала драйвер хоста R36.5 → `double free` на первом `cudaMalloc`.
+- Ключ репо `packages.ros.org` в базе просрочен — репо снят в Dockerfile.
+- Интернет с телефона рвётся под большой загрузкой: `docker pull` — циклом повторов.
 
 Старый клон апстрима на борту (`~/vins_ws/src/VINS-MONO-ROS2`, `4c3cf08`) хранил ручные
 незакоммиченные правки 5 файлов — сохранены до деплоя в `doc/vins_board_old_upstream.diff`.
@@ -104,8 +120,10 @@ home/andriy/mag_cal.py       — калибровка компаса по MAVLin
                                пишет), --save — на улице; --say озвучивает прогресс на ноуте, --delay
                                — успеть взять борт; с ноута по радио -u tcp:10.5.0.2:5760
 home/andriy/mavlogs/         — auto_bag.sh / auto_bag_m.sh — запись bag (см. ниже)
-home/andriy/vins_ws/         — vins_service*.sh (старые: python cam_node.py, без стримера),
-                               Dockerfile/compose, конфиги VINS, древний camera_node.cpp
+home/andriy/vins_ws/         — vins_service.sh (по армингу) / vins_service_m.sh (сразу) + общий
+                               vins_nodes.sh (ноды стека, останов изнутри контейнера); конфиги
+                               VINS (бортовой config.yaml); СТАРЫЕ Dockerfile/compose (откат) и
+                               древний camera_node.cpp — не используются
 home/andriy/simple_cam/      — стримеры и профили камеры, tuner plus/cuda
 home/andriy/workspaces/      — остатки isaac_ros (драйвер камеры Argus не поддерживает)
 usr/local/bin/               — start_mavros.sh (MAVROS + запрос HIGHRES_IMU/RAW_IMU 200 Гц)
@@ -126,7 +144,7 @@ doc/ssh-keys/jetson, doc/wifi.txt — СЕКРЕТЫ, в .gitignore (репо п
 Суффикс `_m` у юнитов/скриптов = ручной режим без ожидания арминга.
 
 **Служба `vins` ВЫКЛЮЧЕНА с 2026-09-25** (`systemctl disable --now vins`) до деплоя нового стека.
-Дефект `vins_service.sh`: ноды стартуют `docker exec … &`, а стоп — `kill -INT` по PID
+Дефект ниже ИСПРАВЛЕН 2026-10-02 (`vins_nodes.sh`, проверено на `vins_m`). Был дефект `vins_service.sh`: ноды стартуют `docker exec … &`, а стоп — `kill -INT` по PID
 КЛИЕНТА docker exec: сигнал до процесса в контейнере не доходит, ноды не умирают. Каждый
 арм (и каждый шаг теста моторов!) добавлял пару vins_estimator + feature_tracker — после
 44 армов их было 36+36, участники CycloneDDS кончились («Failed to find a free participant

@@ -13,41 +13,9 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 source /opt/ros/humble/setup.bash
 
 # ==========================================
-# 2. Настройки VINS-Mono и Docker
+# 2. Ноды стека (общий файл с vins_service_m.sh)
 # ==========================================
-CONTAINER="vins_project_13_7"
-PID1=""
-PID2=""
-PID3=""
-
-# Функция для запуска нод VINS-Mono
-start_vins_nodes() {
-    echo "Запуск нод VINS-Mono в контейнере $CONTAINER..."
-    
-    # 1. Camera Node
-    docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && cd /root/vins_ws/src && exec python3 ./cam_node.py" &
-    PID1=$!
-
-    # 2. Feature Tracker
-    docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && exec ros2 run feature_tracker feature_tracker --ros-args -p config_file:=/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml" &
-    PID2=$!
-
-    # 3. VINS Estimator
-    docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && exec ros2 run vins_estimator vins_estimator --ros-args -p config_file:=/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml --remap /feature_tracker/feature:=/feature --remap /feature_tracker/restart:=/restart" &
-    PID3=$!
-}
-
-# Функция для остановки нод VINS-Mono
-stop_vins_nodes() {
-    if [[ -n "$PID1" ]] || [[ -n "$PID2" ]] || [[ -n "$PID3" ]]; then
-        echo "Останавливаем процессы VINS-Mono..."
-        kill -INT $PID1 $PID2 $PID3 2>/dev/null
-        wait $PID1 $PID2 $PID3 2>/dev/null
-        PID1=""
-        PID2=""
-        PID3=""
-    fi
-}
+source "$(dirname "$(readlink -f "$0")")/vins_nodes.sh"
 
 # Функция очистки при остановке сервиса systemd
 cleanup() {
@@ -87,13 +55,13 @@ echo "Ожидание арминга в топике /mavros/state..."
 # чтобы PIDs сохранялись в глобальной области видимости
 while read -r line; do
     
-    # Если заармились и PID1 пустой (значит процессы еще не запущены)
-    if [[ "$line" == *"true"* ]] && [[ -z "$PID1" ]]; then
+    # Если заармились и ноды ещё не запущены
+    if [[ "$line" == *"true"* ]] && [[ ${#NODE_PIDS[@]} -eq 0 ]]; then
         echo "Дрон ЗААРМЛЕН! Инициализация VINS-Mono..."
         start_vins_nodes
         
-    # Если дизармились и PID1 не пустой (значит процессы работают)
-    elif [[ "$line" == *"false"* ]] && [[ -n "$PID1" ]]; then
+    # Если дизармились и ноды работают
+    elif [[ "$line" == *"false"* ]] && [[ ${#NODE_PIDS[@]} -gt 0 ]]; then
         echo "Дрон ДИЗАРМЛЕН! Завершение VINS-Mono..."
         stop_vins_nodes
     fi

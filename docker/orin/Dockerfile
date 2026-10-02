@@ -54,6 +54,12 @@ RUN echo "source /opt/ros/humble/install/setup.bash" >> /root/.bashrc && \
     echo "source /opt/deps_ws/install/setup.bash" >> /root/.bashrc && \
     echo "if [ -f /root/vins_ws/install/setup.bash ]; then source /root/vins_ws/install/setup.bash; fi" >> /root/.bashrc
 
+# Без /usr/local/cuda/compat: база кладёт его ПЕРВЫМ в LD_LIBRARY_PATH, а там libcuda
+# прямой совместимости CUDA 12.2 (2023). Хост борта — L4T R36.5 с драйвером новее: старая
+# libcuda перекрывала его, и первый cudaMalloc (GpuMat::create в camera_node) падал
+# «double free or corruption» в libnvcucompat. libcuda берётся с хоста (runtime nvidia).
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64
+
 ENV ROS_DOMAIN_ID=0
 ENV ROS_LOCALHOST_ONLY=1
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
