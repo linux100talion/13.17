@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CycloneDDS борта — ОДИН файл для хоста (mavros, auto-bag, vins_service, shell) и контейнера
+     (docker/orin монтирует /etc/cyclonedds). Подключается env CYCLONEDDS_URI.
+
+     Зачем. ROS_LOCALHOST_ONLY=1 → Cyclone без мультикаста: участники ищут друг друга
+     unicast'ом по портам индексов 0..MaxAutoParticipantIndex, а по умолчанию их ~10 на
+     машину. MAVROS + 4 ноды стека + crsf_joy/ray_tracer/лётная нода + ros2-утилиты не
+     влезали: «Failed to find a free participant index» → rmw_create_node падал (2026-10-02,
+     песочница; 2026-09-25 — 36+36 копий VINS уронили auto-bag). Индекс ОБЯЗАН совпадать у
+     всех процессов: участник с большим индексом невидим тем, кто ищет до меньшего. -->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain Id="any">
+    <Discovery>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>100</MaxAutoParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

@@ -110,8 +110,12 @@ MANUAL_SCRIPT = [
 class BootstrapArch2Node(Node):
     def __init__(self, cfg: BootstrapConfig, pilot_kind: str):
         super().__init__('alt_hold_bootstrap_arch2')
-        # Все бюджеты/таймеры — по sim-времени (/clock), RTF-независимо.
-        self.set_parameters([Parameter('use_sim_time', Parameter.Type.BOOL, True)])
+        # Все бюджеты/таймеры — по sim-времени (/clock), RTF-независимо. На РЕАЛЬНОМ
+        # БОРТУ /clock нет: с sim-временем часы ноды стоят и таймер не тикает ни разу —
+        # там USE_SIM_TIME=0 (vins_nodes.sh), время = wall. Не ручка BS_ (не профиль):
+        # это свойство площадки, а не полёта.
+        sim_time = os.environ.get('USE_SIM_TIME', '1') != '0'
+        self.set_parameters([Parameter('use_sim_time', Parameter.Type.BOOL, sim_time)])
         self.cfg = cfg
 
         # адаптеры (инфраструктура)

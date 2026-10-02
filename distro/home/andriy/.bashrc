@@ -125,3 +125,4 @@ source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash
 export ROS_DOMAIN_ID=0
 export ROS_LOCALHOST_ONLY=1
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI=file:///etc/cyclonedds/cyclonedds.xml   # лимит участников DDS (etc/cyclonedds)

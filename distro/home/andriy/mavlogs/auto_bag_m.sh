@@ -14,6 +14,7 @@ export ROS_DOMAIN_ID=0
 # ВАЖНО 1: Если вы используете CycloneDDS в терминале (что стандартно для Jetson + камеры),
 # systemd об этом не знает и запускает дефолтный FastRTPS. Раскомментируйте строку ниже, если используете Cyclone!
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI=file:///etc/cyclonedds/cyclonedds.xml   # лимит участников DDS (etc/cyclonedds)
 
 # Загружаем базовый ROS 2
 source /opt/ros/humble/setup.bash

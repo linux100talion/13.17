@@ -1,0 +1,89 @@
+КАК НА БОРТУ ОТКЛЮЧЁН АРМ ЛЁТНОЙ НОДОЙ И КАК ЕГО ПОТОМ ВКЛЮЧИТЬ
+================================================================
+2026-10-02, ветка orin_deploy. Первый запуск лётной ноды bootstrap_arch2 на реальном борту.
+Требование пилота: «МЫ НЕ ДОЛЖНЫ АРМИТЬСЯ» (пропеллеры сняты, но людей рядом пугать нельзя).
+
+1. ЧТО УМЕЕТ НОДА (почему вообще надо отключать)
+------------------------------------------------
+На ветке attitude_out/orin_deploy (профиль mission/att_out → mission/board) нода САМА:
+  - армит и дизармит полётник по жесту пилота (node_arm.py, ArmGesture) и шагом Arm плана;
+  - force arm/disarm командой MAV_CMD 400 (/mavros/cmd/command);
+  - переключает режимы (SF вверх → GUIDED_NOGPS, иначе ALT_HOLD);
+  - шлёт override /mavros/rc/override и уставки /mavros/setpoint_raw/{attitude,local};
+  - пишет параметры полётника (/mavros/param/set: EK3_SRC1_VELXY/POSXY=6 при vision_vel,
+    BS_FCU_PARAMS — RTL_*/SRTL_*);
+  - задаёт начало координат EKF (/mavros/global_position/set_gp_origin, BS_ORIGIN_LAT/LON —
+    точка СИМУЛЯТОРА, Киев 50.4501/30.5234) и дом (/mavros/cmd/set_home);
+  - шлёт позу и скорость в EKF (/mavros/vision_pose/pose, /mavros/vision_speed/speed_twist).
+Аварийного выключения моторов мимо ноды на пульте борта пока НЕТ.
+
+2. КАК ОТКЛЮЧЕНО — ПЕСОЧНИЦА  ~/vins_ws/sandbox_node.sh
+-------------------------------------------------------
+Код ноды НЕ менялся. Запуск — только скриптом (в репо distro/home/andriy/vins_ws/sandbox_node.sh):
+
+    ~/vins_ws/sandbox_node.sh [секунд=120]
+
+Скрипт поднимает в контейнере crsf_joy, ray_tracer и bootstrap_arch2. У лётной ноды ВСЕ 11
+каналов записи в полётник переименованы ROS-remap'ом в тупики /blocked/...:
+
+    /mavros/cmd/arming                  → /blocked/cmd/arming        (арм/дизарм)
+    /mavros/cmd/command                 → /blocked/cmd/command       (force arm/disarm)
+    /mavros/set_mode                    → /blocked/set_mode          (режимы)
+    /mavros/rc/override                 → /blocked/rc/override
+    /mavros/setpoint_raw/attitude       → /blocked/setpoint_raw/attitude
+    /mavros/setpoint_raw/local          → /blocked/setpoint_raw/local
+    /mavros/param/set                   → /blocked/param/set         (EK3_SRC*, RTL_* ...)
+    /mavros/cmd/set_home                → /blocked/cmd/set_home
+    /mavros/global_position/set_gp_origin → /blocked/global_position/set_gp_origin
+    /mavros/vision_pose/pose            → /blocked/vision_pose/pose
+    /mavros/vision_speed/speed_twist    → /blocked/vision_speed/speed_twist
+
+Сервиса-тупика не существует → клиент ноды никогда не «готов» → вызов не уходит вовсе.
+Что нода ХОТЕЛА бы послать, видно в тупиках:  ros2 topic echo /blocked/setpoint_raw/attitude
+Оставлены только чтение параметров (/mavros/param/get_parameters) и частоты телеметрии
+(/mavros/set_message_interval) — в полёте ничего не меняют.
+ray_tracer: -p publish_vision_pose:=false + тот же remap позы (EKF на GPS не трогаем).
+
+Страховки скрипта:
+  - борт заармлен (или /mavros/state не читается) → отказ запуска;
+  - через 8 с после старта `ros2 node info` обеих нод: любой издатель/клиент в /mavros, кроме
+    двух разрешённых, или нода не видна → немедленный останов всего (сработало 2026-10-02).
+
+ЧТО ПЕСОЧНИЦА НЕ ЗАКРЫВАЕТ:
+  - ARMING_RUDDER = 2 в полётнике: он армится САМ стиком курса (газ вниз + курс вправо 2 с) —
+    от физического пульта через приёмник, нода тут ни при чём. Жест арма на пульте не делать.
+  - запуск ноды МИМО скрипта (ros2 run mission_pkg bootstrap_arch2 руками) — защиты нет.
+
+⚠️ ИНЦИДЕНТ 2026-10-02 18:41:30. При отладке песочницы нода один раз (6 с) была запущена
+руками БЕЗ remap'ов. Арма не было (нет /joy → «углы не шлю»), параметры EK3_* не тронуты
+(POSXY остался 3), но нода успела: (а) задать начало координат EKF в точку симулятора
+(журнал MAVROS: «FCU: EKF3 IMU0 origin set», /mavros/global_position/gp_origin =
+50.4501/30.5234 — у полётника в помещении не было фикса GPS); (б) переключить режим
+STABILIZE → ALT_HOLD. Начало координат держится до перезагрузки полётника — лечится
+перезагрузкой FCU (передёрнуть батарею). Правило: лётную ноду на борту — ТОЛЬКО через
+sandbox_node.sh, пока арм не включён осознанно (раздел 3).
+
+3. КАК ПОТОМ ВКЛЮЧИТЬ АРМ (когда пилот решит, по шагам)
+-------------------------------------------------------
+Порядок от безопасного к полному. Каждый шаг — отдельное решение пилота.
+
+  а) Песочница с override/режимами, но без арма. В sandbox_node.sh убрать из массива BLOCK
+     /mavros/set_mode, /mavros/rc/override, /mavros/setpoint_raw/attitude|local (а ALLOWED
+     дополнить ими), оставить заблокированными арм, команду, параметры, origin, дом, позу.
+     Проверить: режимы переключаются по SF, на задизармленном борту уставки идут.
+     ⚠️ Override + ARMING_RUDDER 2 = нода сама может «нажать» жест арма курсом — перед этим
+     шагом поставить ARMING_RUDDER 0 (так в симе, sitl_lv_profile.py) — в полётник и в
+     distro/doc/HW/Ardupilot_Params/MP/stellar_cld.txt.
+  б) Начало координат/параметры: BS_SET_ORIGIN, BS_VISION_VEL, BS_FCU_PARAMS, BS_RTH_SET_HOME
+     в профиле mission/board.txt — выставить под борт (origin — РЕАЛЬНАЯ точка взлёта или
+     0, если GPS есть), только потом убрать их тупики.
+  в) Арм нодой. Убрать /mavros/cmd/arming и /mavros/cmd/command из BLOCK — арм пойдёт по жесту
+     ноды (SF вверх + жест, node_arm.py). Только с ПРОПЕЛЛЕРАМИ СНЯТЫМИ, первый раз.
+     До этого: аварийное выключение моторов мимо ноды (канал пульта → полётник, напр.
+     RCx_OPTION 31 «Motor Emergency Stop» на свободном тумблере) — открытый пункт.
+  г) Штатный запуск без песочницы: ноду поднимает служба (vins_service.sh / vins_nodes.sh —
+     добавить туда crsf_joy, ray_tracer, bootstrap_arch2 с USE_SIM_TIME=0 и профилями из
+     sandbox_node.sh) — и только после полёта с пропеллерами на привязи/в поле.
+
+Вернуть всё как было (полностью без ноды): просто не запускать sandbox_node.sh — службы
+vins/vins_m лётную ноду не поднимают.

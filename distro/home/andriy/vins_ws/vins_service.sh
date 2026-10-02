@@ -8,6 +8,7 @@ export ROS_DOMAIN_ID=0
 
 # Если используется CycloneDDS (как в скрипте записи bag), раскомментируйте:
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI=file:///etc/cyclonedds/cyclonedds.xml   # лимит участников DDS (etc/cyclonedds)
 
 # Загружаем базовый ROS 2 на хосте, чтобы утилита `ros2 topic echo` работала
 source /opt/ros/humble/setup.bash

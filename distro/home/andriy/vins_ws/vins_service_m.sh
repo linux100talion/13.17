@@ -5,6 +5,7 @@
 export ROS_LOCALHOST_ONLY=1
 export ROS_DOMAIN_ID=0
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI=file:///etc/cyclonedds/cyclonedds.xml   # лимит участников DDS (etc/cyclonedds)
 
 source "$(dirname "$(readlink -f "$0")")/vins_nodes.sh"
 

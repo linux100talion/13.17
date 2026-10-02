@@ -27,6 +27,11 @@ services:
     privileged: true
     runtime: nvidia
 
+    # Конфиг CycloneDDS — тот же файл, что у хоста (distro/etc/cyclonedds): лимит участников
+    # должен совпадать у всех процессов, иначе ноды контейнера и MAVROS хоста не видят друг друга.
+    environment:
+      - CYCLONEDDS_URI=file:///etc/cyclonedds/cyclonedds.xml
+
     # Монтируем исходники. build/ и install/ — именованные тома: собираются внутри
     # контейнера colcon'ом и переживают пересоздание контейнера (down/up).
     volumes:
@@ -45,6 +50,7 @@ services:
       - vins_build:/root/vins_ws/build
       - vins_install:/root/vins_ws/install
       - ./output:/root/vins_ws/output
+      - /etc/cyclonedds:/etc/cyclonedds:ro
 
 volumes:
   vins_build:
