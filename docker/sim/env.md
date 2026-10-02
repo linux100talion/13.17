@@ -63,7 +63,7 @@
 
 ## Ключи `env.default` (эталон; сейчас = этот ноутбук)
 
-Настоящие ключи профиля бокса — семь:
+Настоящие ключи профиля бокса — восемь:
 
 | Ключ | Значение | Кто ест | Зачем |
 |---|---|---|---|
@@ -71,6 +71,7 @@
 | `CUDA_ARCH_BIN` | `8.9` | compose (build) | арка CUDA для сборки OpenCV в образе nav (RTX 4050 = Ada); одна арка — быстрее сборка. ⚠️ машинно-зависим (под GPU бокса) |
 | `WORLD` | `/root/worlds/mili_fortress_fine.sdf` | compose → simulator | мир по умолчанию: мелкая фактура земли (grass_plane_fine, texel 3.7 мм) — зрение живёт у земли. Базовый мир — закомментировать строку |
 | `CAM_CFG` | `distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml` | compose → simulator, nav | положение камеры (путь от корня репо): бортовой конфиг VINS, из него — поза camera_link в Gazebo (`sim_up.sh`), экстринсики VINS сима (`sim_nav.launch.py`), `FLOW_R`/`CAM_TILT` демпфера (`bootstrap_node`), плечо `ray_tracer`. Разбор — `control_pkg/perception/camera_mount.py`. Смена пути — fresh-start, правка файла — restart-all |
+| `COM_X_FRAC` | `-0.0868` | compose → simulator | центр масс борта вдоль продольной оси в долях полубазы моторов (минус — назад): реальный борт −0.0755 (hw.txt, «ЗАМЕР В ПОЛЁТЕ», задняя пара 53.8 % тяги) + 15 %. `sim_up.sh` сдвигает центр масс `base_link` с учётом масс остальных звеньев. 0 — без сдвига. fresh-start |
 | `LV` | `2` | freefly_lv.sh | профиль «GPS отсутствует с бута» (модель реального борта) |
 | `BS_SF_MASTER` | `1` | freefly_lv.sh → нода | схема «SF-мастер»: SF (CH7) = мастер сырых стиков, SC (CH6) = потолок лесенки демпфер/VinsHold/LOITER. Нужен микс SF→CH7 в EdgeTX |
 | `BS_LAND_JOY` | `b1` (эталон с 2026-09-02; дефолт ноды `b0`) | freefly_lv.sh → нода | где в `/joy` кнопка SA (мягкая посадка): `b<i>`/`a<i>`; зависит от микшера пульта — мерить `src/lab/joystick/js_probe.py` |

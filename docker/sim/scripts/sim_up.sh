@@ -126,6 +126,65 @@ else
     echo "  ветер: выкл (WIND_SPD=0)"
 fi
 
+# ── ЦЕНТР МАСС: смещение вдоль продольной оси (COM_X_FRAC) ───────────────────
+# COM_X_FRAC — где центр масс ВСЕГО борта относительно центра моторов, в ДОЛЯХ полубазы
+# (расстояние от центра до осей моторов по продольной оси; минус — назад). Доля, а не метры:
+# так развесовка переносится с реального борта на iris (момент тангажа ∝ d/a при той же тяге).
+# Реальный борт (distro/doc/HW/hw.txt, «ЗАМЕР В ПОЛЁТЕ», висение First_Loiter): задняя пара
+# несёт 53.8 % тяги по rpm² → центр тяжести на 7.55 % полубазы позади. Сдвиг делается центром
+# масс base_link (iris_with_standoffs, копия в /tmp тем же приёмом, что ветер), с учётом масс и
+# поз остальных звеньев (IMU, роторы, камера — камера своей массой тянет вперёд). 0/пусто — выкл.
+COM_X_FRAC="${COM_X_FRAC:-0}"
+if [ -n "$COM_X_FRAC" ] && [ "$COM_X_FRAC" != "0" ]; then
+    if [ ! -d "$PATCH/iris_with_standoffs" ]; then
+        cp -a /root/ardupilot_gazebo/models/iris_with_standoffs "$PATCH/iris_with_standoffs"
+    fi
+    python3 - "$PATCH/iris_with_standoffs/model.sdf" "$PATCH/iris_cam/model.sdf" "$COM_X_FRAC" <<'PYEOF'
+import re, sys
+body_p, cam_p, frac = sys.argv[1], sys.argv[2], float(sys.argv[3])
+body, cam = open(body_p).read(), open(cam_p).read()
+
+def links(text):
+    """[(имя, x звена, x инерции, масса)] — звенья с массой."""
+    out = []
+    for m in re.finditer(r"<link name=['\"]([\w]+)['\"]>(.*?)</link>", text, re.S):
+        name, blk = m.group(1), m.group(2)
+        head = blk.split('<inertial>')[0]
+        lpm = re.search(r"<pose[^>]*>([^<]*)</pose>", head)
+        lx = float(lpm.group(1).split()[0]) if lpm else 0.0
+        im = re.search(r"<inertial>(.*?)</inertial>", blk, re.S)
+        if not im:
+            continue
+        ip = re.search(r"<pose[^>]*>([^<]*)</pose>", im.group(1))
+        ms = re.search(r"<mass>([^<]*)</mass>", im.group(1))
+        if not ms:
+            continue
+        out.append((name, lx, float(ip.group(1).split()[0]) if ip else 0.0, float(ms.group(1))))
+    return out
+
+B = links(body)
+C = [l for l in links(cam) if l[0] == 'camera_link']
+rot = [abs(l[1]) for l in B if l[0].startswith('rotor_')]
+a = sum(rot) / len(rot)                       # полубаза по продольной оси, м
+allm = B + C
+M = sum(l[3] for l in allm)
+base = next(l for l in B if l[0] == 'base_link')
+others = sum(l[3] * (l[1] + l[2]) for l in allm if l is not base)
+target = frac * a
+xb = (target * M - others) / base[3] - base[1]
+blk = re.search(r"(<link name=['\"]base_link['\"]>.*?<inertial>\s*<pose>)([^<]*)(</pose>)", body, re.S)
+if not blk:
+    sys.exit("ОШИБКА: не нашёл <inertial><pose> base_link")
+p = blk.group(2).split()
+p[0] = f"{xb:.5f}"
+body = body[:blk.start(2)] + ' '.join(p) + body[blk.end(2):]
+open(body_p, 'w').write(body)
+print(f"  ЦЕНТР МАСС: {frac:+.4f} полубазы (a={a:.3f} м) → борт {target:+.4f} м, "
+      f"центр масс base_link {xb:+.4f} м (масса борта {M:.3f} кг)")
+PYEOF
+    export GZ_SIM_RESOURCE_PATH="$PATCH:${GZ_SIM_RESOURCE_PATH}"
+fi
+
 # ── ТОЧКА СПАВНА: «где сел — там и стартуем» ─────────────────────────────────
 # SPAWN_POSE="x y z roll pitch yaw" — где поставить борт, в осях МИРА Gazebo
 # (x-восток, y-север, z-вверх; yaw 0 = нос на восток, радианы). Пусто = штатный

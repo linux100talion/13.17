@@ -63,6 +63,7 @@ services:
       #   WORLD=/root/worlds/mili_fortress_fine.sdf
       # Применяется при СОЗДАНИИ контейнера → только fresh-start.
       - WORLD=${WORLD:-}
+      - COM_X_FRAC=${COM_X_FRAC:-0}           # центр масс борта, доля полубазы (минус — назад), sim_up.sh
       # Положение камеры — из бортового конфига VINS (путь от корня репо; репо ro
       # в /root/repo). Читают sim_up.sh (поза camera_link), sim_nav.launch.py
       # (экстринсики VINS), bootstrap_node (демпфер): control_pkg/perception/camera_mount.py
