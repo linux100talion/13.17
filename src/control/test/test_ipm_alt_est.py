@@ -38,6 +38,14 @@ for k in range(60):                                   # висение: ε ≈ 0
 check(f'висение не сдвигает оценку ({d0:+.4f} → {g.delta:+.4f})', abs(g.delta - d0) < 1e-6)
 g.update(5.0, 5.0, 1.5, 1.52)                         # выброс |ε| > eps_max
 check('выброс отброшен', abs(g.delta - d0) < 1e-6)
+g = GroundOffsetEstimator()
+for k in range(120):                                  # только висение с шумом — оценки нет
+    g.update(k * DT, 0.002 * ((-1) ** k), 1.5, 1.5 + 1e-4 * ((-1) ** k))
+check(f'одно висение: оценки нет (не уходит в бесконечность) — {g.delta}', g.delta is None)
+g = GroundOffsetEstimator()
+for k in range(60):                                   # у земли (< h_min) кадры не берутся
+    g.update(k * DT, 0.05, 0.2 + 0.005 * k, 0.2 + 0.005 * (k + 1))
+check('ниже h_min кадры не берутся', g.n == 0 and g.delta is None)
 
 
 # 2. в канале на рендере

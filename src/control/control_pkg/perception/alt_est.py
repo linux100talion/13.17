@@ -29,23 +29,35 @@ class GroundOffsetEstimator:
     обновлении. Линейная версия с накопленными суммами (регрессор у принятой высоты)
     занижала |δ| на 10–20 % при δ/h ≈ 0.2 (синтетика test_ipm_alt_est)."""
 
-    def __init__(self, tau_forget=60.0, eps_max=0.2, iters=3):
+    def __init__(self, tau_forget=60.0, eps_max=0.2, iters=3, h_min=0.6, model_sd=0.07):
         self.tau_forget = float(tau_forget)
         self.eps_max = float(eps_max)      # |ε| за кадр выше — сбой LK, не зум
         self.iters = int(iters)
+        # у земли зум меряется плохо: полёт bl_vinit_vis_20261002_134434 — на посадке
+        # поправка ушла +0.125 → +0.25 за последние секунды. Кадры ниже h_min не берём.
+        self.h_min = float(h_min)
+        # ОШИБКА МОДЕЛИ в σ: оцениваем ПОСТОЯННУЮ поправку, а истинная (ошибка высоты EKF)
+        # блуждает за секунды — СКО 0.04–0.076 м по bag vzph_s1/vzph_sc/bl_vinit (2026-10-02).
+        # Без неё покрытие |ошибка| < 2σ было 9–19 % (σ ~0.01 при реальной ±0.1).
+        self.model_sd = float(model_sd)
+        # МИНИМУМ ИНФОРМАЦИИ Σw·J²: без хода по высоте δ не наблюдается, и Гаусс — Ньютон
+        # на одних висячих кадрах (J ≈ 0) уходил в бесконечность (реплей с середины висения).
+        # 1e-3 ≈ несколько кадров набора 0.5 м/с на метре. Ниже — оценки нет (HUD vis --).
+        self.info_min = 1e-3
         self.reset()
 
     def reset(self):
         self._buf = deque()                 # (t, ε, h0, h1)
         self.delta = None
         self.sigma = None
+        self.rho = 0.0
         self.n = 0
 
     def update(self, t, eps, h0, h1):
         """Кадр: ε (мера зума), h0/h1 — принятая высота камеры опорного/текущего кадра."""
         if eps is None or not math.isfinite(eps) or abs(eps) > self.eps_max:
             return
-        if h0 <= 0.05 or h1 <= 0.05:
+        if min(h0, h1) < self.h_min:
             return
         self._buf.append((float(t), float(eps), float(h0), float(h1)))
         while self._buf and t - self._buf[0][0] > 3.0 * self.tau_forget:
@@ -61,12 +73,23 @@ class GroundOffsetEstimator:
             r = e - (np.log((h1a + d) / (h0a + d)) - base)
             J = 1.0 / (h1a + d) - 1.0 / (h0a + d)
             info = float(np.sum(w * J * J))
-            if info <= 0.0:
-                return
-            d += float(np.sum(w * J * r)) / info
+            if info < self.info_min:
+                return                         # δ не наблюдается — прежняя оценка (или нет)
+            d += max(-0.5, min(0.5, float(np.sum(w * J * r)) / info))   # шаг ≤ 0.5 м
         r = e - (np.log((h1a + d) / (h0a + d)) - base)
         J = 1.0 / (h1a + d) - 1.0 / (h0a + d)
         info = float(np.sum(w * J * J))
         var_e = float(np.sum(w * r * r) / max(np.sum(w), 1e-9))   # шум ε за кадр
+        # ЧЕСТНАЯ σ: соседние кадры не независимы (LK по почти той же картинке, сглаженные
+        # углы) — без поправки σ выходила 0.007 при реальной ошибке ±0.1 (реплей). Невязки
+        # как AR(1): ρ — их автокорреляция с шагом в кадр, дисперсия оценки ×(1+ρ)/(1−ρ).
+        self.rho = 0.0
+        if len(r) > 10:
+            num = float(np.sum(w[1:] * r[1:] * r[:-1]))
+            den = float(np.sum(w[1:] * r[1:] * r[1:]))
+            if den > 0.0:
+                self.rho = min(max(num / den, 0.0), 0.98)
+        infl = (1.0 + self.rho) / (1.0 - self.rho)
         self.delta = d
-        self.sigma = math.sqrt(var_e / info) if info > 0.0 else None
+        self.sigma = (math.sqrt(var_e * infl / info + self.model_sd ** 2)
+                      if info > 0.0 else None)

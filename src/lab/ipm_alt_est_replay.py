@@ -87,7 +87,7 @@ def main(run):
         d_true = cam_true - cam_acc
         d, s = est.ipm_alt_delta, est.ipm_alt_sigma
         if d is not None and s is not None and s < 0.10 and h_true > 0.3:
-            errs.append(d - d_true)
+            errs.append((d - d_true, s))
         if t >= nxt:
             nxt += STEP
             ds = '--' if d is None else f'{d:+.3f} ± {s:.3f}' if s is not None else f'{d:+.3f}'
@@ -95,9 +95,11 @@ def main(run):
             print(f'  {t - t0:6.1f}  {h_true:5.2f}   {cam_acc:5.2f}    {cam_true:5.2f}   '
                   f'{d_true:+.3f}   {ds:18s} {er}')
     if errs:
-        e = np.array(errs)
+        a = np.array(errs)
+        e, s = a[:, 0], a[:, 1]
         print(f'  ИТОГ (σ < 0.10, в воздухе): ошибка оценки δ медиана {np.median(e):+.3f} м, '
-              f'|ошибка| 90 % {np.percentile(np.abs(e), 90):.3f} м, кадров {len(e)}')
+              f'|ошибка| 90 % {np.percentile(np.abs(e), 90):.3f} м, кадров {len(e)}; σ медиана '
+              f'{np.median(s):.3f}, покрытие |ошибка| < 2σ: {100 * np.mean(np.abs(e) < 2 * s):.0f} %')
 
 
 if __name__ == '__main__':
