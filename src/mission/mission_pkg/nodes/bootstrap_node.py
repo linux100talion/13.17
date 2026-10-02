@@ -603,11 +603,16 @@ class BootstrapArch2Node(Node):
                     f"ВОЗВРАТ: дом залатчен ({h[0]:+.1f},{h[1]:+.1f}) м EKF, "
                     f"{self._rth.dist:.1f} м от арма по IPM — RTH разрешён")
                 self._set_home()
-            else:
+            elif s.rth_state == RthReadiness.LOST:
                 self.logger.warn(
                     f"ВОЗВРАТ ЗАПРЕЩЁН на этот полёт: {s.rth_why} "
                     f"(круг {self.cfg.rth_radius:g} м, лечение "
                     f"{self.cfg.rth_heal_sec:g} с) — домой ведёт пилот")
+            elif not s.armed:
+                # дизарм сбрасывает готовность в HEAL — следующий полёт с чистого листа;
+                # раньше этот сброс логировался как «ВОЗВРАТ ЗАПРЕЩЁН» с пустой причиной
+                # (bl_vinit_20261002_120342: READY весь полёт, «запрет» через 0.6 с после дизарма)
+                self.logger.info("возврат: готовность сброшена (дизарм) — следующий полёт заново")
 
     def _yaw_source_tick(self, s) -> None:
         """Переключение источника курса EKF (BS_EKF_YAW_SRC=vins).
