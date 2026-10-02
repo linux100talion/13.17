@@ -149,6 +149,7 @@ class BootstrapArch2Node(Node):
             h = float(os.environ.get('CAMERA_H', 720))
             self.perception = RosPerception(self, w, h, FLOW_R, FLOW_ROTSIGN,
                                             cam_tilt=CAM_TILT,
+                                            cam_lever=CAMERA.t if cfg.ipm_lever else None,
                                             roll_smooth_n=cfg.roll_smooth,
                                             pitch_smooth_n=cfg.pitch_smooth,
                                             yaw_smooth_n=cfg.yaw_smooth,
@@ -173,6 +174,7 @@ class BootstrapArch2Node(Node):
                                             ipm_alt_floor=cfg.ipm_alt_floor,
                                             ipm_scale_ref=cfg.ipm_scale_ref,
                                             ipm_acc_tau=cfg.ipm_acc_tau,
+                                            ipm_acc_world=cfg.ipm_acc_world,
                                             alt_src=cfg.perc_alt_src,
                 alt_stale=cfg.perc_alt_stale,
                                             alt_zero=cfg.perc_alt_zero > 0)

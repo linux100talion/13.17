@@ -71,7 +71,8 @@ class RosPerception:
                  alt_stale=2.0,
                  alt_zero=False, ipm_wz_gate=None, ipm_wz_bias_max=None,
                  att_interp=False, att_latency=0.0,
-                 att_wait_max=0.15, att_src='ekf', cam_tilt=None):
+                 att_wait_max=0.15, att_src='ekf', cam_tilt=None,
+                 cam_lever=None, ipm_acc_world=None):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -159,6 +160,10 @@ class RosPerception:
             extra['ipm_acc_tau'] = float(ipm_acc_tau)
         if cam_tilt is not None:
             extra['cam_tilt'] = float(cam_tilt)
+        if cam_lever is not None:
+            extra['cam_lever'] = tuple(float(v) for v in cam_lever)
+        if ipm_acc_world is not None:
+            extra['ipm_acc_world'] = bool(ipm_acc_world)
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,
                                   roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
                                   yaw_smooth_n=yaw_smooth_n, **extra)

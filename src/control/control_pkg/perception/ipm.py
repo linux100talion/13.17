@@ -39,7 +39,7 @@ class IpmChannel:
     def _init_ipm(self, ipm, ipm_x0, ipm_x1, ipm_yhalf, ipm_res, ipm_win,
                   ipm_model, ipm_derot, ipm_wz_tau, ipm_adapt, ipm_vel_tau,
                   ipm_alt_floor, ipm_scale_ref, ipm_acc_tau, ipm_wz_gate,
-                  ipm_wz_bias_max=0.0):
+                  ipm_wz_bias_max=0.0, cam_lever=(0.0, 0.0, 0.0), ipm_acc_world=False):
         # --- КАНАЛ ВИДА СВЕРХУ (IPM): МЕТРИЧЕСКОЕ смещение и скорость ---
         # Масштабный канал (kf_logs) меряет log(масштаб) созвездия, и цена метра у него
         # плавает в 14 раз: глубина точек не контролируется, точка на земле в 5 м даёт
@@ -193,6 +193,31 @@ class IpmChannel:
         # десятки секунд удержания равно нулю (иначе скорость росла бы неограниченно).
         # ⚠️ На ДЛИТЕЛЬНОМ настоящем разгоне среднее съело бы и сигнал — там ручку выключать.
         self.ipm_acc_tau = float(ipm_acc_tau)
+        # ⚠️ ОЦЕНКУ ВЕТРОВОГО НАКЛОНА ВЕСТИ В ОСЯХ КУРСА, А НЕ ТЕЛА (ipm_acc_world, 2026-10-02).
+        # Балансирующий ветер наклон неподвижен В МИРЕ. В осях тела на развороте он вращается
+        # с −ω_z, а скользящее среднее с τ 5 с за ним не успевает: разница (поворот вектора
+        # ≈ ω_z·τ) интегрируется прогнозом как ускорение → ложная скорость ∝ ω_z. Замер
+        # реплеем (src/lab/ipm_yaw_err.py, серия cmd/ipm_lever, ветер 2 + порывы 5): боковая
+        # ошибка канала по ω_z −0.07 м с ФВЧ против +0.14 без него — ФВЧ вносил ≈ −0.2 м·ω_z,
+        # больше, чем ход вынесенной камеры (+0.14). Лечение — поворачивать оценку на −ω_z·dt
+        # каждый шаг: вектор ветра в осях тела вращается ровно так. False — прежнее поведение.
+        self.ipm_acc_world = bool(ipm_acc_world)
+        # --- ВЫНОС КАМЕРЫ (cam_lever, м, тело FLU; с 2026-10-02) ---
+        # Камера стоит не в точке, к которой относятся высота и скорость борта (IMU), а
+        # вынесена на t бортового конфига (на борту 0.14 вперёд, 0.06 ниже). Канал меряет
+        # движение КАМЕРЫ над землёй, а высоту ему дают борта. Учитываем два эффекта:
+        #   1) высота геометрии = высота камеры: alt + (R(тангаж,крен)·t)_z. Ниже на 6 см
+        #      — это 20 % масштаба на 0.3 м; вынос вперёд на клевке опускает камеру ещё
+        #      на t_x·sinθ;
+        #   2) смещение камеры за кадр = смещение борта + собственный ход выноса при
+        #      вращении: разворот на dψ гонит вынесенную вперёд камеру вбок на t_x·dψ
+        #      (0.14 м/с на 1 рад/с — ровно ложный снос, который демпфер бы гасил),
+        #      смена наклона двигает её вперёд/вбок на Δ(R·t). Вычитаем.
+        # (0,0,0) = выкл (поведение бит-в-бит прежнее, так зовут офлайн-стенды).
+        # Вынос ЗАДАЁТСЯ ТОЛЬКО бортовым конфигом (camera_mount.py), ручки значения нет.
+        self.cam_lever = tuple(float(v) for v in cam_lever)
+        self._lever_on = any(abs(v) > 1e-9 for v in self.cam_lever)
+        self._ipm_prev_lev = None    # (вперёд, влево) выноса на опорном кадре
         self._acc_bias = None        # [af, al] — медленное среднее прогноза
         self._acc_t = None
         self._acc_n = 0
@@ -269,18 +294,48 @@ class IpmChannel:
             return None
         return [self.cx + self.fx * P[0] / P[2], self.cy + self.fy * P[1] / P[2]]
 
+    def _lever_level(self, pitch, roll):
+        """Вынос камеры в ГОРИЗОНТИРОВАННЫХ осях курса: (вперёд, влево, вверх), м.
+
+        Конвенция углов канала (ROS FLU, см. _ipm_px/_vel_predict): pitch>0 = нос
+        ВНИЗ, roll>0 = правое крыло ВНИЗ — это повороты +θ вокруг y и +φ вокруг x
+        по правой руке, то есть c = Ry(θ)·Rx(φ)·t."""
+        tx, ty, tz = self.cam_lever
+        cr, sr = math.cos(roll), math.sin(roll)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+        y1 = cr * ty - sr * tz                 # Rx(φ)
+        z1 = sr * ty + cr * tz
+        return (cp * tx + sp * z1, y1, -sp * tx + cp * z1)   # Ry(θ)
+
+    def _ipm_geom_h(self, alt, pitch, roll):
+        """Высота, по которой строится геометрия кадра: высота КАМЕРЫ (борт + вынос),
+        не ниже пола ipm_alt_floor. Офлайн-рисовалки обязаны брать её же."""
+        if self._lever_on:
+            alt = alt + self._lever_level(pitch, roll)[2]
+        if self.ipm_alt_floor > 0.0:
+            alt = max(alt, self.ipm_alt_floor)   # геометрия — не ниже пола
+        return alt
+
+    def _ipm_drop_prev(self):
+        self._ipm_prev = None
+        self._ipm_prev_t = None
+        self._ipm_prev_geo = None
+        self._ipm_prev_lev = None
+
     def _vel_reset(self):
         """Скорость с фильтром — только в воздухе: на земле/без баро состояние 0."""
         self._ipm_v = [0.0, 0.0]
         self._ipm_v_t = None
         self._ipm_meas_t = -1e9
 
-    def _acc_debias(self, stamp, af, al):
+    def _acc_debias(self, stamp, af, al, wz=0.0):
         """Прогноз ускорения без постоянной составляющей (ФВЧ, τ = ipm_acc_tau).
 
         Один в один `_wz_debias` (включая разгон веса max(1−e^(−dt/τ), 1/n): чистое
         экспоненциальное сглаживание тащило бы ошибку первого отсчёта τ секунд).
-        0 = отдать прогноз как есть — прежнее поведение бит-в-бит."""
+        0 = отдать прогноз как есть — прежнее поведение бит-в-бит.
+        ipm_acc_world: оценка ветрового наклона живёт в осях курса — на шаге её вектор
+        поворачивается на −ω_z·dt вслед за телом (см. _init_ipm)."""
         if self.ipm_acc_tau <= 0.0:
             return af, al
         if self._acc_bias is None:
@@ -292,6 +347,12 @@ class IpmChannel:
         self._acc_t = stamp
         self._acc_n += 1
         if dt > 0.0:
+            if self.ipm_acc_world:
+                # мировой вектор в осях тела, повернувшегося влево на dψ: f' = f·c + l·s,
+                # l' = −f·s + l·c
+                c, s = math.cos(wz * dt), math.sin(wz * dt)
+                bf, bl = self._acc_bias
+                self._acc_bias = [c * bf + s * bl, -s * bf + c * bl]
             a = max(1.0 - math.exp(-dt / self.ipm_acc_tau), 1.0 / self._acc_n)
             self._acc_bias[0] += a * (af - self._acc_bias[0])
             self._acc_bias[1] += a * (al - self._acc_bias[1])
@@ -315,7 +376,7 @@ class IpmChannel:
         vf, vl = self._ipm_v
         af = 9.81 * math.sin(pitch)
         al = -9.81 * math.sin(roll)
-        af, al = self._acc_debias(stamp, af, al)   # снять балансирующий ветер наклон
+        af, al = self._acc_debias(stamp, af, al, wz)   # снять балансирующий ветер наклон
         self._ipm_v[0] = vf + (af + wz * vl) * dt
         self._ipm_v[1] = vl + (al - wz * vf) * dt
         if stamp - self._ipm_meas_t <= self._VEL_HOLD:
@@ -425,13 +486,11 @@ class IpmChannel:
         gate = self._ALT_GROUND if self.ipm_alt_floor > 0.0 else 0.5
         if not self.ipm or alt is None or alt < gate:
             self.ipm_fail = 6 if not self.ipm else 1
-            self._ipm_prev = None
-            self._ipm_prev_t = None
-            self._ipm_prev_geo = None
+            self._ipm_drop_prev()
             self._vel_reset()
             return
-        if self.ipm_alt_floor > 0.0:
-            alt = max(alt, self.ipm_alt_floor)   # геометрия — не ниже пола
+        lev = self._lever_level(pitch, roll) if self._lever_on else None
+        alt = self._ipm_geom_h(alt, pitch, roll)   # высота камеры, не ниже пола
         if self.ipm_vel_tau > 0.0:
             # прогноз тикает на КАЖДОМ кадре, включая бракованные — провалы мостятся;
             # ipm_ok при фильтре = «скорости можно верить» (измерения свежее _VEL_HOLD)
@@ -449,9 +508,7 @@ class IpmChannel:
         x0 = self._ipm_window(alt, pitch, self.ipm_x0 * sc)
         if x0 is None:
             self.ipm_fail = 2
-            self._ipm_prev = None
-            self._ipm_prev_t = None
-            self._ipm_prev_geo = None
+            self._ipm_drop_prev()
             return
         x1 = x0 + length
         # размер варпа — от БАЗОВОЙ геометрии (инвариантен к s, см. _ipm_rectify);
@@ -461,9 +518,7 @@ class IpmChannel:
         rect = self._ipm_rectify(gray, alt, pitch, roll, x0, x1, yhalf, res, dims)
         if rect is None:
             self.ipm_fail = 3
-            self._ipm_prev = None
-            self._ipm_prev_t = None
-            self._ipm_prev_geo = None
+            self._ipm_drop_prev()
             return
         prev = self._ipm_prev
         prev_t = self._ipm_prev_t
@@ -478,6 +533,7 @@ class IpmChannel:
         self._ipm_prev = rect
         self._ipm_prev_t = stamp
         self._ipm_prev_geo = (x0, length, yhalf, res)
+        prev_lev, self._ipm_prev_lev = self._ipm_prev_lev, lev
         if prev is None or prev.shape != rect.shape:
             self.ipm_fail = 7
             return
@@ -526,11 +582,20 @@ class IpmChannel:
         # производной мировой позиции дал ipm_vlat ≈ −v_right с наклоном ~1.
         # Потребитель (DpRollRate._cmd) компенсирует минусом, как DpRollHold.
         d_lat = float(np.median(d[:, 0])) * res
-        self.ipm_lat += d_lat
         # Сдвиг АДАПТИВНОГО окна между кадрами (x0 − prev_x0) неотличим для потока от
         # хода вперёд (статичная точка земли сползает вниз по сетке ровно на сдвиг),
         # но он известен ТОЧНО — вычитаем. При ipm_adapt=0 окна совпадают, дельта 0.
         d_fwd = float(np.median(d[:, 1])) * res - (x0 - prev_geo[0])
+        # ВЫНОС КАМЕРЫ: d_fwd/d_lat выше — ход КАМЕРЫ в осях курса прошлого кадра. Ход
+        # борта = ход камеры − ход выноса: Δ(R·t) от смены наклона плюс поворот выноса
+        # на dψ (влево-положительный разворот: вперёд −c_l·dψ, влево +c_f·dψ).
+        # dψ — по ФИЗИЧЕСКОМУ ω_z (ω_z>0 = влево, как в _vel_predict), не по ручке
+        # знака ipm_derot: та выбирала знак вычитания ПОЛЯ, а здесь кинематика.
+        if lev is not None and prev_lev is not None and prev_t is not None:
+            dpsi_l = float(wz) * (stamp - prev_t)
+            d_fwd -= (lev[0] - prev_lev[0]) - prev_lev[1] * dpsi_l
+            d_lat -= (lev[1] - prev_lev[1]) + prev_lev[0] * dpsi_l
+        self.ipm_lat += d_lat
         self.ipm_fwd += d_fwd
         # ШУМ КАНАЛА онлайн: |приращение за кадр − v̂·dt| (v̂ — отфильтрованная скорость
         # ПРОШЛОГО кадра), сглажено τ=2 с; ≈0.8σ покадрового шума пути (м/кадр).

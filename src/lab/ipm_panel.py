@@ -54,7 +54,9 @@ def warp_panel(gray, est, alt, pitch, roll, t, zoom=3, agl=None, extra=()):
     # ⚠️ ПРОЕЦИРОВАТЬ ПО ТОЙ ЖЕ ВЫСОТЕ, ЧТО СЧИТАЛА ВАРП: `_ipm_update` применяет
     # пол ipm_alt_floor ВНУТРИ, и рамка, нарисованная по сырой высоте, легла бы
     # не туда (у земли промах в разы). Одна строка — но без неё картинка врёт.
-    h_geom = max(alt, est.ipm_alt_floor) if est.ipm_alt_floor > 0.0 else alt
+    # С выносом камеры (cam_lever) высота геометрии ещё и = высота КАМЕРЫ —
+    # поэтому спрашиваем сам оценщик, а не повторяем формулу.
+    h_geom = est._ipm_geom_h(alt, pitch, roll)
     geo, rect = est._ipm_prev_geo, est._ipm_prev
     if geo is not None:
         x0, length, yhalf, _res = geo
@@ -68,7 +70,7 @@ def warp_panel(gray, est, alt, pitch, roll, t, zoom=3, agl=None, extra=()):
             _text(view, f'{x0:.2f}..{x0+length:.2f}m',
                   (pts[0][0], min(pts[0][1] + 22, view.shape[0] - 6)), 0.6, YELLOW)
     ok = est.ipm_fail == 0
-    floor = ' (floor)' if h_geom > alt + 1e-9 else ''
+    floor = ' (floor)' if est.ipm_alt_floor > 0.0 and h_geom <= est.ipm_alt_floor + 1e-9 else ''
     head = f't{t:5.1f}s  '
     if agl is not None:
         head += f'AGL {agl:.2f}m  '

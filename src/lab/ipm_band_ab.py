@@ -337,7 +337,7 @@ def main():
                 # углы полосы, которую канал ТОЛЬКО ЧТО обработал, за кадром → чёрные
                 # клинья в варпе (проецируем той же высотой, что считала варп)
                 x0g, ln, yhg, _ = g
-                h = max(alt, est.ipm_alt_floor) if est.ipm_alt_floor > 0 else alt
+                h = est._ipm_geom_h(alt, pitch, roll)
                 out = 0
                 for X, Y in ((x0g, -yhg), (x0g, yhg), (x0g + ln, yhg), (x0g + ln, -yhg)):
                     p = est._ipm_px(X, Y, h, pitch, roll)

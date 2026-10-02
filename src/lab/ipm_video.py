@@ -69,7 +69,7 @@ from std_msgs.msg import String                                          # noqa:
 
 from control_pkg.perception.flow_estimator import FlowEstimator          # noqa: E402
 from mission_pkg.config import BootstrapConfig                           # noqa: E402
-from mission_pkg.nodes.bootstrap_node import FLOW_R, FLOW_ROTSIGN, CAM_TILT  # noqa: E402
+from mission_pkg.nodes.bootstrap_node import CAMERA, FLOW_R, FLOW_ROTSIGN, CAM_TILT  # noqa: E402
 # ⚠️ камера — ТЕКУЩИЙ CAM_CFG (не та, с которой летал bag): старые прогоны (до
 # 2026-10-01, наклон 0.26) рисовать с CAM_CFG на yaml той камеры.
 
@@ -86,7 +86,7 @@ ALT_SRC = os.environ.get('IPM_ALT_SRC', 'auto')
 FPS_PROBE_N = 60                 # кадров на авто-оценку fps
 # ручки канала, которые кладёт в оценщик bootstrap_node (те же BS_-имена)
 IPM_KNOBS = ('ipm_model', 'ipm_derot', 'ipm_wz_tau', 'ipm_wz_gate', 'ipm_win', 'ipm_adapt',
-             'ipm_vel_tau', 'ipm_alt_floor', 'ipm_scale_ref', 'ipm_acc_tau')
+             'ipm_vel_tau', 'ipm_alt_floor', 'ipm_scale_ref', 'ipm_acc_tau', 'ipm_acc_world')
 
 
 def env_from_archive(bag):
@@ -112,6 +112,10 @@ def env_from_archive(bag):
             os.environ[k] = v
             n += 1
     # прогоны до 2026-10-02 летели без учёта выноса камеры — ключа в их мете нет
+    for k in ('BS_IPM_LEVER', 'BS_IPM_ACC_WORLD'):   # ручки 2026-10-02: старые прогоны без них
+        if k not in os.environ:
+            os.environ[k] = '0'
+            n += 1
     return f'{path} (+{n} BS_*)'
 
 
@@ -125,6 +129,8 @@ def flight_cfg():
     # PROFILES (пост-рендер из freefly_lv до архива); иначе SystemExit с именами ключей.
     base = BootstrapConfig.from_run()
     cfg = {k: getattr(base, k) for k in IPM_KNOBS}
+    # вынос камеры — как в bootstrap_node: значения из CAM_CFG, включает BS_IPM_LEVER
+    cfg['cam_lever'] = CAMERA.t if base.ipm_lever else (0.0, 0.0, 0.0)
     return base, cfg, []
 
 
