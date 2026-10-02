@@ -78,6 +78,22 @@ try:
 except ValueError:
     check('не ортонормирована → отказ', True)
 
+# 6. интринсики: калибровка под разрешение кадра, идеальная камера сима, отказ на чужих пропорциях
+check('бортовой: 960×540 → 480/480/480/270', close(board.intrinsics_for(960, 540, ideal=False),
+                                                  (480, 480, 480, 270)))
+check('бортовой: угол обзора Gazebo 90°', abs(board.sim_hfov - math.pi / 2) < 1e-9)
+k = CameraMount(OLD_R, [0, 0, 0], 'k', K=(700, 705, 650, 350, 1280, 720))
+check('калибровка 700/705/650/350 @1280 → 960: ×0.75', close(k.intrinsics_for(960, 540, ideal=False),
+                                                             (525, 528.75, 487.5, 262.5)))
+check('ideal: фокус калибровки, квадратный пиксель, центр посередине',
+      close(k.intrinsics_for(960, 540, ideal=True), (525, 525, 480, 270)))
+check('угол обзора Gazebo = 2·atan(W/2fx)', abs(k.sim_hfov - 2 * math.atan(1280 / 1400)) < 1e-12)
+try:
+    k.intrinsics_for(1920, 1200, ideal=False)
+    check('чужие пропорции кадра → отказ', False)
+except ValueError:
+    check('чужие пропорции кадра → отказ', True)
+
 bad = [n for n, ok in results if not ok]
 print(f'\n{len(results) - len(bad)}/{len(results)} OK')
 sys.exit(1 if bad else 0)

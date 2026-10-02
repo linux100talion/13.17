@@ -293,13 +293,13 @@ def main():
         else:
             continue
         if est is None:
-            # интринсики — из разрешения кадра (pinhole 90° hfov), ровно как их
-            # считает RosPerception из cam_w/cam_h ноды
-            fx = fy = msg.width / 2.0
-            est = FlowEstimator(fx, fy, msg.width / 2.0, msg.height / 2.0,
+            # интринсики — как у ноды: конфиг камеры под разрешение кадра (CAM_IDEAL
+            # в контейнере сима — идеальная камера Gazebo)
+            fx, fy, cx, cy = CAMERA.intrinsics_for(msg.width, msg.height)
+            est = FlowEstimator(fx, fy, cx, cy,
                                 FLOW_R, FLOW_ROTSIGN, cam_tilt=CAM_TILT, **cfg)
-            print(f'  кадр {msg.width}×{msg.height} → fx=fy={fx:.0f} '
-                  f'cx={msg.width/2:.0f} cy={msg.height/2:.0f}')
+            print(f'  кадр {msg.width}×{msg.height} → fx/fy={fx:.0f}/{fy:.0f} '
+                  f'cx={cx:.0f} cy={cy:.0f}')
         roll = float(np.interp(t, od[:, 0], od[:, 2]))
         pitch = float(np.interp(t, od[:, 0], od[:, 3]))
         wz = float(np.interp(t, od[:, 0], od[:, 7]))

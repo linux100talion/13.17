@@ -68,6 +68,7 @@ services:
       # (экстринсики VINS), bootstrap_node (демпфер): control_pkg/perception/camera_mount.py
       - CAM_CFG=${CAM_CFG:-distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml}
       - REPO_ROOT=/root/repo
+      - CAM_IDEAL=1                         # сим рисует идеальную камеру (центр посередине, без дисторсии)
 
     # iGPU (Intel, DRI3) для ОКНА `make gui`: X-сервер гибридного ноута сидит на
     # /dev/dri/card*, без проброса Mesa в контейнере падает на llvmpipe (софт-рендер,
@@ -130,6 +131,7 @@ services:
       - CAMERA_H=${CAMERA_H:-720}
       - CAM_CFG=${CAM_CFG:-distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml}
       - REPO_ROOT=/root/repo
+      - CAM_IDEAL=1                         # сим рисует идеальную камеру (центр посередине, без дисторсии)
 
     # Виртуальная камера: байеризатор пишет сюда, camera_node читает отсюда.
     # /dev/rawbayer создаётся на ХОСТЕ модулем v4l2loopback (см. README).

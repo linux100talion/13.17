@@ -7,7 +7,13 @@
 
   * поза `camera_link` дрона в Gazebo  — `sdf_pose()`   (sim_up.sh, model.sdf);
   * экстринсики VINS в симе            — `R`, `t`        (sim_nav.launch.py, sim.yaml);
-  * поворот и наклон канала вида сверху — `flow_R`, `tilt` (bootstrap_node, демпфер).
+  * поворот и наклон канала вида сверху — `flow_R`, `tilt` (bootstrap_node, демпфер);
+  * ИНТРИНСИКИ демпфера — `intrinsics_for(w, h)`: fx/fy/cx/cy калибровки (projection_parameters
+    при image_width×image_height), пересчитанные под фактический кадр (с 2026-10-02; до того
+    демпфер брал идеальную камеру 90° из разрешения). Дисторсию демпфер пока НЕ снимает;
+  * угол обзора камеры Gazebo и интринсики VINS сима — `sim_hfov`, `intrinsics_for(…, ideal)`:
+    сим рисует идеальную камеру (квадратный пиксель, центр посередине, без дисторсии) с фокусом
+    конфига — в симе демпфер берёт ровно её (env CAM_IDEAL=1, compose).
 
 Ручек «наклон», «сдвиг» нет нарочно — второй источник правды. Другая камера =
 другой yaml: env `CAM_CFG` (путь; относительный — от корня репо, см. `cam_cfg_path`).
@@ -102,13 +108,33 @@ def cam_cfg_path(path=None):
     return p
 
 
-class CameraMount:
-    """R (imu^R_cam), t (м) и всё, что из них выводится."""
+def read_scalar(text, name, block=None):
+    """Число `name: value` (внутри блока `block:` с отступом, если задан)."""
+    if block:
+        m = re.search(r'^' + re.escape(block) + r'\s*:\s*\n((?:[ \t]+.*\n?)+)', text, re.M)
+        if not m:
+            raise ValueError(f'нет блока {block}')
+        text = m.group(1)
+    m = re.search(r'^\s*' + re.escape(name) + r'\s*:\s*([-+0-9.eE]+)', text, re.M)
+    if not m:
+        raise ValueError(f'нет {block + "." if block else ""}{name}')
+    return float(m.group(1))
 
-    def __init__(self, R, t, source='?'):
+
+def cam_ideal():
+    """Камера — идеальная (сим: Gazebo рисует pinhole с центром посередине)? env CAM_IDEAL."""
+    return os.environ.get('CAM_IDEAL', '0') not in ('', '0', 'false', 'False')
+
+
+class CameraMount:
+    """R (imu^R_cam), t (м), интринсики калибровки и всё, что из них выводится."""
+
+    def __init__(self, R, t, source='?', K=None):
         self.R = tuple(tuple(float(v) for v in r) for r in R)
         self.t = tuple(float(v) for v in t)
         self.source = source
+        # (fx, fy, cx, cy, ширина, высота) калибровки; None — не заданы (тогда идеальная 90°)
+        self.K = tuple(float(v) for v in K) if K is not None else None
         for i in range(3):
             for j in range(3):
                 d = sum(self.R[k][i] * self.R[k][j] for k in range(3)) - (i == j)
@@ -129,7 +155,37 @@ class CameraMount:
             text = fh.read()
         R = read_matrix(text, 'extrinsicRotation')
         t = [r[0] for r in read_matrix(text, 'extrinsicTranslation')]
-        return cls(R, t, p)
+        K = tuple(read_scalar(text, k, 'projection_parameters') for k in ('fx', 'fy', 'cx', 'cy')) \
+            + (read_scalar(text, 'image_width'), read_scalar(text, 'image_height'))
+        return cls(R, t, p, K)
+
+    def intrinsics_for(self, w, h, ideal=None):
+        """(fx, fy, cx, cy) для кадра w×h: калибровка, пересчитанная под разрешение.
+
+        Пропорции кадра обязаны совпадать с калибровкой (другой режим сенсора — обрезка, а не
+        масштаб: пересчёт был бы неверен) — иначе ValueError. ideal (None → env CAM_IDEAL):
+        камера, которую рисует сим — фокус калибровки, квадратный пиксель, центр посередине."""
+        w, h = float(w), float(h)
+        if self.K is None:
+            return w / 2.0, w / 2.0, w / 2.0, h / 2.0
+        fx, fy, cx, cy, W, H = self.K
+        if abs(w / h - W / H) > 0.01 * (W / H):
+            raise ValueError(f'{self.source}: кадр {w:.0f}×{h:.0f} не в пропорциях калибровки '
+                             f'{W:.0f}×{H:.0f} — пересчитать интринсики масштабом нельзя')
+        s = w / W
+        if ideal is None:
+            ideal = cam_ideal()
+        if ideal:
+            return fx * s, fx * s, w / 2.0, h / 2.0
+        return fx * s, fy * s, cx * s, cy * s
+
+    @property
+    def sim_hfov(self):
+        """Горизонтальный угол обзора, рад, камеры Gazebo с фокусом калибровки."""
+        if self.K is None:
+            return math.pi / 2.0
+        fx, _fy, _cx, _cy, W, _H = self.K
+        return 2.0 * math.atan(W / (2.0 * fx))
 
     @property
     def flow_R(self):
@@ -157,9 +213,14 @@ class CameraMount:
 
     def summary(self):
         r, p, y = (math.degrees(v) + 0.0 for v in self.link_rpy)
+        k = ''
+        if self.K is not None:
+            fx, fy, cx, cy, W, H = self.K
+            k = (f'; fx/fy {fx:g}/{fy:g} cx/cy {cx:g}/{cy:g} @ {W:.0f}×{H:.0f} '
+                 f'(обзор {math.degrees(self.sim_hfov):.1f}°)')
         return (f'камера {self.source}: t=({self.t[0]:+.3f}, {self.t[1]:+.3f}, '
                 f'{self.t[2]:+.3f}) м, наклон вниз {math.degrees(self.tilt) + 0.0:.2f}° '
-                f'(link rpy {r:.2f}/{p:.2f}/{y:.2f}°)')
+                f'(link rpy {r:.2f}/{p:.2f}/{y:.2f}°){k}')
 
 
 def main(argv):
@@ -167,13 +228,17 @@ def main(argv):
     ap = argparse.ArgumentParser(description='положение камеры из бортового yaml VINS')
     ap.add_argument('yaml', nargs='?', help='путь (по умолчанию env CAM_CFG / бортовой)')
     ap.add_argument('--sdf-pose', action='store_true', help='напечатать <pose> camera_link')
+    ap.add_argument('--sim-hfov', action='store_true', help='напечатать horizontal_fov камеры Gazebo, рад')
     a = ap.parse_args(argv)
     try:
         cm = CameraMount.load(a.yaml)
     except (OSError, ValueError) as e:
         print(f'camera_mount: ОШИБКА: {e}', file=sys.stderr)
         return 1
-    print(cm.sdf_pose() if a.sdf_pose else cm.summary())
+    if a.sim_hfov:
+        print(f'{cm.sim_hfov:.6f}')
+    else:
+        print(cm.sdf_pose() if a.sdf_pose else cm.summary())
     return 0
 
 

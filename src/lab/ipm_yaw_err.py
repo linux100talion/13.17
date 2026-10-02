@@ -147,7 +147,7 @@ def main(run):
         buf = np.frombuffer(m.data, dtype=np.uint8)
         gray = cv2.cvtColor(buf.reshape(m.height, m.width, 3), cv2.COLOR_BGR2GRAY)
         if not ests:
-            fx = m.width / 2.0
+            fx, fy, cx, cy = cam.intrinsics_for(m.width, m.height)   # сим-bag: CAM_IDEAL=1
             for n in names:
                 c = dict(cfg)
                 if n == 'noderot':
@@ -158,7 +158,7 @@ def main(run):
                     c['ipm_acc_tau'] = 0.0
                 if n in ('accw', 'accwlever', 'accwneg', 'accw2'):
                     c['ipm_acc_world'] = True
-                ests[n] = FlowEstimator(fx, fx, m.width / 2.0, m.height / 2.0, cam.flow_R, 1.0,
+                ests[n] = FlowEstimator(fx, fy, cx, cy, cam.flow_R, 1.0,
                                         cam_tilt=cam.tilt,
                                         cam_lever=cam.t if n in ('lever', 'rawlever', 'accwlever')
                                         else (0.0, 0.0, 0.0), **c)

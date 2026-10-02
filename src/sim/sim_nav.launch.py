@@ -69,9 +69,10 @@ def _vins_config(width, height):
     Сим верит им жёстко (estimate_extrinsic: 0 в sim.yaml): Gazebo ставит камеру
     ровно туда, ошибки крепления в симе нет.
 
-    Базовый sim.yaml посчитан под 1280×720. При другом разрешении (CPU-режим)
-    масштабируем image_width/height + интринсики fx/fy/cx/cy ИЗ ОДНОГО ИСТОЧНИКА
-    (sim.yaml) — без второго .yaml, который бы дрейфовал.
+    Интринсики (fx/fy/cx/cy) и разрешение — тоже из конфига камеры (с 2026-10-02): камера,
+    которую рисует Gazebo (фокус конфига под текущее разрешение, центр посередине, пиксель
+    квадратный; sim_up.sh ставит по тому же фокусу horizontal_fov). Значения в sim.yaml —
+    заглушка. Дисторсия sim.yaml нулевая: Gazebo рисует без неё.
     """
     cm = _camera_mount_module()
     cam = cm.CameraMount.load()
@@ -81,7 +82,10 @@ def _vins_config(width, height):
     text = cm.replace_matrix(text, "extrinsicRotation", [list(r) for r in cam.R])
     text = cm.replace_matrix(text, "extrinsicTranslation", [[v] for v in cam.t])
 
-    sx, sy = width / 1280.0, height / 720.0
+    # интринсики VINS сима — камера, которую РИСУЕТ Gazebo: фокус из конфига камеры (sim_up.sh
+    # ставит по нему horizontal_fov), квадратный пиксель, центр посередине, без дисторсии
+    kfx, kfy, kcx, kcy = cam.intrinsics_for(width, height, ideal=True)
+    kv = {"fx": kfx, "fy": kfy, "cx": kcx, "cy": kcy}
     out_lines = []
     for ln in text.splitlines():
         m = re.match(r"^(\s*)(image_width|image_height|fx|fy|cx|cy)(\s*:\s*)([0-9.]+)(.*)$", ln)
@@ -91,10 +95,8 @@ def _vins_config(width, height):
                 nv = str(width)
             elif key == "image_height":
                 nv = str(height)
-            elif key in ("fx", "cx"):       # масштаб по ширине
-                nv = f"{float(val) * sx:.6g}"
-            else:                            # fy, cy — по высоте
-                nv = f"{float(val) * sy:.6g}"
+            else:
+                nv = f"{kv[key]:.6g}"
             ln = f"{indent}{key}{sep}{nv}{tail}"
         out_lines.append(ln)
 

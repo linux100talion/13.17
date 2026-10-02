@@ -73,7 +73,7 @@ class RosPerception:
                  att_interp=False, att_latency=0.0,
                  att_wait_max=0.15, att_src='ekf', cam_tilt=None,
                  cam_lever=None, ipm_acc_world=None, ipm_scale_exact=None,
-                 ipm_ground_clear=None):
+                 ipm_ground_clear=None, intrinsics=None):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -113,8 +113,13 @@ class RosPerception:
             from nav_msgs.msg import Odometry
             node.create_subscription(Odometry, '/model/iris_cam/odometry',
                                      self._on_truth_att, 10)
-        fx = fy = cam_w / 2.0          # pinhole 90° hfov
-        cx, cy = cam_w / 2.0, cam_h / 2.0
+        # интринсики (fx, fy, cx, cy) под кадр cam_w×cam_h: из конфига камеры (camera_mount,
+        # bootstrap_node); None — идеальная камера 90° из разрешения (как было до 2026-10-02)
+        if intrinsics is not None:
+            fx, fy, cx, cy = (float(v) for v in intrinsics)
+        else:
+            fx = fy = cam_w / 2.0          # pinhole 90° hfov
+            cx, cy = cam_w / 2.0, cam_h / 2.0
         # Затвор опоры по высоте — две ручки, обе наружу (свип E1, разбор в ToDo5.md):
         #   kf_alt_max  — ПОРОГ заморозки: ушла высота больше — кадр недостоверен,
         #                 регулятор по нему не командует;

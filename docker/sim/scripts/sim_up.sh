@@ -42,6 +42,11 @@ if n != 1:
     sys.exit("ОШИБКА: не нашёл <pose> camera_link в model.sdf")
 open(path, 'w').write(s)
 PYEOF
+# угол обзора камеры Gazebo — по фокусу того же конфига: 2·atan(W/2fx) (идеальная камера с
+# центром посередине; демпфер и VINS сима берут ровно её — CAM_IDEAL=1, sim_nav.launch.py)
+CAM_HFOV="$(python3 "$CAM_MOUNT_PY" --sim-hfov)" || { echo "ОШИБКА: угол обзора камеры" >&2; exit 1; }
+sed -i "s|<horizontal_fov>[^<]*</horizontal_fov>|<horizontal_fov>${CAM_HFOV}</horizontal_fov>|" \
+    "$PATCH/iris_cam/model.sdf"
 echo "  $(python3 "$CAM_MOUNT_PY")"
 CAM_W="${CAMERA_W:-1280}"; CAM_H="${CAMERA_H:-720}"
 if [ "$CAM_W" != "1280" ] || [ "$CAM_H" != "720" ]; then

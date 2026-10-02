@@ -41,7 +41,7 @@ from control_pkg.infrastructure.mavros_actuator import MavrosActuator
 from control_pkg.infrastructure.ros_clock import RosClock
 from control_pkg.infrastructure.ros_io import RosDebugSink, RosLogger
 from control_pkg.infrastructure.ros_perception import RosPerception
-from control_pkg.perception.camera_mount import CameraMount
+from control_pkg.perception.camera_mount import CameraMount, cam_ideal
 from control_pkg.infrastructure.ros_pilot import (JoyPilot, PressEdge, RosPilot,
                                                   ScriptedPilot)
 from control_pkg.infrastructure.ros_telemetry import RosTelemetry
@@ -147,7 +147,12 @@ class BootstrapArch2Node(Node):
             self.get_logger().info(CAMERA.summary())
             w = float(os.environ.get('CAMERA_W', 1280))
             h = float(os.environ.get('CAMERA_H', 720))
+            K = CAMERA.intrinsics_for(w, h)
+            self.get_logger().info(f'интринсики демпфера {w:.0f}×{h:.0f}: fx/fy {K[0]:.1f}/{K[1]:.1f} '
+                                   f'cx/cy {K[2]:.1f}/{K[3]:.1f}'
+                                   + (' (идеальная камера сима, CAM_IDEAL)' if cam_ideal() else ''))
             self.perception = RosPerception(self, w, h, FLOW_R, FLOW_ROTSIGN,
+                                            intrinsics=K,
                                             cam_tilt=CAM_TILT,
                                             cam_lever=CAMERA.t if cfg.ipm_lever else None,
                                             roll_smooth_n=cfg.roll_smooth,
