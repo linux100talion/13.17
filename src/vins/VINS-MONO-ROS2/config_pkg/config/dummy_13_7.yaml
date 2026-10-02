@@ -34,11 +34,19 @@ td: 0.0             # Начальное предположение о заде�
 estimate_extrinsic: 1
 ex_calib_result_path: "/home/andriy/vins_ws/extrinsic.yaml"
 
+# Конвенция VINS: imu^R_cam, СТОЛБЦЫ — оси камеры (X вправо, Y вниз, Z вперёд)
+# в теле FLU (/mavros/imu/data_raw). Камера горизонтально вперёд, без наклона:
+# X_cam=-Y_body, Y_cam=-Z_body, Z_cam=+X_body (как sim.yaml с 2026-10-01).
+# ⚠️ До 2026-10-01 тут стояла ЕДИНИЧНАЯ матрица = камера смотрит ВВЕРХ
+# (Z_cam=+Z_body): estimate_extrinsic 1 уточнял её от начальной ошибки в 90°.
+# Заготовка до калибровки Kalibr (src/vins/calib/README.md).
 extrinsicRotation: !!opencv-matrix
    rows: 3
    cols: 3
    dt: d
-   data: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+   data: [0, 0, 1,
+          -1, 0, 0,
+          0, -1, 0]
 
 # В метрах
 # Допустим, камера закреплена на 

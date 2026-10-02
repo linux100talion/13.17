@@ -44,11 +44,11 @@ docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "sourc
 PID1=$!
 
 # 2. Feature Tracker
-docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && exec ros2 run feature_tracker feature_tracker --ros-args -p config_file:=/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/dummy_13_7.yaml" &
+docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && exec ros2 run feature_tracker feature_tracker --ros-args -p config_file:=/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml" &
 PID2=$!
 
 # 3. VINS Estimator
-docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && exec ros2 run vins_estimator vins_estimator --ros-args -p config_file:=/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/dummy_13_7.yaml --remap /feature_tracker/feature:=/feature --remap /feature_tracker/restart:=/restart" &
+docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 $CONTAINER bash -c "source /root/vins_ws/install/setup.bash && exec ros2 run vins_estimator vins_estimator --ros-args -p config_file:=/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml --remap /feature_tracker/feature:=/feature --remap /feature_tracker/restart:=/restart" &
 PID3=$!
 
 # Удерживаем скрипт активным

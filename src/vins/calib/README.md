@@ -1,6 +1,6 @@
 # Калибровка бортовой камеры и связки камера–IMU (Kalibr → VINS-Mono)
 
-Бортовой `config_pkg/config/dummy_13_7.yaml` до сих пор несёт **заглушки**: интринсики
+Бортовой `distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml` (бывш. `dummy_13_7.yaml`; с 2026-10-01 он же — источник положения камеры для сима и демпфера, `control_pkg/perception/camera_mount.py`) до сих пор несёт **заглушки**: интринсики
 сима (`fx=fy=640, cx=640, cy=360`, дисторсия 0), `extrinsicRotation` = единичная,
 трансляция «на глаз», шумы IMU «×10 от чипа». Всё это надо ИЗМЕРИТЬ, прежде чем VINS
 полетит на реальном борте. Инструмент — **Kalibr**; VINS-Mono съедает его выход
@@ -13,7 +13,7 @@
 | Kalibr (исходники) | `/home/andriy/kalibr` (клон на хосте, вне репо — как форк VINS) | `ethz-asl/kalibr` @ **`1f60227`** (master, 2024-03-08) |
 | Kalibr (образ) | `docker images kalibr:1f60227` | собран из того же клона, `Dockerfile_ros1_20_04` (ROS1 noetic) |
 | Мишень | `aprilgrid_pvc1000.*` — основная (ПВХ 1×1 м); `aprilgrid_a1.*` — бумажный запасной вариант; `aprilgrid_a4.*` — настольная (этот каталог) | сгенерированы `kalibr_create_target_pdf` того же коммита |
-| Потребитель | `src/vins/VINS-MONO-ROS2/config_pkg/config/dummy_13_7.yaml` | форк `1317_debug` |
+| Потребитель | `distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml` | форк `1317_debug` |
 
 Пересборка образа / регенерация мишени:
 ```bash
@@ -100,10 +100,10 @@ docker run --rm -v $PWD:/out --entrypoint bash kalibr:1f60227 -c \
    `intrinsics [fu fv pu pv]` → `fx fy cx cy`, `distortion_coeffs [k1 k2 p1 p2]`.
 4. **Шумы IMU** (Аллан): статичный bag IMU 2–3 ч → `allan_variance_ros` →
    `acc_n gyr_n acc_w gyr_w` (в `imu.yaml` Kalibr — те же, ×5–10 по их рекомендации
-   для шага 5; в `dummy_13_7.yaml` — измеренные).
+   для шага 5; в `config.yaml` — измеренные).
 5. **Камера–IMU**: `kalibr_calibrate_imu_camera --bag imucam.bag --cam camchain.yaml
    --imu imu.yaml --target aprilgrid_pvc1000.yaml` → `T_cam_imu` и `timeshift_cam_imu`.
-6. **Перенос в `dummy_13_7.yaml`**: Kalibr даёт `T_cam_imu` (точки IMU → камера), VINS
+6. **Перенос в `config.yaml`**: Kalibr даёт `T_cam_imu` (точки IMU → камера), VINS
    ждёт обратное — `extrinsicRotation/Translation` = **`inv(T_cam_imu)`** (камера →
    IMU/body). `td` = `timeshift_cam_imu` (обе стороны: `t_imu = t_cam + shift`).
    ⚠️ Транспонирование матрицы здесь уже ловили в симе (память `vins-solver-fix`) —
