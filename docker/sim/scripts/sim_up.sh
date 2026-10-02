@@ -14,22 +14,43 @@ source /opt/ros/humble/setup.bash
 LOG=/root/output; mkdir -p "$LOG"
 WORLD="${WORLD:-/root/worlds/mili_fortress.sdf}"
 
-# Разрешение камеры: env CAMERA_W/CAMERA_H (default 1280×720). В GPU-less прогоне
-# (llvmpipe) CPU-оверрайд compose ставит 320×180 — в ~16 раз меньше пикселей под
-# софтрендер. SDF статичен (gz не подставляет env), поэтому при не-дефолтном
-# разрешении кладём ПАТЧЕНУЮ копию модели iris_cam в /tmp и выводим её первой в
-# GZ_SIM_RESOURCE_PATH — репозиторную модель не трогаем (git чист).
+# Модель iris_cam грузится ВСЕГДА из патченной копии в /tmp (первой в
+# GZ_SIM_RESOURCE_PATH) — репозиторную модель не трогаем (git чист). SDF статичен
+# (gz не подставляет env), поэтому патчим:
+#
+# 1) ПОЛОЖЕНИЕ КАМЕРЫ — из бортового конфига VINS (env CAM_CFG, путь от корня репо,
+#    репо смонтировано ro в /root/repo). Поза camera_link вычисляется из его
+#    extrinsicRotation/Translation (control_pkg/perception/camera_mount.py) — тот же
+#    файл читают VINS сима (sim_nav.launch.py) и демпфер (bootstrap_node). Правка
+#    файла применяется на restart-all, смена CAM_CFG — на fresh-start (env compose).
+# 2) Разрешение: env CAMERA_W/CAMERA_H (default 1280×720). В GPU-less прогоне
+#    (llvmpipe) CPU-оверрайд compose ставит 320×180 — в ~16 раз меньше пикселей.
 PATCH=/tmp/sim_models
+rm -rf "$PATCH"; mkdir -p "$PATCH"
+cp -a /root/worlds/iris_cam "$PATCH/iris_cam"
+CAM_MOUNT_PY=/root/repo/src/control/control_pkg/perception/camera_mount.py
+CAM_POSE="$(python3 "$CAM_MOUNT_PY" --sdf-pose)" || {
+    echo "ОШИБКА: положение камеры не прочитано (CAM_CFG=${CAM_CFG:-?}) — gz не стартую" >&2
+    exit 1; }
+python3 - "$PATCH/iris_cam/model.sdf" "$CAM_POSE" <<'PYEOF'
+import re, sys
+path, pose = sys.argv[1:3]
+s = open(path).read()
+s, n = re.subn(r'(<link name="camera_link">\s*<pose relative_to="iris_with_standoffs::base_link">)'
+               r'[^<]*(</pose>)', lambda m: m.group(1) + pose + m.group(2), s)
+if n != 1:
+    sys.exit("ОШИБКА: не нашёл <pose> camera_link в model.sdf")
+open(path, 'w').write(s)
+PYEOF
+echo "  $(python3 "$CAM_MOUNT_PY")"
 CAM_W="${CAMERA_W:-1280}"; CAM_H="${CAMERA_H:-720}"
 if [ "$CAM_W" != "1280" ] || [ "$CAM_H" != "720" ]; then
-    rm -rf "$PATCH"; mkdir -p "$PATCH"
-    cp -a /root/worlds/iris_cam "$PATCH/iris_cam"
     sed -i "s|<width>1280</width>|<width>${CAM_W}</width>|; \
             s|<height>720</height>|<height>${CAM_H}</height>|" \
         "$PATCH/iris_cam/model.sdf"
-    export GZ_SIM_RESOURCE_PATH="$PATCH:${GZ_SIM_RESOURCE_PATH}"
-    echo "  камера: SDF пропатчен до ${CAM_W}x${CAM_H} (модель из $PATCH)"
+    echo "  камера: SDF пропатчен до ${CAM_W}x${CAM_H}"
 fi
+export GZ_SIM_RESOURCE_PATH="$PATCH:${GZ_SIM_RESOURCE_PATH}"
 
 # ── ВЕТЕР (Gazebo WindEffects) ────────────────────────────────────────────────
 # WIND_SPD=0 → выкл (мир и модель не трогаем вовсе). Иначе тем же приёмом, что и

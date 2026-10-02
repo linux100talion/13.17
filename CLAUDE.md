@@ -261,7 +261,8 @@ git clone --branch 1317_debug https://github.com/linux100talion/VINS-MONO-ROS2 /
 ```
 
 Конфиги: `src/vins/VINS-MONO-ROS2/config_pkg/config/`
-- `dummy_13_7.yaml` — бортовой (реальный ArduCam)
+- бортовой (реальный ArduCam) — `distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml`
+  (бывш. `dummy_13_7.yaml`; его читают `vins_service*.sh`, он же — положение камеры для сима)
 - `sim.yaml` — симуляция (см. ниже)
 
 ---
@@ -472,8 +473,16 @@ CUDA + OpenCV-с-CUDA даром). `runtime: nvidia`, `network_mode: host`,
 ## Дрон — `worlds/iris_cam/`
 
 `iris_with_ardupilot` из ardupilot_gazebo (проверена под SITL: моторы, IMU,
-`ArduPilotPlugin`@9002) + камера пилота (параметры из concept.txt: поза
-`0.15 0 0.05`, наклон 0.26, fov 1.5708; но 1280×720). Прикреплена к
+`ArduPilotPlugin`@9002) + камера пилота (fov 1.5708, 1280×720). **Положение
+камеры — из ОДНОГО файла**, бортового конфига VINS
+`distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml`
+(ручка `CAM_CFG` в `docker/sim/.env`, путь от корня репо; репо ro в `/root/repo`
+обоих контейнеров). Из его `extrinsicRotation/Translation` вычисляются
+(`control_pkg/perception/camera_mount.py`, тест `test_camera_mount.py`): поза
+camera_link в Gazebo (`sim_up.sh`), экстринсики VINS сима (`sim_nav.launch.py`),
+`FLOW_R`/`CAM_TILT` демпфера (`bootstrap_node`), плечо `ray_tracer`. Значения в
+`model.sdf`/`sim.yaml` — заглушки. С 2026-10-01 камера как на борту: `0.14 0 -0.06`,
+горизонтально (до того concept `0.15 0 0.05`, наклон 0.26). Прикреплена к
 `iris_with_standoffs::base_link`, публикует gz-топик `camera/image_raw`.
 
 ## sim.yaml (VINS для Gazebo)

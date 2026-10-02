@@ -67,8 +67,11 @@ class RayTracer(Node):
         self.declare_parameter("cx", 640.0)
         self.declare_parameter("cy", 360.0)
         # монтаж камеры (model.sdf): rpy camlink относительно body + рычаг (м)
-        self.declare_parameter("cam_mount_rpy", [0.0, 0.26, 0.0])
-        self.declare_parameter("cam_mount_xyz", [0.15, 0.0, 0.05])
+        # Положение камеры — из бортового конфига VINS (extrinsicRotation = R тело←оптика,
+        # extrinsicTranslation = плечо в теле); тот же файл ставит камеру в Gazebo и
+        # кормит демпфер (control_pkg/perception/camera_mount.py — nav_pkg его не
+        # импортирует, читаем OpenCV'ом). Пусто → env CAM_CFG (+ REPO_ROOT) → бортовой путь.
+        self.declare_parameter("cam_cfg", "")
         # сглаживание поправки: 1.0 = жёсткий сброс на каждой засечке
         self.declare_parameter("correction_alpha", 1.0)
         self.declare_parameter("anchor_pos_std", 2.0)   # σ засечки, м
@@ -155,10 +158,11 @@ class RayTracer(Node):
         self.alpha = float(self.get_parameter("correction_alpha").value)
         self.anchor_std = float(self.get_parameter("anchor_pos_std").value)
 
-        # статичный разворот optical(CV) -> body: R_body_camlink @ R_camlink_opt
-        rpy = self.get_parameter("cam_mount_rpy").value
-        self.R_body_opt = geo.rpy_to_rotmat(*rpy) @ geo.R_CAMLINK_OPT
-        self.lever_body = np.array(self.get_parameter("cam_mount_xyz").value)
+        # статичный разворот optical(CV) -> body и плечо камеры в теле
+        self.R_body_opt, self.lever_body = geo.load_camera_mount(
+            self.get_parameter("cam_cfg").value)
+        self.get_logger().info(f"камера: R_body_opt={self.R_body_opt.tolist()} "
+                               f"lever={self.lever_body.tolist()}")
 
         self._load_db()
 

@@ -63,6 +63,11 @@ services:
       #   WORLD=/root/worlds/mili_fortress_fine.sdf
       # Применяется при СОЗДАНИИ контейнера → только fresh-start.
       - WORLD=${WORLD:-}
+      # Положение камеры — из бортового конфига VINS (путь от корня репо; репо ro
+      # в /root/repo). Читают sim_up.sh (поза camera_link), sim_nav.launch.py
+      # (экстринсики VINS), bootstrap_node (демпфер): control_pkg/perception/camera_mount.py
+      - CAM_CFG=${CAM_CFG:-distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml}
+      - REPO_ROOT=/root/repo
 
     # iGPU (Intel, DRI3) для ОКНА `make gui`: X-сервер гибридного ноута сидит на
     # /dev/dri/card*, без проброса Mesa в контейнере падает на llvmpipe (софт-рендер,
@@ -78,6 +83,7 @@ services:
       - ./scripts:/scripts:ro               # sim_up.sh запускается автоматически
       - ./config/sitl-extra.parm:/root/sitl-extra.parm:ro  # доп. параметры SITL
       - sitl_eeprom:/root/sitl_state        # eeprom.bin SITL (калибровка акселя) — выживает при fresh-start
+      - ../..:/root/repo:ro                 # корень репо: CAM_CFG (положение камеры) + camera_mount.py
 
     # sim_up.sh стартует Gazebo+SITL+bridge в фоне, потом tail держит контейнер.
     # Итерация без пересоздания: docker compose stop && docker compose start
@@ -122,6 +128,8 @@ services:
       # simulator. Применяется при СОЗДАНИИ контейнера → менять через up/fresh-start.
       - CAMERA_W=${CAMERA_W:-1280}
       - CAMERA_H=${CAMERA_H:-720}
+      - CAM_CFG=${CAM_CFG:-distro/home/andriy/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml}
+      - REPO_ROOT=/root/repo
 
     # Виртуальная камера: байеризатор пишет сюда, camera_node читает отсюда.
     # /dev/rawbayer создаётся на ХОСТЕ модулем v4l2loopback (см. README).
@@ -157,6 +165,7 @@ services:
       - nav_colcon_install:/root/sim_ws/install  # colcon install — выживает при fresh-start
       - ./output:/root/sim_ws/output
       - ./scripts:/scripts:ro                    # nav_up.sh запускается автоматически
+      - ../..:/root/repo:ro                      # корень репо: CAM_CFG (положение камеры)
 
     # nav_up.sh: colcon build (если нет) + bayerizer + VINS launch + MAVROS.
     # Итерация без пересоздания: docker compose stop && docker compose start

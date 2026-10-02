@@ -344,6 +344,9 @@ mkdir -p "$RUN_DIR"
     # полный снимок ручек ноды и ветра — ровно то, что собрал загрузчик (все поля схемы)
     python3 "$LOADER" --format plain $PROFILES
     env | { grep -E '^(BS_REPLAY_|SPAWN_|TOPICS_|GDRIVE_|MP4|HUD_MP4|IPM_MP4)' || true; } | sort
+    # положение камеры: путь и сами числа (yaml может поменяться после прогона)
+    echo "CAM_CFG=$(docker exec "$NAV" printenv CAM_CFG 2>/dev/null || echo '?')"
+    echo "# $(docker exec "$NAV" python3 /root/repo/src/control/control_pkg/perception/camera_mount.py 2>&1 | tail -1)"
 } > "$RUN_DIR/$NAME.env"
 # Каждый артефакт — со своей громкой диагностикой: шаг 4 НЕ умирает молча и не
 # молчит о пропаже (bag прогона 2026-08-22 не доехал до архива без единого слова).

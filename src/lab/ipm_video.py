@@ -69,7 +69,9 @@ from std_msgs.msg import String                                          # noqa:
 
 from control_pkg.perception.flow_estimator import FlowEstimator          # noqa: E402
 from mission_pkg.config import BootstrapConfig                           # noqa: E402
-from mission_pkg.nodes.bootstrap_node import FLOW_R, FLOW_ROTSIGN        # noqa: E402
+from mission_pkg.nodes.bootstrap_node import FLOW_R, FLOW_ROTSIGN, CAM_TILT  # noqa: E402
+# ⚠️ камера — ТЕКУЩИЙ CAM_CFG (не та, с которой летал bag): старые прогоны (до
+# 2026-10-01, наклон 0.26) рисовать с CAM_CFG на yaml той камеры.
 
 from ipm_panel import FAIL_ASCII, dbg_z_decode, warp_panel               # noqa: E402
 
@@ -109,6 +111,7 @@ def env_from_archive(bag):
         if k not in os.environ:
             os.environ[k] = v
             n += 1
+    # прогоны до 2026-10-02 летели без учёта выноса камеры — ключа в их мете нет
     return f'{path} (+{n} BS_*)'
 
 
@@ -287,7 +290,7 @@ def main():
             # считает RosPerception из cam_w/cam_h ноды
             fx = fy = msg.width / 2.0
             est = FlowEstimator(fx, fy, msg.width / 2.0, msg.height / 2.0,
-                                FLOW_R, FLOW_ROTSIGN, **cfg)
+                                FLOW_R, FLOW_ROTSIGN, cam_tilt=CAM_TILT, **cfg)
             print(f'  кадр {msg.width}×{msg.height} → fx=fy={fx:.0f} '
                   f'cx={msg.width/2:.0f} cy={msg.height/2:.0f}')
         roll = float(np.interp(t, od[:, 0], od[:, 2]))

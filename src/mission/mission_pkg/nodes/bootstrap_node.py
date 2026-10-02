@@ -41,6 +41,7 @@ from control_pkg.infrastructure.mavros_actuator import MavrosActuator
 from control_pkg.infrastructure.ros_clock import RosClock
 from control_pkg.infrastructure.ros_io import RosDebugSink, RosLogger
 from control_pkg.infrastructure.ros_perception import RosPerception
+from control_pkg.perception.camera_mount import CameraMount
 from control_pkg.infrastructure.ros_pilot import (JoyPilot, PressEdge, RosPilot,
                                                   ScriptedPilot)
 from control_pkg.infrastructure.ros_telemetry import RosTelemetry
@@ -70,9 +71,16 @@ TEL_STREAMS = (
 TEL_SILENT_SEC = 2.0     # IMU молчит дольше — телеметрия «мёртвая»
 TEL_RETRY_SEC = 3.0      # период запросов, пока молчит
 
-# Экстринсик камеры (R_cam_imu) + знак derotation — из sim.yaml/монолита, ПОДТВЕРЖДЕНЫ
-# flow_derotation_check (остаток 0.55× baseline). Интринсики — из разрешения (см. RosPerception).
-FLOW_R = [0.0, -1.0, 0.0, -0.25708, 0.0, -0.96639, 0.96639, 0.0, -0.25708]
+# Экстринсик камеры — из БОРТОВОГО конфига VINS (env CAM_CFG, в симе — тот же файл, по
+# которому sim_up.sh поставил камеру в Gazebo; perception/camera_mount.py). FLOW_R =
+# транспонированный extrinsicRotation (тело→камера, строки — оси камеры), CAM_TILT —
+# наклон оптической оси вниз. Знак derotation ПОДТВЕРЖДЁН flow_derotation_check
+# (остаток 0.55× baseline). Интринсики — из разрешения (см. RosPerception).
+# До 2026-10-01 тут были константы наклонной камеры: FLOW_R [0,-1,0,
+# -0.25708,0,-0.96639, 0.96639,0,-0.25708], наклон 0.26 рад.
+CAMERA = CameraMount.load()
+CAM_TILT = CAMERA.tilt
+FLOW_R = CAMERA.flow_R
 FLOW_ROTSIGN = 1.0
 
 # Демо-профили стиков для ScriptedPilot (sim, без живого пульта). Кортежи
@@ -136,9 +144,11 @@ class BootstrapArch2Node(Node):
                     (use_mission and 'Dp' in stab_spec) or cfg.vision_vel > 0
         self.perception = None
         if need_flow:
+            self.get_logger().info(CAMERA.summary())
             w = float(os.environ.get('CAMERA_W', 1280))
             h = float(os.environ.get('CAMERA_H', 720))
             self.perception = RosPerception(self, w, h, FLOW_R, FLOW_ROTSIGN,
+                                            cam_tilt=CAM_TILT,
                                             roll_smooth_n=cfg.roll_smooth,
                                             pitch_smooth_n=cfg.pitch_smooth,
                                             yaw_smooth_n=cfg.yaw_smooth,

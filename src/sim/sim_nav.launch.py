@@ -15,6 +15,7 @@
 # ============================================================================
 import os
 import re
+import sys
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -48,34 +49,54 @@ CAMERA_H = int(os.environ.get("CAMERA_H", "720"))
 VISION_POSE_SOURCE = os.environ.get("VISION_POSE_SOURCE", "ray_tracer")
 
 
+def _camera_mount_module():
+    """camera_mount.py: положение камеры из бортового конфига (env CAM_CFG) — тот же
+    файл, по которому sim_up.sh поставил camera_link в Gazebo, а bootstrap_node
+    считает демпфер."""
+    try:
+        from control_pkg.perception import camera_mount
+    except ImportError:
+        sys.path.insert(0, os.path.join(os.environ.get("REPO_ROOT", "/root/repo"), "src/control"))
+        from control_pkg.perception import camera_mount
+    return camera_mount
+
+
 def _vins_config(width, height):
-    """Конфиг VINS под текущее разрешение.
+    """Конфиг VINS сима: sim.yaml + экстринсики камеры + разрешение, копией в /tmp.
+
+    Экстринсики (extrinsicRotation/Translation) ВСЕГДА берутся из бортового конфига
+    (CAM_CFG, camera_mount.py) — значения в sim.yaml лишь заглушка того же вида.
+    Сим верит им жёстко (estimate_extrinsic: 0 в sim.yaml): Gazebo ставит камеру
+    ровно туда, ошибки крепления в симе нет.
 
     Базовый sim.yaml посчитан под 1280×720. При другом разрешении (CPU-режим)
     масштабируем image_width/height + интринсики fx/fy/cx/cy ИЗ ОДНОГО ИСТОЧНИКА
-    (sim.yaml) в /tmp — без второго .yaml, который бы дрейфовал. 1280×720 →
-    возвращаем sim.yaml как есть (лётный/GPU путь не трогаем).
+    (sim.yaml) — без второго .yaml, который бы дрейфовал.
     """
-    if (width, height) == (1280, 720):
-        return CFG
+    cm = _camera_mount_module()
+    cam = cm.CameraMount.load()
+    print(f"[sim_nav] {cam.summary()}")
+    with open(CFG) as f:
+        text = f.read()
+    text = cm.replace_matrix(text, "extrinsicRotation", [list(r) for r in cam.R])
+    text = cm.replace_matrix(text, "extrinsicTranslation", [[v] for v in cam.t])
 
     sx, sy = width / 1280.0, height / 720.0
     out_lines = []
-    with open(CFG) as f:
-        for ln in f.read().splitlines():
-            m = re.match(r"^(\s*)(image_width|image_height|fx|fy|cx|cy)(\s*:\s*)([0-9.]+)(.*)$", ln)
-            if m:
-                indent, key, sep, val, tail = m.groups()
-                if key == "image_width":
-                    nv = str(width)
-                elif key == "image_height":
-                    nv = str(height)
-                elif key in ("fx", "cx"):       # масштаб по ширине
-                    nv = f"{float(val) * sx:.6g}"
-                else:                            # fy, cy — по высоте
-                    nv = f"{float(val) * sy:.6g}"
-                ln = f"{indent}{key}{sep}{nv}{tail}"
-            out_lines.append(ln)
+    for ln in text.splitlines():
+        m = re.match(r"^(\s*)(image_width|image_height|fx|fy|cx|cy)(\s*:\s*)([0-9.]+)(.*)$", ln)
+        if m:
+            indent, key, sep, val, tail = m.groups()
+            if key == "image_width":
+                nv = str(width)
+            elif key == "image_height":
+                nv = str(height)
+            elif key in ("fx", "cx"):       # масштаб по ширине
+                nv = f"{float(val) * sx:.6g}"
+            else:                            # fy, cy — по высоте
+                nv = f"{float(val) * sy:.6g}"
+            ln = f"{indent}{key}{sep}{nv}{tail}"
+        out_lines.append(ln)
 
     dst = f"/tmp/sim_{width}x{height}.yaml"
     with open(dst, "w") as f:

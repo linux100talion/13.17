@@ -901,10 +901,14 @@
     <!-- ====== Камера пилота (параметры из concept.txt) ======
          Разрешение 1280x720 (НЕ 1920x1200 из concept) — под него заточены
          camera_node (width_/height_) и sim.yaml (fx=fy=640, cx=640, cy=360).
-         Поза/наклон/fov/clip — как в concept.txt model.sdf.
+         fov/clip — как в concept.txt model.sdf. ПОЗА НИЖЕ — ЗАГЛУШКА: sim_up.sh
+         при каждом старте подменяет её позой из бортового конфига VINS (env
+         CAM_CFG → control_pkg/perception/camera_mount.py --sdf-pose) в копии модели
+         в /tmp. IMU (iris_with_standoffs::imu_link) стоит в начале base_link →
+         поза относительно base_link = сдвиг относительно IMU.
          Жёстко прикреплена к корпусу iris (iris_with_standoffs::base_link). -->
     <link name="camera_link">
-      <pose relative_to="iris_with_standoffs::base_link">0.15 0 0.05 0 0.26 0</pose>
+      <pose relative_to="iris_with_standoffs::base_link">0.14 0 -0.06 0 0 0</pose>
       <inertial>
         <mass>0.05</mass>
         <inertia>

@@ -27,6 +27,30 @@ R_CAMLINK_OPT = np.array([
 ])
 
 
+BOARD_CAM_CFG = "/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml"
+
+
+def load_camera_mount(path=""):
+    """(R_body_opt, lever_body) из бортового конфига VINS: extrinsicRotation (imu^R_cam,
+    тело FLU ← оптика) и extrinsicTranslation (м). Путь: аргумент > env CAM_CFG
+    (относительный — от env REPO_ROOT) > BOARD_CAM_CFG. Та же логика, что у
+    control_pkg/perception/camera_mount.cam_cfg_path."""
+    import os
+    import cv2
+    p = path or os.environ.get("CAM_CFG") or BOARD_CAM_CFG
+    if not os.path.isabs(p):
+        p = os.path.join(os.environ.get("REPO_ROOT", "/root/repo"), p)
+    fs = cv2.FileStorage(p, cv2.FILE_STORAGE_READ)
+    if not fs.isOpened():
+        raise FileNotFoundError(f"конфиг камеры не открылся: {p}")
+    R = fs.getNode("extrinsicRotation").mat()
+    t = fs.getNode("extrinsicTranslation").mat()
+    fs.release()
+    if R is None or t is None:
+        raise ValueError(f"{p}: нет extrinsicRotation/extrinsicTranslation")
+    return np.asarray(R, float).reshape(3, 3), np.asarray(t, float).reshape(3)
+
+
 def geodetic_to_enu(lat, lon, alt, lat0, lon0, alt0):
     """GPS -> локальные ENU-метры относительно датума (равнопромежуточная
     аппроксимация — точна на масштабах км; для больших площадей взять pymap3d)."""
