@@ -124,7 +124,11 @@ for s in "${SECTIONS[@]}"; do
         code) [ -n "$DRY" ] || as_user "mkdir -p $CODE_DST/src $CODE_DST/docker"
               for d in "${CODE_DIRS[@]}"; do
                   sync_section "code/$d" "$REPO/$d/" "$CODE_DST/$d/" --delete "${CODE_EXCL[@]}"
-              done ;;
+              done
+              # версия кода на борту (её копирует meta.txt записи bag): коммит + незакоммиченное
+              ver="$(git -C "$REPO" rev-parse --short HEAD) $(git -C "$REPO" rev-parse --abbrev-ref HEAD)"
+              [ -n "$(git -C "$REPO" status --porcelain -- "${CODE_DIRS[@]/#/$REPO/}")" ] && ver="$ver +незакоммиченное"
+              [ -n "$DRY" ] || as_user "echo '$ver $(date +%F_%T)' > $CODE_DST/DEPLOYED.txt" ;;
     esac
 done
 

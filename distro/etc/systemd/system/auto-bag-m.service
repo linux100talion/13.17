@@ -1,5 +1,5 @@
 [Unit]
-Description=Auto ROS2 Bag Recorder on Arming
+Description=ROS2 bag на борту: с подъёма MAVROS, куски 180 с (включать руками)
 After=network.target
 
 [Service]
@@ -9,9 +9,9 @@ ExecStart=/bin/bash /home/andriy/mavlogs/auto_bag_m.sh
 Restart=on-failure
 RestartSec=5
 
-# Заставляем systemd слать Ctrl+C при остановке и ждать не больше 3 секунд
+# SIGINT = Ctrl+C: ros2 bag закрывает кусок; большой sqlite с камерой закрывается не мгновенно
 KillSignal=SIGINT
-TimeoutStopSec=3
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
