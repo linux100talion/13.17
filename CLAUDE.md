@@ -123,7 +123,8 @@ camera_node → /image_color ─┬─► nn1_anchor (1Гц) → /nn1/detections
   «EKF WARMUP» (жёлт) → «EKF READY - TAKEOFF OK» (зел) → «ARMED» (зел) →
   после дизарма снова READY/WARMUP (поле `ekf=` той же строки, критерий =
   WaitEkfPos — свежий local_position; в полёте ARMED, не ekf); строка
-  «ALT baro X.Xm ekf X.Xm perc X.Xm» — высота ТРЕМЯ источниками (`alt=` rel_alt
+  «ALT baro X.Xm ekf X.Xm perc X.Xm cam X.XXm» — высота ТРЕМЯ источниками + камеры над землёй (`calt=`,
+  по ней строится геометрия канала вида сверху: perc + клиренс + вынос) (`alt=` rel_alt
   миссии, баро при `BS_ALT_SRC=baro`; `zekf=` z того же local_position глазами
   EKF3; `palt=` высота ПЕРЦЕПЦИИ — по ней и судит гейт земли IPM; протухшее
   честное `--`), расхождение больше `max(0.2, 0.2·baro)` — жёлтым (порог

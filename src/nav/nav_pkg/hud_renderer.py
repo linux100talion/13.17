@@ -496,6 +496,10 @@ class HudRenderer:
                 txt = f"ALT baro {_t(a)}m  ekf {_t(z)}m"
                 if "palt" in self.status:
                     txt += f"  perc {_t(pa)}m"
+                if "calt" in self.status:
+                    # высота КАМЕРЫ над землёй, по которой строит геометрию канал вида
+                    # сверху (perc + клиренс корпуса + вынос камеры, не ниже пола)
+                    txt += f"  cam {_t(_v(self.status.get('calt')))}m"
                 self._line_bottom_center(frame, k, txt, col)
             # 5б) ВОЗВРАТ ДОМОЙ — ЛЕВЫЙ НИЖНИЙ УГОЛ (rth= статуса, латч
             # rth_ready.py). Пилоту это нужно ДО того, как он нажмёт SD:

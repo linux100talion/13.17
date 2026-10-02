@@ -121,6 +121,10 @@ check("palt: высота перцепции в строке", d['palt'] == '0.3
 d = kv(hud_status(DroneState(now_sim=5.0, rel_alt=0.3), FRESH))
 check("palt: перцепции нет в стеке (None) → '--'", d['palt'] == '--')
 check("palt=None не мешает остальным полям", d['alt'] == '0.3')
+d = kv(hud_status(DroneState(now_sim=5.0, rel_alt=0.3, perc_alt=0.31, cam_agl=0.445), FRESH))
+check("calt: высота камеры над землёй в строке (2 знака)", d['calt'] == '0.45' or d['calt'] == '0.44')
+d = kv(hud_status(DroneState(now_sim=5.0, rel_alt=0.3), FRESH))
+check("calt: нет высоты перцепции → '--'", d['calt'] == '--')
 
 # ipm/ipmf: дефолт снапшота — «канала ещё не было» (ok=0, код 7 «нет опоры»)
 d = kv(hud_status(DroneState(now_sim=5.0), FRESH))

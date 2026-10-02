@@ -80,6 +80,11 @@ class DroneState:
     # разбор 183305 упёрся в то, что HUD показывал два первых, а канал закрывал
     # третье. None = перцепции нет в стеке (голый профиль без зрения).
     perc_alt: float | None = None
+    # Высота КАМЕРЫ НАД ЗЕМЛЁЙ, по которой канал вида сверху строит геометрию полосы
+    # (FlowEstimator._ipm_geom_h: perc_alt + клиренс корпуса стоя + вынос камеры по углам,
+    # не ниже пола ipm_alt_floor). perc_alt — «от позы стою», cam_agl — то, что видит
+    # геометрия. None = высоты перцепции нет / протухла.
+    cam_agl: float | None = None
 
     # --- Ground-truth Gazebo (СИМ; на Orin gt_valid=False) ---
     gt_valid: bool = False

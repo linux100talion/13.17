@@ -503,6 +503,9 @@ class RosPerception:
         s.ipm_fail = self._ipm_fail
         # по НЕЙ судит гейт земли IPM (не rel_alt); протухшая = НЕИЗВЕСТНАЯ
         s.perc_alt = self._alt if self._alt_fresh() else None
+        # высота камеры над землёй, которой пользуется геометрия канала (HUD: cam)
+        s.cam_agl = (self._est._ipm_geom_h(s.perc_alt, self._pitch or 0.0, self._roll or 0.0)
+                     if s.perc_alt is not None else None)
         s.att_yaw = self._att_yaw
         return s
 
