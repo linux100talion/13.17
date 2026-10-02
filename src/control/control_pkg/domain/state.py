@@ -87,7 +87,8 @@ class DroneState:
     cam_agl: float | None = None
     # Поправка к cam_agl по ЗУМУ ЗЕМЛИ в канале (perception/alt_est.py, BS_IPM_ALT_EST):
     # истинная высота камеры ≈ cam_agl + cam_agl_delta; sigma — её погрешность, м.
-    # Только наблюдение (HUD vis) — геометрия канала летит на cam_agl. None — не оценена.
+    # Только наблюдение (HUD vis) — геометрия канала летит на cam_agl. None — не оценена
+    # или cam_agl стоит на полу ipm_alt_floor (там cam + δ смысла не имеет).
     cam_agl_delta: float | None = None
     cam_agl_sigma: float | None = None
 

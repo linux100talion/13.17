@@ -511,6 +511,11 @@ class RosPerception:
         # поправка высоты камеры по зуму земли (ipm_alt_est, только наблюдение → HUD vis)
         s.cam_agl_delta = self._est.ipm_alt_delta
         s.cam_agl_sigma = self._est.ipm_alt_sigma
+        # на ПОЛУ высоты (геометрия упёрлась в ipm_alt_floor) cam — не высота камеры, а пол:
+        # cam + δ смысла не имеет → поправку не отдаём, HUD рисует «vis --»
+        fl = self._est.ipm_alt_floor
+        if s.cam_agl is not None and fl > 0.0 and s.cam_agl <= fl + 1e-9:
+            s.cam_agl_delta = s.cam_agl_sigma = None
         s.att_yaw = self._att_yaw
         return s
 
