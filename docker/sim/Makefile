@@ -44,7 +44,7 @@ DISPLAY ?= :0
 export DISPLAY
 
 .DEFAULT_GOAL := help
-.PHONY: help ensure-env host-setup host-persist build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm rth smart-rth fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
+.PHONY: fpvd help ensure-env host-setup host-persist build up sim nav run stop restart-all fresh-start down ps logs status wait nav-rebuild arm bootstrap takeoff hover land disarm rth smart-rth fly vins-watch sitl-cal capture-frames capture-scene scene-clear scene-restore scene-status clean
 
 # .env (локальный профиль бокса, в .gitignore) сеется из эталона env.default
 # (в git): свежий клон получает штатные дефолты (WORLD/LV/BS_SF_MASTER) без
@@ -89,6 +89,13 @@ gui:             ## окно Gazebo: GUI-клиент к работающему 
 fpv:             ## окно оператора: штатный поток openhd_streamer (H.264 UDP :5600, с рамками NN)
 	@echo "fpv: смотрю UDP :5600 (закрыть — Ctrl+C или закрыть окно; стек не трогает)."
 	gst-launch-1.0 -q udpsrc port=5600 \
+	    caps="application/x-rtp,media=video,encoding-name=H264,payload=96" \
+	    ! rtph264depay ! avdec_h264 ! videoconvert ! autovideosink sync=false
+
+fpvd:            ## окно оператора с РЕАЛЬНОГО ДРОНА: видео борта по радио WFB-ng (H.264 UDP :5610 ноута)
+	@echo "fpvd: смотрю UDP :5610 — видео дрона через наземный Alfa (wifibroadcast@gs, tools/wfb/gs.cfg)."
+	@echo "      пусто? борт: служба vins_m (стример), ноут: hw_check.sh wfb (video rx). Закрыть — Ctrl+C."
+	gst-launch-1.0 -q udpsrc port=5610 \
 	    caps="application/x-rtp,media=video,encoding-name=H264,payload=96" \
 	    ! rtph264depay ! avdec_h264 ! videoconvert ! autovideosink sync=false
 
