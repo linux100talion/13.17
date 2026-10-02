@@ -41,7 +41,8 @@ for t in "${BLOCK[@]}"; do REMAP="$REMAP -r $t:=/blocked${t#/mavros}"; done
 ALLOWED='^/mavros/(param/get_parameters|set_message_interval)$'
 PATTERNS=("lib/mission_pk[g]/bootstrap_arch2" "lib/mission_pk[g]/crsf_joy" "lib/nav_pk[g]/ray_tracer")
 
-dexec() { docker exec -e USE_SIM_TIME=0 "$CONTAINER" bash -c "source /root/vins_ws/install/setup.bash && $1"; }
+# ядра 0–4: ядро 5 — стример (vins_nodes.sh); docker exec affinity systemd не наследует
+dexec() { docker exec -e USE_SIM_TIME=0 "$CONTAINER" bash -c "taskset -cp 0-4 \$\$ >/dev/null && source /root/vins_ws/install/setup.bash && $1"; }
 
 stop_all() {
     local p

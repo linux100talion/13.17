@@ -6,7 +6,10 @@
 #   camera_node      C++ CUDA: V4L2 → /image_mono (VINS) + /image_color (nav)
 #   feature_tracker  VINS, бортовой config.yaml
 #   vins_estimator   VINS → /odometry
-#   openhd_streamer  /image_color → H.264 :5600 (камера сама OpenHD не гонит)
+#   openhd_streamer  /image_color → H.264 1280×720 → UDP :5602 = вход видео WFB-ng борта
+#                    (на ноуте — 127.0.0.1:5600); ОТДЕЛЬНОЕ ЯДРО STREAMER_CPU (taskset):
+#                    кодер на CPU (у Orin Nano нет NVENC), остальное systemd держит на 0–4
+#                    (etc/systemd/system.conf.d/cpuaffinity.conf). 720p ≈ 88 % ядра (замер 2026-10-02)
 #
 # ОСТАНОВ — ИЗНУТРИ контейнера (pkill по шаблону). Прежняя версия слала kill -INT
 # PID'у КЛИЕНТА docker exec: до процесса в контейнере сигнал не доходил, ноды не
@@ -15,6 +18,7 @@
 
 CONTAINER="vins_project_13_7"
 CFG=/root/vins_ws/src/VINS-MONO-ROS2/config_pkg/config/config.yaml
+STREAMER_CPU=5
 
 # Шаблоны pkill -f: путь исполняемого файла в install/. Скобка [x] — обязательна: у
 # контейнера pid: host, pkill/pgrep изнутри видят и ХОСТ, в т.ч. клиента `docker exec …
@@ -29,9 +33,12 @@ NODE_PATTERNS=(
 )
 NODE_PIDS=()
 
-dexec() {   # docker exec с окружением ROS; $1 — команда
+# Ядра. systemd держит хост на 0–4 (cpuaffinity.conf), но `docker exec` его affinity НЕ
+# наследует — runc ставит процессу все ядра cpuset контейнера (0–5). Поэтому оболочка
+# exec'а сама садится на $2 (по умолчанию 0–4), и всё, что она запускает, наследует это.
+dexec() {   # docker exec с окружением ROS; $1 — команда, $2 — ядра (умолч. 0-4)
     docker exec -e ROS_LOCALHOST_ONLY=1 -e ROS_DOMAIN_ID=0 -e RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
-        "$CONTAINER" bash -c "source /root/vins_ws/install/setup.bash && $1"
+        "$CONTAINER" bash -c "taskset -cp ${2:-0-4} \$\$ >/dev/null && source /root/vins_ws/install/setup.bash && $1"
 }
 
 nodes_alive() {   # сколько наших нод живо в контейнере
@@ -67,7 +74,8 @@ start_vins_nodes() {
     dexec "exec ros2 run vins_estimator vins_estimator --ros-args -p config_file:=$CFG \
         --remap /feature_tracker/feature:=/feature --remap /feature_tracker/restart:=/restart" &
     NODE_PIDS+=($!)
-    dexec "exec ros2 run nav_pkg openhd_streamer" &
+    dexec "exec ros2 run nav_pkg openhd_streamer --ros-args \
+        -p out_width:=1280 -p out_height:=720 -p port:=5602" "$STREAMER_CPU" &
     NODE_PIDS+=($!)
 }
 

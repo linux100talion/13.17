@@ -90,6 +90,15 @@ micro-USB 2.0 кабель в USB 3.0 micro-B гнезде даёт `error -71`,
    тангажа прочитан, в тупики ничего (SF внизу = MANUAL). ✅ знаки/SF/SC/SA/SD глазами ядра
    ноды сверены (`home/andriy/vins_ws/joy_board_check.py`, всё как ожидалось); ⬜ bag с топиками сима; дамп `BS_*` рядом с bag'ом (песочница уже пишет `bs.env`).
 
+**Видео и ядра (2026-10-02).** Штатный стример — 1280×720 H.264 (`openh264enc`, CPU: у Orin
+Nano нет NVENC) прямо во вход WFB-ng борта UDP :5602 → на ноуте 127.0.0.1:5600 (смотреть:
+`gst-launch-1.0 udpsrc port=5600 caps="application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000" ! rtph264depay ! h264parse ! avdec_h264 ! autovideosink sync=false`).
+Стример на ОТДЕЛЬНОМ ЯДРЕ 5: `etc/systemd/system.conf.d/cpuaffinity.conf` (`CPUAffinity=0-4`
+для всего, что запускает systemd), `vins_nodes.sh`/`sandbox_node.sh` сажают оболочку
+`docker exec` на ядра сами (runc ставит exec'у ВСЕ ядра контейнера, affinity systemd не
+наследуется). Замер: ядро 5 — 88 % (стример), 0–4 — 36–53 %; на ноуте 15.1 к/с 1280×720,
+радио без потерь. feature_tracker — ~1 ядро.
+
 **Грабли этапа (2026-10-02):**
 - У контейнера `pid: host` — `pkill -f`/`pgrep -f` ИЗНУТРИ видят и хост, в т.ч. собственный
   клиент `docker exec … pkill -f <шаблон>`: шаблон пишется как `lib/camera_pk[g]/…`.
