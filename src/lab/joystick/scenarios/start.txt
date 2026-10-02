@@ -1,0 +1,18 @@
+bash cmd/bl/bl.sh
+
+docker compose -f docker/sim/docker-compose.yml stop
+
+make -C docker/sim fpv
+Запускай после того, как в первом терминале стек поднялся.
+
+
+Варианты:
+- полёт по сценарию без пульта: BS_PILOT=replay BS_REPLAY_SCENARIO=/lab/joystick/scenarios/vins_init.json bash cmd/bl/bl.sh
+- своё имя прогона: NAME=мой_полёт bash cmd/bl/bl.sh
+- окно Gazebo (смотреть со стороны): make -C docker/sim gui
+
+
+$ RATE=2 bash src/lab/bag_rviz.sh docker/sim/output/joystick/lv2_joy_20261002_164916/
+
+
+

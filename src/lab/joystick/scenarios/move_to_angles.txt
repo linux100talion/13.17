@@ -1,0 +1,4 @@
+Запуск на текущем baseline:
+
+BS_PILOT=replay BS_REPLAY_SCENARIO=/lab/joystick/scenarios/vins_init_5.json bash cmd/bl/bl.sh          # выход в углах
+ATT=0 BS_PILOT=replay BS_REPLAY_SCENARIO=/lab/joystick/scenarios/vins_init_5.json bash cmd/bl/bl.sh    # override
