@@ -82,6 +82,7 @@ def load_meta(run):
                     m[k] = v
     m.setdefault('BS_IPM_LEVER', '0')
     m.setdefault('BS_IPM_ACC_WORLD', '0')
+    m.setdefault('BS_IPM_SCALE_EXACT', '0')
     return BootstrapConfig.from_mapping(m, 'meta')
 
 

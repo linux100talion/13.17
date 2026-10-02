@@ -88,7 +88,7 @@ class FlowEstimator(IpmChannel, KeyframeChannel):
                  ipm_derot=0.0, ipm_wz_tau=0.0, ipm_adapt=0.0, ipm_vel_tau=0.0,
                  ipm_alt_floor=0.0, ipm_scale_ref=0.0, ipm_acc_tau=0.0,
                  ipm_wz_gate=0.0, ipm_wz_bias_max=0.0, cam_lever=(0.0, 0.0, 0.0),
-                 ipm_acc_world=False):
+                 ipm_acc_world=False, ipm_scale_exact=False):
         if cv2 is None:
             raise RuntimeError('cv2 не найден — FlowEstimator не работает')
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -103,7 +103,7 @@ class FlowEstimator(IpmChannel, KeyframeChannel):
                        ipm_derot, ipm_wz_tau, ipm_adapt, ipm_vel_tau, ipm_alt_floor,
                        ipm_scale_ref, ipm_acc_tau, ipm_wz_gate,
                        ipm_wz_bias_max=ipm_wz_bias_max, cam_lever=cam_lever,
-                       ipm_acc_world=ipm_acc_world)
+                       ipm_acc_world=ipm_acc_world, ipm_scale_exact=ipm_scale_exact)
         self.max_feats = max_feats
         # ВРЕМЕННОЕ СГЛАЖИВАНИЕ: медиана по N кадрам, СВОЁ N на КАЖДУЮ ось (roll=lateral,
         # pitch=longitudinal, yaw). Шум потока БЕЛЫЙ (автокорр≈0, см. flow_calib) →
