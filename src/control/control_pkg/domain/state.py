@@ -85,6 +85,11 @@ class DroneState:
     # не ниже пола ipm_alt_floor). perc_alt — «от позы стою», cam_agl — то, что видит
     # геометрия. None = высоты перцепции нет / протухла.
     cam_agl: float | None = None
+    # Поправка к cam_agl по ЗУМУ ЗЕМЛИ в канале (perception/alt_est.py, BS_IPM_ALT_EST):
+    # истинная высота камеры ≈ cam_agl + cam_agl_delta; sigma — её погрешность, м.
+    # Только наблюдение (HUD vis) — геометрия канала летит на cam_agl. None — не оценена.
+    cam_agl_delta: float | None = None
+    cam_agl_sigma: float | None = None
 
     # --- Ground-truth Gazebo (СИМ; на Orin gt_valid=False) ---
     gt_valid: bool = False

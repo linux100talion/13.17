@@ -40,7 +40,7 @@ class IpmChannel:
                   ipm_model, ipm_derot, ipm_wz_tau, ipm_adapt, ipm_vel_tau,
                   ipm_alt_floor, ipm_scale_ref, ipm_acc_tau, ipm_wz_gate,
                   ipm_wz_bias_max=0.0, cam_lever=(0.0, 0.0, 0.0), ipm_acc_world=False,
-                  ipm_scale_exact=False, ipm_ground_clear=0.0):
+                  ipm_scale_exact=False, ipm_ground_clear=0.0, ipm_alt_est=False):
         # --- КАНАЛ ВИДА СВЕРХУ (IPM): МЕТРИЧЕСКОЕ смещение и скорость ---
         # Масштабный канал (kf_logs) меряет log(масштаб) созвездия, и цена метра у него
         # плавает в 14 раз: глубина точек не контролируется, точка на земле в 5 м даёт
@@ -222,6 +222,18 @@ class IpmChannel:
         # высоте: наклон ошибки по vz −0.185 → +0.003 при δ = +0.2 (gates.md). Гейты «на
         # земле» по-прежнему судят СЫРУЮ высоту. 0 — прежнее поведение.
         self.ipm_ground_clear = float(ipm_ground_clear)
+        # ПОПРАВКА ВЫСОТЫ ПО ЗУМУ ЗЕМЛИ (ipm_alt_est, 2026-10-02) — только наблюдение: канал
+        # меряет, на сколько истинная высота камеры отличается от принятой геометрией
+        # (perception/alt_est.py); геометрию не трогает. Нужен ipm_scale_exact (мера зума
+        # считается в метрическом шаге). Наружу — ipm_alt_delta / ipm_alt_sigma.
+        self.ipm_alt_est = bool(ipm_alt_est)
+        from .alt_est import GroundOffsetEstimator
+        self._alt_est = GroundOffsetEstimator()
+        self.ipm_alt_delta = None
+        self.ipm_alt_sigma = None
+        self.ipm_geom_h = None       # высота камеры, по которой построен ЭТОТ кадр
+        self._ipm_prev_h = None      # она же у опорного кадра (None — на полу/нет)
+        self._ipm_eps = None         # мера зума последнего метрического шага
         # --- ВЫНОС КАМЕРЫ (cam_lever, м, тело FLU; с 2026-10-02) ---
         # Камера стоит не в точке, к которой относятся высота и скорость борта (IMU), а
         # вынесена на t бортового конфига (на борту 0.14 вперёд, 0.06 ниже). Канал меряет
@@ -355,11 +367,21 @@ class IpmChannel:
         dpsi = 0.0
         if self.ipm_derot and prev_t is not None:
             dpsi = self.ipm_derot * float(wz) * (stamp - prev_t)
+        fwd = X0 - X1 - Y0 * dpsi
         d_lat = float(np.median(Y1 - Y0 - X0 * dpsi))
-        d_fwd = float(np.median(X0 - X1 - Y0 * dpsi))
+        d_fwd = float(np.median(fwd))
+        # мера ЗУМА (alt_est): ход точек дальней половины против ближней на разницу их
+        # дальности — ε в ход_i = t + ε·X_i; медианы половин — устойчиво к выбросам LK
+        self._ipm_eps = None
+        if len(X0) >= 20:
+            far = X0 > np.median(X0)
+            dx = float(np.mean(X0[far]) - np.mean(X0[~far]))
+            if dx > 1e-6:
+                self._ipm_eps = float(np.median(fwd[far]) - np.median(fwd[~far])) / dx
         return d_lat, d_fwd
 
     def _ipm_drop_prev(self):
+        self._ipm_prev_h = None
         self._ipm_prev = None
         self._ipm_prev_t = None
         self._ipm_prev_geo = None
@@ -533,7 +555,10 @@ class IpmChannel:
             self._vel_reset()
             return
         lev = self._lever_level(pitch, roll) if self._lever_on else None
+        on_floor = (self.ipm_alt_floor > 0.0
+                    and self._ipm_geom_h(alt, pitch, roll) <= self.ipm_alt_floor + 1e-9)
         alt = self._ipm_geom_h(alt, pitch, roll)   # высота камеры, не ниже пола
+        self.ipm_geom_h = alt
         if self.ipm_vel_tau > 0.0:
             # прогноз тикает на КАЖДОМ кадре, включая бракованные — провалы мостятся;
             # ipm_ok при фильтре = «скорости можно верить» (измерения свежее _VEL_HOLD)
@@ -577,6 +602,7 @@ class IpmChannel:
         self._ipm_prev_t = stamp
         self._ipm_prev_geo = (x0, length, yhalf, res)
         prev_lev, self._ipm_prev_lev = self._ipm_prev_lev, lev
+        prev_h, self._ipm_prev_h = self._ipm_prev_h, (None if on_floor else alt)
         if prev is None or prev.shape != rect.shape:
             self.ipm_fail = 7
             return
@@ -597,6 +623,10 @@ class IpmChannel:
         if self.ipm_scale_exact:
             d_lat, d_fwd = self._ipm_metric_step(p0, p0 + d, prev_geo,
                                                  (x0, length, yhalf, res), wz, stamp, prev_t)
+            if self.ipm_alt_est and prev_h is not None and not on_floor:
+                self._alt_est.update(stamp, self._ipm_eps, prev_h, alt)
+                self.ipm_alt_delta = self._alt_est.delta
+                self.ipm_alt_sigma = self._alt_est.sigma
         # --- ВЫЧИТАНИЕ РАЗВОРОТА (ipm_derot) ---
         # Медиана смещений считает поле «только сдвиг», поэтому разворот борта читается
         # как боковой снос: полоса лежит ВПЕРЕДИ, и поворот на dψ двигает её вбок на

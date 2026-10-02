@@ -182,6 +182,7 @@ class BootstrapArch2Node(Node):
                                             ipm_acc_world=cfg.ipm_acc_world,
                                             ipm_scale_exact=cfg.ipm_scale_exact,
                                             ipm_ground_clear=cfg.ipm_ground_clear,
+                                            ipm_alt_est=cfg.ipm_alt_est,
                                             alt_src=cfg.perc_alt_src,
                 alt_stale=cfg.perc_alt_stale,
                                             alt_zero=cfg.perc_alt_zero > 0)

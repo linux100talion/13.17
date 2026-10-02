@@ -500,6 +500,16 @@ class HudRenderer:
                     # высота КАМЕРЫ над землёй, по которой строит геометрию канал вида
                     # сверху (perc + клиренс корпуса + вынос камеры, не ниже пола)
                     txt += f"  cam {_t(_v(self.status.get('calt')))}m"
+                    # vis — та же высота, измеренная КАМЕРОЙ по зуму земли (cam + vdel;
+                    # BS_IPM_ALT_EST, только наблюдение) и её поправка к cam. Показываем,
+                    # когда погрешность vsig < 0.10 м, иначе «--» (на висении без набора
+                    # поправка не наблюдается — копится только на ходе по высоте)
+                    ca, vd, vs = (_v(self.status.get(k)) for k in ("calt", "vdel", "vsig"))
+                    if "vdel" in self.status:
+                        if ca is not None and vd is not None and vs is not None and vs < 0.10:
+                            txt += f"  vis {ca + vd:.2f}m ({vd:+.2f})"
+                        else:
+                            txt += "  vis --"
                 self._line_bottom_center(frame, k, txt, col)
             # 5б) ВОЗВРАТ ДОМОЙ — ЛЕВЫЙ НИЖНИЙ УГОЛ (rth= статуса, латч
             # rth_ready.py). Пилоту это нужно ДО того, как он нажмёт SD:

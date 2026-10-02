@@ -173,6 +173,11 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
     # calt — ВЫСОТА КАМЕРЫ НАД ЗЕМЛЁЙ, по которой канал строит геометрию: palt + клиренс
     # корпуса стоя (BS_IPM_GROUND_CLEAR) + вынос камеры, не ниже пола ipm_alt_floor.
     calt = f"{s.cam_agl:.2f}" if getattr(s, 'cam_agl', None) is not None else "--"
+    # vdel/vsig — поправка к calt по зуму земли и её погрешность (BS_IPM_ALT_EST): камера
+    # меряет, на сколько истинная высота камеры отличается от барометрической цепочки
+    vd, vs = getattr(s, 'cam_agl_delta', None), getattr(s, 'cam_agl_sigma', None)
+    vdel = f"{vd:+.3f}" if vd is not None else "--"
+    vsig = f"{vs:.3f}" if vs is not None else "--"
     # rcr/rcp/rct/rcy — СТИКИ ПИЛОТА глазами ноды (сырой PWM − центр, как их видит
     # арбитр и стек: pilot_* снапшота), sw — тумблер авто/ручной. Зачем в статусе:
     # /joy в bag штампован стеночным временем джойстик-ноды, и при плавающем RTF
@@ -190,7 +195,7 @@ def hud_status(s, fresh_sec: float, loiter_alt: float = 1.5, ladder=None,
             f"extnav={int(s.extnav_ready)} "
             f"odom={s.vins_odom_count} age={min(age, 999.0):.1f} "
             f"reb={getattr(s, 'vins_rebirths', 0)} "
-            f"alt={(s.rel_alt or 0.0):.1f} zekf={zekf} palt={palt} calt={calt} "
+            f"alt={(s.rel_alt or 0.0):.1f} zekf={zekf} palt={palt} calt={calt} vdel={vdel} vsig={vsig} "
             f"ipm={int(s.ipm_ok)} ipmf={s.ipm_fail} "
             f"res={s.vins_res:.2f} rat={s.vins_ratio:.2f} "
             f"rcr={s.pilot_roll - RC_CENTER} rcp={s.pilot_pitch - RC_CENTER} "

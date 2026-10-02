@@ -73,7 +73,7 @@ class RosPerception:
                  att_interp=False, att_latency=0.0,
                  att_wait_max=0.15, att_src='ekf', cam_tilt=None,
                  cam_lever=None, ipm_acc_world=None, ipm_scale_exact=None,
-                 ipm_ground_clear=None, intrinsics=None):
+                 ipm_ground_clear=None, intrinsics=None, ipm_alt_est=None):
         # ⚠️ ИСТОЧНИК ω — НЕ /gz_imu/data_flu. Тот поток пропущен через low-pass 5 Гц
         # (src/sim/imu_frd_to_flu.py; фильтр нужен VINS — срезает лимит-цикл rate-loop
         # ~7.5 Гц, которого камера на 10 Гц не видит). Оценщик вычитает по ω ВРАЩАТЕЛЬНЫЙ
@@ -174,6 +174,8 @@ class RosPerception:
             extra['ipm_scale_exact'] = bool(ipm_scale_exact)
         if ipm_ground_clear is not None:
             extra['ipm_ground_clear'] = float(ipm_ground_clear)
+        if ipm_alt_est is not None:
+            extra['ipm_alt_est'] = bool(ipm_alt_est)
         self._est = FlowEstimator(fx, fy, cx, cy, R_cam_imu, rotflow_sign,
                                   roll_smooth_n=roll_smooth_n, pitch_smooth_n=pitch_smooth_n,
                                   yaw_smooth_n=yaw_smooth_n, **extra)
@@ -506,6 +508,9 @@ class RosPerception:
         # высота камеры над землёй, которой пользуется геометрия канала (HUD: cam)
         s.cam_agl = (self._est._ipm_geom_h(s.perc_alt, self._pitch or 0.0, self._roll or 0.0)
                      if s.perc_alt is not None else None)
+        # поправка высоты камеры по зуму земли (ipm_alt_est, только наблюдение → HUD vis)
+        s.cam_agl_delta = self._est.ipm_alt_delta
+        s.cam_agl_sigma = self._est.ipm_alt_sigma
         s.att_yaw = self._att_yaw
         return s
 
