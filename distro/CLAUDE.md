@@ -100,6 +100,11 @@ Nano нет NVENC) прямо во вход WFB-ng борта UDP :5602 → на
 радио без потерь. feature_tracker — ~1 ядро.
 
 **Грабли этапа (2026-10-02):**
+- Пересборка в контейнере — ТОЛЬКО после `source /opt/ros/humble/install/setup.bash` (база
+  dustynv; `/opt/ros/humble/setup.bash` там НЕТ). Собрал без подложки — colcon молча пишет
+  `install/setup.bash` без ROS, и `vins_m` падает петлёй `exec: ros2: not found` у всех нод
+  (2026-10-03). Чинится пересборкой с правильным source:
+  `docker exec vins_project_13_7 bash -c "cd /root/vins_ws && source /opt/ros/humble/install/setup.bash && colcon build --packages-select <пакет>"`.
 - У контейнера `pid: host` — `pkill -f`/`pgrep -f` ИЗНУТРИ видят и хост, в т.ч. собственный
   клиент `docker exec … pkill -f <шаблон>`: шаблон пишется как `lib/camera_pk[g]/…`.
 - База dustynv кладёт `/usr/local/cuda/compat` первым в `LD_LIBRARY_PATH`: старая libcuda
