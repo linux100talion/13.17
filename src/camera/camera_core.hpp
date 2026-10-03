@@ -75,6 +75,24 @@ public:
             RCLCPP_INFO(this->get_logger(), "Штамп кадра — из трейлера bayerizer (stamp_from_frame:=true)");
         }
 
+        // Экспозиция сенсора ArduCam (единицы драйвера). Штат — УЛИЦА (с 2026-10-03, замер
+        // при калибровке: день 200/100 — средняя 119, пересвет 0.1 %; сумерки — exposure 400).
+        // Помещение — прежний штат 5250/1200 (на улице пересвет до 31 % кадра). Меняются на
+        // лету без перезапуска: ros2 param set /raw_camera_node exposure 400.
+        exposure_      = this->declare_parameter("exposure", 200);
+        analogue_gain_ = this->declare_parameter("analogue_gain", 100);
+        param_cb_ = this->add_on_set_parameters_callback(
+            [this](const std::vector<rclcpp::Parameter>& ps) {
+                for (const auto& prm : ps) {
+                    if (prm.get_name() == "exposure" || prm.get_name() == "analogue_gain") {
+                        set_ctrl(prm.get_name(), prm.as_int());
+                    }
+                }
+                rcl_interfaces::msg::SetParametersResult r;
+                r.successful = true;
+                return r;
+            });
+
         // 3. CameraInfo (интринсики из конфига).
         setup_camera_info();
 
@@ -153,6 +171,16 @@ private:
     sensor_msgs::msg::CameraInfo camera_info_msg_;
 
     cv::VideoWriter openhd_writer_;
+    int64_t exposure_ = 200;
+    int64_t analogue_gain_ = 100;
+    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
+
+    // Один контрол V4L2 на лету (exposure / analogue_gain); на v4l2loopback (сим) — ошибка, не фатально.
+    void set_ctrl(const std::string& name, int64_t v) {
+        std::string cmd = "v4l2-ctl -d " + device_ + " -c " + name + "=" + std::to_string(v);
+        int rc = system(cmd.c_str());
+        RCLCPP_INFO(this->get_logger(), "%s := %ld%s", name.c_str(), v, rc ? " (v4l2-ctl: ошибка)" : "");
+    }
 
     void setup_camera_info() {
         // Интринсики — параметры fx/fy/cx/cy + дисторсия radtan k1/k2/p1/p2 (plumb_bob), их
@@ -228,8 +256,10 @@ private:
 
         // Контролы специфичны для ArduCam; на v4l2loopback (симуляция) дадут
         // ошибку — не фатально.
-        RCLCPP_INFO(this->get_logger(), "Применение настроек экспозиции, FPS и Gain...");
-        std::string cmd_ctrl = "v4l2-ctl -d " + device_ + " -c frame_rate=15 -c analogue_gain=1200 -c exposure=5250";
+        RCLCPP_INFO(this->get_logger(), "FPS 15, exposure %ld, analogue_gain %ld",
+                    exposure_, analogue_gain_);
+        std::string cmd_ctrl = "v4l2-ctl -d " + device_ + " -c frame_rate=15 -c analogue_gain=" +
+                               std::to_string(analogue_gain_) + " -c exposure=" + std::to_string(exposure_);
         system(cmd_ctrl.c_str());
 
         return true;
