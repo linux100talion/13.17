@@ -9,6 +9,11 @@
 # Что пишется: ТОЛЬКО /image_mono (вход VINS = ровно то, что видит VINS) + /camera_info.
 # 1280×720 mono8 15 Гц ≈ 14 МБ/с → 120 с ≈ 1.7 ГБ. IMU для интринсиков не нужен.
 #
+# Другие записи тем же путём — env: PREFIX (имя, умолч. intr), TOPICS (список, умолч. выше).
+# Прогулка «в руках» для scene_ipm.mp4 + офлайн-реплея VINS (лёгкая, без /image_color):
+#   PREFIX=walk ./rec_intr.sh 120     (набор топиков WALK_TOPICS — ниже; 120 с ≈ 1.7 ГБ)
+# ⚠️ ноль барометра = первая секунда bag: начинать, когда дрон СТОИТ на земле, поднять через 2–3 с.
+#
 # Камеру поднимает служба vins_m (camera_node + VINS + стример; лишнее не мешает). Если её
 # включил скрипт — он же её и гасит в конце (KEEP_CAM=1 — оставить). Видео для наводки — WFB
 # (`make -C docker/sim fpvd`), это тот же кадр, что пишется.
@@ -36,6 +41,12 @@ SUDOPW="${JETSON_SUDO:-ok}"
 BOARD_DIR=/home/andriy/mavlogs/calib
 LOCAL_DIR="$(git rev-parse --show-toplevel)/docker/sim/output/board/calib"
 FPS_MIN=12          # ниже — камера не та/тормозит, не пишем
+PREFIX="${PREFIX:-intr}"
+# прогулка: камера VINS + IMU (AHRS — углы для ipm_video, сырой — для реплея VINS) + баро
+# (высота ipm_video) + что VINS выдал вживую
+WALK_TOPICS="/image_mono /camera_info /mavros/imu/data /mavros/imu/data_raw \
+/mavros/imu/static_pressure /mavros/state /feature /odometry /path"
+if [ "$PREFIX" = walk ]; then TOPICS="${TOPICS:-$WALK_TOPICS}"; else TOPICS="${TOPICS:-/image_mono /camera_info}"; fi
 for HOST in "${HOSTS[@]}"; do
     ssh -o ConnectTimeout=4 -o BatchMode=yes "$HOST" true 2>/dev/null && break
     HOST=""
@@ -88,10 +99,10 @@ HZ=$(board "timeout 6 ros2 topic hz /image_mono 2>/dev/null | awk '/average rate
 echo "   /image_mono: ${HZ:-0} Гц"
 awk -v h="${HZ:-0}" -v m=$FPS_MIN 'BEGIN{exit !(h>=m)}' || die "камера не даёт кадров (≥$FPS_MIN Гц) — journalctl -u vins_m"
 
-NAME="intr_$(date +%Y%m%d_%H%M%S)"
+NAME="${PREFIX}_$(date +%Y%m%d_%H%M%S)"
 OUT="$BOARD_DIR/$NAME"
 board "mkdir -p $BOARD_DIR && setsid nohup bash -c '$ROSENV; exec timeout -s INT $DUR \
-       ros2 bag record -o $OUT /image_mono /camera_info' > $OUT.log 2>&1 < /dev/null &" ||
+       ros2 bag record -o $OUT $TOPICS' > $OUT.log 2>&1 < /dev/null &" ||
     die "не стартовала запись"
 
 echo "== ЗАПИСЬ $NAME, $DUR с — водите мишенью (углы кадра, близко/далеко, наклоны, медленно)"
