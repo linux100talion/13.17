@@ -1,4 +1,4 @@
-# Мишень Kalibr — AprilGrid 6×8 на листе A4 (src/vins/calib/aprilgrid_a4.pdf).
+# Мишень Kalibr — AprilGrid 6×8 на листе A4 (tools/vins/calib/aprilgrid_a4.pdf).
 # Сгенерирована kalibr_create_target_pdf из закреплённого коммита Kalibr 1f60227
 # (тот же, что в образе kalibr:1f60227 для калибровки) — см. README.md рядом.
 #

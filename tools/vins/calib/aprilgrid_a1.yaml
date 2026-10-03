@@ -1,4 +1,4 @@
-# Мишень Kalibr — AprilGrid 6×8 на листе A1 (src/vins/calib/aprilgrid_a1.pdf).
+# Мишень Kalibr — AprilGrid 6×8 на листе A1 (tools/vins/calib/aprilgrid_a1.pdf).
 # ОСНОВНАЯ мишень (камера–IMU и интринсики); A4-вариант рядом — для настольных проб.
 # Сгенерирована kalibr_create_target_pdf из образа kalibr:1f60227 (коммит 1f60227):
 #

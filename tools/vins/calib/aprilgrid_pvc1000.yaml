@@ -1,4 +1,4 @@
-# Мишень Kalibr — AprilGrid 7×7 на листе ПВХ 1000×1000 мм (src/vins/calib/aprilgrid_pvc1000.pdf).
+# Мишень Kalibr — AprilGrid 7×7 на листе ПВХ 1000×1000 мм (tools/vins/calib/aprilgrid_pvc1000.pdf).
 # ОСНОВНАЯ мишень (камера–IMU и интринсики). Заказ 2026-09-16: UV-печать на белом ПВХ 5 мм,
 # матовая, 1:1. Сгенерирована kalibr_create_target_pdf из образа kalibr:1f60227:
 #

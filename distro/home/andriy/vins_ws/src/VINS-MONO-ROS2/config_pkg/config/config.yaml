@@ -14,7 +14,7 @@ image_height: 720
 num_of_cam: 1
 
 # ИЗМЕРЕНО Kalibr 2026-10-03 (pinhole-radtan, мишень ПВХ 7×7, 2 bag'а «в руках», 601 кадр,
-# репроекция 0.18/0.15 px; src/vins/calib/README.md). Поле зрения 1280×720 ≈ 59° по горизонтали.
+# репроекция 0.18/0.15 px; tools/vins/calib/README.md). Поле зрения 1280×720 ≈ 59° по горизонтали.
 # Сим берёт отсюда же фокус (идеальная камера: fx, центр посередине, без дисторсии — CAM_IDEAL).
 # До калибровки — заглушка сима fx=fy=640, cx=640, cy=360 (90°), дисторсия 0.
 distortion_parameters:
@@ -43,7 +43,7 @@ ex_calib_result_path: "/home/andriy/vins_ws/extrinsic.yaml"
 # X_cam=-Y_body, Y_cam=-Z_body, Z_cam=+X_body (как sim.yaml с 2026-10-01).
 # ⚠️ До 2026-10-01 тут стояла ЕДИНИЧНАЯ матрица = камера смотрит ВВЕРХ
 # (Z_cam=+Z_body): estimate_extrinsic 1 уточнял её от начальной ошибки в 90°.
-# Заготовка до калибровки Kalibr (src/vins/calib/README.md).
+# Заготовка до калибровки Kalibr (tools/vins/calib/README.md).
 extrinsicRotation: !!opencv-matrix
    rows: 3
    cols: 3

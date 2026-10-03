@@ -18,8 +18,7 @@ docker/
   sim/         — СИМУЛЯЦИЯ (x86 + NVIDIA: SITL + Gazebo + VINS)
 src/
   camera/      — C++ CUDA камера-нода (camera_pkg) + tuner
-  vins/        — VINS-MONO-ROS2 (конфиги) + python cam-ноды (fallback); calib/ —
-                 калибровка бортовой камеры/IMU Kalibr: мишени ПВХ 1×1 м / A1 / A4, версии, пайплайн
+  vins/        — VINS-MONO-ROS2 (конфиги) + python cam-ноды (fallback)
   sim/         — симуляционная обвязка (байеризатор, launch)
   control/     — пакет control_pkg: стабилизаторы, арбитр, гейты + ручки прогона
                  (profiles/). Доки рядом: architecture.md (слои, порты),
@@ -50,6 +49,8 @@ distro/        — ИСТОЧНИК ПРАВДЫ конфигурации Jetson
                  датчики, цены — и раздел «Софт»: что где крутится на борту
                  и в симуляции. Первое, что читать про железо
 tools/mdtopdf/ — генератор CLAUDE.pdf (reportlab)
+tools/vins/calib/ — калибровка бортовой камеры/IMU Kalibr: мишени ПВХ 1×1 м / A1 / A4, версии,
+                 пайплайн; rec_intr.sh (запись bag на борту), kalibr_intr.sh (convert + Kalibr)
 ```
 
 Бинарники в репе — пустые заглушки `*__bin` (реальные собираются на месте).
