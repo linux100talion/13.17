@@ -74,6 +74,18 @@ if [ -d src/vins_oss/feature_tracker ]; then
     fi
 fi
 
+# 1h. camera_pkg (C++ камера-нода, src/camera — bind mount) — тоже инкрементально и всегда:
+#     без этого правка камеры (напр. интринсики /camera_info, 2026-10-03) в бинарь не попадала
+#     до ручного nav-rebuild, а лишние -p параметры старая нода молча игнорирует.
+if [ -d src/camera ]; then
+    echo "  colcon build (camera_pkg) ..."
+    if colcon build --packages-select camera_pkg 2>&1 | tail -3; then
+        source install/setup.bash
+    else
+        echo "  ⚠️ сборка camera_pkg не удалась (см. выше) — летим на прежнем бинаре"
+    fi
+fi
+
 # 2. Байеризатор: Gazebo RGB → /dev/rawbayer (v4l2loopback).
 #    Запускается ВНЕ sim_nav.launch.py: если запустить внутри launch, его крах
 #    убивает весь launch (camera_node + VINS). Здесь он изолирован.
