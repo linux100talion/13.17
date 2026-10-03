@@ -127,9 +127,13 @@ def generate_launch_description():
                 # stamp_from_frame — честный штамп рендера Gazebo из трейлера
                 # bayerizer (иначе при RTF≈1 смещение ~60 мс + джиттер ±30 мс
                 # относительно IMU разваливает VINS). Только для симуляции.
+                # интринсики /camera_info (их ест ray_tracer) — камера, которую рисует
+                # Gazebo: фокус бортового конфига, центр посередине, без дисторсии
                 parameters=[use_sim_time, {"device": DEVICE,
                                            "width": CAMERA_W, "height": CAMERA_H,
-                                           "stamp_from_frame": True}],
+                                           "stamp_from_frame": True,
+                                           **_camera_mount_module().CameraMount.load()
+                                           .camera_params(CAMERA_W, CAMERA_H, ideal=True)}],
             ),
 
             # VINS feature tracker.

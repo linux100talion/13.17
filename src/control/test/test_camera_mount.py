@@ -79,9 +79,17 @@ except ValueError:
     check('не ортонормирована → отказ', True)
 
 # 6. интринсики: калибровка под разрешение кадра, идеальная камера сима, отказ на чужих пропорциях
-check('бортовой: 960×540 → 480/480/480/270', close(board.intrinsics_for(960, 540, ideal=False),
-                                                  (480, 480, 480, 270)))
-check('бортовой: угол обзора Gazebo 90°', abs(board.sim_hfov - math.pi / 2) < 1e-9)
+# бортовой конфиг — калибровка Kalibr 2026-10-03 (fx/fy 1124.71/1124.54, cx/cy 630.80/356.42)
+check('бортовой: 960×540 → ×0.75 калибровки', close(board.intrinsics_for(960, 540, ideal=False),
+                                                   (843.5325, 843.405, 473.1, 267.315)))
+check('бортовой: угол обзора Gazebo 2·atan(640/fx) ≈ 59.3°',
+      abs(board.sim_hfov - 2 * math.atan(640 / 1124.71)) < 1e-9)
+cp = board.camera_params(1280, 720, ideal=False)
+check('бортовой: /camera_info — калибровка с дисторсией',
+      close([cp[k] for k in ('fx', 'fy', 'cx', 'cy', 'k1', 'k2')], (1124.71, 1124.54, 630.80, 356.42, 0.04214, -0.08968)))
+cp = board.camera_params(1280, 720, ideal=True)
+check('бортовой: /camera_info сима — фокус конфига, центр, без дисторсии',
+      close([cp[k] for k in ('fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2')], (1124.71, 1124.71, 640, 360, 0, 0, 0, 0)))
 k = CameraMount(OLD_R, [0, 0, 0], 'k', K=(700, 705, 650, 350, 1280, 720))
 check('калибровка 700/705/650/350 @1280 → 960: ×0.75', close(k.intrinsics_for(960, 540, ideal=False),
                                                              (525, 528.75, 487.5, 262.5)))

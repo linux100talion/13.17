@@ -129,12 +129,14 @@ def cam_ideal():
 class CameraMount:
     """R (imu^R_cam), t (м), интринсики калибровки и всё, что из них выводится."""
 
-    def __init__(self, R, t, source='?', K=None):
+    def __init__(self, R, t, source='?', K=None, D=None):
         self.R = tuple(tuple(float(v) for v in r) for r in R)
         self.t = tuple(float(v) for v in t)
         self.source = source
         # (fx, fy, cx, cy, ширина, высота) калибровки; None — не заданы (тогда идеальная 90°)
         self.K = tuple(float(v) for v in K) if K is not None else None
+        # (k1, k2, p1, p2) калибровки, radtan; None — без дисторсии
+        self.D = tuple(float(v) for v in D) if D is not None else None
         for i in range(3):
             for j in range(3):
                 d = sum(self.R[k][i] * self.R[k][j] for k in range(3)) - (i == j)
@@ -157,7 +159,11 @@ class CameraMount:
         t = [r[0] for r in read_matrix(text, 'extrinsicTranslation')]
         K = tuple(read_scalar(text, k, 'projection_parameters') for k in ('fx', 'fy', 'cx', 'cy')) \
             + (read_scalar(text, 'image_width'), read_scalar(text, 'image_height'))
-        return cls(R, t, p, K)
+        try:
+            D = tuple(read_scalar(text, k, 'distortion_parameters') for k in ('k1', 'k2', 'p1', 'p2'))
+        except ValueError:
+            D = None
+        return cls(R, t, p, K, D)
 
     def intrinsics_for(self, w, h, ideal=None):
         """(fx, fy, cx, cy) для кадра w×h: калибровка, пересчитанная под разрешение.
@@ -178,6 +184,15 @@ class CameraMount:
         if ideal:
             return fx * s, fx * s, w / 2.0, h / 2.0
         return fx * s, fy * s, cx * s, cy * s
+
+    def camera_params(self, w, h, ideal=None):
+        """Параметры camera_node (её /camera_info) для кадра w×h: интринсики intrinsics_for +
+        дисторсия radtan (идеальная камера сима — без дисторсии: Gazebo рисует без неё)."""
+        if ideal is None:
+            ideal = cam_ideal()
+        fx, fy, cx, cy = self.intrinsics_for(w, h, ideal)
+        d = (0.0,) * 4 if ideal or self.D is None else self.D
+        return dict(zip(('fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2'), (fx, fy, cx, cy, *d)))
 
     @property
     def sim_hfov(self):
@@ -229,13 +244,23 @@ def main(argv):
     ap.add_argument('yaml', nargs='?', help='путь (по умолчанию env CAM_CFG / бортовой)')
     ap.add_argument('--sdf-pose', action='store_true', help='напечатать <pose> camera_link')
     ap.add_argument('--sim-hfov', action='store_true', help='напечатать horizontal_fov камеры Gazebo, рад')
+    ap.add_argument('--camera-params', nargs=2, type=int, metavar=('W', 'H'),
+                    help='напечатать «-p fx:=… …» для camera_node под кадр W×H (CAM_IDEAL — идеальная)')
     a = ap.parse_args(argv)
     try:
         cm = CameraMount.load(a.yaml)
     except (OSError, ValueError) as e:
         print(f'camera_mount: ОШИБКА: {e}', file=sys.stderr)
         return 1
-    if a.sim_hfov:
+    if a.camera_params:
+        try:
+            kv = cm.camera_params(*a.camera_params)
+        except ValueError as e:
+            print(f'camera_mount: ОШИБКА: {e}', file=sys.stderr)
+            return 1
+        # фиксированная точка с «.»: ROS-параметр обязан прочитаться как double, не int
+        print(' '.join(f'-p {k}:={f"{v:.9f}".rstrip("0")}0' for k, v in kv.items()))
+    elif a.sim_hfov:
         print(f'{cm.sim_hfov:.6f}')
     else:
         print(cm.sdf_pose() if a.sdf_pose else cm.summary())

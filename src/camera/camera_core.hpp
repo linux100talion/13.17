@@ -155,21 +155,32 @@ private:
     cv::VideoWriter openhd_writer_;
 
     void setup_camera_info() {
-        // Интринсики вычисляем из разрешения по модели sim-камеры: hfov 90°,
-        // квадратные пиксели → fx=fy=width/2, cx=width/2, cy=height/2.
-        // 1280×720 → fx=fy=640, cx=640, cy=360 (как было захардкожено); 320×180
-        // → 160/160/160/90. Для VINS источник интринсик — sim.yaml, не этот
-        // /camera_info, но держим его консистентным с разрешением.
-        const double fx = width_ / 2.0;
-        const double fy = width_ / 2.0;
-        const double cx = width_ / 2.0;
-        const double cy = height_ / 2.0;
+        // Интринсики — параметры fx/fy/cx/cy + дисторсия radtan k1/k2/p1/p2 (plumb_bob), их
+        // даёт camera_mount.py --camera-params из бортового config.yaml (калибровка Kalibr; в
+        // симе — идеальная камера с тем же фокусом). fx<=0 — старая модель sim-камеры: hfov
+        // 90°, fx=fy=width/2, центр посередине, без дисторсии.
+        double fx = this->declare_parameter("fx", 0.0);
+        double fy = this->declare_parameter("fy", 0.0);
+        double cx = this->declare_parameter("cx", 0.0);
+        double cy = this->declare_parameter("cy", 0.0);
+        const double k1 = this->declare_parameter("k1", 0.0);
+        const double k2 = this->declare_parameter("k2", 0.0);
+        const double p1 = this->declare_parameter("p1", 0.0);
+        const double p2 = this->declare_parameter("p2", 0.0);
+        if (fx <= 0.0) {
+            fx = fy = width_ / 2.0;
+            cx = width_ / 2.0;
+            cy = height_ / 2.0;
+            RCLCPP_WARN(this->get_logger(), "Интринсики не заданы — /camera_info: идеальная камера 90°");
+        }
+        RCLCPP_INFO(this->get_logger(), "/camera_info: fx/fy %.2f/%.2f cx/cy %.2f/%.2f d %.5f %.5f %.6f %.6f",
+                    fx, fy, cx, cy, k1, k2, p1, p2);
 
         camera_info_msg_.header.frame_id = "camera_frame";
         camera_info_msg_.width = width_;
         camera_info_msg_.height = height_;
         camera_info_msg_.distortion_model = "plumb_bob";
-        camera_info_msg_.d = {0.0, 0.0, 0.0, 0.0, 0.0};
+        camera_info_msg_.d = {k1, k2, p1, p2, 0.0};
         camera_info_msg_.k = {fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0};
         camera_info_msg_.r = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
         camera_info_msg_.p = {fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0};

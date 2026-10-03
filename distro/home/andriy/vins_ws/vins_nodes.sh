@@ -67,7 +67,10 @@ start_vins_nodes() {
     echo "Запуск нод в контейнере $CONTAINER..."
     kill_nodes   # на случай остатков прошлого запуска
     NODE_PIDS=()
-    dexec "exec ros2 run camera_pkg camera_node --ros-args -p stream_openhd:=false" &
+    # интринсики /camera_info — калибровка из бортового config.yaml (camera_mount.py);
+    # не прочиталась — нода публикует идеальную 90° и пишет WARN
+    dexec "exec ros2 run camera_pkg camera_node --ros-args -p stream_openhd:=false \
+        \$(python3 /root/vins_ws/src/control/control_pkg/perception/camera_mount.py --camera-params 1280 720)" &
     NODE_PIDS+=($!)
     dexec "exec ros2 run feature_tracker feature_tracker --ros-args -p config_file:=$CFG" &
     NODE_PIDS+=($!)
